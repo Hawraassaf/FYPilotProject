@@ -1,0 +1,75 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.6.11806.211
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FYPilot.Domain", "src\FYPilot.Domain\FYPilot.Domain.csproj", "{A1B2C3D4-1111-1111-1111-000000000001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FYPilot.Application", "src\FYPilot.Application\FYPilot.Application.csproj", "{A1B2C3D4-2222-2222-2222-000000000002}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FYPilot.Infrastructure", "src\FYPilot.Infrastructure\FYPilot.Infrastructure.csproj", "{A1B2C3D4-3333-3333-3333-000000000003}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FYPilot.Api", "src\FYPilot.Api\FYPilot.Api.csproj", "{A1B2C3D4-4444-4444-4444-000000000004}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FYPilot.AppHost", "src\FYPilot.AppHost\FYPilot.AppHost.csproj", "{A1B2C3D4-5555-5555-5555-000000000005}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FYPilot.ServiceDefaults", "src\FYPilot.ServiceDefaults\FYPilot.ServiceDefaults.csproj", "{A1B2C3D4-6666-6666-6666-000000000006}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FYPilot.Web", "src\FYPilot.Web\FYPilot.Web.csproj", "{A1B2C3D4-7777-7777-7777-000000000007}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{A1B2C3D4-AAAA-AAAA-AAAA-000000000010}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "services", "services", "{A1B2C3D4-BBBB-BBBB-BBBB-000000000011}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{A1B2C3D4-DDDD-DDDD-DDDD-000000000013}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A1B2C3D4-1111-1111-1111-000000000001}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1B2C3D4-1111-1111-1111-000000000001}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1B2C3D4-1111-1111-1111-000000000001}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1B2C3D4-1111-1111-1111-000000000001}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1B2C3D4-2222-2222-2222-000000000002}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1B2C3D4-2222-2222-2222-000000000002}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1B2C3D4-2222-2222-2222-000000000002}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1B2C3D4-2222-2222-2222-000000000002}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1B2C3D4-3333-3333-3333-000000000003}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1B2C3D4-3333-3333-3333-000000000003}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1B2C3D4-3333-3333-3333-000000000003}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1B2C3D4-3333-3333-3333-000000000003}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1B2C3D4-4444-4444-4444-000000000004}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1B2C3D4-4444-4444-4444-000000000004}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1B2C3D4-4444-4444-4444-000000000004}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1B2C3D4-4444-4444-4444-000000000004}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1B2C3D4-5555-5555-5555-000000000005}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1B2C3D4-5555-5555-5555-000000000005}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1B2C3D4-5555-5555-5555-000000000005}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1B2C3D4-5555-5555-5555-000000000005}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1B2C3D4-6666-6666-6666-000000000006}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1B2C3D4-6666-6666-6666-000000000006}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1B2C3D4-6666-6666-6666-000000000006}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1B2C3D4-6666-6666-6666-000000000006}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1B2C3D4-7777-7777-7777-000000000007}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1B2C3D4-7777-7777-7777-000000000007}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1B2C3D4-7777-7777-7777-000000000007}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1B2C3D4-7777-7777-7777-000000000007}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{A1B2C3D4-1111-1111-1111-000000000001} = {A1B2C3D4-AAAA-AAAA-AAAA-000000000010}
+		{A1B2C3D4-2222-2222-2222-000000000002} = {A1B2C3D4-AAAA-AAAA-AAAA-000000000010}
+		{A1B2C3D4-3333-3333-3333-000000000003} = {A1B2C3D4-AAAA-AAAA-AAAA-000000000010}
+		{A1B2C3D4-4444-4444-4444-000000000004} = {A1B2C3D4-AAAA-AAAA-AAAA-000000000010}
+		{A1B2C3D4-5555-5555-5555-000000000005} = {A1B2C3D4-AAAA-AAAA-AAAA-000000000010}
+		{A1B2C3D4-6666-6666-6666-000000000006} = {A1B2C3D4-AAAA-AAAA-AAAA-000000000010}
+		{A1B2C3D4-7777-7777-7777-000000000007} = {A1B2C3D4-AAAA-AAAA-AAAA-000000000010}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {560BD462-2DEE-4AD6-963D-1FE036151A68}
+	EndGlobalSection
+EndGlobal

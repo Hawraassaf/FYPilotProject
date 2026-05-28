@@ -1,0 +1,103 @@
+@page
+@model FYPilot.Web.Pages.Student.ProjectDNAModel
+@{
+    ViewData["Title"]    = "Project DNA Analyzer";
+    ViewData["Subtitle"] = "Visualise the technical profile of your project idea";
+}
+
+@if (Model.Idea == null)
+{
+    <div class="page-card p-5 text-center">
+        <i class="bi bi-diagram-3 display-3 text-muted"></i>
+        <h5 class="mt-3">No Idea Selected</h5>
+        <p class="text-muted">Please generate and select a project idea first.</p>
+        <a href="/Student/IdeaGenerator" class="btn btn-primary">
+            <i class="bi bi-stars me-2"></i>Go to Idea Generator
+        </a>
+    </div>
+}
+else
+{
+    <div class="row g-4">
+        <div class="col-lg-5">
+            <div class="page-card p-4 mb-3">
+                <h6 class="fw-bold mb-1">@Model.Idea.Title</h6>
+                <span class="badge bg-primary-subtle text-primary mb-3">@Model.Idea.Domain</span>
+                <p class="text-muted small">@Model.Idea.ProblemStatement</p>
+                <div class="row g-2 text-center">
+                    @foreach (var (label, val, color) in new[] {
+                        ("Innovation",   Model.Idea.InnovationScore,    "#3b82f6"),
+                        ("Feasibility",  Model.Idea.FeasibilityScore,   "#10b981"),
+                        ("Market",       Model.Idea.MarketDemandScore,  "#f59e0b"),
+                    })
+                    {
+                        <div class="col-4">
+                            <div class="score-ring mx-auto" style="color:@color;border-color:@color;width:60px;height:60px;font-size:0.9rem">@val%</div>
+                            <div class="small text-muted mt-1">@label</div>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="page-card p-4">
+                <h6 class="fw-bold mb-3">DNA Dimensions</h6>
+                @foreach (var (label, val, color) in Model.DnaDimensions)
+                {
+                    <div class="dna-row d-flex align-items-center gap-2">
+                        <div class="dna-label">@label</div>
+                        <div class="progress flex-grow-1" style="height:10px">
+                            <div class="progress-bar" style="width:@val%;background:@color"></div>
+                        </div>
+                        <div class="small text-muted" style="width:30px;text-align:right">@val</div>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="col-lg-7">
+            <div class="page-card p-4 mb-3">
+                <h6 class="fw-bold mb-3"><i class="bi bi-shield-exclamation me-2 text-warning"></i>Risk Profile</h6>
+                @foreach (var risk in Model.Risks)
+                {
+                    <div class="d-flex align-items-start gap-3 mb-3 p-3 rounded-2 risk-@risk.Level.ToLower()">
+                        <div>
+                            <div class="fw-semibold small">@risk.Category
+                                <span class="badge ms-1 @(risk.Level == "high" ? "bg-danger" : risk.Level == "medium" ? "bg-warning text-dark" : "bg-success")">@risk.Level</span>
+                            </div>
+                            <div class="small mt-1">@risk.Description</div>
+                            <div class="small text-muted mt-1"><i class="bi bi-lightbulb me-1"></i>@risk.Mitigation</div>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div class="page-card p-4">
+                <h6 class="fw-bold mb-3"><i class="bi bi-check2-all me-2 text-success"></i>Required Skills vs Your Profile</h6>
+                @foreach (var skill in Model.Idea.RequiredSkills.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)))
+                {
+                    var match = Model.StudentSkills.FirstOrDefault(ss => ss.SkillName.Equals(skill, StringComparison.OrdinalIgnoreCase));
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <i class="bi @(match != null ? "bi-check-circle-fill text-success" : "bi-x-circle text-danger")"></i>
+                        <span class="small">@skill</span>
+                        @if (match != null)
+                        {
+                            <span class="badge bg-success-subtle text-success ms-auto">Level @match.Rating/5</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-danger-subtle text-danger ms-auto">Missing</span>
+                        }
+                    </div>
+                }
+                <div class="mt-3">
+                    <a href="/Student/ScopeOptimizer?ideaId=@Model.Idea.Id" class="btn btn-outline-warning btn-sm">
+                        <i class="bi bi-funnel me-1"></i>Optimize Scope
+                    </a>
+                    <a href="/Student/DefenseSimulator?ideaId=@Model.Idea.Id" class="btn btn-outline-danger btn-sm ms-2">
+                        <i class="bi bi-shield-check me-1"></i>Defense Prep
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+}

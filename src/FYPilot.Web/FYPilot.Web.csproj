@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>FYPilot.Web</RootNamespace>
+    <UserSecretsId>fypilot-web-secrets</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\FYPilot.Infrastructure\FYPilot.Infrastructure.csproj" />
+    <ProjectReference Include="..\FYPilot.ServiceDefaults\FYPilot.ServiceDefaults.csproj" />
+  </ItemGroup>
+</Project>

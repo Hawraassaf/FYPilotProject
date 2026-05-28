@@ -1,0 +1,91 @@
+@page
+@model FYPilot.Web.Pages.Supervisor.DashboardModel
+@{
+    ViewData["Title"]    = "Supervisor Dashboard";
+    ViewData["Subtitle"] = "Manage and evaluate student project ideas";
+}
+
+<!-- Stats -->
+<div class="row g-3 mb-4">
+    @foreach (var s in Model.Stats)
+    {
+        <div class="col-sm-6 col-xl-3">
+            <div class="stat-card d-flex align-items-center gap-3">
+                <div class="stat-icon" style="background:@s.BgColor"><i class="bi bi-@s.Icon" style="color:@s.Color"></i></div>
+                <div><div class="stat-value">@s.Value</div><div class="stat-label">@s.Label</div></div>
+            </div>
+        </div>
+    }
+</div>
+
+<div class="row g-4">
+    <!-- Pending reviews -->
+    <div class="col-lg-8">
+        <div class="page-card p-4">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+                <h6 class="fw-bold mb-0"><i class="bi bi-card-checklist me-2 text-warning"></i>Pending Idea Reviews</h6>
+                <a href="/Supervisor/IdeaReview" class="btn btn-sm btn-outline-primary">View All</a>
+            </div>
+            @if (!Model.PendingIdeas.Any())
+            {
+                <div class="text-center py-4 text-muted">
+                    <i class="bi bi-check-circle display-4 text-success"></i>
+                    <p class="mt-3">No pending reviews — all ideas have been evaluated.</p>
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead><tr><th>Student</th><th>Project Idea</th><th>Scores</th><th>Status</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var item in Model.PendingIdeas)
+                            {
+                                <tr>
+                                    <td><div class="small fw-semibold">@item.StudentName</div></td>
+                                    <td>
+                                        <div class="small fw-semibold">@item.IdeaTitle</div>
+                                        <span class="badge bg-secondary-subtle text-secondary small">@item.Domain</span>
+                                    </td>
+                                    <td>
+                                        <div class="d-flex gap-1">
+                                            <span class="badge bg-primary-subtle text-primary">F:@item.Feasibility%</span>
+                                            <span class="badge bg-warning-subtle text-warning">I:@item.Innovation%</span>
+                                        </div>
+                                    </td>
+                                    <td><span class="badge bg-warning-subtle text-warning text-capitalize">@item.Status</span></td>
+                                    <td>
+                                        <a href="/Supervisor/IdeaReview?ideaId=@item.IdeaId" class="btn btn-sm btn-primary">Review</a>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+    <!-- Recent evaluations -->
+    <div class="col-lg-4">
+        <div class="page-card p-4 mb-3">
+            <h6 class="fw-bold mb-3"><i class="bi bi-star-half me-2 text-success"></i>Recent Evaluations</h6>
+            @foreach (var ev in Model.RecentEvals)
+            {
+                <div class="d-flex align-items-start gap-2 mb-3 pb-3 border-bottom">
+                    <div class="avatar" style="background:#dcfce7;color:#16a34a">@(ev.StudentName.Length > 0 ? ev.StudentName[0].ToString() : "S")</div>
+                    <div class="flex-grow-1">
+                        <div class="small fw-semibold">@ev.StudentName</div>
+                        <div class="text-muted-sm">@ev.IdeaTitle.Substring(0, Math.Min(ev.IdeaTitle.Length, 30))…</div>
+                        <span class="badge mt-1 @(ev.Status == "approved" ? "bg-success" : ev.Status == "rejected" ? "bg-danger" : "bg-warning text-dark")">@ev.Status</span>
+                    </div>
+                </div>
+            }
+            @if (!Model.RecentEvals.Any())
+            {
+                <div class="text-muted small">No evaluations yet.</div>
+            }
+            <a href="/Supervisor/Evaluations" class="btn btn-sm btn-outline-secondary w-100 mt-2">View All Evaluations</a>
+        </div>
+    </div>
+</div>

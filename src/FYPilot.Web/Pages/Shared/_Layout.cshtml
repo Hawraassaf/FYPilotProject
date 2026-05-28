@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] — FYPilot</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    @RenderSection("Head", required: false)
+</head>
+<body class="bg-light">
+@{
+    var role     = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+    var userName = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+    var isAuth   = User.Identity?.IsAuthenticated == true;
+    var path     = Context.Request.Path.Value ?? "";
+
+    string NavLink(string href, string icon, string label) {
+        var active = path.Equals(href, StringComparison.OrdinalIgnoreCase) ||
+                     (href != "/" && path.StartsWith(href, StringComparison.OrdinalIgnoreCase));
+        return $"<a href=\"{href}\" class=\"nav-link{(active ? " active" : "")}\">" +
+               $"<i class=\"bi bi-{icon}\"></i> {label}</a>";
+    }
+}
+
+@if (isAuth)
+{
+<div class="app-shell d-flex" style="min-height:100vh">
+
+    <!-- ── Sidebar (offcanvas-lg: drawer on mobile, inline on desktop) ── -->
+    <div class="offcanvas-lg offcanvas-start sidebar d-flex flex-column flex-shrink-0"
+         tabindex="-1" id="appSidebar" style="width:240px">
+
+        <!-- Offcanvas close header — only visible on mobile -->
+        <div class="offcanvas-header d-lg-none px-3 py-2"
+             style="border-bottom:1px solid rgba(255,255,255,0.15)">
+            <div class="d-flex align-items-center gap-2">
+                <div class="sidebar-logo-icon">
+                    <i class="bi bi-mortarboard-fill text-white"></i>
+                </div>
+                <span class="fw-bold fs-6 text-white">FYPilot</span>
+            </div>
+            <button type="button" class="btn-close btn-close-white"
+                    data-bs-dismiss="offcanvas" data-bs-target="#appSidebar"
+                    aria-label="Close"></button>
+        </div>
+
+        <!-- Logo — desktop only -->
+        <div class="p-3 d-none d-lg-block" style="border-bottom:1px solid rgba(255,255,255,0.15)">
+            <div class="d-flex align-items-center gap-2">
+                <div class="sidebar-logo-icon">
+                    <i class="bi bi-mortarboard-fill text-white"></i>
+                </div>
+                <span class="fw-bold fs-5 text-white">FYPilot</span>
+            </div>
+            <div class="mt-1" style="font-size:0.7rem;color:rgba(255,255,255,0.5)">Academic Intelligence System</div>
+        </div>
+
+        <!-- Navigation -->
+        <div class="flex-grow-1 overflow-auto p-2">
+            <ul class="nav flex-column gap-1 list-unstyled">
+
+            @if (role == "student")
+            {
+                <li><span class="nav-label">MY WORKSPACE</span></li>
+                <li>@Html.Raw(NavLink("/Student/Dashboard",       "speedometer2",      "Dashboard"))</li>
+                <li>@Html.Raw(NavLink("/Student/Profile", "person-circle", "Profile"))</li>
+                <li>@Html.Raw(NavLink("/Student/SkillAssessment", "lightning-charge",  "Skill Assessment"))</li>
+                <li><span class="nav-label">AI FEATURES</span></li>
+                <li>@Html.Raw(NavLink("/Student/IdeaGenerator",   "stars",             "Idea Generator"))</li>
+                <li>@Html.Raw(NavLink("/Student/IdeaComparison",  "bar-chart-line",    "Idea Comparison"))</li>
+                <li>@Html.Raw(NavLink("/Student/ProjectDNA",      "diagram-3",         "Project DNA"))</li>
+                <li>@Html.Raw(NavLink("/Student/Roadmap",         "map",               "Roadmap"))</li>
+                <li>@Html.Raw(NavLink("/Student/DocumentationGenerator", "file-earmark-text", "SE Documentation"))</li>
+                <li>@Html.Raw(NavLink("/Student/ScopeOptimizer",  "funnel",            "Scope Optimizer"))</li>
+                <li>@Html.Raw(NavLink("/Student/DefenseSimulator","shield-check",      "Defense Simulator"))</li>
+                <li><span class="nav-label">SUPPORT</span></li>
+                <li>@Html.Raw(NavLink("/Student/MentorChat",      "chat-dots",         "Mentor Chat"))</li>
+                <li>@Html.Raw(NavLink("/Student/ProjectDetails",  "folder2-open",      "My Project"))</li>
+                <li>@Html.Raw(NavLink("/Student/Feedback",        "chat-square-text",  "Supervisor Feedback"))</li>
+            }
+            @if (role == "supervisor")
+            {
+                <li><span class="nav-label">SUPERVISOR</span></li>
+                <li>@Html.Raw(NavLink("/Supervisor/Dashboard",   "speedometer2",  "Dashboard"))</li>
+                <li>@Html.Raw(NavLink("/Supervisor/IdeaReview",  "card-checklist","Idea Review"))</li>
+                <li>@Html.Raw(NavLink("/Supervisor/Evaluations", "star-half",     "Evaluations"))</li>
+            }
+            @if (role == "admin")
+            {
+                <li><span class="nav-label">ADMINISTRATION</span></li>
+                <li>@Html.Raw(NavLink("/Admin/Dashboard",    "speedometer2",   "Dashboard"))</li>
+                <li>@Html.Raw(NavLink("/Admin/Users",        "people",         "Users"))</li>
+                <li>@Html.Raw(NavLink("/Admin/Projects",     "folder",         "Projects"))</li>
+                <li>@Html.Raw(NavLink("/Admin/MarketNeeds",  "graph-up-arrow", "Market Needs"))</li>
+                <li>@Html.Raw(NavLink("/Admin/Analytics",    "bar-chart",      "Analytics"))</li>
+            }
+            <li style="margin-top:auto"><span class="nav-label">SYSTEM</span></li>
+            <li>@Html.Raw(NavLink("/SystemTest", "shield-check", "System Test"))</li>
+            </ul>
+        </div>
+
+        <!-- User footer -->
+        <div class="p-3" style="border-top:1px solid rgba(255,255,255,0.15)">
+            <div class="d-flex align-items-center gap-2 mb-2">
+                <div class="avatar">@(userName?.Length > 0 ? userName[0].ToString().ToUpper() : "U")</div>
+                <div class="overflow-hidden">
+                    <div class="text-white small fw-semibold text-truncate">@userName</div>
+                    <div class="text-capitalize" style="font-size:0.7rem;color:rgba(255,255,255,0.5)">@role</div>
+                </div>
+            </div>
+            <form method="post" asp-page="/Account/Logout">
+                <button type="submit" class="btn btn-sm btn-outline-light w-100">
+                    <i class="bi bi-box-arrow-right"></i> Sign Out
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- ── Main content ──────────────────────────────────────────────── -->
+    <div class="flex-grow-1 d-flex flex-column overflow-hidden min-w-0">
+
+        <!-- Top header -->
+        <header class="top-header px-3 px-lg-4 py-2 d-flex align-items-center justify-content-between">
+            <div class="d-flex align-items-center gap-2 min-w-0">
+                <!-- Hamburger — mobile only -->
+                <button class="btn btn-sm btn-light border d-lg-none flex-shrink-0"
+                        type="button"
+                        data-bs-toggle="offcanvas"
+                        data-bs-target="#appSidebar"
+                        aria-controls="appSidebar"
+                        aria-label="Open menu">
+                    <i class="bi bi-list fs-5"></i>
+                </button>
+                <div class="min-w-0">
+                    <h6 class="mb-0 fw-semibold text-dark text-truncate">@(ViewData["Title"] ?? "Dashboard")</h6>
+                    @if (ViewData["Subtitle"] is string sub)
+                    {
+                        <div class="text-muted-sm d-none d-sm-block">@sub</div>
+                    }
+                </div>
+            </div>
+            <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                <span class="badge rounded-pill text-capitalize"
+                      style="background:@(role == "student" ? "#dbeafe" : role == "supervisor" ? "#dcfce7" : "#fef9c3");
+                             color:@(role == "student" ? "#1d4ed8" : role == "supervisor" ? "#15803d" : "#854d0e")">
+                    @role
+                </span>
+            </div>
+        </header>
+
+        <!-- Page body -->
+        <main class="flex-grow-1 p-3 p-lg-4 overflow-auto">
+            @if (TempData["Success"] is string sMsg)
+            {
+                <div class="alert alert-success alert-dismissible fade show" data-auto-dismiss="4000">
+                    <i class="bi bi-check-circle me-2"></i>@sMsg
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            }
+            @if (TempData["Error"] is string eMsg)
+            {
+                <div class="alert alert-danger alert-dismissible fade show" data-auto-dismiss="5000">
+                    <i class="bi bi-exclamation-triangle me-2"></i>@eMsg
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            }
+            @RenderBody()
+        </main>
+    </div>
+
+</div>
+}
+else
+{
+    @RenderBody()
+}
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="~/js/site.js" asp-append-version="true"></script>
+@await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

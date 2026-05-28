@@ -1,0 +1,115 @@
+@page
+@model FYPilot.Web.Pages.Student.IdeaComparisonModel
+@{
+    ViewData["Title"]    = "Idea Comparison";
+    ViewData["Subtitle"] = "Compare project ideas side-by-side across all dimensions";
+}
+
+@if (!Model.Ideas.Any())
+{
+    <div class="page-card p-5 text-center">
+        <i class="bi bi-bar-chart-line display-3 text-muted"></i>
+        <h5 class="mt-3">No Ideas to Compare</h5>
+        <p class="text-muted">Generate at least two project ideas to compare them.</p>
+        <a href="/Student/IdeaGenerator" class="btn btn-primary"><i class="bi bi-stars me-2"></i>Generate Ideas</a>
+    </div>
+}
+else
+{
+    <!-- Score overview table -->
+    <div class="page-card p-4 mb-4">
+        <h6 class="fw-bold mb-3"><i class="bi bi-table me-2 text-primary"></i>Score Comparison</h6>
+        <div class="table-responsive">
+            <table class="table align-middle">
+                <thead>
+                    <tr>
+                        <th>Metric</th>
+                        @foreach (var idea in Model.Ideas) { <th class="text-center">@idea.Title.Substring(0, Math.Min(idea.Title.Length, 28))…</th> }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var (metric, getter, color) in new (string, Func<FYPilot.Domain.Entities.ProjectIdea, int>, string)[] {
+                        ("Innovation",     i => i.InnovationScore,    "#3b82f6"),
+                        ("Feasibility",    i => i.FeasibilityScore,   "#10b981"),
+                        ("Market Demand",  i => i.MarketDemandScore,  "#f59e0b"),
+                    })
+                    {
+                        <tr>
+                            <td class="small fw-semibold">@metric</td>
+                            @foreach (var idea in Model.Ideas)
+                            {
+                                var val = getter(idea);
+                                <td class="text-center">
+                                    <div class="d-flex flex-column align-items-center gap-1">
+                                        <div class="fw-bold" style="color:@color">@val%</div>
+                                        <div class="progress w-100" style="height:5px">
+                                            <div class="progress-bar" style="width:@val%;background:@color"></div>
+                                        </div>
+                                    </div>
+                                </td>
+                            }
+                        </tr>
+                    }
+                    <tr>
+                        <td class="small fw-semibold">Difficulty</td>
+                        @foreach (var idea in Model.Ideas) { <td class="text-center"><span class="badge bg-warning-subtle text-warning text-capitalize">@idea.DifficultyLevel</span></td> }
+                    </tr>
+                    <tr>
+                        <td class="small fw-semibold">Duration</td>
+                        @foreach (var idea in Model.Ideas) { <td class="text-center text-muted small">@idea.ExpectedDurationWeeks weeks</td> }
+                    </tr>
+                    <tr>
+                        <td class="small fw-semibold">Domain</td>
+                        @foreach (var idea in Model.Ideas) { <td class="text-center"><span class="badge bg-primary-subtle text-primary">@idea.Domain</span></td> }
+                    </tr>
+                    <tr class="table-light fw-bold">
+                        <td class="fw-bold">Avg Score</td>
+                        @foreach (var idea in Model.Ideas)
+                        {
+                            var avg = (idea.InnovationScore + idea.FeasibilityScore + idea.MarketDemandScore) / 3;
+                            <td class="text-center">
+                                <span class="badge fs-6 @(avg >= 70 ? "bg-success" : avg >= 50 ? "bg-warning text-dark" : "bg-danger")">@avg%</span>
+                            </td>
+                        }
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Idea cards -->
+    <div class="row g-3">
+        @foreach (var idea in Model.Ideas)
+        {
+            var avg = (idea.InnovationScore + idea.FeasibilityScore + idea.MarketDemandScore) / 3;
+            <div class="col-md-6 col-xl-4">
+                <div class="page-card p-4 h-100">
+                    <div class="d-flex align-items-start justify-content-between mb-2">
+                        <h6 class="fw-bold small mb-0" style="max-width:180px">@idea.Title</h6>
+                        <div class="score-ring @(avg >= 70 ? "text-success" : "text-warning")" style="width:50px;height:50px;font-size:0.85rem">@avg%</div>
+                    </div>
+                    <p class="text-muted" style="font-size:0.8rem">@idea.ProblemStatement.Substring(0, Math.Min(idea.ProblemStatement.Length, 100))…</p>
+                    <div class="small text-muted mb-3">
+                        <i class="bi bi-tools me-1"></i>@idea.RequiredTechnologies.Substring(0, Math.Min(idea.RequiredTechnologies.Length, 60))
+                    </div>
+                    @if (idea.IsSelected)
+                    {
+                        <span class="badge bg-success w-100 py-2"><i class="bi bi-check-circle me-1"></i>Currently Selected</span>
+                    }
+                    else
+                    {
+                        <form method="post">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="ideaId" value="@idea.Id" />
+                            <button class="btn btn-sm btn-outline-primary w-100">Select This Idea</button>
+                        </form>
+                    }
+                    <div class="d-flex gap-1 mt-2">
+                        <a href="/Student/ProjectDNA?ideaId=@idea.Id" class="btn btn-sm btn-light flex-grow-1">DNA</a>
+                        <a href="/Student/Roadmap?ideaId=@idea.Id"    class="btn btn-sm btn-light flex-grow-1">Roadmap</a>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}

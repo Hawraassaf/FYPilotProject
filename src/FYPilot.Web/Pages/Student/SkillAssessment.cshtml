@@ -1,0 +1,93 @@
+@page
+@model FYPilot.Web.Pages.Student.SkillAssessmentModel
+@{
+    ViewData["Title"]    = "Skill Assessment";
+    ViewData["Subtitle"] = "Profile your technical capabilities";
+}
+
+<div class="row g-4">
+    <div class="col-lg-7">
+        <div class="page-card p-4">
+            <h6 class="fw-bold mb-1"><i class="bi bi-lightning-charge me-2 text-primary"></i>Rate Your Skills</h6>
+            <p class="text-muted small mb-4">Select skills you know and rate your proficiency (1 = beginner, 5 = expert).</p>
+
+            <form method="post">
+                @Html.AntiForgeryToken()
+                <div class="row g-3">
+                    @foreach (var (cat, skills) in Model.SkillCategories)
+                    {
+                        <div class="col-12">
+                            <div class="fw-semibold small text-muted text-uppercase mb-2">@cat</div>
+                            @foreach (var skill in skills)
+                            {
+                                var existing = Model.ExistingSkills.FirstOrDefault(s => s.SkillName == skill);
+                                <div class="d-flex align-items-center gap-3 mb-2 p-2 rounded-2 bg-light">
+                                    <div class="form-check mb-0" style="min-width:160px">
+                                        <input class="form-check-input skill-check" type="checkbox"
+                                               name="SelectedSkills" value="@skill" id="sk-@skill.Replace(" ","_")"
+                                               @(existing != null ? "checked" : "") />
+                                        <label class="form-check-label small" for="sk-@skill.Replace(" ","_")">@skill</label>
+                                    </div>
+                                    <input type="range" class="form-range flex-grow-1" min="1" max="5" step="1"
+                                           name="Ratings[@skill]" value="@(existing?.Rating ?? 3)" />
+                                    <span class="badge bg-primary-subtle text-primary" style="min-width:24px">@(existing?.Rating ?? 3)</span>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+                <div class="mt-4">
+                    <button type="submit" class="btn btn-primary fw-semibold">
+                        <i class="bi bi-save me-2"></i>Save & Analyze Skills
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        @if (Model.Result != null)
+        {
+            <div class="page-card p-4 mb-3">
+                <h6 class="fw-bold mb-3"><i class="bi bi-bar-chart me-2 text-success"></i>Your Skill Profile</h6>
+                <div class="text-center mb-3">
+                    <div class="score-ring text-success mx-auto">@Model.Result.SkillScore%</div>
+                    <div class="mt-2 fw-semibold">@Model.Result.RecommendedLevel level complexity</div>
+                    <div class="text-muted small">@Model.Result.Message</div>
+                </div>
+                @foreach (var skill in Model.ExistingSkills.OrderByDescending(s => s.Rating).Take(5))
+                {
+                    <div class="mb-2">
+                        <div class="d-flex justify-content-between small mb-1">
+                            <span>@skill.SkillName</span>
+                            <span class="text-muted">@skill.Rating/5</span>
+                        </div>
+                        <div class="progress" style="height:6px">
+                            <div class="progress-bar bg-primary" style="width:@(skill.Rating * 20)%"></div>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+
+        <div class="page-card p-4">
+            <h6 class="fw-bold mb-2"><i class="bi bi-info-circle me-2"></i>Why This Matters</h6>
+            <p class="text-muted small">Your skill profile is used to:</p>
+            <ul class="text-muted small mb-0">
+                <li>Generate personalised project ideas</li>
+                <li>Score feasibility of each idea</li>
+                <li>Detect skill gaps before you start</li>
+                <li>Recommend the right project complexity</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+document.querySelectorAll('input[type=range]').forEach(r => {
+    var badge = r.nextElementSibling;
+    r.addEventListener('input', () => badge.textContent = r.value);
+});
+</script>
+}

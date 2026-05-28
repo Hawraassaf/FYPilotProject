@@ -1,0 +1,62 @@
+@page
+@model FYPilot.Web.Pages.IndexModel
+@{
+    Layout = null;
+    ViewData["Title"] = "FYPilot — Academic Intelligence System";
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FYPilot — Academic Intelligence System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+</head>
+<body>
+<div class="auth-wrapper" style="background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 60%,#0f172a 100%)">
+    <div class="text-center text-white px-4" style="max-width:680px">
+        <div class="mb-4">
+            <div style="width:72px;height:72px;background:rgba(255,255,255,0.15);border-radius:16px;display:inline-flex;align-items:center;justify-content:center;font-size:2rem">
+                🎓
+            </div>
+        </div>
+        <h1 class="display-4 fw-bold mb-2">FYPilot</h1>
+        <p class="lead mb-1 opacity-75">An Intelligent Academic Project Intelligence System</p>
+        <p class="mb-5 opacity-50 small">for FYP Validation, Feasibility Analysis, and Execution Planning</p>
+
+        <div class="row g-3 mb-5">
+            @foreach (var (icon, title, desc) in new[] {
+                ("lightning-charge", "AI Idea Generation", "Generate validated FYP ideas based on your skills"),
+                ("shield-check",     "Feasibility Engine", "Score ideas across 8 dimensions with ML models"),
+                ("diagram-3",        "Project DNA",        "Visualize the technical profile of any project"),
+                ("map",              "Smart Roadmap",      "Evidence-based execution plans with risk alarms"),
+            })
+            {
+                <div class="col-6">
+                    <div class="p-3 rounded-3" style="background:rgba(255,255,255,0.1)">
+                        <i class="bi bi-@icon fs-4 mb-2 d-block"></i>
+                        <div class="fw-semibold small">@title</div>
+                        <div class="opacity-50" style="font-size:0.75rem">@desc</div>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="d-flex gap-3 justify-content-center">
+            <a href="/Account/Login" class="btn btn-light btn-lg px-4 fw-semibold">
+                <i class="bi bi-box-arrow-in-right me-2"></i>Sign In
+            </a>
+            <a href="/Account/Register" class="btn btn-outline-light btn-lg px-4">
+                <i class="bi bi-person-plus me-2"></i>Register
+            </a>
+        </div>
+        <div class="mt-4 opacity-50 small">
+            <a href="/SystemTest" class="text-white text-decoration-none"><i class="bi bi-cpu me-1"></i>System Status</a>
+        </div>
+    </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

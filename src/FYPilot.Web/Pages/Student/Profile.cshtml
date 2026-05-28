@@ -1,0 +1,163 @@
+﻿@page
+@model FYPilot.Web.Pages.Student.ProfileModel
+@{
+    ViewData["Title"] = "Student Profile";
+}
+
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-bold mb-1">Student Profile</h2>
+            <p class="text-muted mb-0">Manage your academic information and project preferences.</p>
+        </div>
+        <a asp-page="/Student/SkillAssessment" class="btn btn-outline-primary">
+            <i class="bi bi-lightning-charge me-1"></i>Manage Technical Skills
+        </a>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
+    {
+        <div class="alert alert-success">
+            <i class="bi bi-check-circle me-2"></i>@Model.SuccessMessage
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div class="alert alert-danger">
+            <i class="bi bi-exclamation-triangle me-2"></i>@Model.ErrorMessage
+        </div>
+    }
+
+    <form method="post">
+        <div class="row g-4">
+            <div class="col-lg-6">
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-body">
+                        <h5 class="fw-bold mb-3">Academic Information</h5>
+
+                        <div class="mb-3">
+                            <label asp-for="Input.University" class="form-label fw-semibold">University</label>
+                            <input asp-for="Input.University" class="form-control" placeholder="Example: Lebanese International University" />
+                            <span asp-validation-for="Input.University" class="text-danger small"></span>
+                        </div>
+
+                        <div class="mb-3">
+                            <label asp-for="Input.Major" class="form-label fw-semibold">Major</label>
+                            <input asp-for="Input.Major" class="form-control" placeholder="Example: Computer Science" />
+                            <span asp-validation-for="Input.Major" class="text-danger small"></span>
+                        </div>
+
+                        <div class="mb-3">
+                            <label asp-for="Input.Year" class="form-label fw-semibold">Academic Year</label>
+                            <select asp-for="Input.Year" class="form-select">
+                                <option value="">Select academic year</option>
+                                <option>1st Year</option>
+                                <option>2nd Year</option>
+                                <option>3rd Year</option>
+                                <option>4th Year</option>
+                                <option>Final Year</option>
+                            </select>
+                            <span asp-validation-for="Input.Year" class="text-danger small"></span>
+                        </div>
+
+                        <div class="mb-3">
+                            <label asp-for="Input.ExperienceLevel" class="form-label fw-semibold">Experience Level</label>
+                            <select asp-for="Input.ExperienceLevel" class="form-select">
+                                <option value="">Select experience level</option>
+                                <option value="beginner">Beginner</option>
+                                <option value="intermediate">Intermediate</option>
+                                <option value="advanced">Advanced</option>
+                            </select>
+                            <span asp-validation-for="Input.ExperienceLevel" class="text-danger small"></span>
+                        </div>
+
+                        <div class="mb-3">
+                            <label asp-for="Input.Interests" class="form-label fw-semibold">Academic / Project Interests</label>
+                            <textarea asp-for="Input.Interests" class="form-control" rows="4" placeholder="Example: AI, Web Development, Data Science"></textarea>
+                            <span asp-validation-for="Input.Interests" class="text-danger small"></span>
+                            <div class="form-text">
+                                Technical skills are managed separately in the Skill Assessment page.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-6">
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-body">
+                        <h5 class="fw-bold mb-3">Project Preferences</h5>
+
+                        <div class="mb-3">
+                            <label asp-for="Input.PreferredDomain" class="form-label fw-semibold">Preferred Domain</label>
+                            <select asp-for="Input.PreferredDomain" class="form-select">
+                                <option value="">Select preferred domain</option>
+                                <option>AI/Data Science</option>
+                                <option>Web Development</option>
+                                <option>Mobile Development</option>
+                                <option>Cybersecurity</option>
+                                <option>Education Technology</option>
+                                <option>Healthcare Technology</option>
+                                <option>E-commerce</option>
+                                <option>General Software System</option>
+                            </select>
+                            <span asp-validation-for="Input.PreferredDomain" class="text-danger small"></span>
+                        </div>
+
+                        <div class="mb-3">
+                            <label asp-for="Input.PreferredStack" class="form-label fw-semibold">Preferred Technology Stack</label>
+                            <input asp-for="Input.PreferredStack" class="form-control" placeholder="Example: ASP.NET, React, PostgreSQL" />
+                            <span asp-validation-for="Input.PreferredStack" class="text-danger small"></span>
+                            <div class="form-text">
+                                This is a preferred stack, not the official assessed skills list.
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label asp-for="Input.AvailableHoursPerWeek" class="form-label fw-semibold">Available Hours / Week</label>
+                                <input asp-for="Input.AvailableHoursPerWeek" type="number" min="1" max="60" class="form-control" />
+                                <span asp-validation-for="Input.AvailableHoursPerWeek" class="text-danger small"></span>
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                <label asp-for="Input.TeamMembers" class="form-label fw-semibold">Team Members</label>
+                                <input asp-for="Input.TeamMembers" type="number" min="1" max="6" class="form-control" />
+                                <span asp-validation-for="Input.TeamMembers" class="text-danger small"></span>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label asp-for="Input.TargetDifficulty" class="form-label fw-semibold">Target Difficulty</label>
+                            <select asp-for="Input.TargetDifficulty" class="form-select">
+                                <option value="">Select target difficulty</option>
+                                <option value="beginner">Beginner</option>
+                                <option value="intermediate">Intermediate</option>
+                                <option value="advanced">Advanced</option>
+                            </select>
+                            <span asp-validation-for="Input.TargetDifficulty" class="text-danger small"></span>
+                        </div>
+
+                        <div class="mb-3">
+                            <label asp-for="Input.ProjectGoals" class="form-label fw-semibold">Project Goals</label>
+                            <textarea asp-for="Input.ProjectGoals" class="form-control" rows="5" placeholder="Describe what you want to achieve in your FYP..."></textarea>
+                            <span asp-validation-for="Input.ProjectGoals" class="text-danger small"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="d-flex justify-content-end mt-4 gap-2">
+            <a asp-page="/Student/Dashboard" class="btn btn-outline-secondary">Cancel</a>
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-save me-1"></i>Save Profile
+            </button>
+        </div>
+    </form>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

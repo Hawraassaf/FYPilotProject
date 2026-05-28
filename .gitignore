@@ -1,0 +1,56 @@
+# ── .NET build outputs ──────────────────────────────────────
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.userprefs
+
+# ── Published output ────────────────────────────────────────
+publish/
+out/
+
+# ── NuGet ───────────────────────────────────────────────────
+*.nupkg
+*.snupkg
+project.lock.json
+.nuget/
+
+# ── Python ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.env
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.pyc
+
+# ── Jupyter ─────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── ML model files (large binaries — regenerate locally) ────
+services/FYPilot.AI/data/*.pkl
+services/FYPilot.AI/data/*.joblib
+
+# ── Secrets ─────────────────────────────────────────────────
+.env
+*.env.local
+appsettings.Production.json
+
+# ── OS ──────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDE ─────────────────────────────────────────────────────
+.idea/
+.vscode/settings.json
+*.swp
+
+# ── Node (if any tooling is added) ──────────────────────────
+node_modules/

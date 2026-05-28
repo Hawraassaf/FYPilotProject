@@ -1,0 +1,71 @@
+@page
+@model FYPilot.Web.Pages.Supervisor.EvaluationsModel
+@{
+    ViewData["Title"]    = "Evaluations";
+    ViewData["Subtitle"] = "All project evaluations you have submitted";
+}
+
+<div class="page-card p-4">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <h6 class="fw-bold mb-0"><i class="bi bi-star-half me-2 text-success"></i>My Evaluations</h6>
+        <div class="d-flex gap-2">
+            <span class="badge bg-success-subtle text-success">@Model.Evals.Count(e => e.Status == "approved") Approved</span>
+            <span class="badge bg-warning-subtle text-warning">@Model.Evals.Count(e => e.Status == "needs_revision") Needs Revision</span>
+            <span class="badge bg-danger-subtle text-danger">@Model.Evals.Count(e => e.Status == "rejected") Rejected</span>
+        </div>
+    </div>
+
+    @if (!Model.Evals.Any())
+    {
+        <div class="text-center py-5 text-muted">
+            <i class="bi bi-clipboard display-4"></i>
+            <p class="mt-3">No evaluations yet. Go to <a href="/Supervisor/IdeaReview">Idea Review</a> to start evaluating.</p>
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Student</th>
+                        <th>Project Title</th>
+                        <th>Status</th>
+                        <th>Originality</th>
+                        <th>Similarity</th>
+                        <th>Date</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var e in Model.Evals.OrderByDescending(e => e.UpdatedAt))
+                    {
+                        <tr>
+                            <td class="small fw-semibold">@e.StudentName</td>
+                            <td>
+                                <div class="small">@e.IdeaTitle</div>
+                                <span class="badge bg-secondary-subtle text-secondary small">@e.Domain</span>
+                            </td>
+                            <td>
+                                <span class="badge @(e.Status == "approved" ? "bg-success" : e.Status == "rejected" ? "bg-danger" : e.Status == "needs_revision" ? "bg-warning text-dark" : "bg-secondary") text-capitalize">
+                                    @e.Status.Replace("_", " ")
+                                </span>
+                            </td>
+                            <td>
+                                <div class="d-flex align-items-center gap-1">
+                                    <div class="progress flex-grow-1" style="height:5px;min-width:50px">
+                                        <div class="progress-bar bg-success" style="width:@e.OriginalityScore%"></div>
+                                    </div>
+                                    <small>@e.OriginalityScore%</small>
+                                </div>
+                            </td>
+                            <td><span class="badge @(e.SimilarityScore > 50 ? "bg-danger-subtle text-danger" : "bg-success-subtle text-success")">@e.SimilarityScore%</span></td>
+                            <td class="text-muted small">@e.UpdatedAt.ToString("dd MMM yyyy")</td>
+                            <td><a href="/Supervisor/IdeaReview?ideaId=@e.IdeaId" class="btn btn-sm btn-outline-secondary">Edit</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>

@@ -1,0 +1,151 @@
+@page
+@model FYPilot.Web.Pages.Student.DashboardModel
+@{
+    ViewData["Title"] = "Student Dashboard";
+    ViewData["Subtitle"] = "Your FYP command centre";
+}
+@section Head {
+    <style>
+        .idea-card { transition: box-shadow 0.2s; cursor: pointer; }
+        .idea-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+    </style>
+}
+
+<!-- Stat cards -->
+<div class="row g-3 mb-4">
+    @foreach (var s in Model.Stats)
+    {
+        <div class="col-6 col-xl-3">
+            <div class="stat-card d-flex align-items-center gap-3">
+                <div class="stat-icon" style="background:@s.BgColor">
+                    <i class="bi bi-@s.Icon" style="color:@s.Color"></i>
+                </div>
+                <div>
+                    <div class="stat-value">@s.Value</div>
+                    <div class="stat-label">@s.Label</div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<div class="row g-4">
+    <!-- Project Ideas -->
+    <div class="col-lg-8">
+        <div class="page-card p-4">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+                <h6 class="fw-bold mb-0"><i class="bi bi-stars me-2 text-primary"></i>My Project Ideas</h6>
+                <a href="/Student/IdeaGenerator" class="btn btn-sm btn-primary">
+                    <i class="bi bi-plus-lg me-1"></i>Generate New
+                </a>
+            </div>
+            @if (!Model.Ideas.Any())
+            {
+                <div class="text-center py-5">
+                    <i class="bi bi-lightbulb display-4 text-muted"></i>
+
+                    @if (Model.HasSkills)
+                    {
+                        <div class="mt-3 text-muted">No ideas yet. Generate your first project idea using your saved skills.</div>
+                        <a href="/Student/IdeaGenerator" class="btn btn-outline-primary mt-3">
+                            <i class="bi bi-stars me-1"></i>Generate Ideas
+                        </a>
+                    }
+                    else
+                    {
+                        <div class="mt-3 text-muted">No ideas yet. Start by completing your Skill Assessment.</div>
+                        <a href="/Student/SkillAssessment" class="btn btn-outline-primary mt-3">
+                            <i class="bi bi-lightning-charge me-1"></i>Assess My Skills
+                        </a>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead>
+                            <tr>
+                                <th>Title</th>
+                                <th>Domain</th>
+                                <th>Difficulty</th>
+                                <th>Feasibility</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var idea in Model.Ideas)
+                            {
+                                <tr class="idea-card" onclick="location.href='/Student/ProjectDetails?id=@idea.Id'">
+                                    <td>
+                                        <div class="fw-semibold small">@idea.Title</div>
+                                        @if (idea.IsSelected)
+                                        {
+                                            <span class="badge bg-success-subtle text-success">Selected</span>
+                                        }
+                                    </td>
+                                    <td><span class="badge bg-primary-subtle text-primary">@idea.Domain</span></td>
+                                    <td><span class="badge bg-warning-subtle text-warning text-capitalize">@idea.DifficultyLevel</span></td>
+                                    <td>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <div class="progress flex-grow-1" style="height:6px">
+                                                <div class="progress-bar bg-success" style="width:@(idea.FeasibilityScore)%"></div>
+                                            </div>
+                                            <small class="text-muted">@idea.FeasibilityScore%</small>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <a href="/Student/ProjectDetails?id=@idea.Id" class="btn btn-sm btn-outline-secondary">
+                                            <i class="bi bi-arrow-right"></i>
+                                        </a>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+    <!-- Quick actions + Risk -->
+    <div class="col-lg-4">
+        <div class="page-card p-4 mb-3">
+            <h6 class="fw-bold mb-3"><i class="bi bi-grid me-2 text-primary"></i>AI Toolkit</h6>
+            <div class="d-grid gap-2">
+                @foreach (var (href, icon, label, color) in new[] {
+                    ("/Student/SkillAssessment", "lightning-charge", "Skill Assessment",    "#3b82f6"),
+                    ("/Student/IdeaGenerator",   "stars",            "Generate Ideas",      "#8b5cf6"),
+                    ("/Student/ProjectDNA",      "diagram-3",        "Project DNA",         "#06b6d4"),
+                    ("/Student/Roadmap",         "map",              "View Roadmap",        "#10b981"),
+                    ("/Student/ScopeOptimizer",  "funnel",           "Scope Optimizer",     "#f59e0b"),
+                    ("/Student/DefenseSimulator","shield-check",     "Defense Simulator",   "#ef4444"),
+                    ("/Student/MentorChat",      "chat-dots",        "Mentor Chat",         "#6366f1"),
+                })
+                {
+                    <a href="@href" class="btn btn-light d-flex align-items-center gap-2 text-start">
+                        <i class="bi bi-@icon" style="color:@color"></i>
+                        <span class="small fw-semibold">@label</span>
+                    </a>
+                }
+            </div>
+        </div>
+
+        @if (Model.RiskAlarms.Any())
+        {
+            <div class="page-card p-4">
+                <h6 class="fw-bold mb-3"><i class="bi bi-exclamation-triangle me-2 text-warning"></i>Risk Alarms</h6>
+                @foreach (var risk in Model.RiskAlarms)
+                {
+                    <div class="d-flex gap-2 mb-2 p-2 rounded-2 risk-@risk.Severity.ToLower()">
+                        <i class="bi bi-circle-fill mt-1 flex-shrink-0" style="font-size:0.5rem"></i>
+                        <div>
+                            <div class="fw-semibold" style="font-size:0.8rem">@risk.Title</div>
+                            <div style="font-size:0.75rem">@risk.Message</div>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>

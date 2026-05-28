@@ -1,0 +1,91 @@
+@page
+@model FYPilot.Web.Pages.SystemTestModel
+@{
+    Layout = "_Layout";
+    ViewData["Title"] = "System Test";
+    ViewData["Subtitle"] = "Verify all platform connections are operational";
+}
+
+<div class="row g-3 mb-4">
+    <div class="col-12">
+        <div class="page-card p-4">
+            <div class="d-flex align-items-center justify-content-between mb-4">
+                <div>
+                    <h6 class="fw-bold mb-1">System Health Check</h6>
+                    <div class="text-muted small">Tests all critical service connections. No login required.</div>
+                </div>
+                <button id="run-btn" class="btn btn-primary fw-semibold" onclick="FYPilot.SystemTest.run()">
+                    <i class="bi bi-play-circle me-2"></i>Run Tests
+                </button>
+            </div>
+
+            @{
+                var tests = new[] {
+                    ("frontend",      "bi-window",           "Razor Pages Web App",          "Verifies the .NET Razor Pages frontend is running"),
+                    ("database",      "bi-database",         "PostgreSQL Database",           "Checks EF Core can connect and query the database"),
+                    ("ai-health",     "bi-cpu",              "Python AI Service /health",     "Calls GET /health on the Python FastAPI service"),
+                    ("skill-analysis","bi-lightning-charge", "AI Skill Analysis",             "Calls POST /analyze-skills with sample data"),
+                    ("feasibility",   "bi-graph-up-arrow",   "AI Feasibility Prediction",     "Calls POST /predict-feasibility with sample features"),
+                    ("similarity",    "bi-diagram-3",        "AI Similarity / Originality",   "Calls POST /check-similarity with a sample idea"),
+                    ("market-match",  "bi-shop",             "AI Market Matching",            "Calls POST /match-market with a sample idea"),
+                    ("risk-alarms",   "bi-exclamation-triangle", "AI Risk Alarms",            "Calls POST /risk-alarms with sample project data"),
+                };
+            }
+
+            <div class="d-flex flex-column gap-2">
+                @foreach (var (id, icon, label, desc) in tests)
+                {
+                    <div id="test-@id" class="test-card">
+                        <div class="status-dot bg-secondary"></div>
+                        <div class="flex-shrink-0" style="width:36px;height:36px;background:#f1f5f9;border-radius:8px;display:flex;align-items:center;justify-content:center">
+                            <i class="@icon text-muted"></i>
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="fw-semibold small">@label</div>
+                            <div class="test-detail text-muted-sm" style="display:none"></div>
+                            <div class="text-muted-sm">@desc</div>
+                        </div>
+                        <span class="test-badge badge bg-secondary">PENDING</span>
+                    </div>
+                }
+            </div>
+
+            <div id="test-summary" class="alert mt-3" style="display:none"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Static info cards -->
+<div class="row g-3">
+    @foreach (var (label, val, icon, color) in new[] {
+        ("Razor Pages App",      "FYPilot.Web — ASP.NET Core 8",      "window",           "#3b82f6"),
+        ("API Server",           "FYPilot.Api — REST / JWT",           "server",           "#8b5cf6"),
+        ("Database",             "PostgreSQL fyp_db + EF Core 8",      "database",         "#10b981"),
+        ("Python AI Service",    "FastAPI — localhost:8000",            "cpu",              "#f59e0b"),
+        ("Architecture",         "Clean Architecture — 7 .NET projects","layers",           "#ef4444"),
+        ("Auth",                 "Cookie Auth (Web) + JWT (API)",       "shield-lock",      "#6366f1"),
+    })
+    {
+        <div class="col-sm-6 col-xl-4">
+            <div class="page-card p-3 d-flex align-items-center gap-3">
+                <div style="width:36px;height:36px;background:@(color)20;border-radius:8px;display:flex;align-items:center;justify-content:center">
+                    <i class="bi bi-@icon" style="color:@color"></i>
+                </div>
+                <div>
+                    <div class="small fw-semibold">@label</div>
+                    <div class="text-muted-sm">@val</div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@Html.AntiForgeryToken()
+
+@section Scripts {
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    FYPilot.SystemTest.setStatus('frontend', 'ok', 'Razor Pages running on .NET 8');
+});
+</script>
+}

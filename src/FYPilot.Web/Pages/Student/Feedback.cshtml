@@ -1,0 +1,143 @@
+@page
+@model FYPilot.Web.Pages.Student.FeedbackModel
+@{
+    ViewData["Title"]    = "Supervisor Feedback";
+    ViewData["Subtitle"] = "Reviews and evaluations from your supervisor";
+}
+
+@if (!Model.Feedbacks.Any())
+{
+    <div class="page-card p-5 text-center text-muted">
+        <i class="bi bi-chat-square-text display-4 d-block mb-3" style="color:#cbd5e1"></i>
+        <h5 class="fw-semibold">No Feedback Yet</h5>
+        <p class="mb-0 small">Your supervisor hasn't reviewed any of your ideas yet.<br/>Submit ideas via the Idea Generator and your supervisor will be notified.</p>
+    </div>
+}
+else
+{
+    <div class="row g-4">
+        @foreach (var item in Model.Feedbacks)
+        {
+            var statusColor = item.Evaluation.Status switch {
+                "approved"       => "#10b981",
+                "needs_revision" => "#f59e0b",
+                "rejected"       => "#ef4444",
+                _                => "#64748b"
+            };
+            var statusBg = item.Evaluation.Status switch {
+                "approved"       => "#f0fdf4",
+                "needs_revision" => "#fffbeb",
+                "rejected"       => "#fef2f2",
+                _                => "#f8fafc"
+            };
+            var statusLabel = item.Evaluation.Status switch {
+                "approved"       => "Approved",
+                "needs_revision" => "Needs Revision",
+                "rejected"       => "Rejected",
+                _                => "Pending Review"
+            };
+            var statusIcon = item.Evaluation.Status switch {
+                "approved"       => "check-circle-fill",
+                "needs_revision" => "exclamation-circle-fill",
+                "rejected"       => "x-circle-fill",
+                _                => "clock-fill"
+            };
+
+            <div class="col-12">
+                <div class="page-card p-0 overflow-hidden">
+
+                    <!-- Card header -->
+                    <div class="d-flex align-items-center justify-content-between px-4 py-3"
+                         style="background:@(statusBg);border-bottom:1px solid #e2e8f0">
+                        <div>
+                            <h6 class="mb-0 fw-bold">@item.Idea.Title</h6>
+                            <div class="text-muted small mt-1">
+                                <i class="bi bi-person me-1"></i>Reviewed by <strong>@item.SupervisorName</strong>
+                                &nbsp;·&nbsp;
+                                <i class="bi bi-calendar3 me-1"></i>@item.Evaluation.UpdatedAt.ToString("MMM d, yyyy")
+                            </div>
+                        </div>
+                        <span class="badge d-flex align-items-center gap-1 px-3 py-2"
+                              style="background:@(statusColor);font-size:0.8rem">
+                            <i class="bi bi-@(statusIcon)"></i> @statusLabel
+                        </span>
+                    </div>
+
+                    <div class="p-4">
+                        <div class="row g-4">
+
+                            <!-- Scores -->
+                            <div class="col-md-3">
+                                <div class="d-flex flex-column align-items-center gap-3">
+                                    <div class="text-center">
+                                        <div class="score-ring" style="width:72px;height:72px;font-size:1rem;color:#10b981">
+                                            @item.Evaluation.OriginalityScore%
+                                        </div>
+                                        <div class="small text-muted mt-1 fw-semibold">Originality</div>
+                                    </div>
+                                    <div class="text-center">
+                                        <div class="score-ring" style="width:72px;height:72px;font-size:1rem;color:#3b82f6">
+                                            @item.Evaluation.SimilarityScore%
+                                        </div>
+                                        <div class="small text-muted mt-1 fw-semibold">Similarity</div>
+                                    </div>
+                                    <div class="text-center">
+                                        <div class="score-ring" style="width:72px;height:72px;font-size:1rem;color:#8b5cf6">
+                                            @item.Idea.FeasibilityScore%
+                                        </div>
+                                        <div class="small text-muted mt-1 fw-semibold">Feasibility</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Feedback text -->
+                            <div class="col-md-9">
+                                @if (!string.IsNullOrWhiteSpace(item.Evaluation.Comment))
+                                {
+                                    <div class="mb-4">
+                                        <div class="d-flex align-items-center gap-2 mb-2">
+                                            <i class="bi bi-chat-left-text" style="color:#3b82f6"></i>
+                                            <span class="fw-semibold small text-uppercase text-muted">Supervisor Comments</span>
+                                        </div>
+                                        <div class="p-3 rounded-3" style="background:#f8fafc;border:1px solid #e2e8f0;line-height:1.7">
+                                            @item.Evaluation.Comment
+                                        </div>
+                                    </div>
+                                }
+
+                                @if (!string.IsNullOrWhiteSpace(item.Evaluation.ImprovementSuggestions))
+                                {
+                                    <div class="mb-3">
+                                        <div class="d-flex align-items-center gap-2 mb-2">
+                                            <i class="bi bi-lightbulb" style="color:#f59e0b"></i>
+                                            <span class="fw-semibold small text-uppercase text-muted">Improvement Suggestions</span>
+                                        </div>
+                                        <div class="p-3 rounded-3" style="background:#fffbeb;border:1px solid #fde68a;line-height:1.7">
+                                            @item.Evaluation.ImprovementSuggestions
+                                        </div>
+                                    </div>
+                                }
+
+                                @if (string.IsNullOrWhiteSpace(item.Evaluation.Comment) && string.IsNullOrWhiteSpace(item.Evaluation.ImprovementSuggestions))
+                                {
+                                    <div class="text-muted small fst-italic">No written comments provided yet.</div>
+                                }
+
+                                <!-- Idea tags -->
+                                <div class="d-flex gap-2 flex-wrap mt-3 pt-3" style="border-top:1px solid #e2e8f0">
+                                    <span class="badge bg-primary-subtle text-primary">@item.Idea.Domain</span>
+                                    <span class="badge bg-warning-subtle text-warning text-capitalize">@item.Idea.DifficultyLevel</span>
+                                    <span class="badge bg-secondary-subtle text-secondary">@item.Idea.ExpectedDurationWeeks weeks</span>
+                                    @if (!string.IsNullOrEmpty(item.Idea.RequiredTechnologies))
+                                    {
+                                        <span class="badge bg-info-subtle text-info">@item.Idea.RequiredTechnologies</span>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}

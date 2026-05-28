@@ -1,0 +1,56 @@
+@page
+@model FYPilot.Web.Pages.Admin.ProjectsModel
+@{
+    ViewData["Title"]    = "All Projects";
+    ViewData["Subtitle"] = "Browse all student project ideas across the platform";
+}
+
+<div class="page-card p-4">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <div class="d-flex gap-2 flex-wrap">
+            <span class="badge bg-primary-subtle text-primary">@Model.Ideas.Count Total Ideas</span>
+            <span class="badge bg-success-subtle text-success">@Model.Ideas.Count(i => i.IsSelected) Selected</span>
+        </div>
+        <input type="text" id="searchInput" class="form-control form-control-sm" placeholder="Search…" style="width:200px" />
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-hover align-middle small" id="projectsTable">
+            <thead>
+                <tr><th>Title</th><th>Student</th><th>Domain</th><th>Difficulty</th><th>Feasibility</th><th>Innovation</th><th>Status</th><th>Created</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var idea in Model.Ideas.OrderByDescending(i => i.CreatedAt))
+                {
+                    <tr>
+                        <td class="fw-semibold" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">@idea.Title</td>
+                        <td class="text-muted">@idea.StudentName</td>
+                        <td><span class="badge bg-secondary-subtle text-secondary">@idea.Domain</span></td>
+                        <td><span class="badge bg-warning-subtle text-warning text-capitalize">@idea.DifficultyLevel</span></td>
+                        <td>
+                            <div class="d-flex align-items-center gap-1">
+                                <div class="progress" style="height:4px;width:50px">
+                                    <div class="progress-bar bg-success" style="width:@idea.FeasibilityScore%"></div>
+                                </div>
+                                <span>@idea.FeasibilityScore%</span>
+                            </div>
+                        </td>
+                        <td>@idea.InnovationScore%</td>
+                        <td>@(idea.IsSelected ? Html.Raw("<span class='badge bg-success'>Selected</span>") : Html.Raw("<span class='badge bg-secondary-subtle text-secondary'>Draft</span>"))</td>
+                        <td class="text-muted">@idea.CreatedAt.ToString("dd MMM")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <div class="text-muted small mt-2">@Model.Ideas.Count total ideas from @Model.Ideas.Select(i => i.UserId).Distinct().Count() students</div>
+</div>
+
+@section Scripts {
+<script>
+document.getElementById('searchInput').addEventListener('input', function() {
+    var q = this.value.toLowerCase();
+    document.querySelectorAll('#projectsTable tbody tr').forEach(function(r) { r.style.display = r.textContent.toLowerCase().includes(q) ? '' : 'none'; });
+});
+</script>
+}

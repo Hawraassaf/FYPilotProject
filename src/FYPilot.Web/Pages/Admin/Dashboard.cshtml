@@ -1,0 +1,109 @@
+@page
+@model FYPilot.Web.Pages.Admin.DashboardModel
+@{
+    ViewData["Title"]    = "Admin Dashboard";
+    ViewData["Subtitle"] = "Platform overview and system administration";
+}
+
+<!-- Stats row -->
+<div class="row g-3 mb-4">
+    @foreach (var s in Model.Stats)
+    {
+        <div class="col-6 col-xl-3">
+            <div class="stat-card d-flex align-items-center gap-3">
+                <div class="stat-icon" style="background:@s.BgColor"><i class="bi bi-@s.Icon" style="color:@s.Color"></i></div>
+                <div><div class="stat-value">@s.Value</div><div class="stat-label">@s.Label</div></div>
+            </div>
+        </div>
+    }
+</div>
+
+<div class="row g-4">
+    <!-- Recent users -->
+    <div class="col-lg-6">
+        <div class="page-card p-4">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+                <h6 class="fw-bold mb-0"><i class="bi bi-people me-2 text-primary"></i>Recent Users</h6>
+                <a href="/Admin/Users" class="btn btn-sm btn-outline-primary">All Users</a>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle small">
+                    <thead><tr><th>Name</th><th>Role</th><th>Joined</th></tr></thead>
+                    <tbody>
+                        @foreach (var u in Model.RecentUsers)
+                        {
+                            <tr>
+                                <td>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <div class="avatar" style="width:28px;height:28px;font-size:0.7rem;background:#e0e7ff;color:#4338ca">@(u.Name.Length > 0 ? u.Name[0].ToString() : "?")</div>
+                                        <span class="fw-semibold">@u.Name</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="badge text-capitalize @(u.Role == "student" ? "bg-primary-subtle text-primary" : u.Role == "supervisor" ? "bg-success-subtle text-success" : "bg-danger-subtle text-danger")">@u.Role</span>
+                                </td>
+                                <td class="text-muted">@u.CreatedAt.ToString("dd MMM")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent ideas -->
+    <div class="col-lg-6">
+        <div class="page-card p-4">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+                <h6 class="fw-bold mb-0"><i class="bi bi-stars me-2 text-warning"></i>Recent Project Ideas</h6>
+                <a href="/Admin/Projects" class="btn btn-sm btn-outline-primary">All Projects</a>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle small">
+                    <thead><tr><th>Title</th><th>Domain</th><th>Score</th></tr></thead>
+                    <tbody>
+                        @foreach (var idea in Model.RecentIdeas)
+                        {
+                            <tr>
+                                <td class="fw-semibold" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">@idea.Title</td>
+                                <td><span class="badge bg-secondary-subtle text-secondary">@idea.Domain</span></td>
+                                <td>
+                                    <span class="badge @(idea.FeasibilityScore >= 70 ? "bg-success" : idea.FeasibilityScore >= 50 ? "bg-warning text-dark" : "bg-danger")">@idea.FeasibilityScore%</span>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- System links -->
+    <div class="col-12">
+        <div class="page-card p-4">
+            <h6 class="fw-bold mb-3"><i class="bi bi-tools me-2"></i>Quick Administration</h6>
+            <div class="row g-2">
+                @foreach (var (href, icon, label, desc, color) in new[] {
+                    ("/Admin/Users",       "people",         "Manage Users",       "View, search, and manage all platform users",              "#3b82f6"),
+                    ("/Admin/Projects",    "folder",         "All Projects",       "Browse all student project ideas across all accounts",      "#8b5cf6"),
+                    ("/Admin/MarketNeeds", "graph-up-arrow", "Market Needs",       "Manage industry problem dataset for AI matching",           "#10b981"),
+                    ("/Admin/Analytics",   "bar-chart",      "Analytics",          "Platform usage statistics and performance metrics",        "#f59e0b"),
+                    ("/SystemTest",        "shield-check",   "System Test",        "Verify database, API, and AI service connections",         "#ef4444"),
+                })
+                {
+                    <div class="col-sm-6 col-xl-4">
+                        <a href="@href" class="d-flex align-items-center gap-3 p-3 rounded-2 bg-light text-decoration-none">
+                            <div class="stat-icon" style="background:@(color)20;width:40px;height:40px">
+                                <i class="bi bi-@icon" style="color:@color"></i>
+                            </div>
+                            <div>
+                                <div class="fw-semibold small">@label</div>
+                                <div class="text-muted-sm">@desc</div>
+                            </div>
+                        </a>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>

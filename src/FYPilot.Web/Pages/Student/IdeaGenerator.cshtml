@@ -1,0 +1,162 @@
+@page
+@model FYPilot.Web.Pages.Student.IdeaGeneratorModel
+@{
+    ViewData["Title"]    = "AI Idea Generator";
+    ViewData["Subtitle"] = "Discover validated FYP ideas tailored to your profile";
+}
+
+<div class="row g-4">
+    <div class="col-lg-4">
+        <div class="page-card p-4">
+            <h6 class="fw-bold mb-3"><i class="bi bi-sliders me-2 text-primary"></i>Generation Settings</h6>
+            <form method="post">
+                @Html.AntiForgeryToken()
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Major / Field</label>
+                    <input asp-for="Input.Major" class="form-control form-control-sm" placeholder="e.g. Computer Science" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Experience Level</label>
+                    <select asp-for="Input.ExperienceLevel" class="form-select form-select-sm">
+                        <option value="beginner">Beginner</option>
+                        <option value="intermediate" selected>Intermediate</option>
+                        <option value="advanced">Advanced</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Preferred Domain</label>
+                    <select asp-for="Input.PreferredDomain" class="form-select form-select-sm">
+                        <option value="">Any Domain</option>
+                        <option>Web Development</option>
+                        <option>AI / Data Science</option>
+                        <option>Mobile</option>
+                        <option>Cybersecurity</option>
+                        <option>Healthcare IT</option>
+                        <option>FinTech</option>
+                        <option>Education Technology</option>
+                        <option>IoT / Embedded</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Target Difficulty</label>
+                    <select asp-for="Input.TargetDifficulty" class="form-select form-select-sm">
+                        <option value="beginner">Beginner</option>
+                        <option value="intermediate" selected>Intermediate</option>
+                        <option value="advanced">Advanced</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Hours per Week</label>
+                    <input asp-for="Input.AvailableHours" type="number" min="5" max="60" class="form-control form-control-sm" value="20" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Team Size</label>
+                    <select asp-for="Input.TeamSize" class="form-select form-select-sm">
+                        <option value="1">Solo</option>
+                        <option value="2">2 members</option>
+                        <option value="3">3 members</option>
+                        <option value="4">4+ members</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary w-100 fw-semibold">
+                    <i class="bi bi-stars me-2"></i>Generate Ideas
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="col-lg-8">
+        @if (Model.GeneratedIdeas.Any())
+        {
+            <div class="d-flex align-items-center justify-content-between mb-3">
+                <h6 class="fw-bold mb-0">@Model.GeneratedIdeas.Count idea(s) generated</h6>
+                <a href="/Student/IdeaComparison" class="btn btn-sm btn-outline-primary">
+                    <i class="bi bi-bar-chart-line me-1"></i>Compare Ideas
+                </a>
+            </div>
+            @foreach (var idea in Model.GeneratedIdeas)
+            {
+                <div class="page-card p-4 mb-3">
+                    <div class="d-flex align-items-start justify-content-between gap-2 mb-3">
+                        <div>
+                            <h6 class="fw-bold mb-1">@idea.Title</h6>
+                            <div class="d-flex flex-wrap gap-1">
+                                <span class="badge bg-primary-subtle text-primary">@idea.Domain</span>
+                                <span class="badge bg-warning-subtle text-warning">@idea.DifficultyLevel</span>
+                                <span class="badge bg-secondary-subtle text-secondary">@idea.ExpectedDurationWeeks weeks</span>
+                            </div>
+                        </div>
+                        <div class="text-end flex-shrink-0">
+                            <div class="score-ring @(idea.FeasibilityScore >= 70 ? "text-success" : idea.FeasibilityScore >= 50 ? "text-warning" : "text-danger")" style="width:56px;height:56px;font-size:1rem">
+                                @idea.FeasibilityScore%
+                            </div>
+                        </div>
+                    </div>
+                    <p class="text-muted small mb-2">@idea.ProblemStatement</p>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <div class="small text-muted fw-semibold mb-1">Required Skills</div>
+                            <div class="small">@idea.RequiredSkills</div>
+                        </div>
+                        <div class="col-6">
+                            <div class="small text-muted fw-semibold mb-1">Technologies</div>
+                            <div class="small">@idea.RequiredTechnologies</div>
+                        </div>
+                    </div>
+                    <div class="row g-2 small mb-3">
+                        <div class="col-4">
+                            <span class="text-muted">Innovation</span>
+                            <div class="progress mt-1" style="height:4px">
+                                <div class="progress-bar bg-info" style="width:@(idea.InnovationScore)%"></div>
+                            </div>
+                        </div>
+                        <div class="col-4">
+                            <span class="text-muted">Market Demand</span>
+                            <div class="progress mt-1" style="height:4px">
+                                <div class="progress-bar bg-success" style="width:@(idea.MarketDemandScore)%"></div>
+                            </div>
+                        </div>
+                        <div class="col-4">
+                            <span class="text-muted">Feasibility</span>
+                            <div class="progress mt-1" style="height:4px">
+                                <div class="progress-bar bg-warning" style="width:@(idea.FeasibilityScore)%"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <form method="post" asp-page-handler="Select">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="ideaId" value="@idea.Id" />
+                        <div class="d-flex gap-2">
+                            <a href="/Student/ProjectDNA?ideaId=@idea.Id" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-diagram-3 me-1"></i>DNA Analysis
+                            </a>
+                            <a href="/Student/Roadmap?ideaId=@idea.Id" class="btn btn-sm btn-outline-success">
+                                <i class="bi bi-map me-1"></i>Generate Roadmap
+                            </a>
+                            @if (!idea.IsSelected)
+                            {
+                                <button type="submit" class="btn btn-sm btn-primary ms-auto">
+                                    <i class="bi bi-check2-circle me-1"></i>Select This Idea
+                                </button>
+                            }
+                            else
+                            {
+                                <span class="badge bg-success d-flex align-items-center ms-auto">
+                                    <i class="bi bi-check-circle me-1"></i>Selected
+                                </span>
+                            }
+                        </div>
+                    </form>
+                </div>
+            }
+        }
+        else
+        {
+            <div class="page-card p-5 text-center">
+                <i class="bi bi-stars display-3 text-muted"></i>
+                <h5 class="mt-3 text-muted">Generate Your First Ideas</h5>
+                <p class="text-muted small">Fill in your profile on the left and click <strong>Generate Ideas</strong> to receive AI-powered project recommendations tailored to your skills and goals.</p>
+            </div>
+        }
+    </div>
+</div>
