@@ -65,6 +65,13 @@ try:
 except Exception as e:
     logger.warning(f"Risk router skipped: {e}")
 
+try:
+    from app.routers import ideas
+    app.include_router(ideas.router)
+    logger.info("Ideas generation router loaded")
+except Exception as e:
+    logger.warning(f"Ideas router skipped: {e}")
+
 # Heavy ML routers — loaded only if dependencies are available
 try:
     from app.routers import analytics
@@ -93,6 +100,7 @@ def ds_health():
             "core": [
                 "GET  /health",
                 "POST /analyze-skills",
+                "POST /generate-ideas",
                 "GET  /ds/health",
             ],
             "full_ml": [
