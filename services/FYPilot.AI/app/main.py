@@ -107,3 +107,9 @@ def ds_health():
             ],
         },
     }
+try:
+    from app.routers import ollama_test
+    app.include_router(ollama_test.router)
+    logger.info("Ollama test router loaded")
+except Exception as e:
+    logger.warning(f"Ollama test router skipped: {e}")
