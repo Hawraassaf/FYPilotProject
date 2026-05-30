@@ -5,7 +5,7 @@
     ViewData["Subtitle"] = "Compare project ideas side-by-side across all dimensions";
 }
 
-@if (!Model.Ideas.Any())
+@if (Model.Ideas.Count < 2)
 {
     <div class="page-card p-5 text-center">
         <i class="bi bi-bar-chart-line display-3 text-muted"></i>

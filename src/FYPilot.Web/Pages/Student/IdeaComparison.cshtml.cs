@@ -22,10 +22,24 @@ public class IdeaComparisonModel(ApplicationDbContext db) : PageModel
     public async Task<IActionResult> OnPostAsync(int ideaId)
     {
         var userId = UserId();
-        await db.ProjectIdeas.Where(i => i.UserId == userId)
+
+        var ideaExists = await db.ProjectIdeas
+            .AnyAsync(i => i.Id == ideaId && i.UserId == userId);
+
+        if (!ideaExists)
+        {
+            TempData["Error"] = "The selected idea was not found or does not belong to your account.";
+            return RedirectToPage();
+        }
+
+        await db.ProjectIdeas
+            .Where(i => i.UserId == userId)
             .ExecuteUpdateAsync(s => s.SetProperty(p => p.IsSelected, false));
-        await db.ProjectIdeas.Where(i => i.Id == ideaId && i.UserId == userId)
+
+        await db.ProjectIdeas
+            .Where(i => i.Id == ideaId && i.UserId == userId)
             .ExecuteUpdateAsync(s => s.SetProperty(p => p.IsSelected, true));
+
         TempData["Success"] = "Project idea selected.";
         return RedirectToPage();
     }

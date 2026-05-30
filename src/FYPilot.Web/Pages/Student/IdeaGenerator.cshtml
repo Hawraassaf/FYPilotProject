@@ -1,64 +1,137 @@
 @page
 @model FYPilot.Web.Pages.Student.IdeaGeneratorModel
 @{
-    ViewData["Title"]    = "AI Idea Generator";
+    ViewData["Title"] = "AI Idea Generator";
     ViewData["Subtitle"] = "Discover validated FYP ideas tailored to your profile";
 }
 
 <div class="row g-4">
     <div class="col-lg-4">
         <div class="page-card p-4">
-            <h6 class="fw-bold mb-3"><i class="bi bi-sliders me-2 text-primary"></i>Generation Settings</h6>
+            <h6 class="fw-bold mb-3">
+                <i class="bi bi-sliders me-2 text-primary"></i>Generation Settings
+            </h6>
+
+            @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
+            {
+                <div class="alert alert-success small">
+                    <i class="bi bi-check-circle me-1"></i>@Model.SuccessMessage
+                </div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+            {
+                <div class="alert alert-danger small">
+                    <i class="bi bi-exclamation-triangle me-1"></i>@Model.ErrorMessage
+                </div>
+            }
+
+            @if (!Model.HasAssessedSkills)
+            {
+                <div class="alert alert-warning small">
+                    <div class="fw-semibold mb-1">Skill Assessment Required</div>
+                    <div>
+                        Project ideas should be generated based on your assessed skills.
+                        Please complete your skill assessment first.
+                    </div>
+                    <a href="/Student/SkillAssessment" class="btn btn-sm btn-outline-warning mt-2">
+                        Go to Skill Assessment
+                    </a>
+                </div>
+            }
+
             <form method="post">
                 @Html.AntiForgeryToken()
+
                 <div class="mb-3">
                     <label class="form-label small fw-semibold">Major / Field</label>
                     <input asp-for="Input.Major" class="form-control form-control-sm" placeholder="e.g. Computer Science" />
+                    <span asp-validation-for="Input.Major" class="text-danger small"></span>
+                    <div class="form-text">Loaded from your student profile.</div>
                 </div>
+
                 <div class="mb-3">
                     <label class="form-label small fw-semibold">Experience Level</label>
                     <select asp-for="Input.ExperienceLevel" class="form-select form-select-sm">
                         <option value="beginner">Beginner</option>
-                        <option value="intermediate" selected>Intermediate</option>
+                        <option value="intermediate">Intermediate</option>
                         <option value="advanced">Advanced</option>
                     </select>
+                    <span asp-validation-for="Input.ExperienceLevel" class="text-danger small"></span>
                 </div>
+
                 <div class="mb-3">
                     <label class="form-label small fw-semibold">Preferred Domain</label>
                     <select asp-for="Input.PreferredDomain" class="form-select form-select-sm">
-                        <option value="">Any Domain</option>
-                        <option>Web Development</option>
-                        <option>AI / Data Science</option>
-                        <option>Mobile</option>
-                        <option>Cybersecurity</option>
-                        <option>Healthcare IT</option>
-                        <option>FinTech</option>
-                        <option>Education Technology</option>
-                        <option>IoT / Embedded</option>
+                        <option value="General Software System">General Software System</option>
+                        <option value="Web Development">Web Development</option>
+                        <option value="AI/Data Science">AI/Data Science</option>
+                        <option value="Mobile Development">Mobile Development</option>
+                        <option value="Cybersecurity">Cybersecurity</option>
+                        <option value="Healthcare Technology">Healthcare Technology</option>
+                        <option value="FinTech">FinTech</option>
+                        <option value="Education Technology">Education Technology</option>
+                        <option value="IoT / Embedded">IoT / Embedded</option>
                     </select>
+                    <span asp-validation-for="Input.PreferredDomain" class="text-danger small"></span>
                 </div>
+
                 <div class="mb-3">
                     <label class="form-label small fw-semibold">Target Difficulty</label>
                     <select asp-for="Input.TargetDifficulty" class="form-select form-select-sm">
                         <option value="beginner">Beginner</option>
-                        <option value="intermediate" selected>Intermediate</option>
+                        <option value="intermediate">Intermediate</option>
                         <option value="advanced">Advanced</option>
                     </select>
+                    <span asp-validation-for="Input.TargetDifficulty" class="text-danger small"></span>
                 </div>
+
                 <div class="mb-3">
                     <label class="form-label small fw-semibold">Hours per Week</label>
-                    <input asp-for="Input.AvailableHours" type="number" min="5" max="60" class="form-control form-control-sm" value="20" />
+                    <input asp-for="Input.AvailableHours" type="number" min="1" max="60" class="form-control form-control-sm" />
+                    <span asp-validation-for="Input.AvailableHours" class="text-danger small"></span>
                 </div>
+
                 <div class="mb-3">
                     <label class="form-label small fw-semibold">Team Size</label>
                     <select asp-for="Input.TeamSize" class="form-select form-select-sm">
                         <option value="1">Solo</option>
                         <option value="2">2 members</option>
                         <option value="3">3 members</option>
-                        <option value="4">4+ members</option>
+                        <option value="4">4 members</option>
+                        <option value="5">5 members</option>
+                        <option value="6">6 members</option>
                     </select>
+                    <span asp-validation-for="Input.TeamSize" class="text-danger small"></span>
                 </div>
-                <button type="submit" class="btn btn-primary w-100 fw-semibold">
+
+                <div class="mb-3">
+                    <div class="small fw-semibold mb-2">Assessed Skills Used for Generation</div>
+
+                    @if (Model.AssessedSkills.Any())
+                    {
+                        <div class="d-flex flex-wrap gap-1">
+                            @foreach (var skill in Model.AssessedSkills)
+                            {
+                                <span class="badge bg-primary-subtle text-primary">
+                                    @skill.SkillName (@skill.Rating/5)
+                                </span>
+                            }
+                        </div>
+
+                        <a href="/Student/SkillAssessment" class="small d-inline-block mt-2">
+                            Update Skill Assessment
+                        </a>
+                    }
+                    else
+                    {
+                        <div class="text-muted small">
+                            No assessed skills found.
+                        </div>
+                    }
+                </div>
+
+                <button type="submit" class="btn btn-primary w-100 fw-semibold" @(Model.HasAssessedSkills ? "" : "disabled")>
                     <i class="bi bi-stars me-2"></i>Generate Ideas
                 </button>
             </form>
@@ -69,13 +142,18 @@
         @if (Model.GeneratedIdeas.Any())
         {
             <div class="d-flex align-items-center justify-content-between mb-3">
-                <h6 class="fw-bold mb-0">@Model.GeneratedIdeas.Count idea(s) generated</h6>
+                <h6 class="fw-bold mb-0">@Model.GeneratedIdeas.Count recent idea(s)</h6>
                 <a href="/Student/IdeaComparison" class="btn btn-sm btn-outline-primary">
                     <i class="bi bi-bar-chart-line me-1"></i>Compare Ideas
                 </a>
             </div>
+
             @foreach (var idea in Model.GeneratedIdeas)
             {
+                var requiresDataset =
+                    !string.IsNullOrWhiteSpace(idea.DatasetNeeded) &&
+                    !idea.DatasetNeeded.Equals("None", StringComparison.OrdinalIgnoreCase);
+
                 <div class="page-card p-4 mb-3">
                     <div class="d-flex align-items-start justify-content-between gap-2 mb-3">
                         <div>
@@ -84,55 +162,111 @@
                                 <span class="badge bg-primary-subtle text-primary">@idea.Domain</span>
                                 <span class="badge bg-warning-subtle text-warning">@idea.DifficultyLevel</span>
                                 <span class="badge bg-secondary-subtle text-secondary">@idea.ExpectedDurationWeeks weeks</span>
+
+                                @if (requiresDataset)
+                                {
+                                    <span class="badge bg-info-subtle text-info">Dataset Needed</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-success-subtle text-success">No Dataset Required</span>
+                                }
+
+                                @if (idea.IsSelected)
+                                {
+                                    <span class="badge bg-success">Selected</span>
+                                }
                             </div>
                         </div>
+
                         <div class="text-end flex-shrink-0">
                             <div class="score-ring @(idea.FeasibilityScore >= 70 ? "text-success" : idea.FeasibilityScore >= 50 ? "text-warning" : "text-danger")" style="width:56px;height:56px;font-size:1rem">
                                 @idea.FeasibilityScore%
                             </div>
                         </div>
                     </div>
-                    <p class="text-muted small mb-2">@idea.ProblemStatement</p>
+
+                    <p class="text-muted small mb-3">@idea.ProblemStatement</p>
+
                     <div class="row g-2 mb-3">
-                        <div class="col-6">
+                        <div class="col-md-6">
                             <div class="small text-muted fw-semibold mb-1">Required Skills</div>
                             <div class="small">@idea.RequiredSkills</div>
                         </div>
-                        <div class="col-6">
+
+                        <div class="col-md-6">
+                            <div class="small text-muted fw-semibold mb-1">Missing Skills</div>
+                            <div class="small">
+                                @(string.IsNullOrWhiteSpace(idea.MissingSkills) ? "None" : idea.MissingSkills)
+                            </div>
+                        </div>
+
+                        <div class="col-md-12">
                             <div class="small text-muted fw-semibold mb-1">Technologies</div>
                             <div class="small">@idea.RequiredTechnologies</div>
                         </div>
                     </div>
+
+                    <div class="mb-3">
+                        <div class="small text-muted fw-semibold mb-1">Lebanese Market Relevance</div>
+                        <div class="small">@idea.LebaneseMarketRelevance</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="small text-muted fw-semibold mb-1">Dataset Requirement</div>
+                        <div class="small">
+                            @(requiresDataset ? idea.DatasetNeeded : "No dataset is required for this idea.")
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="small text-muted fw-semibold mb-1">Final Deliverables</div>
+                        <div class="small">@idea.FinalDeliverables</div>
+                    </div>
+
                     <div class="row g-2 small mb-3">
                         <div class="col-4">
                             <span class="text-muted">Innovation</span>
                             <div class="progress mt-1" style="height:4px">
                                 <div class="progress-bar bg-info" style="width:@(idea.InnovationScore)%"></div>
                             </div>
+                            <div class="small text-muted mt-1">@idea.InnovationScore%</div>
                         </div>
+
                         <div class="col-4">
                             <span class="text-muted">Market Demand</span>
                             <div class="progress mt-1" style="height:4px">
                                 <div class="progress-bar bg-success" style="width:@(idea.MarketDemandScore)%"></div>
                             </div>
+                            <div class="small text-muted mt-1">@idea.MarketDemandScore%</div>
                         </div>
+
                         <div class="col-4">
                             <span class="text-muted">Feasibility</span>
                             <div class="progress mt-1" style="height:4px">
                                 <div class="progress-bar bg-warning" style="width:@(idea.FeasibilityScore)%"></div>
                             </div>
+                            <div class="small text-muted mt-1">@idea.FeasibilityScore%</div>
                         </div>
                     </div>
+
                     <form method="post" asp-page-handler="Select">
                         @Html.AntiForgeryToken()
                         <input type="hidden" name="ideaId" value="@idea.Id" />
-                        <div class="d-flex gap-2">
+
+                        <div class="d-flex flex-wrap gap-2">
+                            <a href="/Student/ProjectDetails?id=@idea.Id" class="btn btn-sm btn-outline-secondary">
+                                <i class="bi bi-eye me-1"></i>View Details
+                            </a>
+
                             <a href="/Student/ProjectDNA?ideaId=@idea.Id" class="btn btn-sm btn-outline-primary">
                                 <i class="bi bi-diagram-3 me-1"></i>DNA Analysis
                             </a>
+
                             <a href="/Student/Roadmap?ideaId=@idea.Id" class="btn btn-sm btn-outline-success">
                                 <i class="bi bi-map me-1"></i>Generate Roadmap
                             </a>
+
                             @if (!idea.IsSelected)
                             {
                                 <button type="submit" class="btn btn-sm btn-primary ms-auto">
@@ -155,8 +289,15 @@
             <div class="page-card p-5 text-center">
                 <i class="bi bi-stars display-3 text-muted"></i>
                 <h5 class="mt-3 text-muted">Generate Your First Ideas</h5>
-                <p class="text-muted small">Fill in your profile on the left and click <strong>Generate Ideas</strong> to receive AI-powered project recommendations tailored to your skills and goals.</p>
+                <p class="text-muted small">
+                    Complete your profile and skill assessment, then click
+                    <strong>Generate Ideas</strong> to receive project recommendations tailored to your skills and goals.
+                </p>
             </div>
         }
     </div>
 </div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}
