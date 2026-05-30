@@ -28,14 +28,25 @@
         }
 
         <form method="post">
+                @if (TempData["PasswordResetMessage"] is string passwordResetMessage)
+                {
+                    <div id="passwordResetAlert" class="alert alert-success small mb-3">
+                        <i class="bi bi-check-circle me-1"></i>
+                        @passwordResetMessage
+                    </div>
+                }
             <div class="mb-3">
                 <label class="form-label fw-semibold small">Email address</label>
                 <input asp-for="Input.Email" class="form-control" type="email" placeholder="you@example.com" autofocus />
             </div>
-            <div class="mb-3">
-                <label class="form-label fw-semibold small">Password</label>
-                <input asp-for="Input.Password" class="form-control" type="password" placeholder="••••••••" />
-            </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold small">Password</label>
+                    <input asp-for="Input.Password" class="form-control" type="password" placeholder="••••••••" />
+
+                    <div class="text-end mt-1">
+                        <a asp-page="/Account/ForgotPassword" class="small">Forgot your password?</a>
+                    </div>
+                </div>
             <div class="d-grid mt-4">
                 <button type="submit" class="btn btn-primary btn-lg fw-semibold">
                     <i class="bi bi-box-arrow-in-right me-2"></i>Sign In
@@ -70,6 +81,18 @@ function fillDemo(email) {
     document.querySelector('[name="Input.Email"]').value = email;
     document.querySelector('[name="Input.Password"]').value = 'password123';
 }
+        setTimeout(function () {
+        const alertBox = document.getElementById("passwordResetAlert");
+
+        if (alertBox) {
+        alertBox.style.transition = "opacity 0.5s ease";
+        alertBox.style.opacity = "0";
+
+        setTimeout(function () {
+        alertBox.remove();
+        }, 500);
+        }
+        }, 3000);
 </script>
 </body>
 </html>

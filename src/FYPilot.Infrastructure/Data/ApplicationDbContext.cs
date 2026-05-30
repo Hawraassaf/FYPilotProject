@@ -30,6 +30,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<PreviousProject> PreviousProjects { get; set; }
     public DbSet<SupervisorEvaluation> SupervisorEvaluations { get; set; }
     public DbSet<ProjectDocumentation> ProjectDocumentations => Set<ProjectDocumentation>();
+    public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -123,6 +124,39 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.Property(e => e.DiagramDescriptionsJson).IsRequired();
             entity.Property(e => e.AiTechnicalReportJson).IsRequired();
             entity.Property(e => e.SupervisorStatus).IsRequired();
+        });
+        modelBuilder.Entity<PasswordResetToken>(entity =>
+        {
+            entity.ToTable("password_reset_tokens");
+
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.Id)
+                .HasColumnName("id");
+
+            entity.Property(e => e.UserId)
+                .HasColumnName("user_id");
+
+            entity.Property(e => e.TokenHash)
+                .HasColumnName("token_hash")
+                .IsRequired();
+
+            entity.Property(e => e.ExpiresAt)
+                .HasColumnName("expires_at");
+
+            entity.Property(e => e.UsedAt)
+                .HasColumnName("used_at");
+
+            entity.Property(e => e.CreatedAt)
+                .HasColumnName("created_at");
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.TokenHash)
+                .IsUnique();
         });
     }
 }
