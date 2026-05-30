@@ -65,6 +65,13 @@ try:
 except Exception as e:
     logger.warning(f"Risk router skipped: {e}")
 
+try:
+    from app.routers import ideas
+    app.include_router(ideas.router)
+    logger.info("Ideas (ProjectIdeaAgent) router loaded")
+except Exception as e:
+    logger.warning(f"Ideas router skipped: {e}")
+
 # Heavy ML routers — loaded only if dependencies are available
 try:
     from app.routers import analytics
@@ -95,6 +102,13 @@ def ds_health():
                 "POST /analyze-skills",
                 "GET  /ds/health",
             ],
+            "lightweight_ai": [
+                "POST /ideas/generate-ideas",
+                "POST /predict-feasibility",
+                "POST /check-similarity",
+                "POST /match-market",
+                "POST /risk-alarms",
+            ],
             "full_ml": [
                 "GET  /ds/analytics/risk/{project_id}",
                 "GET  /ds/analytics/burndown/{project_id}",
@@ -107,3 +121,9 @@ def ds_health():
             ],
         },
     }
+try:
+    from app.routers import ollama_test
+    app.include_router(ollama_test.router)
+    logger.info("Ollama test router loaded")
+except Exception as e:
+    logger.warning(f"Ollama test router skipped: {e}")
