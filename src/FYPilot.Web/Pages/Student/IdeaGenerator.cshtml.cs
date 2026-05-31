@@ -1,5 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
+using FYPilot.Application.DTOs;
+using FYPilot.Application.Interfaces;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
 using FYPilot.Infrastructure.Services;
@@ -11,8 +13,11 @@ using Microsoft.EntityFrameworkCore;
 namespace FYPilot.Web.Pages.Student;
 
 [Authorize(Roles = "student")]
-public class IdeaGeneratorModel(ApplicationDbContext db) : PageModel
+public class IdeaGeneratorModel(ApplicationDbContext db, IAiServiceClient aiServiceClient) : PageModel
 {
+    private const int IdeasPerView = 2;
+    private const int IdeasPerBatch = 6;
+
     [BindProperty]
     public InputModel Input { get; set; } = new();
 
@@ -75,77 +80,113 @@ public class IdeaGeneratorModel(ApplicationDbContext db) : PageModel
             return Page();
         }
 
-        /*
-         * Later, when your friend's AI service is ready,
-         * this is the place where .NET should send:
-         * profile + preferences + skills with ratings.
-         *
-         * For now, we keep the local IdeaGenerator as a fallback
-         * so the feature still works during demo.
-         */
-
-        var skillNames = AssessedSkills
-            .OrderByDescending(s => s.Rating)
-            .Select(s => s.SkillName)
-            .ToList();
-
-        var rawIdeas = IdeaGenerator.Generate(
-            Input.Major.Trim(),
-            Input.ExperienceLevel.Trim().ToLowerInvariant(),
-            Input.PreferredDomain.Trim(),
-            Input.TargetDifficulty.Trim().ToLowerInvariant(),
-            "Any",
-            Input.AvailableHours,
-            Input.TeamSize,
-            skillNames
+        var aiRequest = BuildAiRequest(
+            regenerate: false,
+            previousIdeaTitles: new List<string>()
         );
 
-        if (rawIdeas == null || !rawIdeas.Any())
+        var aiResponse = await aiServiceClient.GenerateIdeasAsync(aiRequest);
+
+        if (aiResponse == null || aiResponse.Ideas == null || !aiResponse.Ideas.Any())
         {
-            ErrorMessage = "No ideas were generated. Please adjust your inputs and try again.";
+            ErrorMessage = "AI service could not generate ideas. Make sure the Python AI service is running.";
             return Page();
         }
 
-        var entities = new List<ProjectIdea>();
+        var entities = await SaveGeneratedIdeasAsync(userId, aiResponse.Ideas);
 
-        foreach (var idea in rawIdeas)
-        {
-            var entity = new ProjectIdea
-            {
-                UserId = userId,
-                Title = idea.Title,
-                ProblemStatement = idea.ProblemStatement,
-                TargetUsers = idea.TargetUsers,
-                WhyUseful = idea.WhyUseful,
-                LebaneseMarketRelevance = idea.LebaneseMarketRelevance,
-                RequiredTechnologies = idea.RequiredTechnologies,
-                RequiredSkills = idea.RequiredSkills,
-                MissingSkills = idea.MissingSkills,
-                DifficultyLevel = idea.DifficultyLevel,
-                InnovationScore = idea.InnovationScore,
-                FeasibilityScore = idea.FeasibilityScore,
-                MarketDemandScore = idea.MarketDemandScore,
-                ExpectedDurationWeeks = idea.ExpectedDurationWeeks,
-                SupervisorCategory = idea.SupervisorCategory,
-                DatasetNeeded = idea.DatasetNeeded,
-                FinalDeliverables = idea.FinalDeliverables,
-                Domain = idea.Domain,
-                LebanesesSector = idea.LebanesesSector,
-                IsSelected = false,
-                CreatedAt = DateTime.UtcNow
-            };
-
-            db.ProjectIdeas.Add(entity);
-            entities.Add(entity);
-        }
-
-        await db.SaveChangesAsync();
+        HttpContext.Session.SetInt32("IdeaGroupIndex", 0);
 
         GeneratedIdeas = entities
-            .OrderByDescending(i => i.CreatedAt)
+            .OrderBy(i => i.Id)
+            .Take(IdeasPerView)
             .ToList();
 
-        SuccessMessage = $"{entities.Count} project idea(s) generated and saved successfully.";
+        var sourceText = aiResponse.LlmUsed
+            ? "using the local AI model"
+            : "using the AI fallback engine";
+
+        SuccessMessage = $"{entities.Count} project idea(s) generated and saved successfully {sourceText}.";
+
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostShuffleAsync()
+    {
+        var userId = UserId();
+
+        var recentIdeasCount = await db.ProjectIdeas
+            .Where(i => i.UserId == userId)
+            .OrderByDescending(i => i.CreatedAt)
+            .ThenByDescending(i => i.Id)
+            .Take(IdeasPerBatch)
+            .CountAsync();
+
+        if (recentIdeasCount == 0)
+        {
+            TempData["Error"] = "Generate ideas first before shuffling.";
+            return RedirectToPage();
+        }
+
+        var currentIndex = HttpContext.Session.GetInt32("IdeaGroupIndex") ?? 0;
+        var maxGroups = Math.Max(1, (int)Math.Ceiling(recentIdeasCount / (double)IdeasPerView));
+        var nextIndex = (currentIndex + 1) % maxGroups;
+
+        HttpContext.Session.SetInt32("IdeaGroupIndex", nextIndex);
+
+        TempData["Success"] = "Showing another group of generated ideas.";
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult> OnPostRegenerateAsync()
+    {
+        var userId = UserId();
+
+        await LoadProfileIntoInputAsync(userId);
+        await LoadPageDataAsync(userId);
+
+        if (!AssessedSkills.Any())
+        {
+            ErrorMessage = "Please complete your Skill Assessment before regenerating project ideas.";
+            return Page();
+        }
+
+        var previousTitles = await db.ProjectIdeas
+            .AsNoTracking()
+            .Where(i => i.UserId == userId)
+            .OrderByDescending(i => i.CreatedAt)
+            .ThenByDescending(i => i.Id)
+            .Take(30)
+            .Select(i => i.Title)
+            .ToListAsync();
+
+        var aiRequest = BuildAiRequest(
+            regenerate: true,
+            previousIdeaTitles: previousTitles
+        );
+
+        var aiResponse = await aiServiceClient.GenerateIdeasAsync(aiRequest);
+
+        if (aiResponse == null || aiResponse.Ideas == null || !aiResponse.Ideas.Any())
+        {
+            ErrorMessage = "AI service could not regenerate ideas. Make sure the Python AI service is running.";
+            return Page();
+        }
+
+        var entities = await SaveGeneratedIdeasAsync(userId, aiResponse.Ideas);
+
+        HttpContext.Session.SetInt32("IdeaGroupIndex", 0);
+
+        GeneratedIdeas = entities
+            .OrderBy(i => i.Id)
+            .Take(IdeasPerView)
+            .ToList();
+
+        var sourceText = aiResponse.LlmUsed
+            ? "using the local AI model"
+            : "using the AI fallback engine";
+
+        SuccessMessage = $"{entities.Count} new project idea(s) regenerated successfully {sourceText}.";
 
         return Page();
     }
@@ -173,6 +214,70 @@ public class IdeaGeneratorModel(ApplicationDbContext db) : PageModel
 
         TempData["Success"] = "Project idea selected successfully.";
         return RedirectToPage();
+    }
+
+    private GenerateIdeasRequest BuildAiRequest(bool regenerate, List<string> previousIdeaTitles)
+    {
+        return new GenerateIdeasRequest(
+            Major: Input.Major.Trim(),
+            ExperienceLevel: Input.ExperienceLevel.Trim().ToLowerInvariant(),
+            PreferredDomain: Input.PreferredDomain.Trim(),
+            TargetDifficulty: Input.TargetDifficulty.Trim().ToLowerInvariant(),
+            PreferredStack: "ASP.NET Core Razor Pages, Python FastAPI, PostgreSQL",
+            AvailableHoursPerWeek: Input.AvailableHours,
+            TeamMembers: Input.TeamSize,
+            ProjectGoals: "Build a useful final year project based on the student's skills and preferred domain.",
+            Regenerate: regenerate,
+            PreviousIdeaTitles: previousIdeaTitles,
+            Skills: AssessedSkills
+                .OrderByDescending(s => s.Rating)
+                .Select(s => new GenerateIdeaSkillDto(
+                    SkillName: s.SkillName,
+                    Rating: Math.Clamp(s.Rating, 1, 5),
+                    ProficiencyLevel: Math.Clamp(s.Rating, 1, 5)
+                ))
+                .ToList()
+        );
+    }
+
+    private async Task<List<ProjectIdea>> SaveGeneratedIdeasAsync(int userId, List<GeneratedIdeaDto> ideas)
+    {
+        var entities = new List<ProjectIdea>();
+
+        foreach (var idea in ideas.Take(IdeasPerBatch))
+        {
+            var entity = new ProjectIdea
+            {
+                UserId = userId,
+                Title = idea.Title,
+                ProblemStatement = idea.ProblemStatement,
+                TargetUsers = idea.TargetUsers,
+                WhyUseful = idea.WhyUseful,
+                LebaneseMarketRelevance = idea.LebaneseMarketRelevance,
+                RequiredTechnologies = idea.RequiredTechnologies,
+                RequiredSkills = idea.RequiredSkills,
+                MissingSkills = idea.MissingSkills,
+                DifficultyLevel = idea.DifficultyLevel.ToString(),
+                InnovationScore = (int)Math.Round(idea.InnovationScore),
+                FeasibilityScore = (int)Math.Round(idea.FeasibilityScore),
+                MarketDemandScore = (int)Math.Round(idea.MarketDemandScore),
+                ExpectedDurationWeeks = idea.ExpectedDurationWeeks,
+                SupervisorCategory = idea.SupervisorCategory,
+                DatasetNeeded = idea.DatasetNeeded,
+                FinalDeliverables = idea.FinalDeliverables,
+                Domain = idea.Domain,
+                LebanesesSector = idea.LebaneseSector,
+                IsSelected = false,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            db.ProjectIdeas.Add(entity);
+            entities.Add(entity);
+        }
+
+        await db.SaveChangesAsync();
+
+        return entities;
     }
 
     private async Task LoadProfileIntoInputAsync(int userId)
@@ -223,12 +328,31 @@ public class IdeaGeneratorModel(ApplicationDbContext db) : PageModel
             .ThenBy(s => s.SkillName)
             .ToListAsync();
 
-        GeneratedIdeas = await db.ProjectIdeas
+        var recentBatch = await db.ProjectIdeas
             .AsNoTracking()
             .Where(i => i.UserId == userId)
             .OrderByDescending(i => i.CreatedAt)
-            .Take(6)
+            .ThenByDescending(i => i.Id)
+            .Take(IdeasPerBatch)
             .ToListAsync();
+
+        var orderedBatch = recentBatch
+            .OrderBy(i => i.Id)
+            .ToList();
+
+        var groupIndex = HttpContext.Session.GetInt32("IdeaGroupIndex") ?? 0;
+        var maxGroups = Math.Max(1, (int)Math.Ceiling(orderedBatch.Count / (double)IdeasPerView));
+
+        if (groupIndex >= maxGroups)
+        {
+            groupIndex = 0;
+            HttpContext.Session.SetInt32("IdeaGroupIndex", groupIndex);
+        }
+
+        GeneratedIdeas = orderedBatch
+            .Skip(groupIndex * IdeasPerView)
+            .Take(IdeasPerView)
+            .ToList();
     }
 
     private int UserId()

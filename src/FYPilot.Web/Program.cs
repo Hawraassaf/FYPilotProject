@@ -14,10 +14,10 @@ static string BuildConnectionString()
     if (!string.IsNullOrWhiteSpace(url)) return url;
 
     // Priority 2: individual PG* variables, with local-dev defaults
-    var host = Environment.GetEnvironmentVariable("PGHOST")     ?? "localhost";
-    var port = Environment.GetEnvironmentVariable("PGPORT")     ?? "5432";
-    var db   = Environment.GetEnvironmentVariable("PGDATABASE") ?? "fyp_db";
-    var user = Environment.GetEnvironmentVariable("PGUSER")     ?? "postgres";
+    var host = Environment.GetEnvironmentVariable("PGHOST") ?? "localhost";
+    var port = Environment.GetEnvironmentVariable("PGPORT") ?? "5432";
+    var db = Environment.GetEnvironmentVariable("PGDATABASE") ?? "fyp_db";
+    var user = Environment.GetEnvironmentVariable("PGUSER") ?? "postgres";
     var pass = Environment.GetEnvironmentVariable("PGPASSWORD") ?? "123456";
     return $"Host={host};Port={port};Database={db};Username={user};Password={pass};SSL Mode=Disable;Trust Server Certificate=true;";
 }
@@ -29,21 +29,21 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
-        options.LoginPath        = "/Account/Login";
-        options.LogoutPath       = "/Account/Logout";
+        options.LoginPath = "/Account/Login";
+        options.LogoutPath = "/Account/Logout";
         options.AccessDeniedPath = "/Account/Login";
-        options.ExpireTimeSpan   = TimeSpan.FromHours(8);
+        options.ExpireTimeSpan = TimeSpan.FromHours(8);
         options.SlidingExpiration = true;
-        options.Cookie.HttpOnly  = true;
-        options.Cookie.SameSite  = SameSiteMode.Lax;
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Lax;
     });
 
 // ── Authorization ─────────────────────────────────────────────────────────────
 builder.Services.AddAuthorization(options =>
 {
-    options.AddPolicy("StudentOnly",    p => p.RequireRole("student"));
+    options.AddPolicy("StudentOnly", p => p.RequireRole("student"));
     options.AddPolicy("SupervisorOnly", p => p.RequireRole("supervisor"));
-    options.AddPolicy("AdminOnly",      p => p.RequireRole("admin"));
+    options.AddPolicy("AdminOnly", p => p.RequireRole("admin"));
 });
 
 // ── AI Service ────────────────────────────────────────────────────────────────
@@ -52,6 +52,17 @@ builder.Services.AddHttpClient();
 
 // ── Documentation Generator Service ───────────────────────────────────────────
 builder.Services.AddScoped<IDocumentationGeneratorService, DocumentationGeneratorService>();
+
+// ── Session: used to store generated AI ideas for Shuffle 2-2-2 ───────────────
+builder.Services.AddDistributedMemoryCache();
+
+builder.Services.AddSession(options =>
+{
+    options.IdleTimeout = TimeSpan.FromMinutes(30);
+    options.Cookie.HttpOnly = true;
+    options.Cookie.IsEssential = true;
+});
+
 // ── Razor Pages ───────────────────────────────────────────────────────────────
 builder.Services.AddRazorPages();
 builder.Services.AddAntiforgery();
@@ -67,8 +78,12 @@ if (!app.Environment.IsDevelopment())
 
 app.UseStaticFiles();
 app.UseRouting();
+
+app.UseSession();
+
 app.UseAuthentication();
 app.UseAuthorization();
+
 app.MapHealthChecks("/healthz");
 app.MapRazorPages();
 

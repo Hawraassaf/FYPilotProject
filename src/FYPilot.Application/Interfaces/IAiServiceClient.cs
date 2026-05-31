@@ -25,4 +25,6 @@ public interface IAiServiceClient
 
     /// <summary>POST /risk-alarms — Generate risk alarms for a project profile.</summary>
     Task<RiskAlarmResponse?> GetRiskAlarmsAsync(RiskAlarmRequest request);
+    /// <summary>POST /generate-ideas — Generate AI-based FYP ideas from student profile and skills.</summary>
+    Task<GenerateIdeasResponse?> GenerateIdeasAsync(GenerateIdeasRequest request);
 }
