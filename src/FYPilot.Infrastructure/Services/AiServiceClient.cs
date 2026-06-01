@@ -119,4 +119,7 @@ public class AiServiceClient : IAiServiceClient
     // ── Risk Alarms ───────────────────────────────────────────────────────────
     public Task<RiskAlarmResponse?> GetRiskAlarmsAsync(RiskAlarmRequest request)
         => PostAsync<RiskAlarmResponse>("/risk-alarms", request);
+    // ── Project DNA Analysis ─────────────────────────────────────────────────────
+    public Task<ProjectDnaServiceResponse?> AnalyzeProjectDnaAsync(ProjectDnaRequest request)
+        => PostAsync<ProjectDnaServiceResponse>("/analyze-project-dna", request);
 }

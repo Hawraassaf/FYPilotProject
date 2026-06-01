@@ -1,8 +1,8 @@
 @page
 @model FYPilot.Web.Pages.Student.ProjectDNAModel
 @{
-    ViewData["Title"]    = "Project DNA Analyzer";
-    ViewData["Subtitle"] = "Visualise the technical profile of your project idea";
+    ViewData["Title"] = "Project DNA Analyzer";
+    ViewData["Subtitle"] = "AI-based technical profile analysis of your project idea";
 }
 
 @if (Model.Idea == null)
@@ -18,29 +18,93 @@
 }
 else
 {
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div class="alert alert-warning small">
+            <i class="bi bi-exclamation-triangle me-1"></i>@Model.ErrorMessage
+        </div>
+    }
+
     <div class="row g-4">
         <div class="col-lg-5">
             <div class="page-card p-4 mb-3">
-                <h6 class="fw-bold mb-1">@Model.Idea.Title</h6>
-                <span class="badge bg-primary-subtle text-primary mb-3">@Model.Idea.Domain</span>
-                <p class="text-muted small">@Model.Idea.ProblemStatement</p>
-                <div class="row g-2 text-center">
-                    @foreach (var (label, val, color) in new[] {
-                        ("Innovation",   Model.Idea.InnovationScore,    "#3b82f6"),
-                        ("Feasibility",  Model.Idea.FeasibilityScore,   "#10b981"),
-                        ("Market",       Model.Idea.MarketDemandScore,  "#f59e0b"),
-                    })
+                <div class="d-flex align-items-start justify-content-between gap-3">
+                    <div>
+                        <h6 class="fw-bold mb-1">@Model.Idea.Title</h6>
+                        <span class="badge bg-primary-subtle text-primary mb-2">@Model.Idea.Domain</span>
+
+                        @if (Model.Analysis != null)
+                        {
+                            <span class="badge bg-success-subtle text-success mb-2">
+                                <i class="bi bi-cpu me-1"></i>AI Agent Analysis
+                            </span>
+                        }
+                    </div>
+
+                    @if (Model.Analysis != null)
                     {
-                        <div class="col-4">
-                            <div class="score-ring mx-auto" style="color:@color;border-color:@color;width:60px;height:60px;font-size:0.9rem">@val%</div>
-                            <div class="small text-muted mt-1">@label</div>
+                        <div class="text-center">
+                            <div class="score-ring mx-auto @(Model.Analysis.OverallScore >= 75 ? "text-success" : Model.Analysis.OverallScore >= 55 ? "text-warning" : "text-danger")" style="width:70px;height:70px;font-size:1rem">
+                                @Model.Analysis.OverallScore%
+                            </div>
+                            <div class="small text-muted mt-1">Overall</div>
                         </div>
                     }
                 </div>
+
+                <p class="text-muted small mt-3">@Model.Idea.ProblemStatement</p>
+
+                @if (Model.Analysis != null)
+                {
+                    <div class="small mb-2">
+                        <span class="text-muted fw-semibold">DNA Type:</span>
+                        @Model.Analysis.ProjectDNAType
+                    </div>
+
+                    <div class="small mb-2">
+                        <span class="text-muted fw-semibold">Risk Level:</span>
+                        @{
+                            var riskBadge = Model.Analysis.RiskLevel.Equals("High", StringComparison.OrdinalIgnoreCase)
+                                ? "bg-danger"
+                                : Model.Analysis.RiskLevel.Equals("Medium", StringComparison.OrdinalIgnoreCase)
+                                    ? "bg-warning text-dark"
+                                    : "bg-success";
+                        }
+                        <span class="badge @riskBadge">@Model.Analysis.RiskLevel</span>
+                    </div>
+
+                    <div class="small text-muted">
+                        @Model.Analysis.Summary
+                    </div>
+
+                    <div class="small text-muted mt-2">
+                        Source:
+                        <strong>@(Model.LlmUsed ? "Ollama / ProjectDNAAgent" : "Fallback Analysis")</strong>
+                    </div>
+                }
+                else
+                {
+                    <div class="row g-2 text-center">
+                        @foreach (var (label, val, color) in new[] {
+                            ("Innovation",   Model.Idea.InnovationScore,    "#3b82f6"),
+                            ("Feasibility",  Model.Idea.FeasibilityScore,   "#10b981"),
+                            ("Market",       Model.Idea.MarketDemandScore,  "#f59e0b"),
+                        })
+                        {
+                            <div class="col-4">
+                                <div class="score-ring mx-auto" style="color:@color;border-color:@color;width:60px;height:60px;font-size:0.9rem">@val%</div>
+                                <div class="small text-muted mt-1">@label</div>
+                            </div>
+                        }
+                    </div>
+                }
             </div>
 
             <div class="page-card p-4">
-                <h6 class="fw-bold mb-3">DNA Dimensions</h6>
+                <h6 class="fw-bold mb-3">
+                    <i class="bi bi-diagram-3 me-2 text-primary"></i>DNA Dimensions
+                </h6>
+
                 @foreach (var (label, val, color) in Model.DnaDimensions)
                 {
                     <div class="dna-row d-flex align-items-center gap-2">
@@ -48,51 +112,155 @@ else
                         <div class="progress flex-grow-1" style="height:10px">
                             <div class="progress-bar" style="width:@val%;background:@color"></div>
                         </div>
-                        <div class="small text-muted" style="width:30px;text-align:right">@val</div>
+                        <div class="small text-muted" style="width:35px;text-align:right">@val</div>
                     </div>
                 }
             </div>
+
+            @if (Model.Analysis != null)
+            {
+                <div class="page-card p-4 mt-3">
+                    <h6 class="fw-bold mb-3">
+                        <i class="bi bi-lightbulb me-2 text-warning"></i>Recommended Improvements
+                    </h6>
+
+                    @foreach (var improvement in Model.Analysis.RecommendedImprovements)
+                    {
+                        <div class="small mb-2">
+                            <i class="bi bi-arrow-right-circle text-primary me-1"></i>
+                            @improvement
+                        </div>
+                    }
+                </div>
+            }
         </div>
 
         <div class="col-lg-7">
+            @if (Model.Analysis != null)
+            {
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6">
+                        <div class="page-card p-4 h-100">
+                            <h6 class="fw-bold mb-3 text-success">
+                                <i class="bi bi-check-circle me-2"></i>Strengths
+                            </h6>
+
+                            @foreach (var strength in Model.Analysis.Strengths)
+                            {
+                                <div class="small mb-2">
+                                    <i class="bi bi-check2 text-success me-1"></i>
+                                    @strength
+                                </div>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="page-card p-4 h-100">
+                            <h6 class="fw-bold mb-3 text-warning">
+                                <i class="bi bi-exclamation-circle me-2"></i>Weaknesses
+                            </h6>
+
+                            @foreach (var weakness in Model.Analysis.Weaknesses)
+                            {
+                                <div class="small mb-2">
+                                    <i class="bi bi-dot text-warning me-1"></i>
+                                    @weakness
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+
             <div class="page-card p-4 mb-3">
-                <h6 class="fw-bold mb-3"><i class="bi bi-shield-exclamation me-2 text-warning"></i>Risk Profile</h6>
+                <h6 class="fw-bold mb-3">
+                    <i class="bi bi-shield-exclamation me-2 text-warning"></i>Risk Profile
+                </h6>
+
                 @foreach (var risk in Model.Risks)
                 {
-                    <div class="d-flex align-items-start gap-3 mb-3 p-3 rounded-2 risk-@risk.Level.ToLower()">
+                    var level = risk.Level.ToLowerInvariant();
+                    var badgeClass = level == "high"
+                        ? "bg-danger"
+                        : level == "medium"
+                            ? "bg-warning text-dark"
+                            : "bg-success";
+
+                    <div class="d-flex align-items-start gap-3 mb-3 p-3 rounded-2 risk-@level">
                         <div>
-                            <div class="fw-semibold small">@risk.Category
-                                <span class="badge ms-1 @(risk.Level == "high" ? "bg-danger" : risk.Level == "medium" ? "bg-warning text-dark" : "bg-success")">@risk.Level</span>
+                            <div class="fw-semibold small">
+                                @risk.Category
+                                <span class="badge ms-1 @badgeClass">@risk.Level</span>
                             </div>
                             <div class="small mt-1">@risk.Description</div>
-                            <div class="small text-muted mt-1"><i class="bi bi-lightbulb me-1"></i>@risk.Mitigation</div>
+                            <div class="small text-muted mt-1">
+                                <i class="bi bi-lightbulb me-1"></i>@risk.Mitigation
+                            </div>
                         </div>
                     </div>
                 }
             </div>
 
             <div class="page-card p-4">
-                <h6 class="fw-bold mb-3"><i class="bi bi-check2-all me-2 text-success"></i>Required Skills vs Your Profile</h6>
-                @foreach (var skill in Model.Idea.RequiredSkills.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)))
+                <h6 class="fw-bold mb-3">
+                    <i class="bi bi-check2-all me-2 text-success"></i>Required Skills vs Your Profile
+                </h6>
+
+                @if (Model.RequiredSkillsAnalysis.Any())
                 {
-                    var match = Model.StudentSkills.FirstOrDefault(ss => ss.SkillName.Equals(skill, StringComparison.OrdinalIgnoreCase));
-                    <div class="d-flex align-items-center gap-2 mb-2">
-                        <i class="bi @(match != null ? "bi-check-circle-fill text-success" : "bi-x-circle text-danger")"></i>
-                        <span class="small">@skill</span>
-                        @if (match != null)
-                        {
-                            <span class="badge bg-success-subtle text-success ms-auto">Level @match.Rating/5</span>
-                        }
-                        else
-                        {
-                            <span class="badge bg-danger-subtle text-danger ms-auto">Missing</span>
-                        }
-                    </div>
+                    @foreach (var skill in Model.RequiredSkillsAnalysis)
+                    {
+                        var status = skill.Status.ToLowerInvariant();
+                        var icon = status == "matched"
+                            ? "bi-check-circle-fill text-success"
+                            : status == "partial"
+                                ? "bi-exclamation-circle-fill text-warning"
+                                : "bi-x-circle text-danger";
+
+                        var badge = status == "matched"
+                            ? "bg-success-subtle text-success"
+                            : status == "partial"
+                                ? "bg-warning-subtle text-warning"
+                                : "bg-danger-subtle text-danger";
+
+                        <div class="d-flex align-items-start gap-2 mb-3">
+                            <i class="bi @icon mt-1"></i>
+                            <div>
+                                <div class="small fw-semibold">@skill.SkillName</div>
+                                <div class="small text-muted">@skill.Explanation</div>
+                            </div>
+                            <span class="badge @badge ms-auto">@skill.Status</span>
+                        </div>
+                    }
                 }
+                else
+                {
+                    @foreach (var skill in Model.Idea.RequiredSkills.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)))
+                    {
+                        var match = Model.StudentSkills.FirstOrDefault(ss => ss.SkillName.Equals(skill, StringComparison.OrdinalIgnoreCase));
+
+                        <div class="d-flex align-items-center gap-2 mb-2">
+                            <i class="bi @(match != null ? "bi-check-circle-fill text-success" : "bi-x-circle text-danger")"></i>
+                            <span class="small">@skill</span>
+
+                            @if (match != null)
+                            {
+                                <span class="badge bg-success-subtle text-success ms-auto">Level @match.Rating/5</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-danger-subtle text-danger ms-auto">Missing</span>
+                            }
+                        </div>
+                    }
+                }
+
                 <div class="mt-3">
                     <a href="/Student/ScopeOptimizer?ideaId=@Model.Idea.Id" class="btn btn-outline-warning btn-sm">
                         <i class="bi bi-funnel me-1"></i>Optimize Scope
                     </a>
+
                     <a href="/Student/DefenseSimulator?ideaId=@Model.Idea.Id" class="btn btn-outline-danger btn-sm ms-2">
                         <i class="bi bi-shield-check me-1"></i>Defense Prep
                     </a>

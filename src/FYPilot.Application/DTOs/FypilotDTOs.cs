@@ -324,3 +324,105 @@ public record AdminStatsResponse(
     int TotalSelectedProjects,
     int TotalRoadmaps
 );
+public record ProjectDnaRequest(
+    [property: System.Text.Json.Serialization.JsonPropertyName("ideaTitle")]
+    string IdeaTitle,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("problemStatement")]
+    string ProblemStatement,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("targetUsers")]
+    string TargetUsers,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("whyUseful")]
+    string WhyUseful,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("lebaneseMarketRelevance")]
+    string LebaneseMarketRelevance,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("requiredTechnologies")]
+    string RequiredTechnologies,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("requiredSkills")]
+    string RequiredSkills,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("missingSkills")]
+    string MissingSkills,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("difficultyLevel")]
+    string DifficultyLevel,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("datasetNeeded")]
+    string DatasetNeeded,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("finalDeliverables")]
+    string FinalDeliverables,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("domain")]
+    string Domain,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("lebaneseSector")]
+    string LebaneseSector,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("studentMajor")]
+    string StudentMajor,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("experienceLevel")]
+    string ExperienceLevel,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("availableHoursPerWeek")]
+    int AvailableHoursPerWeek,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("teamSize")]
+    int TeamSize,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("studentSkills")]
+    List<string> StudentSkills,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("skillRatings")]
+    Dictionary<string, int> SkillRatings
+);
+
+public record ProjectDnaServiceResponse(
+    ProjectDnaAnalysisDto Analysis,
+    string Agent,
+    bool LlmUsed,
+    string Source,
+    string? OllamaError,
+    string? OllamaRawPreview,
+    DateTime? GeneratedAt,
+    string Message
+);
+
+public record ProjectDnaAnalysisDto(
+    string ProjectDNAType,
+    int OverallScore,
+    int TechnicalFitScore,
+    int SkillMatchScore,
+    int InnovationScore,
+    int FeasibilityScore,
+    int MarketRelevanceScore,
+    int DataReadinessScore,
+    int ScopeClarityScore,
+    int SupervisorFitScore,
+    string RiskLevel,
+    List<string> Strengths,
+    List<string> Weaknesses,
+    List<ProjectDnaRiskDto> RiskProfile,
+    List<ProjectDnaSkillDto> RequiredSkillsAnalysis,
+    List<string> RecommendedImprovements,
+    string Summary
+);
+
+public record ProjectDnaRiskDto(
+    string Title,
+    string Level,
+    string Explanation,
+    string Mitigation
+);
+
+public record ProjectDnaSkillDto(
+    string SkillName,
+    string Status,
+    string Explanation
+);

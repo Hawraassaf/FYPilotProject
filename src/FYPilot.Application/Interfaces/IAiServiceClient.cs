@@ -27,4 +27,6 @@ public interface IAiServiceClient
     Task<RiskAlarmResponse?> GetRiskAlarmsAsync(RiskAlarmRequest request);
     /// <summary>POST /generate-ideas — Generate AI-based FYP ideas from student profile and skills.</summary>
     Task<GenerateIdeasResponse?> GenerateIdeasAsync(GenerateIdeasRequest request);
+    Task<ProjectDnaServiceResponse?> AnalyzeProjectDnaAsync(ProjectDnaRequest request);
 }
+
