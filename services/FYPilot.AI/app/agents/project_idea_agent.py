@@ -4,8 +4,8 @@ ProjectIdeaAgent — LLM-assisted, skill-based FYP idea generation for FYPilot.
 Design:
 - Ollama is used only for natural-language idea generation.
 - Scores are calculated deterministically in Python.
-- Each generation returns 6 ideas.
-- .NET will display 2 ideas at a time and shuffle between the saved 6.
+- Each generation returns 4 ideas.
+- .NET will display 2 ideas at a time and shuffle between the saved 4.
 - Regenerate sends previousIdeaTitles so the agent avoids old ideas.
 - If Ollama is unavailable, slow, or returns invalid JSON, fallback ideas are returned.
 - The app should never crash because of Ollama.
@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger("fypilot-agent")
 
 
-IDEAS_PER_BATCH = 6
+IDEAS_PER_BATCH = 4
 
 
 # ── Pydantic models kept compatible with current ideas router ─────────────────
@@ -79,7 +79,7 @@ class IdeaGenerationResponse(BaseModel):
 
 class ProjectIdeaAgent:
     """
-    Generates 6 personalized FYP ideas.
+    Generates 4 personalized FYP ideas.
 
     Ollama generates idea text.
     Python cleans, validates, filters repetition, and calculates scores.
@@ -124,7 +124,7 @@ class ProjectIdeaAgent:
 
     def generate_ideas(self, profile: StudentProfile) -> list[ProjectIdea]:
         """
-        Generate exactly 6 ideas.
+        Generate exactly 4 ideas.
         """
         self.last_llm_used = False
         self.last_error = None
@@ -152,7 +152,7 @@ class ProjectIdeaAgent:
             profile.previousIdeaTitles
         )
 
-        # Add fallback ideas if Ollama returned fewer than 6 usable ideas
+        # Add fallback ideas if Ollama returned fewer than 4 usable ideas
         if len(raw_ideas) < IDEAS_PER_BATCH:
             raw_ideas.extend(self._fallback_raw_ideas(profile))
 
@@ -161,7 +161,7 @@ class ProjectIdeaAgent:
             profile.previousIdeaTitles
         )
 
-        # Final emergency backup to guarantee exactly 6 ideas
+        # Final emergency backup to guarantee exactly 4 ideas
         backup_index = 0
         while len(raw_ideas) < IDEAS_PER_BATCH:
             raw_ideas.append(self._backup_raw_idea(profile, backup_index))
@@ -186,11 +186,11 @@ class ProjectIdeaAgent:
                     "stream": False,
                     "format": "json",
                     "options": {
-                        "temperature": 0.35,
-                        "num_predict": 2400
+                        "temperature": 0.2,
+                        "num_predict": 1400
                     }
                 },
-                timeout=300
+                timeout=600
             )
 
             if not response.ok:
@@ -245,7 +245,7 @@ Make the concepts meaningfully different from previous generated titles.
         return f"""
 You are ProjectIdeaAgent inside FYPilot, an Academic Intelligence System for Final Year Project planning.
 
-Generate exactly 6 original and realistic Final Year Project ideas.
+Generate exactly 4 original and realistic Final Year Project ideas.
 
 Student profile:
 - Major: {profile.major}
@@ -278,11 +278,25 @@ Strict rules:
 - Do not use markdown.
 - Do not add explanation outside JSON.
 - Do not wrap the JSON in markdown code fences.
-- The "ideas" array must contain exactly 6 idea objects.
+- The "ideas" array must contain exactly 4 idea objects.
 - Do not leave any field empty.
 - difficultyLevel must be one of: "beginner", "medium", "advanced".
+- Keep every field short and direct.
+- problemStatement must be one sentence only.
+- whyUseful must be one sentence only.
+- lebaneseMarketRelevance must be one sentence only.
+- requiredTechnologies must be a comma-separated list only.
+- requiredSkills must be a comma-separated list only.
+- missingSkills must be a comma-separated list only.
+- datasetNeeded must be one short sentence only.
+- finalDeliverables must be a comma-separated list only.
 
-Return exactly this JSON structure with exactly 6 filled idea objects:
+The frontend will display the 4 generated ideas as 2 ideas at a time:
+- First view: ideas 1 and 2
+- Shuffle: ideas 3 and 4
+- Shuffle again: back to ideas 1 and 2
+
+Return exactly this JSON structure with exactly 4 filled idea objects:
 
 {{
   "ideas": [
@@ -425,10 +439,12 @@ Return exactly this JSON structure with exactly 6 filled idea objects:
     def _complete_and_score(self, profile: StudentProfile, raw: dict[str, Any]) -> ProjectIdea:
         title = self._clean_text(raw.get("title"), self._default_title(profile))
         problem = self._clean_text(raw.get("problemStatement"), self._default_problem(profile))
+
         target_users = self._clean_text(
             raw.get("targetUsers"),
             "University students and supervisors"
         )
+
         why_useful = self._clean_text(
             raw.get("whyUseful"),
             "It helps students choose realistic and useful final year projects."
@@ -476,12 +492,14 @@ Return exactly this JSON structure with exactly 6 filled idea objects:
         )
 
         innovation_score = self._calculate_innovation_score(title, problem, why_useful, domain)
+
         feasibility_score = self._calculate_feasibility_score(
             profile,
             required_skills,
             missing_skills,
             difficulty
         )
+
         market_score = self._calculate_market_score(
             lebanese_relevance,
             lebanese_sector,
@@ -550,25 +568,7 @@ Return exactly this JSON structure with exactly 6 filled idea objects:
                 "Students often choose scopes that are too large, too vague, or unrealistic for the semester timeline.",
                 "Final year students and supervisors",
                 "Education"
-            ),
-            (
-                "Dataset Requirement Advisor for FYP Ideas",
-                "Students working on AI or analytics ideas often do not know whether their project requires a dataset.",
-                "Students working on AI, data science, and software projects",
-                "Education / AI"
-            ),
-            (
-                "Local SME Digital Transformation Recommender",
-                "Small Lebanese businesses may not know which digital tools can solve their operational problems.",
-                "Lebanese SMEs, students, and university incubators",
-                "SMEs / Business"
-            ),
-            (
-                "AI Mentor Chat for Final Year Project Planning",
-                "Students need continuous project guidance but supervisors may not always be available.",
-                "Final year students and academic supervisors",
-                "Education Technology"
-            ),
+            )
         ]
 
         ideas = []
@@ -598,10 +598,12 @@ Return exactly this JSON structure with exactly 6 filled idea objects:
 
     def _backup_raw_idea(self, profile: StudentProfile, index: int) -> dict[str, Any]:
         title = f"Alternative {profile.preferredDomain} Project Concept {index + 1}"
+
         problem = (
             "Students need additional realistic project options that match their skills, "
             "preferred domain, and available implementation time."
         )
+
         required_skills = self._infer_required_skills(profile, title, problem)
 
         return {

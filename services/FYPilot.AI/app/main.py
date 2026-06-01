@@ -72,6 +72,13 @@ try:
 except Exception as e:
     logger.warning(f"Ideas router skipped: {e}")
 
+try:
+    from app.routers import dna
+    app.include_router(dna.router)
+    logger.info("Project DNA router loaded")
+except Exception as e:
+    logger.warning(f"Project DNA router skipped: {e}")
+
 # Heavy ML routers — loaded only if dependencies are available
 try:
     from app.routers import analytics

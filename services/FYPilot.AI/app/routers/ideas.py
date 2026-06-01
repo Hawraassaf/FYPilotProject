@@ -209,7 +209,7 @@ def _response_to_dict(ideas, agent=None):
         "ollamaError": getattr(agent, "last_error", None),
         "ollamaRawPreview": getattr(agent, "last_raw_llm_response", None),
         "generatedAt": datetime.now().isoformat(),
-        "message": "Generated 6 project ideas successfully"
+        "message": "Generated 4 project ideas successfully"
     }
 
 
