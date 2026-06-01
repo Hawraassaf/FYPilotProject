@@ -30,7 +30,7 @@ public class AiServiceClient : IAiServiceClient
         // Ollama/Python idea generation can take time, so 10 seconds is too short.
         _http = new HttpClient
         {
-            Timeout = TimeSpan.FromSeconds(300)
+            Timeout = TimeSpan.FromSeconds(600)
         };
 
         _baseUrl = Environment.GetEnvironmentVariable("AI_SERVICE_URL")

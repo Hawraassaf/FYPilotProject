@@ -16,7 +16,7 @@ namespace FYPilot.Web.Pages.Student;
 public class IdeaGeneratorModel(ApplicationDbContext db, IAiServiceClient aiServiceClient) : PageModel
 {
     private const int IdeasPerView = 2;
-    private const int IdeasPerBatch = 6;
+    private const int IdeasPerBatch = 4;
 
     [BindProperty]
     public InputModel Input { get; set; } = new();
