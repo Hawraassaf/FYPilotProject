@@ -78,7 +78,15 @@ try:
     logger.info("Project DNA router loaded")
 except Exception as e:
     logger.warning(f"Project DNA router skipped: {e}")
+    
+try:
+    from app.routers import roadmap
+    app.include_router(roadmap.router)
+    logger.info("Project Roadmap router loaded")
+except Exception as e:
+    logger.warning(f"Project Roadmap router skipped: {e}")
 
+    
 # Heavy ML routers — loaded only if dependencies are available
 try:
     from app.routers import analytics
