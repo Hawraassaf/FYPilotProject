@@ -382,7 +382,80 @@ public record ProjectDnaRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("skillRatings")]
     Dictionary<string, int> SkillRatings
 );
+// ── AI Project Roadmap Agent ─────────────────────────────────────────────────
 
+public record ProjectRoadmapRequest(
+    [property: System.Text.Json.Serialization.JsonPropertyName("ideaTitle")]
+    string IdeaTitle,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("problemStatement")]
+    string ProblemStatement,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("requiredTechnologies")]
+    string RequiredTechnologies,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("requiredSkills")]
+    string RequiredSkills,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("missingSkills")]
+    string MissingSkills,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("difficultyLevel")]
+    string DifficultyLevel,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("expectedDurationWeeks")]
+    int ExpectedDurationWeeks,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("domain")]
+    string Domain,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("finalDeliverables")]
+    string FinalDeliverables,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("teamSize")]
+    int TeamSize,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("availableHoursPerWeek")]
+    int AvailableHoursPerWeek,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("studentSkills")]
+    List<string> StudentSkills,
+
+    [property: System.Text.Json.Serialization.JsonPropertyName("skillRatings")]
+    Dictionary<string, int> SkillRatings
+);
+
+public record ProjectRoadmapServiceResponse(
+    ProjectRoadmapDto Roadmap,
+    string Agent,
+    bool LlmUsed,
+    string Source,
+    string? OllamaError,
+    string? OllamaRawPreview,
+    DateTime? GeneratedAt,
+    string Message
+);
+
+public record ProjectRoadmapDto(
+    string RoadmapTitle,
+    int TotalWeeks,
+    string DifficultyLevel,
+    string TeamStrategy,
+    List<ProjectRoadmapWeekDto> Weeks,
+    string FinalAdvice
+);
+
+public record ProjectRoadmapWeekDto(
+    int WeekNumber,
+    string PhaseTitle,
+    string MainGoal,
+    List<string> Tasks,
+    List<string> Deliverables,
+    List<string> TeamResponsibilities,
+    List<string> SkillsToLearn,
+    string RiskWarning,
+    string Checkpoint
+);
 public record ProjectDnaServiceResponse(
     ProjectDnaAnalysisDto Analysis,
     string Agent,

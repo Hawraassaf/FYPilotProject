@@ -4,6 +4,7 @@ using FYPilot.Application.Interfaces;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
 
@@ -28,7 +29,44 @@ public class ProjectDNAModel(ApplicationDbContext db, IAiServiceClient aiService
     public async Task OnGetAsync(int? ideaId)
     {
         var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        await LoadPageDataAsync(userId, ideaId);
+    }
 
+    public async Task<IActionResult> OnPostAnalyzeAsync(int ideaId)
+    {
+        var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+
+        await LoadPageDataAsync(userId, ideaId);
+
+        if (Idea == null)
+        {
+            return Page();
+        }
+
+        var profile = await db.StudentProfiles
+            .FirstOrDefaultAsync(p => p.UserId == userId);
+
+        var request = BuildProjectDnaRequest(profile);
+
+        var response = await aiService.AnalyzeProjectDnaAsync(request);
+
+        if (response?.Analysis == null)
+        {
+            ErrorMessage = "AI Project DNA analysis could not be generated. Make sure the Python AI service is running.";
+            return Page();
+        }
+
+        Analysis = response.Analysis;
+        LlmUsed = response.LlmUsed;
+        Source = response.Source;
+
+        ApplyAiAnalysis(response.Analysis);
+
+        return Page();
+    }
+
+    private async Task LoadPageDataAsync(int userId, int? ideaId)
+    {
         Idea = ideaId.HasValue
             ? await db.ProjectIdeas.FirstOrDefaultAsync(i => i.Id == ideaId && i.UserId == userId)
             : await db.ProjectIdeas.FirstOrDefaultAsync(i => i.UserId == userId && i.IsSelected)
@@ -46,26 +84,11 @@ public class ProjectDNAModel(ApplicationDbContext db, IAiServiceClient aiService
             .Where(s => s.UserId == userId)
             .ToListAsync();
 
+        DnaDimensions.Clear();
+        Risks.Clear();
+        RequiredSkillsAnalysis.Clear();
+
         BuildFallbackViewData();
-
-        var profile = await db.StudentProfiles
-            .FirstOrDefaultAsync(p => p.UserId == userId);
-
-        var request = BuildProjectDnaRequest(profile);
-
-        var response = await aiService.AnalyzeProjectDnaAsync(request);
-
-        if (response?.Analysis == null)
-        {
-            ErrorMessage = "AI Project DNA analysis could not be generated. Make sure the Python AI service is running.";
-            return;
-        }
-
-        Analysis = response.Analysis;
-        LlmUsed = response.LlmUsed;
-        Source = response.Source;
-
-        ApplyAiAnalysis(response.Analysis);
     }
 
     private ProjectDnaRequest BuildProjectDnaRequest(StudentProfile? profile)
@@ -123,7 +146,7 @@ public class ProjectDNAModel(ApplicationDbContext db, IAiServiceClient aiService
             ("Supervisor Fit", analysis.SupervisorFitScore, "#14b8a6"),
         ];
 
-        Risks = analysis.RiskProfile
+        Risks = (analysis.RiskProfile ?? [])
             .Select(r => new RiskItem(
                 r.Title,
                 r.Level,

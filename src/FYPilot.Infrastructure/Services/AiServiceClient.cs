@@ -122,4 +122,7 @@ public class AiServiceClient : IAiServiceClient
     // ── Project DNA Analysis ─────────────────────────────────────────────────────
     public Task<ProjectDnaServiceResponse?> AnalyzeProjectDnaAsync(ProjectDnaRequest request)
         => PostAsync<ProjectDnaServiceResponse>("/analyze-project-dna", request);
+
+    public Task<ProjectRoadmapServiceResponse?> GenerateProjectRoadmapAsync(ProjectRoadmapRequest request)
+    => PostAsync<ProjectRoadmapServiceResponse>("/generate-project-roadmap", request);
 }
