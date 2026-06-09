@@ -499,3 +499,161 @@ public record ProjectDnaSkillDto(
     string Status,
     string Explanation
 );
+public record IdeaComparisonRequest(
+    string StudentMajor,
+    string ExperienceLevel,
+    int TeamSize,
+    int AvailableHoursPerWeek,
+    List<string> StudentSkills,
+    Dictionary<string, int> SkillRatings,
+    List<IdeaComparisonInputDto> Ideas
+);
+
+public record IdeaComparisonInputDto(
+    int Id,
+    string Title,
+    string ProblemStatement,
+    string RequiredTechnologies,
+    string RequiredSkills,
+    string MissingSkills,
+    string DifficultyLevel,
+    int ExpectedDurationWeeks,
+    string DatasetNeeded,
+    string Domain,
+    string LebaneseMarketRelevance,
+    double InnovationScore,
+    double FeasibilityScore,
+    double MarketDemandScore,
+    string CreatedAt
+);
+
+public record IdeaComparisonServiceResponse(
+    IdeaComparisonDto Comparison,
+    string Agent,
+    bool LlmUsed,
+    string Source,
+    string? OllamaError,
+    string? OllamaRawPreview,
+    DateTime? GeneratedAt,
+    string Message
+);
+
+public record IdeaComparisonDto(
+    string ComparisonTitle,
+    int TotalIdeasCompared,
+    int BestIdeaId,
+    string BestIdeaTitle,
+    string Summary,
+    List<ComparedIdeaDto> Ideas,
+    string FinalRecommendation
+);
+
+public record ComparedIdeaDto(
+    int IdeaId,
+    int Rank,
+    string Title,
+    int OverallScore,
+    int SkillFitScore,
+    int FeasibilityScore,
+    int InnovationScore,
+    int MarketRelevanceScore,
+    string RiskLevel,
+    string BestFor,
+    List<string> Strengths,
+    List<string> Weaknesses,
+    string Recommendation
+);
+public record FypMentorRequest(
+    string Message,
+    MentorStudentProfileDto? StudentProfile,
+    MentorSelectedIdeaDto? SelectedIdea,
+    MentorDnaSummaryDto? DnaSummary,
+    List<MentorRoadmapPhaseDto> Roadmap,
+    List<MentorRecentMessageDto> RecentMessages,
+    MentorCodeContextDto? CodeContext
+);
+
+public record MentorStudentProfileDto(
+    string Major,
+    string ExperienceLevel,
+    int TeamSize,
+    int AvailableHoursPerWeek,
+    List<string> Skills,
+    Dictionary<string, int> SkillRatings
+);
+
+public record MentorSelectedIdeaDto(
+    int? Id,
+    string Title,
+    string ProblemStatement,
+    string TargetUsers,
+    string WhyUseful,
+    string RequiredTechnologies,
+    string RequiredSkills,
+    string MissingSkills,
+    string DifficultyLevel,
+    int ExpectedDurationWeeks,
+    string Domain,
+    string FinalDeliverables
+);
+
+public record MentorDnaSummaryDto(
+    int? OverallScore,
+    string RiskLevel,
+    List<string> Strengths,
+    List<string> Weaknesses,
+    List<string> RecommendedImprovements
+);
+
+public record MentorRoadmapPhaseDto(
+    int PhaseNumber,
+    string Name,
+    string Objective,
+    List<string> Tasks,
+    string ExpectedOutput,
+    string SuccessCriteria,
+    bool IsCompleted
+);
+
+public record MentorRecentMessageDto(
+    string Role,
+    string Content
+);
+
+public record MentorCodeContextDto(
+    string TargetFile,
+    string Language,
+    string ExistingCode,
+    string RequestedChange,
+    List<string> Constraints
+);
+
+public record FypMentorServiceResponse(
+    FypMentorAnswerDto Answer,
+    string Agent,
+    bool LlmUsed,
+    string Source,
+    string? OllamaError,
+    string? OllamaRawPreview,
+    DateTime? GeneratedAt,
+    string Message
+);
+
+public record FypMentorAnswerDto(
+    string Reply,
+    string Intent,
+    List<string> UsedContext,
+    List<string> SuggestedNextActions,
+    string Warning,
+    int Confidence,
+    List<string> Assumptions,
+    List<MentorCodeBlockDto> CodeBlocks
+);
+
+public record MentorCodeBlockDto(
+    string Title,
+    string Language,
+    string TargetFile,
+    string Content,
+    List<string> Notes
+);

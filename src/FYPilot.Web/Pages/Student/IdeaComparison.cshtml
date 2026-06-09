@@ -93,9 +93,11 @@ else
                         var avg = AverageScore(idea);
                         var isSelected = idea.IsSelected;
 
-                        <button type="button"
-                                class="ic2-idea-card @(i == 0 ? "active" : "")"
-                                data-focus-idea="@idea.Id">
+                        <div class="ic2-idea-card @(i == 0 ? "active" : "")"
+                             data-focus-idea="@idea.Id"
+                             role="button"
+                             tabindex="0">
+
                             <div class="ic2-idea-number">
                                 @(i + 1)
                             </div>
@@ -109,6 +111,15 @@ else
                                 </div>
 
                                 <p>@Clip(idea.ProblemStatement, 92)</p>
+
+                                <form method="post" asp-page-handler="Select" class="ic2-inline-select-form">
+                                    @Html.AntiForgeryToken()
+                                    <input type="hidden" name="ideaId" value="@idea.Id" />
+
+                                    <button type="submit" class="btn btn-sm ic2-select-small-btn">
+                                        Select Idea
+                                    </button>
+                                </form>
                             </div>
 
                             <div class="ic2-idea-score">
@@ -122,7 +133,7 @@ else
                                     <i class="bi bi-check"></i>
                                 </div>
                             }
-                        </button>
+                        </div>
                     }
                 </div>
 
@@ -141,9 +152,20 @@ else
                         <h2>Select your priorities</h2>
                     </div>
 
-                    <button type="button" class="btn ic2-clear-btn" id="ic2ResetMetrics">
-                        Reset
-                    </button>
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <form method="post" asp-page-handler="Compare" class="m-0">
+                            @Html.AntiForgeryToken()
+
+                            <button type="submit" class="btn ic2-primary-btn">
+                                <i class="bi bi-columns-gap me-1"></i>
+                                Compare My Ideas
+                            </button>
+                        </form>
+
+                        <button type="button" class="btn ic2-clear-btn" id="ic2ResetMetrics">
+                            Reset
+                        </button>
+                    </div>
                 </div>
 
                 <div class="ic2-metric-tabs" id="ic2MetricTabs">
@@ -226,7 +248,7 @@ else
                         </p>
                     </div>
 
-                    <form method="post" class="ic2-recommendation-action">
+                    <form method="post" asp-page-handler="Select" class="ic2-recommendation-action">
                         @Html.AntiForgeryToken()
                         <input type="hidden" name="ideaId" id="ic2RecommendedIdeaId" value="@ideas.First().Id" />
 
@@ -328,7 +350,11 @@ else
         });
 
         document.querySelectorAll("[data-focus-idea]").forEach(card => {
-            card.addEventListener("click", function () {
+            card.addEventListener("click", function (event) {
+                if (event.target.closest("form")) {
+                    return;
+                }
+
                 document.querySelectorAll("[data-focus-idea]").forEach(item => item.classList.remove("active"));
                 this.classList.add("active");
 
@@ -337,6 +363,13 @@ else
                 document.querySelectorAll("[data-idea-row]").forEach(row => {
                     row.classList.toggle("focused", row.dataset.ideaRow === ideaId);
                 });
+            });
+
+            card.addEventListener("keydown", function (event) {
+                if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    this.click();
+                }
             });
         });
 

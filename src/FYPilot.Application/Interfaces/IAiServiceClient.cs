@@ -30,5 +30,9 @@ public interface IAiServiceClient
     Task<ProjectDnaServiceResponse?> AnalyzeProjectDnaAsync(ProjectDnaRequest request);
 
     Task<ProjectRoadmapServiceResponse?> GenerateProjectRoadmapAsync(ProjectRoadmapRequest request);
+
+    Task<IdeaComparisonServiceResponse?> CompareGeneratedIdeasAsync(IdeaComparisonRequest request);
+
+    Task<FypMentorServiceResponse?> AskFypMentorAsync(FypMentorRequest request);
 }
 

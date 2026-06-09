@@ -1,12 +1,20 @@
 @page
 @model FYPilot.Web.Pages.Student.MentorChatModel
 @{
-    ViewData["Title"]    = "Mentor Chat";
+    ViewData["Title"] = "Mentor Chat";
     ViewData["Subtitle"] = "AI-powered academic guidance for your FYP";
 }
 
 <div class="row g-4">
     <div class="col-lg-8">
+        @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+        {
+            <div class="alert alert-warning mb-3">
+                <i class="bi bi-exclamation-triangle me-1"></i>
+                @Model.ErrorMessage
+            </div>
+        }
+
         <div class="page-card d-flex flex-column" style="height:520px">
             <!-- Messages -->
             <div id="chat-messages" class="flex-grow-1 p-4 overflow-auto">
@@ -14,9 +22,12 @@
                 {
                     <div class="text-center text-muted py-5">
                         <i class="bi bi-chat-dots display-4"></i>
-                        <p class="mt-3">Ask anything about your FYP — feasibility, methodology, technologies, or proposal strategy.</p>
+                        <p class="mt-3">
+                            Ask anything about your FYP — feasibility, methodology, technologies, implementation, testing, documentation, or defense.
+                        </p>
                     </div>
                 }
+
                 @foreach (var msg in Model.Messages)
                 {
                     <div class="mb-3 d-flex @(msg.Role == "user" ? "justify-content-end" : "justify-content-start")">
@@ -29,24 +40,101 @@
                                     <span class="small fw-semibold text-primary">FYPilot Mentor</span>
                                 </div>
                             }
-                            <div>@msg.Content</div>
-                            <div class="mt-1 @(msg.Role == "user" ? "text-white-50" : "text-muted-sm")" style="font-size:0.7rem">
+
+                            <div style="white-space: pre-wrap;">@msg.Content</div>
+
+                            <div class="mt-1 @(msg.Role == "user" ? "text-white-50" : "text-muted")" style="font-size:0.7rem">
                                 @msg.CreatedAt.ToString("HH:mm")
                             </div>
                         </div>
                     </div>
                 }
             </div>
+
             <!-- Input -->
             <div class="border-top p-3">
-                <form method="post">
+                <form method="post" asp-page-handler="Send">
                     @Html.AntiForgeryToken()
+
                     <input type="hidden" name="ideaId" value="@Model.SelectedIdeaId" />
+
                     <div class="d-flex gap-2">
-                        <input type="text" name="message" class="form-control" placeholder="Ask your FYP mentor…" required autofocus />
+                        <input asp-for="MessageText"
+                               id="mentorMessage"
+                               class="form-control"
+                               placeholder="Ask your FYP mentor…"
+                               required
+                               autofocus />
+
                         <button type="submit" class="btn btn-primary px-3">
                             <i class="bi bi-send"></i>
                         </button>
+                    </div>
+
+                    <!-- Optional Code Context -->
+                    <div class="accordion mt-3" id="codeContextAccordion">
+                        <div class="accordion-item border-0">
+                            <h2 class="accordion-header" id="codeContextHeading">
+                                <button class="accordion-button collapsed bg-light py-2 small"
+                                        type="button"
+                                        data-bs-toggle="collapse"
+                                        data-bs-target="#codeContextCollapse"
+                                        aria-expanded="false"
+                                        aria-controls="codeContextCollapse">
+                                    <i class="bi bi-code-slash me-2"></i>
+                                    Optional code generation context
+                                </button>
+                            </h2>
+
+                            <div id="codeContextCollapse"
+                                 class="accordion-collapse collapse"
+                                 aria-labelledby="codeContextHeading"
+                                 data-bs-parent="#codeContextAccordion">
+                                <div class="accordion-body bg-light rounded-bottom">
+                                    <div class="mb-2">
+                                        <label asp-for="TargetFile" class="form-label small fw-semibold">Target file</label>
+                                        <input asp-for="TargetFile"
+                                               class="form-control form-control-sm"
+                                               placeholder="src/FYPilot.Web/Pages/Student/Roadmap.cshtml.cs" />
+                                    </div>
+
+                                    <div class="mb-2">
+                                        <label asp-for="CodeLanguage" class="form-label small fw-semibold">Language</label>
+                                        <input asp-for="CodeLanguage"
+                                               class="form-control form-control-sm"
+                                               placeholder="csharp" />
+                                    </div>
+
+                                    <div class="mb-2">
+                                        <label asp-for="ExistingCode" class="form-label small fw-semibold">Existing code</label>
+                                        <textarea asp-for="ExistingCode"
+                                                  class="form-control form-control-sm font-monospace"
+                                                  rows="6"
+                                                  placeholder="Paste the current file code here"></textarea>
+                                    </div>
+
+                                    <div class="mb-2">
+                                        <label asp-for="RequestedChange" class="form-label small fw-semibold">Requested change</label>
+                                        <textarea asp-for="RequestedChange"
+                                                  class="form-control form-control-sm"
+                                                  rows="2"
+                                                  placeholder="Explain exactly what you want changed"></textarea>
+                                    </div>
+
+                                    <div>
+                                        <label asp-for="ConstraintsText" class="form-label small fw-semibold">Constraints</label>
+                                        <textarea asp-for="ConstraintsText"
+                                                  class="form-control form-control-sm"
+                                                  rows="3"
+                                                  placeholder="One constraint per line, example: Do not remove authorization checks"></textarea>
+                                    </div>
+
+                                    <div class="small text-muted mt-2">
+                                        Use this section only when asking the mentor to generate or fix code.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </form>
             </div>
@@ -55,35 +143,55 @@
 
     <div class="col-lg-4">
         <div class="page-card p-4 mb-3">
-            <h6 class="fw-bold mb-3"><i class="bi bi-lightbulb me-2 text-warning"></i>Suggested Questions</h6>
+            <h6 class="fw-bold mb-3">
+                <i class="bi bi-lightbulb me-2 text-warning"></i>
+                Suggested Questions
+            </h6>
+
             <div class="d-grid gap-2">
                 @foreach (var q in new[] {
+                    "What should I work on next?",
                     "Is my project idea feasible for a solo FYP?",
                     "What are the main risks in my project?",
                     "How should I structure my methodology?",
                     "Which technologies best fit my skill level?",
                     "How do I validate my dataset?",
                     "What makes a good FYP proposal?",
-                    "How do I defend my idea against professors?",
+                    "How do I defend my idea against professors?"
                 })
                 {
-                    <button type="button" class="btn btn-sm btn-outline-secondary text-start"
-                            onclick="document.querySelector('[name=message]').value = this.textContent.trim()">
+                    <button type="button"
+                            class="btn btn-sm btn-outline-secondary text-start"
+                            onclick="document.getElementById('mentorMessage').value = this.textContent.trim(); document.getElementById('mentorMessage').focus();">
                         @q
                     </button>
                 }
             </div>
         </div>
 
+        @if (Model.SelectedIdea != null)
+        {
+            <div class="page-card p-4 mb-3">
+                <h6 class="fw-bold mb-2 small text-muted">CURRENT IDEA</h6>
+                <div class="fw-semibold small">
+                    <i class="bi bi-stars me-1 text-primary"></i>
+                    @Model.SelectedIdea.Title
+                </div>
+            </div>
+        }
+
         @if (Model.Ideas.Any())
         {
             <div class="page-card p-4">
                 <h6 class="fw-bold mb-2 small text-muted">DISCUSS ABOUT</h6>
+
                 @foreach (var idea in Model.Ideas)
                 {
-                    <a href="/Student/MentorChat?ideaId=@idea.Id"
-                       class="d-block p-2 rounded-2 mb-1 small @(idea.Id == Model.SelectedIdeaId ? "bg-primary-subtle text-primary fw-semibold" : "text-muted")">
-                        <i class="bi bi-stars me-1"></i>@idea.Title
+                    <a asp-page="/Student/MentorChat"
+                       asp-route-ideaId="@idea.Id"
+                       class="d-block p-2 rounded-2 mb-1 small text-decoration-none @(idea.Id == Model.SelectedIdeaId ? "bg-primary-subtle text-primary fw-semibold" : "text-muted")">
+                        <i class="bi bi-stars me-1"></i>
+                        @idea.Title
                     </a>
                 }
             </div>
@@ -92,8 +200,10 @@
 </div>
 
 @section Scripts {
-<script>
-var msgs = document.getElementById('chat-messages');
-if (msgs) msgs.scrollTop = msgs.scrollHeight;
-</script>
+    <script>
+        const msgs = document.getElementById('chat-messages');
+        if (msgs) {
+            msgs.scrollTop = msgs.scrollHeight;
+        }
+    </script>
 }

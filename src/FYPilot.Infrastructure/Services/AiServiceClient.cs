@@ -125,4 +125,10 @@ public class AiServiceClient : IAiServiceClient
 
     public Task<ProjectRoadmapServiceResponse?> GenerateProjectRoadmapAsync(ProjectRoadmapRequest request)
     => PostAsync<ProjectRoadmapServiceResponse>("/generate-project-roadmap", request);
+
+    public Task<IdeaComparisonServiceResponse?> CompareGeneratedIdeasAsync(IdeaComparisonRequest request)
+    => PostAsync<IdeaComparisonServiceResponse>("/compare-generated-ideas", request);
+
+    public Task<FypMentorServiceResponse?> AskFypMentorAsync(FypMentorRequest request)
+        => PostAsync<FypMentorServiceResponse>("/fyp-chat", request);
 }
