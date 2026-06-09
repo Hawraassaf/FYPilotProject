@@ -2,162 +2,388 @@
 @model FYPilot.Web.Pages.Student.ProfileModel
 @{
     ViewData["Title"] = "Student Profile";
+    ViewData["Subtitle"] = "Manage your academic identity.";
+
+    var openEditMode = !ViewData.ModelState.IsValid || !string.IsNullOrWhiteSpace(Model.ErrorMessage);
 }
 
-<div class="container-fluid">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <h2 class="fw-bold mb-1">Student Profile</h2>
-            <p class="text-muted mb-0">Manage your academic information and project preferences.</p>
-        </div>
-        <a asp-page="/Student/SkillAssessment" class="btn btn-outline-primary">
-            <i class="bi bi-lightning-charge me-1"></i>Manage Technical Skills
-        </a>
-    </div>
+<div class="profile-page">
 
     @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
     {
-        <div class="alert alert-success">
+        <div id="profileMessage" class="alert alert-success profile-alert">
             <i class="bi bi-check-circle me-2"></i>@Model.SuccessMessage
         </div>
     }
 
     @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
     {
-        <div class="alert alert-danger">
+        <div id="profileMessage" class="alert alert-danger profile-alert">
             <i class="bi bi-exclamation-triangle me-2"></i>@Model.ErrorMessage
         </div>
     }
 
-    <form method="post">
-        <div class="row g-4">
-            <div class="col-lg-6">
-                <div class="card shadow-sm border-0 h-100">
-                    <div class="card-body">
-                        <h5 class="fw-bold mb-3">Academic Information</h5>
+    <form method="post" enctype="multipart/form-data">
 
-                        <div class="mb-3">
-                            <label asp-for="Input.University" class="form-label fw-semibold">University</label>
-                            <input asp-for="Input.University" class="form-control" placeholder="Example: Lebanese International University" />
-                            <span asp-validation-for="Input.University" class="text-danger small"></span>
+        <input type="hidden" asp-for="Input.PreferredDomain" />
+        <input type="hidden" asp-for="Input.PreferredStack" />
+        <input type="hidden" asp-for="Input.AvailableHoursPerWeek" />
+        <input type="hidden" asp-for="Input.TeamMembers" />
+        <input type="hidden" asp-for="Input.TargetDifficulty" />
+        <input type="hidden" asp-for="Input.ProjectGoals" />
+
+        <section class="profile-studio-card">
+
+            <aside class="profile-studio-side">
+                <div class="profile-side-pattern"></div>
+
+                <div class="profile-photo-zone profile-photo-zone-clean">
+                    <div class="profile-avatar-large profile-avatar-studio">
+                        @if (!string.IsNullOrWhiteSpace(Model.ProfileImagePath))
+                        {
+                            <img id="profilePreview"
+                                 src="@Model.ProfileImagePath"
+                                 alt="Profile photo" />
+
+                            <div id="profileInitials" class="profile-initials d-none">
+                                @Model.Initials
+                            </div>
+                        }
+                        else
+                        {
+                            <img id="profilePreview"
+                                 src=""
+                                 alt="Profile photo"
+                                 class="d-none" />
+
+                            <div id="profileInitials" class="profile-initials">
+                                @Model.Initials
+                            </div>
+                        }
+
+                        <label for="ProfilePhotoInput" class="profile-camera-btn" title="Change profile photo">
+                            <i class="bi bi-camera-fill"></i>
+                        </label>
+
+                        <input asp-for="ProfilePhoto"
+                               id="ProfilePhotoInput"
+                               type="file"
+                               class="d-none"
+                               accept=".jpg,.jpeg,.png,.webp" />
+                    </div>
+
+                    <div class="profile-photo-hint">
+                        JPG, PNG, or WEBP • Max 3MB
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(Model.ProfileImagePath))
+                    {
+                        <button type="submit"
+                                asp-page-handler="RemovePhoto"
+                                class="profile-remove-photo-btn profile-remove-photo-light"
+                                formnovalidate>
+                            <i class="bi bi-trash3 me-1"></i>
+                            Remove photo
+                        </button>
+                    }
+                </div>
+
+                <div class="profile-side-identity">
+                    <div class="profile-side-kicker">Student Profile</div>
+
+                    <h1>@Model.DisplayName</h1>
+
+                    <p>
+                        @(string.IsNullOrWhiteSpace(Model.Input.Major) ? "Computer Science Student" : Model.Input.Major)
+                        @if (!string.IsNullOrWhiteSpace(Model.Input.Year))
+                        {
+                            <span>• @Model.Input.Year</span>
+                        }
+                    </p>
+                </div>
+
+                <div class="profile-side-info">
+                    <div class="profile-side-info-row">
+                        <i class="bi bi-envelope"></i>
+                        <span>@Model.DisplayEmail</span>
+                    </div>
+
+                    <div class="profile-side-info-row">
+                        <i class="bi bi-building"></i>
+                        <span>@(string.IsNullOrWhiteSpace(Model.Input.University) ? "University not set" : Model.Input.University)</span>
+                    </div>
+
+                    <div class="profile-side-info-row">
+                        <i class="bi bi-bar-chart"></i>
+                        <span>@(string.IsNullOrWhiteSpace(Model.Input.ExperienceLevel) ? "Level not set" : Model.Input.ExperienceLevel)</span>
+                    </div>
+                </div>
+
+                <a asp-page="/Student/SkillAssessment" class="btn profile-side-btn">
+                    <i class="bi bi-bar-chart-line me-1"></i>
+                    Manage Skills
+                </a>
+            </aside>
+
+            <main class="profile-studio-main">
+
+                <div id="profileStaticView" class="@(openEditMode ? "d-none" : "")">
+                    <div class="profile-studio-head">
+                        <div>
+                            <div class="profile-unified-kicker">Profile Overview</div>
+                            <h2>Academic information</h2>
+                            <p>
+                                Your academic profile is used by FYPilot to personalize your workspace and guide your project planning.
+                            </p>
                         </div>
 
-                        <div class="mb-3">
-                            <label asp-for="Input.Major" class="form-label fw-semibold">Major</label>
-                            <input asp-for="Input.Major" class="form-control" placeholder="Example: Computer Science" />
-                            <span asp-validation-for="Input.Major" class="text-danger small"></span>
+                        <button type="button" id="editProfileBtn" class="btn btn-profile-primary">
+                            <i class="bi bi-pencil-square me-1"></i>
+                            Edit Profile
+                        </button>
+                    </div>
+
+                    <div class="profile-static-grid">
+                        <div class="profile-static-item">
+                            <div class="profile-static-icon">
+                                <i class="bi bi-person"></i>
+                            </div>
+                            <div>
+                                <span>Full Name</span>
+                                <strong>@(string.IsNullOrWhiteSpace(Model.Input.FullName) ? "Not set" : Model.Input.FullName)</strong>
+                            </div>
                         </div>
 
-                        <div class="mb-3">
-                            <label asp-for="Input.Year" class="form-label fw-semibold">Academic Year</label>
-                            <select asp-for="Input.Year" class="form-select">
-                                <option value="">Select academic year</option>
-                                <option>1st Year</option>
-                                <option>2nd Year</option>
-                                <option>3rd Year</option>
-                                <option>4th Year</option>
-                                <option>Final Year</option>
-                            </select>
-                            <span asp-validation-for="Input.Year" class="text-danger small"></span>
+                        <div class="profile-static-item">
+                            <div class="profile-static-icon">
+                                <i class="bi bi-envelope"></i>
+                            </div>
+                            <div>
+                                <span>Email Address</span>
+                                <strong>@Model.DisplayEmail</strong>
+                            </div>
                         </div>
 
-                        <div class="mb-3">
-                            <label asp-for="Input.ExperienceLevel" class="form-label fw-semibold">Experience Level</label>
-                            <select asp-for="Input.ExperienceLevel" class="form-select">
-                                <option value="">Select experience level</option>
-                                <option value="beginner">Beginner</option>
-                                <option value="intermediate">Intermediate</option>
-                                <option value="advanced">Advanced</option>
-                            </select>
-                            <span asp-validation-for="Input.ExperienceLevel" class="text-danger small"></span>
+                        <div class="profile-static-item">
+                            <div class="profile-static-icon">
+                                <i class="bi bi-building"></i>
+                            </div>
+                            <div>
+                                <span>University</span>
+                                <strong>@(string.IsNullOrWhiteSpace(Model.Input.University) ? "Not set" : Model.Input.University)</strong>
+                            </div>
                         </div>
 
-                        <div class="mb-3">
-                            <label asp-for="Input.Interests" class="form-label fw-semibold">Academic / Project Interests</label>
-                            <textarea asp-for="Input.Interests" class="form-control" rows="4" placeholder="Example: AI, Web Development, Data Science"></textarea>
+                        <div class="profile-static-item">
+                            <div class="profile-static-icon">
+                                <i class="bi bi-mortarboard"></i>
+                            </div>
+                            <div>
+                                <span>Major</span>
+                                <strong>@(string.IsNullOrWhiteSpace(Model.Input.Major) ? "Not set" : Model.Input.Major)</strong>
+                            </div>
+                        </div>
+
+                        <div class="profile-static-item">
+                            <div class="profile-static-icon">
+                                <i class="bi bi-calendar3"></i>
+                            </div>
+                            <div>
+                                <span>Academic Year</span>
+                                <strong>@(string.IsNullOrWhiteSpace(Model.Input.Year) ? "Not set" : Model.Input.Year)</strong>
+                            </div>
+                        </div>
+
+                        <div class="profile-static-item">
+                            <div class="profile-static-icon">
+                                <i class="bi bi-bar-chart"></i>
+                            </div>
+                            <div>
+                                <span>Experience Level</span>
+                                <strong>@(string.IsNullOrWhiteSpace(Model.Input.ExperienceLevel) ? "Not set" : Model.Input.ExperienceLevel)</strong>
+                            </div>
+                        </div>
+
+                        <div class="profile-static-item profile-static-wide">
+                            <div class="profile-static-icon">
+                                <i class="bi bi-stars"></i>
+                            </div>
+                            <div>
+                                <span>Academic / Project Interests</span>
+                                <strong>@(string.IsNullOrWhiteSpace(Model.Input.Interests) ? "No interests added yet" : Model.Input.Interests)</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="profileEditView" class="@(openEditMode ? "" : "d-none")">
+                    <div class="profile-studio-head">
+                        <div>
+                            <div class="profile-unified-kicker">Edit Mode</div>
+                            <h2>Edit academic information</h2>
+                            <p>
+                                Update your student identity, university information, academic year, experience level, and interests.
+                            </p>
+                        </div>
+
+                        <button type="button" id="cancelEditBtn" class="btn btn-profile-outline d-none d-md-inline-flex">
+                            Cancel
+                        </button>
+                    </div>
+
+                    <div class="profile-form-clean">
+                        <div class="profile-clean-row">
+                            <div class="profile-clean-field">
+                                <label asp-for="Input.FullName" class="form-label profile-label">Full Name</label>
+                                <input asp-for="Input.FullName" class="form-control profile-control" placeholder="Your full name" />
+                                <span asp-validation-for="Input.FullName" class="text-danger small"></span>
+                            </div>
+
+                            <div class="profile-clean-field">
+                                <label class="form-label profile-label">Email Address</label>
+                                <input value="@Model.DisplayEmail" class="form-control profile-control profile-readonly" readonly />
+                                <div class="profile-helper">Used for login and cannot be changed here.</div>
+                            </div>
+                        </div>
+
+                        <div class="profile-clean-row">
+                            <div class="profile-clean-field">
+                                <label asp-for="Input.University" class="form-label profile-label">University</label>
+                                <input asp-for="Input.University" class="form-control profile-control" placeholder="Example: Lebanese International University" />
+                                <span asp-validation-for="Input.University" class="text-danger small"></span>
+                            </div>
+
+                            <div class="profile-clean-field">
+                                <label asp-for="Input.Major" class="form-label profile-label">Major</label>
+                                <input asp-for="Input.Major" class="form-control profile-control" placeholder="Example: Computer Science" />
+                                <span asp-validation-for="Input.Major" class="text-danger small"></span>
+                            </div>
+                        </div>
+
+                        <div class="profile-clean-row">
+                            <div class="profile-clean-field">
+                                <label asp-for="Input.Year" class="form-label profile-label">Academic Year</label>
+                                <select asp-for="Input.Year" class="form-select profile-control">
+                                    <option value="">Select academic year</option>
+                                    <option>1st Year</option>
+                                    <option>2nd Year</option>
+                                    <option>3rd Year</option>
+                                    <option>4th Year</option>
+                                    <option>Final Year</option>
+                                </select>
+                                <span asp-validation-for="Input.Year" class="text-danger small"></span>
+                            </div>
+
+                            <div class="profile-clean-field">
+                                <label asp-for="Input.ExperienceLevel" class="form-label profile-label">Experience Level</label>
+                                <select asp-for="Input.ExperienceLevel" class="form-select profile-control">
+                                    <option value="">Select level</option>
+                                    <option value="beginner">Beginner</option>
+                                    <option value="intermediate">Intermediate</option>
+                                    <option value="advanced">Advanced</option>
+                                </select>
+                                <span asp-validation-for="Input.ExperienceLevel" class="text-danger small"></span>
+                            </div>
+                        </div>
+
+                        <div class="profile-clean-field">
+                            <label asp-for="Input.Interests" class="form-label profile-label">Academic / Project Interests</label>
+                            <textarea asp-for="Input.Interests"
+                                      class="form-control profile-control"
+                                      rows="5"
+                                      placeholder="Example: AI, Web Development, Data Science"></textarea>
                             <span asp-validation-for="Input.Interests" class="text-danger small"></span>
-                            <div class="form-text">
-                                Technical skills are managed separately in the Skill Assessment page.
-                            </div>
+                            <div class="profile-helper">Technical skills are managed separately in Skill Assessment.</div>
                         </div>
                     </div>
-                </div>
-            </div>
 
-            <div class="col-lg-6">
-                <div class="card shadow-sm border-0 h-100">
-                    <div class="card-body">
-                        <h5 class="fw-bold mb-3">Project Preferences</h5>
+                    <div class="profile-actions profile-actions-final">
+                        <button type="button" id="cancelEditBtnBottom" class="btn btn-profile-outline">
+                            Cancel
+                        </button>
 
-                        <div class="mb-3">
-                            <label asp-for="Input.PreferredDomain" class="form-label fw-semibold">Preferred Domain</label>
-                            <select asp-for="Input.PreferredDomain" class="form-select">
-                                <option value="">Select preferred domain</option>
-                                <option>AI/Data Science</option>
-                                <option>Web Development</option>
-                                <option>Mobile Development</option>
-                                <option>Cybersecurity</option>
-                                <option>Education Technology</option>
-                                <option>Healthcare Technology</option>
-                                <option>E-commerce</option>
-                                <option>General Software System</option>
-                            </select>
-                            <span asp-validation-for="Input.PreferredDomain" class="text-danger small"></span>
-                        </div>
-
-                        <div class="mb-3">
-                            <label asp-for="Input.PreferredStack" class="form-label fw-semibold">Preferred Technology Stack</label>
-                            <input asp-for="Input.PreferredStack" class="form-control" placeholder="Example: ASP.NET, React, PostgreSQL" />
-                            <span asp-validation-for="Input.PreferredStack" class="text-danger small"></span>
-                            <div class="form-text">
-                                This is a preferred stack, not the official assessed skills list.
-                            </div>
-                        </div>
-
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label asp-for="Input.AvailableHoursPerWeek" class="form-label fw-semibold">Available Hours / Week</label>
-                                <input asp-for="Input.AvailableHoursPerWeek" type="number" min="1" max="60" class="form-control" />
-                                <span asp-validation-for="Input.AvailableHoursPerWeek" class="text-danger small"></span>
-                            </div>
-
-                            <div class="col-md-6 mb-3">
-                                <label asp-for="Input.TeamMembers" class="form-label fw-semibold">Team Members</label>
-                                <input asp-for="Input.TeamMembers" type="number" min="1" max="6" class="form-control" />
-                                <span asp-validation-for="Input.TeamMembers" class="text-danger small"></span>
-                            </div>
-                        </div>
-
-                        <div class="mb-3">
-                            <label asp-for="Input.TargetDifficulty" class="form-label fw-semibold">Target Difficulty</label>
-                            <select asp-for="Input.TargetDifficulty" class="form-select">
-                                <option value="">Select target difficulty</option>
-                                <option value="beginner">Beginner</option>
-                                <option value="intermediate">Intermediate</option>
-                                <option value="advanced">Advanced</option>
-                            </select>
-                            <span asp-validation-for="Input.TargetDifficulty" class="text-danger small"></span>
-                        </div>
-
-                        <div class="mb-3">
-                            <label asp-for="Input.ProjectGoals" class="form-label fw-semibold">Project Goals</label>
-                            <textarea asp-for="Input.ProjectGoals" class="form-control" rows="5" placeholder="Describe what you want to achieve in your FYP..."></textarea>
-                            <span asp-validation-for="Input.ProjectGoals" class="text-danger small"></span>
-                        </div>
+                        <button type="submit" class="btn btn-profile-primary">
+                            <i class="bi bi-save me-1"></i>
+                            Save Profile
+                        </button>
                     </div>
                 </div>
-            </div>
-        </div>
-
-        <div class="d-flex justify-content-end mt-4 gap-2">
-            <a asp-page="/Student/Dashboard" class="btn btn-outline-secondary">Cancel</a>
-            <button type="submit" class="btn btn-primary">
-                <i class="bi bi-save me-1"></i>Save Profile
-            </button>
-        </div>
+            </main>
+        </section>
     </form>
 </div>
 
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />
+
+    <script>
+        const profileInput = document.getElementById("ProfilePhotoInput");
+        const profilePreview = document.getElementById("profilePreview");
+        const profileInitials = document.getElementById("profileInitials");
+
+        if (profileInput) {
+            profileInput.addEventListener("change", function () {
+                const file = this.files && this.files[0];
+
+                if (!file) {
+                    return;
+                }
+
+                const reader = new FileReader();
+
+                reader.onload = function (event) {
+                    profilePreview.src = event.target.result;
+                    profilePreview.classList.remove("d-none");
+
+                    if (profileInitials) {
+                        profileInitials.classList.add("d-none");
+                    }
+                };
+
+                reader.readAsDataURL(file);
+            });
+        }
+
+        const staticView = document.getElementById("profileStaticView");
+        const editView = document.getElementById("profileEditView");
+        const editBtn = document.getElementById("editProfileBtn");
+        const cancelEditBtn = document.getElementById("cancelEditBtn");
+        const cancelEditBtnBottom = document.getElementById("cancelEditBtnBottom");
+
+        function showEditMode() {
+            staticView.classList.add("d-none");
+            editView.classList.remove("d-none");
+        }
+
+        function showStaticMode() {
+            editView.classList.add("d-none");
+            staticView.classList.remove("d-none");
+        }
+
+        if (editBtn) {
+            editBtn.addEventListener("click", showEditMode);
+        }
+
+        if (cancelEditBtn) {
+            cancelEditBtn.addEventListener("click", showStaticMode);
+        }
+
+        if (cancelEditBtnBottom) {
+            cancelEditBtnBottom.addEventListener("click", showStaticMode);
+        }
+
+                setTimeout(function () {
+            const message = document.getElementById("profileMessage");
+
+            if (message) {
+                message.style.transition = "opacity 0.35s ease, transform 0.35s ease";
+                message.style.opacity = "0";
+                message.style.transform = "translateY(-6px)";
+
+                setTimeout(function () {
+                    message.remove();
+                }, 350);
+            }
+        }, 2000);
+    </script>
 }

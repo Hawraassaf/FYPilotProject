@@ -23,6 +23,21 @@ FYPilot.SystemTest = {
         badge.textContent = cfg.text;
         if (detail) { detDiv.textContent = detail; detDiv.style.display = 'block'; }
     },
+    document.addEventListener("DOMContentLoaded", function () {
+        document.querySelectorAll("[data-auto-dismiss]").forEach(function (alertBox) {
+            const delay = parseInt(alertBox.getAttribute("data-auto-dismiss") || "2000", 10);
+
+            setTimeout(function () {
+                alertBox.style.transition = "opacity 0.35s ease, transform 0.35s ease";
+                alertBox.style.opacity = "0";
+                alertBox.style.transform = "translateY(-6px)";
+
+                setTimeout(function () {
+                    alertBox.remove();
+                }, 350);
+            }, delay);
+        });
+    });
 
     run: async function () {
         var btn = document.getElementById('run-btn');

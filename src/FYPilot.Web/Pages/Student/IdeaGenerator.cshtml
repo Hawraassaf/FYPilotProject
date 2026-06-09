@@ -5,320 +5,419 @@
     ViewData["Subtitle"] = "Discover validated FYP ideas tailored to your profile";
 }
 
-<div class="row g-4">
-    <div class="col-lg-4">
-        <div class="page-card p-4">
-            <h6 class="fw-bold mb-3">
-                <i class="bi bi-sliders me-2 text-primary"></i>Generation Settings
-            </h6>
+<div class="idea2-page">
 
-            @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
-            {
-                <div class="alert alert-success small">
-                    <i class="bi bi-check-circle me-1"></i>@Model.SuccessMessage
-                </div>
-            }
+    @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
+    {
+        <div class="alert alert-success idea2-alert">
+            <i class="bi bi-check-circle me-2"></i>
+            @Model.SuccessMessage
+        </div>
+    }
 
-            @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
-            {
-                <div class="alert alert-danger small">
-                    <i class="bi bi-exclamation-triangle me-1"></i>@Model.ErrorMessage
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div class="alert alert-danger idea2-alert">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            @Model.ErrorMessage
+        </div>
+    }
+
+    <div class="idea2-layout">
+
+        <section class="idea2-settings-card">
+            <div class="idea2-settings-header">
+                <div class="idea2-settings-icon">
+                    <i class="bi bi-stars"></i>
                 </div>
-            }
+
+                <div>
+                    <div class="idea2-kicker">Generation Settings</div>
+                    <h2>Build your idea brief</h2>
+                    <p>
+                        Keep the settings simple. FYPilot will combine these inputs with your assessed skills.
+                    </p>
+                </div>
+            </div>
 
             @if (!Model.HasAssessedSkills)
             {
-                <div class="alert alert-warning small">
-                    <div class="fw-semibold mb-1">Skill Assessment Required</div>
+                <div class="idea2-warning">
                     <div>
-                        Project ideas should be generated based on your assessed skills.
-                        Please complete your skill assessment first.
+                        <strong>Skill Assessment Required</strong>
+                        <span>Complete your skill assessment first so ideas match your real level.</span>
                     </div>
-                    <a href="/Student/SkillAssessment" class="btn btn-sm btn-outline-warning mt-2">
+
+                    <a href="/Student/SkillAssessment" class="btn idea2-outline-btn">
                         Go to Skill Assessment
                     </a>
                 </div>
             }
 
-            <form method="post">
+            <form method="post" class="idea2-settings-form">
                 @Html.AntiForgeryToken()
 
-                <div class="mb-3">
-                    <label class="form-label small fw-semibold">Major / Field</label>
-                    <input asp-for="Input.Major" class="form-control form-control-sm" placeholder="e.g. Computer Science" />
-                    <span asp-validation-for="Input.Major" class="text-danger small"></span>
-                    <div class="form-text">Loaded from your student profile.</div>
-                </div>
+                <div class="idea2-form-scroll">
 
-                <div class="mb-3">
-                    <label class="form-label small fw-semibold">Experience Level</label>
-                    <select asp-for="Input.ExperienceLevel" class="form-select form-select-sm">
-                        <option value="beginner">Beginner</option>
-                        <option value="intermediate">Intermediate</option>
-                        <option value="advanced">Advanced</option>
-                    </select>
-                    <span asp-validation-for="Input.ExperienceLevel" class="text-danger small"></span>
-                </div>
+                    <div class="idea2-field">
+                        <label>Major / Field</label>
+                        <input asp-for="Input.Major" class="form-control idea2-control" placeholder="e.g. Computer Science" />
+                        <span asp-validation-for="Input.Major" class="text-danger small"></span>
+                        <small>Loaded from your student profile.</small>
+                    </div>
 
-                <div class="mb-3">
-                    <label class="form-label small fw-semibold">Preferred Domain</label>
-                    <select asp-for="Input.PreferredDomain" class="form-select form-select-sm">
-                        <option value="General Software System">General Software System</option>
-                        <option value="Web Development">Web Development</option>
-                        <option value="AI/Data Science">AI/Data Science</option>
-                        <option value="Mobile Development">Mobile Development</option>
-                        <option value="Cybersecurity">Cybersecurity</option>
-                        <option value="Healthcare Technology">Healthcare Technology</option>
-                        <option value="FinTech">FinTech</option>
-                        <option value="Education Technology">Education Technology</option>
-                        <option value="IoT / Embedded">IoT / Embedded</option>
-                    </select>
-                    <span asp-validation-for="Input.PreferredDomain" class="text-danger small"></span>
-                </div>
+                    <div class="idea2-field">
+                        <label>Preferred Domain</label>
+                        <select asp-for="Input.PreferredDomain" class="form-select idea2-control">
+                            <option value="General Software System">General Software System</option>
+                            <option value="Web Development">Web Development</option>
+                            <option value="AI/Data Science">AI/Data Science</option>
+                            <option value="Mobile Development">Mobile Development</option>
+                            <option value="Cybersecurity">Cybersecurity</option>
+                            <option value="Healthcare Technology">Healthcare Technology</option>
+                            <option value="FinTech">FinTech</option>
+                            <option value="Education Technology">Education Technology</option>
+                            <option value="IoT / Embedded">IoT / Embedded</option>
+                        </select>
+                        <span asp-validation-for="Input.PreferredDomain" class="text-danger small"></span>
+                    </div>
 
-                <div class="mb-3">
-                    <label class="form-label small fw-semibold">Target Difficulty</label>
-                    <select asp-for="Input.TargetDifficulty" class="form-select form-select-sm">
-                        <option value="beginner">Beginner</option>
-                        <option value="intermediate">Intermediate</option>
-                        <option value="advanced">Advanced</option>
-                    </select>
-                    <span asp-validation-for="Input.TargetDifficulty" class="text-danger small"></span>
-                </div>
-
-                <div class="mb-3">
-                    <label class="form-label small fw-semibold">Hours per Week</label>
-                    <input asp-for="Input.AvailableHours" type="number" min="1" max="60" class="form-control form-control-sm" />
-                    <span asp-validation-for="Input.AvailableHours" class="text-danger small"></span>
-                </div>
-
-                <div class="mb-3">
-                    <label class="form-label small fw-semibold">Team Size</label>
-                    <select asp-for="Input.TeamSize" class="form-select form-select-sm">
-                        <option value="1">Solo</option>
-                        <option value="2">2 members</option>
-                        <option value="3">3 members</option>
-                        <option value="4">4 members</option>
-                        <option value="5">5 members</option>
-                        <option value="6">6 members</option>
-                    </select>
-                    <span asp-validation-for="Input.TeamSize" class="text-danger small"></span>
-                </div>
-
-                <div class="mb-3">
-                    <div class="small fw-semibold mb-2">Assessed Skills Used for Generation</div>
-
-                    @if (Model.AssessedSkills.Any())
-                    {
-                        <div class="d-flex flex-wrap gap-1">
-                            @foreach (var skill in Model.AssessedSkills)
-                            {
-                                <span class="badge bg-primary-subtle text-primary">
-                                    @skill.SkillName (@skill.Rating/5)
-                                </span>
-                            }
+                    <div class="idea2-two-cols">
+                        <div class="idea2-field">
+                            <label>Experience</label>
+                            <select asp-for="Input.ExperienceLevel" class="form-select idea2-control">
+                                <option value="beginner">Beginner</option>
+                                <option value="intermediate">Intermediate</option>
+                                <option value="advanced">Advanced</option>
+                            </select>
+                            <span asp-validation-for="Input.ExperienceLevel" class="text-danger small"></span>
                         </div>
 
-                        <a href="/Student/SkillAssessment" class="small d-inline-block mt-2">
-                            Update Skill Assessment
-                        </a>
-                    }
-                    else
-                    {
-                        <div class="text-muted small">
-                            No assessed skills found.
+                        <div class="idea2-field">
+                            <label>Difficulty</label>
+                            <select asp-for="Input.TargetDifficulty" class="form-select idea2-control">
+                                <option value="beginner">Beginner</option>
+                                <option value="intermediate">Intermediate</option>
+                                <option value="advanced">Advanced</option>
+                            </select>
+                            <span asp-validation-for="Input.TargetDifficulty" class="text-danger small"></span>
                         </div>
-                    }
+                    </div>
+
+                    <div class="idea2-two-cols">
+                        <div class="idea2-field">
+                            <label>Hours / Week</label>
+                            <input asp-for="Input.AvailableHours" type="number" min="1" max="60" class="form-control idea2-control" />
+                            <span asp-validation-for="Input.AvailableHours" class="text-danger small"></span>
+                        </div>
+
+                        <div class="idea2-field">
+                            <label>Team Size</label>
+                            <select asp-for="Input.TeamSize" class="form-select idea2-control">
+                                <option value="1">Solo</option>
+                                <option value="2">2 members</option>
+                                <option value="3">3 members</option>
+                                <option value="4">4 members</option>
+                                <option value="5">5 members</option>
+                                <option value="6">6 members</option>
+                            </select>
+                            <span asp-validation-for="Input.TeamSize" class="text-danger small"></span>
+                        </div>
+                    </div>
+
+                    <div class="idea2-skills-panel">
+                        <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+                            <label class="mb-0">Assessed Skills Used</label>
+
+                            <a href="/Student/SkillAssessment">
+                                Update
+                            </a>
+                        </div>
+
+                        @if (Model.AssessedSkills.Any())
+                        {
+                            <div class="idea2-skill-cloud">
+                                @foreach (var skill in Model.AssessedSkills.Take(12))
+                                {
+                                    <span>
+                                        @skill.SkillName
+                                        <b>@skill.Rating/5</b>
+                                    </span>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="idea2-empty-skills">
+                                No assessed skills found.
+                            </div>
+                        }
+                    </div>
                 </div>
 
-                <button type="submit" class="btn btn-primary w-100 fw-semibold" @(Model.HasAssessedSkills ? "" : "disabled")>
-                    <i class="bi bi-stars me-2"></i>Generate Ideas
-                </button>
+                <div class="idea2-generate-footer">
+                    <button type="submit" class="btn idea2-primary-btn w-100" @(Model.HasAssessedSkills ? "" : "disabled")>
+                        <i class="bi bi-magic me-2"></i>
+                        Generate Ideas
+                    </button>
 
-                <div class="small text-muted mt-2">
-                    AI generates 4 ideas. The page shows 2 at a time; use Shuffle to view the next group.
+                    <div class="idea2-small-note">
+                        Ideas are saved automatically after generation.
+                    </div>
                 </div>
             </form>
-        </div>
-    </div>
+        </section>
 
-    <div class="col-lg-8">
-        @if (Model.GeneratedIdeas.Any())
-        {
-            <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
-                <h6 class="fw-bold mb-0">Showing @Model.GeneratedIdeas.Count generated idea(s)</h6>
-
-                <div class="d-flex flex-wrap gap-2">
-                    <form method="post" asp-page-handler="Shuffle">
-                        @Html.AntiForgeryToken()
-                        <button type="submit" class="btn btn-sm btn-outline-secondary">
-                            <i class="bi bi-shuffle me-1"></i>Shuffle Ideas
-                        </button>
-                    </form>
-
-                    <form method="post" asp-page-handler="Regenerate">
-                        @Html.AntiForgeryToken()
-                        <button type="submit" class="btn btn-sm btn-warning">
-                            <i class="bi bi-arrow-clockwise me-1"></i>Regenerate Ideas
-                        </button>
-                    </form>
-
-                    <a href="/Student/IdeaComparison" class="btn btn-sm btn-outline-primary">
-                        <i class="bi bi-bar-chart-line me-1"></i>Compare Ideas
-                    </a>
-                </div>
-            </div>
-
-            @foreach (var idea in Model.GeneratedIdeas)
+        <section class="idea2-results-card">
+            @if (Model.GeneratedIdeas.Any())
             {
-                var requiresDataset =
-                    !string.IsNullOrWhiteSpace(idea.DatasetNeeded) &&
-                    !idea.DatasetNeeded.Equals("None", StringComparison.OrdinalIgnoreCase);
-
-                <div class="page-card p-4 mb-3">
-                    <div class="d-flex align-items-start justify-content-between gap-2 mb-3">
-                        <div>
-                            <h6 class="fw-bold mb-1">@idea.Title</h6>
-                            <div class="d-flex flex-wrap gap-1">
-                                <span class="badge bg-primary-subtle text-primary">@idea.Domain</span>
-                                <span class="badge bg-warning-subtle text-warning">@idea.DifficultyLevel</span>
-                                <span class="badge bg-secondary-subtle text-secondary">@idea.ExpectedDurationWeeks weeks</span>
-
-                                @if (requiresDataset)
-                                {
-                                    <span class="badge bg-info-subtle text-info">Dataset Needed</span>
-                                }
-                                else
-                                {
-                                    <span class="badge bg-success-subtle text-success">No Dataset Required</span>
-                                }
-
-                                @if (idea.IsSelected)
-                                {
-                                    <span class="badge bg-success">Selected</span>
-                                }
-                            </div>
-                        </div>
-
-                        <div class="text-end flex-shrink-0">
-                            <div class="score-ring @(idea.FeasibilityScore >= 70 ? "text-success" : idea.FeasibilityScore >= 50 ? "text-warning" : "text-danger")" style="width:56px;height:56px;font-size:1rem">
-                                @idea.FeasibilityScore%
-                            </div>
-                        </div>
+                <div class="idea2-results-header">
+                    <div>
+                        <div class="idea2-kicker">Generated Ideas</div>
+                        <h2>Choose an idea to expand</h2>
+                        <p>Click the arrow card to open details. Opening another idea closes the current one.</p>
                     </div>
 
-                    <p class="text-muted small mb-3">@idea.ProblemStatement</p>
+                    <div class="idea2-toolbar">
+                        <form method="post" asp-page-handler="Shuffle">
+                            @Html.AntiForgeryToken()
+                            <button type="submit" class="btn idea2-outline-btn">
+                                <i class="bi bi-shuffle me-1"></i>
+                                Shuffle
+                            </button>
+                        </form>
 
-                    <div class="row g-2 mb-3">
-                        <div class="col-md-6">
-                            <div class="small text-muted fw-semibold mb-1">Required Skills</div>
-                            <div class="small">@idea.RequiredSkills</div>
-                        </div>
+                        <form method="post" asp-page-handler="Regenerate">
+                            @Html.AntiForgeryToken()
+                            <button type="submit" class="btn idea2-soft-btn">
+                                <i class="bi bi-arrow-clockwise me-1"></i>
+                                Regenerate
+                            </button>
+                        </form>
 
-                        <div class="col-md-6">
-                            <div class="small text-muted fw-semibold mb-1">Missing Skills</div>
-                            <div class="small">
-                                @(string.IsNullOrWhiteSpace(idea.MissingSkills) ? "None" : idea.MissingSkills)
+                        <a href="/Student/IdeaComparison" class="btn idea2-outline-btn">
+                            <i class="bi bi-bar-chart-line me-1"></i>
+                            Compare
+                        </a>
+                    </div>
+                </div>
+
+                <div class="idea2-accordion" id="ideaAccordion">
+                    @for (var i = 0; i < Model.GeneratedIdeas.Count; i++)
+                    {
+                        var idea = Model.GeneratedIdeas[i];
+
+                        var requiresDataset =
+                            !string.IsNullOrWhiteSpace(idea.DatasetNeeded) &&
+                            !idea.DatasetNeeded.Equals("None", StringComparison.OrdinalIgnoreCase);
+
+                        var collapseId = $"idea-details-{idea.Id}";
+                        var headingId = $"idea-heading-{idea.Id}";
+                        var isOpen = i == 0;
+
+                        <article class="idea2-idea-item">
+                            <button class="idea2-idea-summary @(isOpen ? "" : "collapsed")"
+                                    type="button"
+                                    id="@headingId"
+                                    data-bs-toggle="collapse"
+                                    data-bs-target="#@collapseId"
+                                    aria-expanded="@(isOpen ? "true" : "false")"
+                                    aria-controls="@collapseId">
+
+                                <div class="idea2-idea-number">
+                                    0@(i + 1)
+                                </div>
+
+                                <div class="idea2-idea-title-area">
+                                    <div class="idea2-idea-tags">
+                                        <span>@idea.Domain</span>
+                                        <span class="text-capitalize">@idea.DifficultyLevel</span>
+                                        <span>@idea.ExpectedDurationWeeks weeks</span>
+
+                                        @if (idea.IsSelected)
+                                        {
+                                            <span class="selected">Selected</span>
+                                        }
+                                    </div>
+
+                                    <h3>@idea.Title</h3>
+
+                                    <p>
+                                        @(string.IsNullOrWhiteSpace(idea.ProblemStatement)
+                                            ? "Open this idea to review its full details."
+                                            : idea.ProblemStatement)
+                                    </p>
+                                </div>
+
+                                <div class="idea2-score-mini">
+                                    <strong>@idea.FeasibilityScore%</strong>
+                                    <span>Feasible</span>
+                                </div>
+
+                                <div class="idea2-arrow">
+                                    <i class="bi bi-chevron-down"></i>
+                                </div>
+                            </button>
+
+                            <div id="@collapseId"
+                                 class="collapse @(isOpen ? "show" : "")"
+                                 aria-labelledby="@headingId"
+                                 data-bs-parent="#ideaAccordion">
+
+                                <div class="idea2-details">
+
+                                    <div class="idea2-detail-grid">
+                                        <div class="idea2-detail-block wide">
+                                            <label>Problem Statement</label>
+                                            <p>@idea.ProblemStatement</p>
+                                        </div>
+
+                                        <div class="idea2-detail-block">
+                                            <label>Target Users</label>
+                                            <p>@idea.TargetUsers</p>
+                                        </div>
+
+                                        <div class="idea2-detail-block">
+                                            <label>Why Useful</label>
+                                            <p>@idea.WhyUseful</p>
+                                        </div>
+
+                                        <div class="idea2-detail-block">
+                                            <label>Required Skills</label>
+                                            <p>@idea.RequiredSkills</p>
+                                        </div>
+
+                                        <div class="idea2-detail-block">
+                                            <label>Missing Skills</label>
+                                            <p>@(string.IsNullOrWhiteSpace(idea.MissingSkills) ? "None" : idea.MissingSkills)</p>
+                                        </div>
+
+                                        <div class="idea2-detail-block wide">
+                                            <label>Technologies</label>
+                                            <p>@idea.RequiredTechnologies</p>
+                                        </div>
+
+                                        <div class="idea2-detail-block wide">
+                                            <label>Lebanese Market Relevance</label>
+                                            <p>@idea.LebaneseMarketRelevance</p>
+                                        </div>
+
+                                        <div class="idea2-detail-block">
+                                            <label>Dataset Requirement</label>
+                                            <p>@(requiresDataset ? idea.DatasetNeeded : "No dataset is required for this idea.")</p>
+                                        </div>
+
+                                        <div class="idea2-detail-block">
+                                            <label>Final Deliverables</label>
+                                            <p>@idea.FinalDeliverables</p>
+                                        </div>
+                                    </div>
+
+                                    <div class="idea2-score-row">
+                                        <div>
+                                            <span>Innovation</span>
+                                            <strong>@idea.InnovationScore%</strong>
+                                            <div class="idea2-progress">
+                                                <div style="width:@(idea.InnovationScore)%"></div>
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <span>Market Demand</span>
+                                            <strong>@idea.MarketDemandScore%</strong>
+                                            <div class="idea2-progress">
+                                                <div style="width:@(idea.MarketDemandScore)%"></div>
+                                            </div>
+                                        </div>
+
+                                        <div>
+                                            <span>Feasibility</span>
+                                            <strong>@idea.FeasibilityScore%</strong>
+                                            <div class="idea2-progress">
+                                                <div style="width:@(idea.FeasibilityScore)%"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <form method="post" asp-page-handler="Select" class="idea2-detail-actions">
+                                        @Html.AntiForgeryToken()
+                                        <input type="hidden" name="ideaId" value="@idea.Id" />
+
+                                        <a href="/Student/ProjectDetails?id=@idea.Id" class="btn idea2-outline-btn">
+                                            <i class="bi bi-eye me-1"></i>
+                                            Details
+                                        </a>
+
+                                        <a href="/Student/ProjectDNA?ideaId=@idea.Id" class="btn idea2-outline-btn">
+                                            <i class="bi bi-diagram-3 me-1"></i>
+                                            DNA
+                                        </a>
+
+                                        <a href="/Student/Roadmap?ideaId=@idea.Id" class="btn idea2-outline-btn">
+                                            <i class="bi bi-map me-1"></i>
+                                            Roadmap
+                                        </a>
+
+                                        @if (!idea.IsSelected)
+                                        {
+                                            <button type="submit" class="btn idea2-primary-btn ms-auto">
+                                                <i class="bi bi-check2-circle me-1"></i>
+                                                Select Idea
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <span class="idea2-selected ms-auto">
+                                                <i class="bi bi-check-circle me-1"></i>
+                                                Selected
+                                            </span>
+                                        }
+                                    </form>
+                                </div>
                             </div>
-                        </div>
-
-                        <div class="col-md-12">
-                            <div class="small text-muted fw-semibold mb-1">Technologies</div>
-                            <div class="small">@idea.RequiredTechnologies</div>
-                        </div>
-                    </div>
-
-                    <div class="mb-3">
-                        <div class="small text-muted fw-semibold mb-1">Lebanese Market Relevance</div>
-                        <div class="small">@idea.LebaneseMarketRelevance</div>
-                    </div>
-
-                    <div class="mb-3">
-                        <div class="small text-muted fw-semibold mb-1">Dataset Requirement</div>
-                        <div class="small">
-                            @(requiresDataset ? idea.DatasetNeeded : "No dataset is required for this idea.")
-                        </div>
-                    </div>
-
-                    <div class="mb-3">
-                        <div class="small text-muted fw-semibold mb-1">Final Deliverables</div>
-                        <div class="small">@idea.FinalDeliverables</div>
-                    </div>
-
-                    <div class="row g-2 small mb-3">
-                        <div class="col-4">
-                            <span class="text-muted">Innovation</span>
-                            <div class="progress mt-1" style="height:4px">
-                                <div class="progress-bar bg-info" style="width:@(idea.InnovationScore)%"></div>
-                            </div>
-                            <div class="small text-muted mt-1">@idea.InnovationScore%</div>
-                        </div>
-
-                        <div class="col-4">
-                            <span class="text-muted">Market Demand</span>
-                            <div class="progress mt-1" style="height:4px">
-                                <div class="progress-bar bg-success" style="width:@(idea.MarketDemandScore)%"></div>
-                            </div>
-                            <div class="small text-muted mt-1">@idea.MarketDemandScore%</div>
-                        </div>
-
-                        <div class="col-4">
-                            <span class="text-muted">Feasibility</span>
-                            <div class="progress mt-1" style="height:4px">
-                                <div class="progress-bar bg-warning" style="width:@(idea.FeasibilityScore)%"></div>
-                            </div>
-                            <div class="small text-muted mt-1">@idea.FeasibilityScore%</div>
-                        </div>
-                    </div>
-
-                    <form method="post" asp-page-handler="Select">
-                        @Html.AntiForgeryToken()
-                        <input type="hidden" name="ideaId" value="@idea.Id" />
-
-                        <div class="d-flex flex-wrap gap-2">
-                            <a href="/Student/ProjectDetails?id=@idea.Id" class="btn btn-sm btn-outline-secondary">
-                                <i class="bi bi-eye me-1"></i>View Details
-                            </a>
-
-                            <a href="/Student/ProjectDNA?ideaId=@idea.Id" class="btn btn-sm btn-outline-primary">
-                                <i class="bi bi-diagram-3 me-1"></i>DNA Analysis
-                            </a>
-
-                            <a href="/Student/Roadmap?ideaId=@idea.Id" class="btn btn-sm btn-outline-success">
-                                <i class="bi bi-map me-1"></i>Generate Roadmap
-                            </a>
-
-                            @if (!idea.IsSelected)
-                            {
-                                <button type="submit" class="btn btn-sm btn-primary ms-auto">
-                                    <i class="bi bi-check2-circle me-1"></i>Select This Idea
-                                </button>
-                            }
-                            else
-                            {
-                                <span class="badge bg-success d-flex align-items-center ms-auto">
-                                    <i class="bi bi-check-circle me-1"></i>Selected
-                                </span>
-                            }
-                        </div>
-                    </form>
+                        </article>
+                    }
                 </div>
             }
-        }
-        else
-        {
-            <div class="page-card p-5 text-center">
-                <i class="bi bi-stars display-3 text-muted"></i>
-                <h5 class="mt-3 text-muted">Generate Your First Ideas</h5>
-                <p class="text-muted small">
-                    Complete your profile and skill assessment, then click
-                    <strong>Generate Ideas</strong> to receive project recommendations tailored to your skills and goals.
-                </p>
-            </div>
-        }
+            else
+            {
+                <div class="idea2-empty-state">
+                    <div class="idea2-empty-icon">
+                        <i class="bi bi-lightbulb"></i>
+                    </div>
+
+                    <h2>Generate your first FYP ideas</h2>
+
+                    <p>
+                        Your generated ideas will appear here as clean expandable cards.
+                        Each idea opens in the same page without moving you away.
+                    </p>
+
+                    <div class="idea2-empty-hint">
+                        <span>01</span> Set your preferences
+                        <span>02</span> Confirm your assessed skills
+                        <span>03</span> Generate ideas
+                    </div>
+                </div>
+            }
+        </section>
     </div>
 </div>
 
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />
+
+    <script>
+        setTimeout(function () {
+            document.querySelectorAll(".idea2-alert").forEach(function (message) {
+                message.style.transition = "opacity 0.35s ease, transform 0.35s ease";
+                message.style.opacity = "0";
+                message.style.transform = "translateY(-6px)";
+
+                setTimeout(function () {
+                    message.remove();
+                }, 350);
+            });
+        }, 2500);
+    </script>
 }

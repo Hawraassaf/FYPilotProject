@@ -4,59 +4,1156 @@
     Layout = null;
     ViewData["Title"] = "FYPilot — Academic Intelligence System";
 }
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FYPilot — Academic Intelligence System</title>
+
+    <script type="application/ld+json">
+            {
+                "@@context": "https://schema.org",
+                "@@type": "SoftwareApplication",
+                "name": "FYPilot",
+                "applicationCategory": "EducationApplication",
+                "description": "AI-powered final year project planning platform for students, supervisors, and administrators.",
+                "url": "/"
+            }
+    </script>
+
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
-</head>
-<body>
-<div class="auth-wrapper" style="background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 60%,#0f172a 100%)">
-    <div class="text-center text-white px-4" style="max-width:680px">
-        <div class="mb-4">
-            <div style="width:72px;height:72px;background:rgba(255,255,255,0.15);border-radius:16px;display:inline-flex;align-items:center;justify-content:center;font-size:2rem">
-                🎓
-            </div>
-        </div>
-        <h1 class="display-4 fw-bold mb-2">FYPilot</h1>
-        <p class="lead mb-1 opacity-75">An Intelligent Academic Project Intelligence System</p>
-        <p class="mb-5 opacity-50 small">for FYP Validation, Feasibility Analysis, and Execution Planning</p>
 
-        <div class="row g-3 mb-5">
-            @foreach (var (icon, title, desc) in new[] {
-                ("lightning-charge", "AI Idea Generation", "Generate validated FYP ideas based on your skills"),
-                ("shield-check",     "Feasibility Engine", "Score ideas across 8 dimensions with ML models"),
-                ("diagram-3",        "Project DNA",        "Visualize the technical profile of any project"),
-                ("map",              "Smart Roadmap",      "Evidence-based execution plans with risk alarms"),
-            })
-            {
-                <div class="col-6">
-                    <div class="p-3 rounded-3" style="background:rgba(255,255,255,0.1)">
-                        <i class="bi bi-@icon fs-4 mb-2 d-block"></i>
-                        <div class="fw-semibold small">@title</div>
-                        <div class="opacity-50" style="font-size:0.75rem">@desc</div>
+    <style>
+            :root {
+                --navy: #0f172a;
+                --navy-dark: #0b1426;
+                --navy-medium: #17345f;
+                --navy-light: #245a9b;
+                --cream-bg: #fff8ed;
+                --cream-soft: #fff2df;
+                --cream-light: #fffaf3;
+                --cream-border: #eadbc5;
+                --page-text: #14243e;
+                --page-muted: #5f6f83;
+                --soft: rgba(255,255,255,0.76);
+                --muted: rgba(255,255,255,0.58);
+                --navy-gradient: linear-gradient(135deg, #0f172a 0%, #17345f 55%, #245a9b 100%);
+                --navy-gradient-soft: linear-gradient(135deg, #162a4a 0%, #1e477f 100%);
+            }
+
+            * {
+                box-sizing: border-box;
+            }
+
+            html {
+                scroll-behavior: smooth;
+            }
+
+            body {
+                margin: 0;
+                min-height: 100vh;
+                overflow-x: hidden;
+                color: var(--page-text);
+                font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+                background: var(--cream-bg);
+            }
+
+            .landing-shell {
+                position: relative;
+                min-height: 100vh;
+                overflow: hidden;
+            }
+
+            .content-layer {
+                position: relative;
+                z-index: 2;
+            }
+
+            /* Navbar */
+
+            .landing-navbar {
+                position: sticky;
+                top: 0;
+                z-index: 20;
+                padding: 1rem 0;
+                backdrop-filter: blur(18px);
+            }
+
+            .nav-frame {
+                position: relative;
+                min-height: 74px;
+                padding: 0.75rem 0.9rem;
+                border-radius: 24px;
+                background: var(--navy-gradient);
+                border: 1px solid rgba(15,23,42,0.16);
+                box-shadow: 0 18px 55px rgba(15,23,42,0.20);
+            }
+
+            .nav-logo-left {
+                position: relative;
+                z-index: 3;
+            }
+
+            .nav-title-center {
+                position: absolute;
+                left: 50%;
+                top: 50%;
+                z-index: 2;
+                text-align: center;
+                transform: translate(-50%, -50%);
+            }
+
+            .nav-actions {
+                position: relative;
+                z-index: 3;
+            }
+
+            .brand-mark {
+                width: 52px;
+                height: 52px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                overflow: hidden;
+                flex-shrink: 0;
+                border-radius: 16px;
+                background: rgba(255,248,237,0.14);
+                border: 1px solid rgba(255,248,237,0.20);
+            }
+
+                .brand-mark img {
+                    width: 42px;
+                    height: 42px;
+                    object-fit: contain;
+                }
+
+            .nav-brand-text {
+                line-height: 1.1;
+                white-space: nowrap;
+            }
+
+            .btn-glass {
+                color: var(--cream-light);
+                border: 1px solid rgba(255,248,237,0.42);
+                background: rgba(255,248,237,0.08);
+                border-radius: 14px;
+            }
+
+                .btn-glass:hover {
+                    color: var(--navy);
+                    background: var(--cream-light);
+                    border-color: var(--cream-light);
+                }
+
+            .nav-actions .btn-light {
+                color: var(--navy);
+                background: var(--cream-light);
+                border-color: var(--cream-light);
+                border-radius: 14px;
+            }
+
+                .nav-actions .btn-light:hover {
+                    color: var(--navy);
+                    background: #ffffff;
+                    border-color: #ffffff;
+                }
+
+            /* Hero */
+
+            .hero-section {
+                padding: 5rem 0 3.8rem;
+            }
+
+            .hero-badge {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.5rem;
+                padding: 0.52rem 0.88rem;
+                margin-bottom: 1.1rem;
+                border-radius: 999px;
+                color: var(--cream-light);
+                background: var(--navy-gradient-soft);
+                border: 1px solid rgba(15,23,42,0.12);
+                box-shadow: 0 10px 28px rgba(15,23,42,0.12);
+                font-size: 0.88rem;
+            }
+
+            .hero-title {
+                max-width: 820px;
+                color: var(--navy);
+                font-size: clamp(2.8rem, 6.3vw, 5.8rem);
+                font-weight: 850;
+                letter-spacing: -0.065em;
+                line-height: 0.96;
+            }
+
+                .hero-title span {
+                    background: linear-gradient(90deg, #0f172a, #1e3a5f, #2563eb);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                }
+
+            .hero-subtitle {
+                max-width: 720px;
+                color: var(--page-muted);
+                line-height: 1.8;
+                font-size: 1.12rem;
+            }
+
+            /* Product Preview */
+
+            .cockpit-card {
+                padding: 1.25rem;
+                border-radius: 30px;
+                color: var(--cream-light);
+                background: var(--navy-gradient);
+                border: 1px solid rgba(15,23,42,0.14);
+                box-shadow: 0 32px 90px rgba(15,23,42,0.24);
+            }
+
+                .cockpit-card h4 {
+                    color: var(--cream-light);
+                }
+
+            .cockpit-inner {
+                padding: 1.1rem;
+                color: var(--page-text);
+                border-radius: 24px;
+                background: var(--cream-light);
+                border: 1px solid var(--cream-border);
+            }
+
+            .mini-sidebar {
+                height: 100%;
+                padding: 1rem;
+                color: #fff;
+                border-radius: 18px;
+                background: var(--navy-gradient-soft);
+            }
+
+            .mini-sidebar-item {
+                display: flex;
+                align-items: center;
+                gap: 0.55rem;
+                padding: 0.62rem 0.7rem;
+                margin-bottom: 0.25rem;
+                border-radius: 12px;
+                color: rgba(255,255,255,0.78);
+                font-size: 0.78rem;
+            }
+
+                .mini-sidebar-item.active {
+                    color: #fff;
+                    font-weight: 700;
+                    background: rgba(255,255,255,0.18);
+                }
+
+            .mini-card {
+                padding: 0.9rem;
+                border-radius: 16px;
+                background: #ffffff;
+                border: 1px solid #eadfce;
+                box-shadow: 0 7px 20px rgba(15,23,42,0.06);
+            }
+
+            .mini-value {
+                font-size: 1.5rem;
+                font-weight: 850;
+                line-height: 1;
+            }
+
+            .idea-line {
+                display: flex;
+                align-items: center;
+                gap: 0.75rem;
+                padding: 0.65rem 0;
+                border-bottom: 1px solid #f0e6d8;
+            }
+
+                .idea-line:last-child {
+                    border-bottom: 0;
+                }
+
+            .idea-icon {
+                width: 36px;
+                height: 36px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-shrink: 0;
+                border-radius: 12px;
+                color: #1e3a5f;
+                background: #edf3fb;
+            }
+
+            .score-pill {
+                padding: 0.28rem 0.6rem;
+                border-radius: 999px;
+                color: #0f5132;
+                background: #dcfce7;
+                font-size: 0.72rem;
+                font-weight: 800;
+            }
+
+            .progress-track {
+                height: 7px;
+                overflow: hidden;
+                border-radius: 999px;
+                background: #e8dfd3;
+            }
+
+            .progress-fill {
+                width: 72%;
+                height: 100%;
+                border-radius: 999px;
+                background: var(--navy-gradient-soft);
+            }
+
+            /* General Sections */
+
+            .section-block {
+                padding: 4.5rem 0 0;
+            }
+
+            .section-kicker {
+                color: #1e4f8a;
+                text-transform: uppercase;
+                font-size: 0.76rem;
+                letter-spacing: 0.14em;
+                font-weight: 850;
+            }
+
+            .section-title {
+                color: var(--navy);
+                font-weight: 850;
+                letter-spacing: -0.045em;
+            }
+
+            .section-text {
+                color: var(--page-muted);
+                line-height: 1.7;
+            }
+
+            /* Module Slider */
+
+            .module-slider-shell {
+                position: relative;
+                overflow: hidden;
+                padding: 1.4rem 0;
+                border-radius: 26px;
+                background: var(--navy-gradient);
+                border: 1px solid rgba(15,23,42,0.14);
+                box-shadow: 0 18px 45px rgba(15,23,42,0.20);
+            }
+
+                .module-slider-shell::before,
+                .module-slider-shell::after {
+                    content: "";
+                    position: absolute;
+                    top: 0;
+                    width: 110px;
+                    height: 100%;
+                    z-index: 2;
+                    pointer-events: none;
+                }
+
+                .module-slider-shell::before {
+                    left: 0;
+                    background: linear-gradient(90deg, #0f172a, transparent);
+                }
+
+                .module-slider-shell::after {
+                    right: 0;
+                    background: linear-gradient(270deg, #245a9b, transparent);
+                }
+
+            .module-track {
+                display: flex;
+                align-items: center;
+                width: max-content;
+                gap: 2rem;
+                animation: moduleMarquee 28s linear infinite;
+            }
+
+            .module-slider-shell:hover .module-track {
+                animation-play-state: paused;
+            }
+
+            .module-word {
+                color: var(--cream-light);
+                font-size: 1rem;
+                font-weight: 800;
+                white-space: nowrap;
+                letter-spacing: 0.01em;
+            }
+
+            .module-dot {
+                color: var(--cream-light);
+                opacity: 0.68;
+                font-size: 1.4rem;
+                line-height: 1;
+            }
+
+            @@keyframes moduleMarquee {
+                from {
+                    transform: translateX(0);
+                }
+
+                to {
+                    transform: translateX(-50%);
+                }
+            }
+
+            /* Workflow */
+
+            .workflow-panel {
+                padding: 1.5rem;
+                border-radius: 28px;
+                background: rgba(15,23,42,0.04);
+                border: 1px solid rgba(15,23,42,0.10);
+            }
+
+            .workflow-step {
+                height: 100%;
+                padding: 1.1rem;
+                color: var(--cream-light);
+                border-radius: 18px;
+                background: var(--navy-gradient-soft);
+                border: 1px solid rgba(15,23,42,0.12);
+                box-shadow: 0 12px 28px rgba(15,23,42,0.14);
+            }
+
+                .workflow-step .fw-bold {
+                    color: var(--cream-light);
+                }
+
+                .workflow-step .small {
+                    color: rgba(255,248,237,0.72) !important;
+                    line-height: 1.55;
+                }
+
+            .step-number {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                padding: 0.25rem 0.6rem;
+                margin-bottom: 0.65rem;
+                border-radius: 999px;
+                color: var(--navy);
+                background: var(--cream-light);
+                font-size: 0.72rem;
+                font-weight: 850;
+                letter-spacing: 0.1em;
+            }
+
+            /* Minimal Role Design */
+
+            .roles-stage {
+                padding: 1.5rem 0 0;
+            }
+
+            .role-node {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 1.1rem;
+                text-align: center;
+            }
+
+            .role-node-middle {
+                transform: translateY(-18px);
+            }
+
+            .role-orb {
+                position: relative;
+                width: 126px;
+                height: 126px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 50%;
+                color: var(--cream-light);
+                background: var(--navy-gradient-soft);
+                border: 1px solid rgba(15,23,42,0.12);
+                box-shadow: 0 20px 45px rgba(15,23,42,0.18);
+                transition: transform 0.22s ease, box-shadow 0.22s ease;
+            }
+
+                .role-orb::before {
+                    content: "";
+                    position: absolute;
+                    inset: 10px;
+                    border-radius: 50%;
+                    border: 1px solid rgba(255,248,237,0.16);
+                }
+
+                .role-orb::after {
+                    content: "";
+                    position: absolute;
+                    inset: -9px;
+                    border-radius: 50%;
+                    border: 1px dashed rgba(30,71,127,0.28);
+                }
+
+                .role-orb:hover {
+                    transform: translateY(-6px);
+                    box-shadow: 0 26px 55px rgba(15,23,42,0.24);
+                }
+
+                .role-orb i {
+                    position: relative;
+                    z-index: 2;
+                    font-size: 2.2rem;
+                }
+
+            .role-label {
+                color: var(--navy);
+                font-size: 1.05rem;
+                font-weight: 850;
+                letter-spacing: -0.02em;
+            }
+
+            /* Simple Unique Footer */
+
+            .landing-footer {
+                padding: 5rem 0 2rem;
+                font-size: 0.9rem;
+            }
+
+            .footer-card {
+                position: relative;
+                overflow: hidden;
+                padding: 2.5rem;
+                border-radius: 32px;
+                color: var(--cream-light);
+                background: var(--navy-gradient);
+                border: 1px solid rgba(15,23,42,0.14);
+                box-shadow: 0 28px 80px rgba(15,23,42,0.24);
+            }
+
+                .footer-card::before {
+                    content: "";
+                    position: absolute;
+                    width: 330px;
+                    height: 330px;
+                    right: -155px;
+                    top: -205px;
+                    border-radius: 50%;
+                    background: rgba(255,248,237,0.07);
+                }
+
+                .footer-card::after {
+                    content: "";
+                    position: absolute;
+                    left: 2.5rem;
+                    right: 2.5rem;
+                    top: 0;
+                    height: 3px;
+                    border-radius: 999px;
+                    background: linear-gradient( 90deg, var(--cream-light), rgba(255,248,237,0.08) );
+                }
+
+            .footer-content {
+                position: relative;
+                z-index: 2;
+            }
+
+            .footer-brand-logo {
+                width: 56px;
+                height: 56px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                overflow: hidden;
+                flex-shrink: 0;
+                border-radius: 18px;
+                background: rgba(255,248,237,0.12);
+                border: 1px solid rgba(255,248,237,0.20);
+            }
+
+                .footer-brand-logo img {
+                    width: 44px;
+                    height: 44px;
+                    object-fit: contain;
+                }
+
+            .footer-brand-title {
+                color: var(--cream-light);
+                font-size: 1.4rem;
+                font-weight: 850;
+                line-height: 1;
+            }
+
+            .footer-brand-subtitle {
+                color: rgba(255,248,237,0.58);
+                font-size: 0.84rem;
+                margin-top: 0.3rem;
+            }
+
+            .footer-origin-label {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.45rem;
+                padding: 0.42rem 0.72rem;
+                margin-bottom: 1rem;
+                border-radius: 999px;
+                color: var(--cream-light);
+                background: rgba(255,248,237,0.10);
+                border: 1px solid rgba(255,248,237,0.16);
+                font-size: 0.78rem;
+                font-weight: 750;
+            }
+
+            .footer-title {
+                color: var(--cream-light);
+                font-size: 1.55rem;
+                font-weight: 850;
+                letter-spacing: -0.03em;
+                margin-bottom: 0.8rem;
+            }
+
+            .footer-text {
+                max-width: 620px;
+                color: rgba(255,248,237,0.70);
+                line-height: 1.75;
+                margin-bottom: 0;
+            }
+
+            .footer-quote {
+                position: relative;
+                padding: 1.4rem 1.5rem 1.4rem 1.8rem;
+                border-radius: 22px;
+                color: rgba(255,248,237,0.82);
+                background: rgba(255,248,237,0.075);
+                border: 1px solid rgba(255,248,237,0.12);
+                line-height: 1.7;
+            }
+
+                .footer-quote::before {
+                    content: "";
+                    position: absolute;
+                    left: 0;
+                    top: 1rem;
+                    bottom: 1rem;
+                    width: 4px;
+                    border-radius: 999px;
+                    background: var(--cream-light);
+                }
+
+            .footer-quote-icon {
+                color: var(--cream-light);
+                font-size: 1.35rem;
+                margin-bottom: 0.7rem;
+            }
+
+            .footer-signature {
+                margin-top: 0.8rem;
+                color: rgba(255,248,237,0.52);
+                font-size: 0.8rem;
+                font-weight: 700;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+            }
+
+            .footer-bottom {
+                position: relative;
+                z-index: 2;
+                margin-top: 2rem;
+                padding-top: 1rem;
+                color: rgba(255,248,237,0.48);
+                border-top: 1px solid rgba(255,248,237,0.12);
+            }
+
+            .footer-stats {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 1px;
+                background: rgba(255,248,237,0.08);
+                border-radius: 14px;
+                overflow: hidden;
+                border: 1px solid rgba(255,248,237,0.08);
+            }
+
+            .footer-stat {
+                background: rgba(255,248,237,0.04);
+                padding: 1rem 1.1rem;
+                display: flex;
+                flex-direction: column;
+                gap: 3px;
+            }
+
+            .footer-stat-num {
+                font-size: 1.2rem;
+                font-weight: 800;
+                color: var(--cream-light);
+                line-height: 1;
+            }
+
+            .footer-stat-label {
+                font-size: 0.72rem;
+                color: rgba(255,248,237,0.45);
+                line-height: 1.3;
+            }
+
+            .footer-dot {
+                display: inline-block;
+                width: 3px;
+                height: 3px;
+                border-radius: 50%;
+                background: rgba(255,248,237,0.30);
+                vertical-align: middle;
+                margin: 0 6px;
+            }
+            /* Responsive */
+
+            @@media (max-width: 991px) {
+                .hero-section {
+                    padding-top: 3rem;
+                }
+
+                .cockpit-card {
+                    margin-top: 2rem;
+                }
+
+                .mini-sidebar {
+                    display: none;
+                }
+
+                .nav-title-center {
+                    position: static;
+                    text-align: left;
+                    transform: none;
+                }
+
+                .nav-frame {
+                    gap: 1rem;
+                }
+
+                .role-node-middle {
+                    transform: none;
+                }
+            }
+
+            @@media (max-width: 575px) {
+                .brand-mark {
+                    width: 44px;
+                    height: 44px;
+                }
+
+                    .brand-mark img {
+                        width: 35px;
+                        height: 35px;
+                    }
+
+                .hero-title {
+                    font-size: 2.65rem;
+                }
+
+                .landing-navbar .btn {
+                    padding-left: 0.72rem;
+                    padding-right: 0.72rem;
+                    font-size: 0.86rem;
+                }
+
+                .nav-brand-text .small {
+                    display: none;
+                }
+
+                .module-word {
+                    font-size: 0.92rem;
+                }
+
+                .footer-card {
+                    padding: 1.4rem;
+                }
+
+                    .footer-card::after {
+                        left: 1.4rem;
+                        right: 1.4rem;
+                    }
+            }
+    </style>
+</head>
+
+<body>
+    <div class="landing-shell">
+        <div class="content-layer">
+            <nav class="landing-navbar">
+                <div class="container">
+                    <div class="nav-frame d-flex align-items-center justify-content-between">
+                        <a href="/" class="nav-logo-left text-white text-decoration-none">
+                            <div class="brand-mark">
+                                <img src="/image/FYPilot_logo.png" alt="FYPilot Logo" />
+                            </div>
+                        </a>
+
+                        <a href="/" class="nav-title-center text-white text-decoration-none">
+                            <div class="nav-brand-text">
+                                <div class="fw-bold fs-4 lh-1">FYPilot</div>
+                                <div class="small" style="color:var(--muted)">Academic Intelligence System</div>
+                            </div>
+                        </a>
+
+                        <div class="nav-actions d-flex align-items-center gap-2">
+                            <a href="/Account/Login" class="btn btn-glass px-3">
+                                <i class="bi bi-box-arrow-in-right me-1"></i>Login
+                            </a>
+
+                            <a href="/Account/Register" class="btn btn-light px-3 fw-semibold">
+                                <i class="bi bi-person-plus me-1"></i>Register
+                            </a>
+                        </div>
                     </div>
                 </div>
-            }
-        </div>
+            </nav>
 
-        <div class="d-flex gap-3 justify-content-center">
-            <a href="/Account/Login" class="btn btn-light btn-lg px-4 fw-semibold">
-                <i class="bi bi-box-arrow-in-right me-2"></i>Sign In
-            </a>
-            <a href="/Account/Register" class="btn btn-outline-light btn-lg px-4">
-                <i class="bi bi-person-plus me-2"></i>Register
-            </a>
-        </div>
-        <div class="mt-4 opacity-50 small">
-            <a href="/SystemTest" class="text-white text-decoration-none"><i class="bi bi-cpu me-1"></i>System Status</a>
+            <main>
+                <section class="hero-section">
+                    <div class="container">
+                        <div class="row align-items-center g-5">
+                            <div class="col-lg-6">
+                                <div class="hero-badge">
+                                    <i class="bi bi-stars"></i>
+                                    AI-powered final year project planning
+                                </div>
+
+                                <h1 class="hero-title mb-4">
+                                    From skills to a
+                                    <span>project-ready FYP.</span>
+                                </h1>
+
+                                <p class="hero-subtitle mb-0">
+                                    FYPilot helps students turn their skills and project preferences into realistic final year project ideas.
+                                    It supports idea generation, feasibility scoring, comparison, and roadmap planning in one structured academic workflow.
+                                </p>
+                            </div>
+
+                            <div class="col-lg-6">
+                                <div class="cockpit-card">
+                                    <div class="d-flex align-items-center justify-content-between mb-3">
+                                        <div>
+                                            <div class="small text-uppercase fw-semibold" style="color:var(--muted)">
+                                                Product Preview
+                                            </div>
+                                            <h4 class="fw-bold mb-0">FYP Planning Cockpit</h4>
+                                        </div>
+
+                                        <div class="brand-mark">
+                                            <img src="/image/FYPilot_logo.png" alt="FYPilot Logo" />
+                                        </div>
+                                    </div>
+
+                                    <div class="cockpit-inner">
+                                        <div class="row g-3">
+                                            <div class="col-md-4">
+                                                <div class="mini-sidebar">
+                                                    <div class="mini-sidebar-item active">
+                                                        <i class="bi bi-grid"></i>Dashboard
+                                                    </div>
+
+                                                    <div class="mini-sidebar-item">
+                                                        <i class="bi bi-lightning-charge"></i>Skills
+                                                    </div>
+
+                                                    <div class="mini-sidebar-item">
+                                                        <i class="bi bi-stars"></i>Ideas
+                                                    </div>
+
+                                                    <div class="mini-sidebar-item">
+                                                        <i class="bi bi-columns-gap"></i>Compare
+                                                    </div>
+
+                                                    <div class="mini-sidebar-item">
+                                                        <i class="bi bi-map"></i>Roadmap
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div class="col-md-8">
+                                                <div class="d-flex align-items-start justify-content-between mb-3">
+                                                    <div>
+                                                        <div class="fw-bold">Student Dashboard</div>
+                                                        <div class="small text-muted">Project planning progress</div>
+                                                    </div>
+
+                                                    <span class="score-pill">AI Ready</span>
+                                                </div>
+
+                                                <div class="row g-2 mb-3">
+                                                    <div class="col-4">
+                                                        <div class="mini-card">
+                                                            <div class="small text-muted">Ideas</div>
+                                                            <div class="mini-value text-primary">12</div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div class="col-4">
+                                                        <div class="mini-card">
+                                                            <div class="small text-muted">Skills</div>
+                                                            <div class="mini-value text-success">18</div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div class="col-4">
+                                                        <div class="mini-card">
+                                                            <div class="small text-muted">Risk</div>
+                                                            <div class="mini-value text-warning">Low</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div class="mini-card mb-3">
+                                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                                        <div class="fw-bold small">Roadmap Progress</div>
+                                                        <div class="small text-muted">72%</div>
+                                                    </div>
+
+                                                    <div class="progress-track">
+                                                        <div class="progress-fill"></div>
+                                                    </div>
+                                                </div>
+
+                                                <div class="mini-card">
+                                                    <div class="fw-bold small mb-2">Recent AI Suggestions</div>
+
+                                                    <div class="idea-line">
+                                                        <div class="idea-icon">
+                                                            <i class="bi bi-robot"></i>
+                                                        </div>
+
+                                                        <div>
+                                                            <div class="fw-semibold small">AI Study Assistant</div>
+                                                            <div class="small text-muted">NLP • Web Platform</div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div class="idea-line">
+                                                        <div class="idea-icon">
+                                                            <i class="bi bi-hospital"></i>
+                                                        </div>
+
+                                                        <div>
+                                                            <div class="fw-semibold small">Clinic Queue Optimizer</div>
+                                                            <div class="small text-muted">Healthcare • Data Science</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="modules" class="section-block">
+                    <div class="container">
+                        <div class="text-center mb-4">
+                            <div class="section-kicker mb-2">Platform Modules</div>
+
+                            <h2 class="section-title">
+                                The core tools behind a stronger FYP plan
+                            </h2>
+
+                            <p class="section-text mb-0">
+                                Each module supports a real stage of the final year project lifecycle.
+                            </p>
+                        </div>
+
+                        <div class="module-slider-shell">
+                            <div class="module-track">
+                                @foreach (var word in new[] {
+                                    "Skill Assessment", "AI Idea Generator", "Feasibility Engine", "Idea Comparison",
+                                    "Lebanese Market Fit", "Dataset Awareness", "Smart Roadmap", "Defense Readiness",
+                                    "Project DNA", "Scope Optimization", "Supervisor Support", "Academic Workflow",
+
+                                    "Skill Assessment", "AI Idea Generator", "Feasibility Engine", "Idea Comparison",
+                                    "Lebanese Market Fit", "Dataset Awareness", "Smart Roadmap", "Defense Readiness",
+                                    "Project DNA", "Scope Optimization", "Supervisor Support", "Academic Workflow"
+                                })
+                                {
+                                    <span class="module-word">@word</span>
+                                    <span class="module-dot">•</span>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="workflow" class="section-block">
+                    <div class="container">
+                        <div class="text-center mb-4">
+                            <div class="section-kicker mb-2">Workflow</div>
+
+                            <h2 class="section-title mb-0">
+                                How FYPilot guides the project journey
+                            </h2>
+                        </div>
+
+                        <div class="workflow-panel">
+                            <div class="row g-3">
+                                @foreach (var step in new[] {
+                                    new { No = "01", Title = "Build Profile", Desc = "The student completes academic information, preferred domain, project goals, available time, team size, and target difficulty so the system understands the project context." },
+                                    new { No = "02", Title = "Assess Skills", Desc = "The student selects known technical skills and rates each one, allowing the system to identify strengths, weaknesses, and realistic project complexity." },
+                                    new { No = "03", Title = "Generate Ideas", Desc = "Project ideas are generated using the student profile and assessed skills, making the suggestions more personal, relevant, and achievable." },
+                                    new { No = "04", Title = "Compare & Select", Desc = "The student reviews ideas using feasibility, innovation, market demand, technologies, missing skills, and deliverables before selecting the final project direction." }
+                                })
+                                {
+                                    <div class="col-md-6">
+                                        <div class="workflow-step">
+                                            <div class="step-number">@step.No</div>
+
+                                            <div class="fw-bold">
+                                                @step.Title
+                                            </div>
+
+                                            <div class="small mt-1">
+                                                @step.Desc
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="roles" class="section-block">
+                    <div class="container">
+                        <div class="text-center mb-5">
+                            <div class="section-kicker mb-2">Platform Roles</div>
+
+                            <h2 class="section-title mb-0">
+                                One system, three connected perspectives
+                            </h2>
+                        </div>
+
+                        <div class="roles-stage">
+                            <div class="row g-5 align-items-center">
+                                <div class="col-md-4">
+                                    <div class="role-node">
+                                        <div class="role-orb">
+                                            <i class="bi bi-mortarboard"></i>
+                                        </div>
+
+                                        <div class="role-label">
+                                            Student Workspace
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="col-md-4">
+                                    <div class="role-node role-node-middle">
+                                        <div class="role-orb">
+                                            <i class="bi bi-person-workspace"></i>
+                                        </div>
+
+                                        <div class="role-label">
+                                            Supervisor Support
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="col-md-4">
+                                    <div class="role-node">
+                                        <div class="role-orb">
+                                            <i class="bi bi-speedometer2"></i>
+                                        </div>
+
+                                        <div class="role-label">
+                                            Admin Control
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </main>
+
+            <footer class="landing-footer">
+                <div class="container">
+                    <div class="footer-card">
+                        <div class="footer-content">
+                            <div class="row g-5 align-items-start">
+
+                                <!-- Left: Brand + Story -->
+                                <div class="col-lg-6">
+                                    <div class="d-flex align-items-center gap-3 mb-4">
+                                        <div class="footer-brand-logo">
+                                            <img src="/image/FYPilot_logo.png" alt="FYPilot Logo" />
+                                        </div>
+                                        <div>
+                                            <div class="footer-brand-title">FYPilot</div>
+                                            <div class="footer-brand-subtitle">Academic Intelligence System</div>
+                                        </div>
+                                    </div>
+
+                                    <div class="footer-origin-label">
+                                        <i class="bi bi-lightbulb"></i>
+                                        Why FYPilot exists
+                                    </div>
+
+                                    <h3 class="footer-title">
+                                        Better project ideas begin with the student.
+                                    </h3>
+
+                                    <p class="footer-text">
+                                        FYPilot was built after seeing CS students struggle to find original,
+                                        realistic final-year project ideas — ones that match their skills and
+                                        reflect real needs in the Lebanese market.
+                                    </p>
+                                </div>
+
+                                <!-- Right: Quote + Stats -->
+                                <div class="col-lg-6 d-flex flex-column gap-3">
+                                    <div class="footer-quote">
+                                        <div class="footer-quote-icon">
+                                            <i class="bi bi-compass"></i>
+                                        </div>
+                                        Our goal is to help students move from uncertainty to a project direction
+                                        that is achievable, meaningful, and locally relevant.
+                                        <div class="footer-signature">The FYPilot Mission</div>
+                                    </div>
+
+                                    <div class="footer-stats">
+                                        <div class="footer-stat">
+                                            <span class="footer-stat-num">100+</span>
+                                            <span class="footer-stat-label">Project ideas generated</span>
+                                        </div>
+                                        <div class="footer-stat">
+                                            <span class="footer-stat-num">LB</span>
+                                            <span class="footer-stat-label">Market-focused</span>
+                                        </div>
+                                        <div class="footer-stat">
+                                            <span class="footer-stat-num">AI</span>
+                                            <span class="footer-stat-label">Skill-aware matching</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                            </div>
+                        </div>
+
+                        <div class="footer-bottom d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <div>© @DateTime.Now.Year FYPilot. All rights reserved.</div>
+                            <div>
+                                From student skills
+                                <span class="footer-dot"></span>
+                                to locally relevant FYP ideas
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </footer>
         </div>
     </div>
-</div>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

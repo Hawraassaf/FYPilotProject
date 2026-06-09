@@ -2,150 +2,251 @@
 @model FYPilot.Web.Pages.Student.DashboardModel
 @{
     ViewData["Title"] = "Student Dashboard";
-    ViewData["Subtitle"] = "Your FYP command centre";
-}
-@section Head {
-    <style>
-        .idea-card { transition: box-shadow 0.2s; cursor: pointer; }
-        .idea-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
-    </style>
+    ViewData["Subtitle"] = "Your FYP planning overview";
+
+    var studentName = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "Student";
 }
 
-<!-- Stat cards -->
-<div class="row g-3 mb-4">
-    @foreach (var s in Model.Stats)
-    {
-        <div class="col-6 col-xl-3">
-            <div class="stat-card d-flex align-items-center gap-3">
-                <div class="stat-icon" style="background:@s.BgColor">
-                    <i class="bi bi-@s.Icon" style="color:@s.Color"></i>
-                </div>
-                <div>
-                    <div class="stat-value">@s.Value</div>
-                    <div class="stat-label">@s.Label</div>
-                </div>
-            </div>
-        </div>
-    }
-</div>
+<div class="dashboard-page">
 
-<div class="row g-4">
-    <!-- Project Ideas -->
-    <div class="col-lg-8">
-        <div class="page-card p-4">
-            <div class="d-flex align-items-center justify-content-between mb-3">
-                <h6 class="fw-bold mb-0"><i class="bi bi-stars me-2 text-primary"></i>My Project Ideas</h6>
-                <a href="/Student/IdeaGenerator" class="btn btn-sm btn-primary">
-                    <i class="bi bi-plus-lg me-1"></i>Generate New
-                </a>
-            </div>
-            @if (!Model.Ideas.Any())
-            {
-                <div class="text-center py-5">
-                    <i class="bi bi-lightbulb display-4 text-muted"></i>
-
-                    @if (Model.HasSkills)
-                    {
-                        <div class="mt-3 text-muted">No ideas yet. Generate your first project idea using your saved skills.</div>
-                        <a href="/Student/IdeaGenerator" class="btn btn-outline-primary mt-3">
-                            <i class="bi bi-stars me-1"></i>Generate Ideas
-                        </a>
-                    }
-                    else
-                    {
-                        <div class="mt-3 text-muted">No ideas yet. Start by completing your Skill Assessment.</div>
-                        <a href="/Student/SkillAssessment" class="btn btn-outline-primary mt-3">
-                            <i class="bi bi-lightning-charge me-1"></i>Assess My Skills
-                        </a>
-                    }
-                </div>
-            }
-            else
-            {
-                <div class="table-responsive">
-                    <table class="table table-hover align-middle">
-                        <thead>
-                            <tr>
-                                <th>Title</th>
-                                <th>Domain</th>
-                                <th>Difficulty</th>
-                                <th>Feasibility</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var idea in Model.Ideas)
-                            {
-                                <tr class="idea-card" onclick="location.href='/Student/ProjectDetails?id=@idea.Id'">
-                                    <td>
-                                        <div class="fw-semibold small">@idea.Title</div>
-                                        @if (idea.IsSelected)
-                                        {
-                                            <span class="badge bg-success-subtle text-success">Selected</span>
-                                        }
-                                    </td>
-                                    <td><span class="badge bg-primary-subtle text-primary">@idea.Domain</span></td>
-                                    <td><span class="badge bg-warning-subtle text-warning text-capitalize">@idea.DifficultyLevel</span></td>
-                                    <td>
-                                        <div class="d-flex align-items-center gap-2">
-                                            <div class="progress flex-grow-1" style="height:6px">
-                                                <div class="progress-bar bg-success" style="width:@(idea.FeasibilityScore)%"></div>
-                                            </div>
-                                            <small class="text-muted">@idea.FeasibilityScore%</small>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <a href="/Student/ProjectDetails?id=@idea.Id" class="btn btn-sm btn-outline-secondary">
-                                            <i class="bi bi-arrow-right"></i>
-                                        </a>
-                                    </td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-            }
-        </div>
-    </div>
-
-    <!-- Quick actions + Risk -->
-    <div class="col-lg-4">
-        <div class="page-card p-4 mb-3">
-            <h6 class="fw-bold mb-3"><i class="bi bi-grid me-2 text-primary"></i>AI Toolkit</h6>
-            <div class="d-grid gap-2">
-                @foreach (var (href, icon, label, color) in new[] {
-                    ("/Student/SkillAssessment", "lightning-charge", "Skill Assessment",    "#3b82f6"),
-                    ("/Student/IdeaGenerator",   "stars",            "Generate Ideas",      "#8b5cf6"),
-                    ("/Student/ProjectDNA",      "diagram-3",        "Project DNA",         "#06b6d4"),
-                    ("/Student/Roadmap",         "map",              "View Roadmap",        "#10b981"),
-                    ("/Student/ScopeOptimizer",  "funnel",           "Scope Optimizer",     "#f59e0b"),
-                    ("/Student/DefenseSimulator","shield-check",     "Defense Simulator",   "#ef4444"),
-                    ("/Student/MentorChat",      "chat-dots",        "Mentor Chat",         "#6366f1"),
-                })
+    <section class="row g-3 mb-4 align-items-stretch">
+        <div class="col-12">
+            <div class="row g-3 h-100">
+                @foreach (var s in Model.Stats)
                 {
-                    <a href="@href" class="btn btn-light d-flex align-items-center gap-2 text-start">
-                        <i class="bi bi-@icon" style="color:@color"></i>
-                        <span class="small fw-semibold">@label</span>
-                    </a>
-                }
-            </div>
-        </div>
+                    var note = s.Label switch
+                    {
+                        "Ideas Generated" => Model.HasIdeas ? "Based on your profile" : "Start generating ideas",
+                        "Skills Assessed" => Model.HasSkills ? "Skills saved" : "Assessment pending",
+                        "Roadmaps Created" => Model.HasRoadmaps ? "Execution planning" : "Create your roadmap",
+                        "Selected Project" => Model.HasSelectedProject ? "Project in focus" : "No project selected",
+                        _ => "FYP progress"
+                    };
 
-        @if (Model.RiskAlarms.Any())
-        {
-            <div class="page-card p-4">
-                <h6 class="fw-bold mb-3"><i class="bi bi-exclamation-triangle me-2 text-warning"></i>Risk Alarms</h6>
-                @foreach (var risk in Model.RiskAlarms)
-                {
-                    <div class="d-flex gap-2 mb-2 p-2 rounded-2 risk-@risk.Severity.ToLower()">
-                        <i class="bi bi-circle-fill mt-1 flex-shrink-0" style="font-size:0.5rem"></i>
-                        <div>
-                            <div class="fw-semibold" style="font-size:0.8rem">@risk.Title</div>
-                            <div style="font-size:0.75rem">@risk.Message</div>
+                    <div class="col-12 col-sm-6 col-xl-3">
+                        <div class="dashboard-stat-card h-100">
+                            <div class="stat-main">
+                                <div class="dashboard-stat-icon">
+                                    <i class="bi bi-@s.Icon"></i>
+                                </div>
+
+                                <div class="min-w-0">
+                                    <div class="dashboard-stat-label">@s.Label</div>
+                                    <div class="dashboard-stat-value">@s.Value</div>
+                                    <div class="dashboard-stat-note">@note</div>
+                                </div>
+                            </div>
+
+                            <div class="mini-chart">
+                                <span style="height: 22%"></span>
+                                <span style="height: 42%"></span>
+                                <span style="height: 34%"></span>
+                                <span style="height: 62%"></span>
+                                <span style="height: 54%"></span>
+                                <span style="height: 76%"></span>
+                                <span style="height: 68%"></span>
+                            </div>
                         </div>
                     </div>
                 }
             </div>
-        }
-    </div>
+        </div>
+    </section>
+
+    <section class="row g-4">
+        <div class="col-xl-7">
+            <div class="dashboard-card h-100">
+                <div class="card-head">
+                    <div>
+                        <h2>
+                            <i class="bi bi-lightbulb"></i>
+                            Recent Project Ideas
+                        </h2>
+                        <p>Latest ideas generated for your FYP journey.</p>
+                    </div>
+
+                    <a href="/Student/IdeaGenerator" class="card-link">View All</a>
+                </div>
+
+                @if (!Model.Ideas.Any())
+                {
+                    <div class="empty-state">
+                        <div class="empty-icon">
+                            <i class="bi bi-stars"></i>
+                        </div>
+
+                        @if (Model.HasSkills)
+                        {
+                            <h3>No ideas generated yet</h3>
+                            <p>Use your saved skills to generate your first personalized project idea.</p>
+
+                            <a href="/Student/IdeaGenerator" class="btn btn-primary-soft mt-2">
+                                Generate Ideas
+                            </a>
+                        }
+                        else
+                        {
+                            <h3>Start with your skills</h3>
+                            <p>Complete your skill assessment first so FYPilot can recommend suitable ideas.</p>
+
+                            <a href="/Student/SkillAssessment" class="btn btn-primary-soft mt-2">
+                                Assess My Skills
+                            </a>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="idea-list">
+                        @foreach (var idea in Model.Ideas.Take(5))
+                        {
+                            <a href="/Student/ProjectDetails?id=@idea.Id" class="idea-row">
+                                <div class="idea-row-icon">
+                                    <i class="bi bi-cpu"></i>
+                                </div>
+
+                                <div class="min-w-0 flex-grow-1">
+                                    <div class="idea-title text-truncate">@idea.Title</div>
+
+                                    <div class="idea-meta">
+                                        <span>@(string.IsNullOrWhiteSpace(idea.Domain) ? "General" : idea.Domain)</span>
+                                        <span>•</span>
+                                        <span class="text-capitalize">@idea.DifficultyLevel</span>
+                                    </div>
+                                </div>
+
+                                <div class="text-end flex-shrink-0">
+                                    @if (idea.IsSelected)
+                                    {
+                                        <span class="status-pill selected">Selected</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="status-pill saved">Saved</span>
+                                    }
+
+                                    <div class="idea-score">@idea.FeasibilityScore% feasible</div>
+                                </div>
+                            </a>
+                        }
+                    </div>
+
+                    <div class="card-footer-action">
+                        <a href="/Student/IdeaGenerator">
+                            Explore More Ideas
+                            <i class="bi bi-arrow-right ms-1"></i>
+                        </a>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="col-xl-5">
+            <div class="dashboard-card h-100">
+                <div class="card-head">
+                    <div>
+                        <h2>
+                            <i class="bi bi-activity"></i>
+                            Project Progress
+                        </h2>
+                        <p>Your current FYP readiness path.</p>
+                    </div>
+
+                    <a href="/Student/Roadmap" class="card-link">Roadmap</a>
+                </div>
+
+                <div class="progress-timeline">
+                    <div class="timeline-item @(Model.HasSkills ? "done" : "pending")">
+                        <div class="timeline-dot">
+                            <i class="bi @(Model.HasSkills ? "bi-check" : "bi-circle")"></i>
+                        </div>
+
+                        <div>
+                            <div class="timeline-title">Skill Assessment</div>
+                            <div class="timeline-text">@(Model.HasSkills ? "Completed" : "Pending")</div>
+                        </div>
+                    </div>
+
+                    <div class="timeline-item @(Model.HasIdeas ? "done" : "pending")">
+                        <div class="timeline-dot">
+                            <i class="bi @(Model.HasIdeas ? "bi-check" : "bi-circle")"></i>
+                        </div>
+
+                        <div>
+                            <div class="timeline-title">Idea Generation</div>
+                            <div class="timeline-text">@(Model.HasIdeas ? "Completed" : "Pending")</div>
+                        </div>
+                    </div>
+
+                    <div class="timeline-item @(Model.HasSelectedProject ? "active" : "pending")">
+                        <div class="timeline-dot">
+                            <i class="bi @(Model.HasSelectedProject ? "bi-check" : "bi-circle")"></i>
+                        </div>
+
+                        <div class="flex-grow-1">
+                            <div class="d-flex align-items-center justify-content-between gap-2">
+                                <div class="timeline-title">Project Selection</div>
+
+                                @if (Model.HasSelectedProject)
+                                {
+                                    <span class="small-status">In Focus</span>
+                                }
+                            </div>
+
+                            <div class="timeline-text">
+                                @(Model.HasSelectedProject ? "Selected project is ready" : "Choose your final idea")
+                            </div>
+
+                            @if (Model.HasSelectedProject)
+                            {
+                                <div class="progress mt-2 dashboard-progress">
+                                    <div class="progress-bar" style="width: 60%"></div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="timeline-item @(Model.HasRoadmaps ? "done" : "pending")">
+                        <div class="timeline-dot">
+                            <i class="bi @(Model.HasRoadmaps ? "bi-check" : "bi-circle")"></i>
+                        </div>
+
+                        <div>
+                            <div class="timeline-title">Roadmap Planning</div>
+                            <div class="timeline-text">@(Model.HasRoadmaps ? "Created" : "Pending")</div>
+                        </div>
+                    </div>
+
+                    <div class="timeline-item pending">
+                        <div class="timeline-dot">
+                            <i class="bi bi-circle"></i>
+                        </div>
+
+                        <div>
+                            <div class="timeline-title">Defense Preparation</div>
+                            <div class="timeline-text">Pending</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="mt-4">
+        <div class="ai-banner ai-banner-horizontal">
+            <div class="ai-banner-icon">
+                <i class="bi bi-stars"></i>
+            </div>
+
+            <div class="flex-grow-1">
+                <h3>FYPilot AI Assistant</h3>
+                <p>Ask for guidance, next steps, project feedback, and planning support for your final year project.</p>
+            </div>
+
+            <a href="/Student/MentorChat" class="btn ai-banner-btn">
+                Ask FYPilot
+            </a>
+        </div>
+    </section>
+
 </div>

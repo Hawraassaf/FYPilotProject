@@ -1,22 +1,22 @@
 using System.ComponentModel.DataAnnotations;
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
-using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
+using FYPilot.Infrastructure.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
 
 namespace FYPilot.Web.Pages.Account;
 
-public class ForgotPasswordModel(ApplicationDbContext db) : PageModel
+public class ForgotPasswordModel(ApplicationDbContext db, IEmailSender emailSender) : PageModel
 {
     [BindProperty]
     public InputModel Input { get; set; } = new();
 
     public string? Message { get; set; }
-
-    public string? DemoResetLink { get; set; }
+    public string? ErrorMessage { get; set; }
 
     public class InputModel
     {
@@ -41,10 +41,9 @@ public class ForgotPasswordModel(ApplicationDbContext db) : PageModel
         var user = await db.Users
             .FirstOrDefaultAsync(u => u.Email.ToLower() == email);
 
-        Message = "If an account with this email exists, a reset link has been generated.";
-
         if (user == null)
         {
+            ErrorMessage = "This email is not registered.";
             return Page();
         }
 
@@ -60,7 +59,7 @@ public class ForgotPasswordModel(ApplicationDbContext db) : PageModel
         var rawToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         var tokenHash = HashToken(rawToken);
 
-        var resetToken = new PasswordResetToken
+        var resetToken = new FYPilot.Domain.Entities.PasswordResetToken
         {
             UserId = user.Id,
             TokenHash = tokenHash,
@@ -71,12 +70,49 @@ public class ForgotPasswordModel(ApplicationDbContext db) : PageModel
         db.PasswordResetTokens.Add(resetToken);
         await db.SaveChangesAsync();
 
-        DemoResetLink = Url.Page(
+        var resetLink = Url.Page(
             "/Account/ResetPassword",
             pageHandler: null,
             values: new { token = rawToken },
             protocol: Request.Scheme
         );
+
+        if (string.IsNullOrWhiteSpace(resetLink))
+        {
+            ErrorMessage = "Could not generate reset link. Please try again.";
+            return Page();
+        }
+
+        var safeResetLink = WebUtility.HtmlEncode(resetLink);
+
+        var emailBody = $"""
+            <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+                <h2>Reset your FYPilot password</h2>
+
+                <p>Please reset your password by clicking 
+                    <a href="{safeResetLink}">here</a>.
+                </p>
+
+                <p>This link will expire in 30 minutes.</p>
+
+                <p>If you did not request this password reset, you can ignore this email.</p>
+            </div>
+            """;
+
+        try
+        {
+            await emailSender.SendAsync(
+                user.Email,
+                "Reset your FYPilot password",
+                emailBody
+            );
+
+            Message = "A password reset email has been sent. Please check your inbox.";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Email sending failed: " + ex.Message;
+        }
 
         return Page();
     }
