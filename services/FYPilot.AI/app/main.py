@@ -86,6 +86,20 @@ try:
 except Exception as e:
     logger.warning(f"Project Roadmap router skipped: {e}")
 
+try:
+    from app.routers import idea_comparison
+    app.include_router(idea_comparison.router)
+    logger.info("Idea Comparison router loaded")
+except Exception as e:
+    logger.warning(f"Idea Comparison router skipped: {e}")
+
+
+try:
+    from app.routers import fyp_chat
+    app.include_router(fyp_chat.router)
+    logger.info("FYP Mentor Chat router loaded")
+except Exception as e:
+    logger.warning(f"FYP Mentor Chat router skipped: {e}")
     
 # Heavy ML routers — loaded only if dependencies are available
 try:
