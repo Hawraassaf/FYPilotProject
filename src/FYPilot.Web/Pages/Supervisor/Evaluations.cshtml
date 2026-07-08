@@ -1,71 +1,866 @@
 @page
+@using System
+@using System.Linq
 @model FYPilot.Web.Pages.Supervisor.EvaluationsModel
 @{
-    ViewData["Title"]    = "Evaluations";
-    ViewData["Subtitle"] = "All project evaluations you have submitted";
+    ViewData["Title"] = "Evaluations";
+    ViewData["Subtitle"] = "Official evaluation archive for supervisor decisions.";
+
+    var search = Request.Query["q"].ToString();
+    var statusFilter = Request.Query["status"].ToString();
+    var similarityFilter = Request.Query["similarity"].ToString();
+    var sort = Request.Query["sort"].ToString();
+
+    var filtered = Model.Evals.AsEnumerable();
+
+    if (!string.IsNullOrWhiteSpace(search))
+    {
+        filtered = filtered.Where(e =>
+            e.StudentName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            e.IdeaTitle.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            e.Domain.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            e.Comment.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            e.ImprovementSuggestions.Contains(search, StringComparison.OrdinalIgnoreCase));
+    }
+
+    if (!string.IsNullOrWhiteSpace(statusFilter) && statusFilter != "all")
+    {
+        filtered = filtered.Where(e => NormalizeStatus(e.Status) == statusFilter);
+    }
+
+    if (similarityFilter == "high")
+    {
+        filtered = filtered.Where(e => e.SimilarityScore >= 50);
+    }
+    else if (similarityFilter == "safe")
+    {
+        filtered = filtered.Where(e => e.SimilarityScore < 50);
+    }
+
+    filtered = sort switch
+    {
+        "oldest" => filtered.OrderBy(e => e.UpdatedAt),
+        "originality" => filtered.OrderByDescending(e => e.OriginalityScore),
+        "similarity" => filtered.OrderByDescending(e => e.SimilarityScore),
+        "student" => filtered.OrderBy(e => e.StudentName),
+        _ => filtered.OrderByDescending(e => e.UpdatedAt)
+    };
+
+    var rows = filtered.ToList();
 }
 
-<div class="page-card p-4">
-    <div class="d-flex align-items-center justify-content-between mb-3">
-        <h6 class="fw-bold mb-0"><i class="bi bi-star-half me-2 text-success"></i>My Evaluations</h6>
-        <div class="d-flex gap-2">
-            <span class="badge bg-success-subtle text-success">@Model.Evals.Count(e => e.Status == "approved") Approved</span>
-            <span class="badge bg-warning-subtle text-warning">@Model.Evals.Count(e => e.Status == "needs_revision") Needs Revision</span>
-            <span class="badge bg-danger-subtle text-danger">@Model.Evals.Count(e => e.Status == "rejected") Rejected</span>
+<section class="er-page">
+
+    <header class="er-hero">
+        <div class="er-hero-copy">
+            <span>Evaluation Records</span>
+            <h1>Your official review archive.</h1>
+            <p>Keep every supervisor decision easy to search, edit, discuss, and connect to student progress without repeating extra sections.</p>
+
+            <div class="er-hero-actions">
+                <a href="/Supervisor/IdeaReview" class="er-primary-link">
+                    <i class="bi bi-card-checklist"></i>
+                    Open Feedback Workspace
+                </a>
+
+                <a href="/Supervisor/ProgressTracking" class="er-soft-link">
+                    <i class="bi bi-graph-up-arrow"></i>
+                    Progress Tracking
+                </a>
+            </div>
         </div>
-    </div>
+
+        <div class="er-workflow-card">
+            <span>Supervisor flow</span>
+
+            <div class="er-flow">
+                <div>
+                    <i class="bi bi-pencil-square"></i>
+                    <small>Evaluate</small>
+                </div>
+
+                <b></b>
+
+                <div>
+                    <i class="bi bi-chat-dots"></i>
+                    <small>Discuss</small>
+                </div>
+
+                <b></b>
+
+                <div>
+                    <i class="bi bi-graph-up"></i>
+                    <small>Track</small>
+                </div>
+            </div>
+
+            <p>Use this page as the clean record of saved evaluations.</p>
+        </div>
+    </header>
 
     @if (!Model.Evals.Any())
     {
-        <div class="text-center py-5 text-muted">
-            <i class="bi bi-clipboard display-4"></i>
-            <p class="mt-3">No evaluations yet. Go to <a href="/Supervisor/IdeaReview">Idea Review</a> to start evaluating.</p>
-        </div>
+        <section class="er-empty">
+            <i class="bi bi-clipboard-check"></i>
+            <h2>No evaluations yet</h2>
+            <p>Start from the Feedback Workspace. Once you save an evaluation, it will appear here as part of your archive.</p>
+            <a href="/Supervisor/IdeaReview">Open Feedback Workspace</a>
+        </section>
     }
     else
     {
-        <div class="table-responsive">
-            <table class="table table-hover align-middle">
-                <thead>
-                    <tr>
-                        <th>Student</th>
-                        <th>Project Title</th>
-                        <th>Status</th>
-                        <th>Originality</th>
-                        <th>Similarity</th>
-                        <th>Date</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var e in Model.Evals.OrderByDescending(e => e.UpdatedAt))
-                    {
-                        <tr>
-                            <td class="small fw-semibold">@e.StudentName</td>
-                            <td>
-                                <div class="small">@e.IdeaTitle</div>
-                                <span class="badge bg-secondary-subtle text-secondary small">@e.Domain</span>
-                            </td>
-                            <td>
-                                <span class="badge @(e.Status == "approved" ? "bg-success" : e.Status == "rejected" ? "bg-danger" : e.Status == "needs_revision" ? "bg-warning text-dark" : "bg-secondary") text-capitalize">
-                                    @e.Status.Replace("_", " ")
-                                </span>
-                            </td>
-                            <td>
-                                <div class="d-flex align-items-center gap-1">
-                                    <div class="progress flex-grow-1" style="height:5px;min-width:50px">
-                                        <div class="progress-bar bg-success" style="width:@e.OriginalityScore%"></div>
-                                    </div>
-                                    <small>@e.OriginalityScore%</small>
-                                </div>
-                            </td>
-                            <td><span class="badge @(e.SimilarityScore > 50 ? "bg-danger-subtle text-danger" : "bg-success-subtle text-success")">@e.SimilarityScore%</span></td>
-                            <td class="text-muted small">@e.UpdatedAt.ToString("dd MMM yyyy")</td>
-                            <td><a href="/Supervisor/IdeaReview?ideaId=@e.IdeaId" class="btn btn-sm btn-outline-secondary">Edit</a></td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
+        <section class="er-toolbar-card">
+            <div class="er-toolbar-title">
+                <span>Archive controls</span>
+                <h2>Search, filter, and sort evaluations</h2>
+            </div>
+
+            <form method="get" class="er-filter-form">
+                <div class="er-search-box">
+                    <i class="bi bi-search"></i>
+                    <input type="search" name="q" value="@search" placeholder="Search student, project, domain, feedback..." />
+                </div>
+
+                <select name="status">
+                    <option value="all" selected="@(statusFilter == "" || statusFilter == "all")">All decisions</option>
+                    <option value="approved" selected="@(statusFilter == "approved")">Approved</option>
+                    <option value="needs_revision" selected="@(statusFilter == "needs_revision")">Needs Revision</option>
+                    <option value="rejected" selected="@(statusFilter == "rejected")">Rejected</option>
+                    <option value="pending" selected="@(statusFilter == "pending")">Pending</option>
+                </select>
+
+                <select name="similarity">
+                    <option value="all" selected="@(similarityFilter == "" || similarityFilter == "all")">All similarity</option>
+                    <option value="high" selected="@(similarityFilter == "high")">High similarity</option>
+                    <option value="safe" selected="@(similarityFilter == "safe")">Safe similarity</option>
+                </select>
+
+                <select name="sort">
+                    <option value="latest" selected="@(sort == "" || sort == "latest")">Latest updated</option>
+                    <option value="oldest" selected="@(sort == "oldest")">Oldest updated</option>
+                    <option value="originality" selected="@(sort == "originality")">Highest originality</option>
+                    <option value="similarity" selected="@(sort == "similarity")">Highest similarity</option>
+                    <option value="student" selected="@(sort == "student")">Student name</option>
+                </select>
+
+                <button type="submit">
+                    <i class="bi bi-funnel"></i>
+                    Apply
+                </button>
+            </form>
+        </section>
+
+        <section class="er-table-card">
+            <div class="er-table-head">
+                <div>
+                    <span>Evaluation archive</span>
+                    <h2>Saved supervisor evaluations</h2>
+                </div>
+
+                <small>Showing @rows.Count of @Model.Evals.Count record@(Model.Evals.Count == 1 ? "" : "s")</small>
+            </div>
+
+            @if (!rows.Any())
+            {
+                <div class="er-empty compact">
+                    <i class="bi bi-search"></i>
+                    <h2>No matching evaluations</h2>
+                    <p>Try changing the search or filter values.</p>
+                </div>
+            }
+            else
+            {
+                <div class="er-table-wrap">
+                    <table class="er-table">
+                        <thead>
+                            <tr>
+                                <th>Student</th>
+                                <th>Project</th>
+                                <th>Decision</th>
+                                <th>Originality</th>
+                                <th>Similarity</th>
+                                <th>Feedback</th>
+                                <th>Updated</th>
+                                <th class="text-end">Actions</th>
+                            </tr>
+                        </thead>
+
+                        <tbody>
+                            @foreach (var item in rows)
+                            {
+                                var statusMeta = StatusMeta(item.Status);
+                                var feedbackMeta = FeedbackMeta(item);
+
+                                <tr>
+                                    <td>
+                                        <div class="er-student-cell">
+                                            <span class="er-avatar">@Initials(item.StudentName)</span>
+                                            <div>
+                                                <strong>@item.StudentName</strong>
+                                                <small>Student</small>
+                                            </div>
+                                        </div>
+                                    </td>
+
+                                    <td>
+                                        <div class="er-project-cell">
+                                            <strong>@item.IdeaTitle</strong>
+                                            <small>@item.Domain</small>
+                                        </div>
+                                    </td>
+
+                                    <td>
+                                        <span class="@statusMeta.ClassName">@statusMeta.Label</span>
+                                    </td>
+
+                                    <td>
+                                        <div class="er-score-line">
+                                            <div><i style="width:@item.OriginalityScore%"></i></div>
+                                            <span>@item.OriginalityScore%</span>
+                                        </div>
+                                    </td>
+
+                                    <td>
+                                        <span class="@SimilarityClass(item.SimilarityScore)">
+                                            @item.SimilarityScore%
+                                        </span>
+                                    </td>
+
+                                    <td>
+                                        <div class="er-feedback-cell">
+                                            <span class="@feedbackMeta.ClassName">@feedbackMeta.Label</span>
+                                            <small>@ShortText(FeedbackPreview(item), 74)</small>
+                                        </div>
+                                    </td>
+
+                                    <td>
+                                        <span class="er-muted">@item.UpdatedAt.ToString("MMM d, yyyy")</span>
+                                    </td>
+
+                                    <td>
+                                        <div class="er-row-actions">
+                                            <a href="/Supervisor/IdeaReview?ideaId=@item.IdeaId" title="Edit evaluation">
+                                                <i class="bi bi-pencil-square"></i>
+                                                Edit
+                                            </a>
+
+                                            <a href="/Supervisor/IdeaDiscussion?ideaId=@item.IdeaId" title="Open discussion">
+                                                <i class="bi bi-chat-dots"></i>
+                                                Discuss
+                                            </a>
+
+                                            <a href="/Supervisor/ProgressTracking?ideaId=@item.IdeaId" title="Track progress">
+                                                <i class="bi bi-graph-up-arrow"></i>
+                                                Track
+                                            </a>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
     }
-</div>
+</section>
+
+@section Head {
+    <style>
+        :root {
+            --er-navy: #28385E;
+            --er-blue: #304163;
+            --er-steel: #516C8D;
+            --er-bg: #F7F8FA;
+            --er-border: #E8ECF2;
+            --er-text: #111827;
+            --er-muted: #64748B;
+            --er-tint: #F1F4F8;
+        }
+
+        .er-page {
+            max-width: 1500px;
+            margin: 0 auto;
+            color: var(--er-text);
+            padding-bottom: 1.5rem;
+        }
+
+        .er-hero {
+            min-height: 175px;
+            border-radius: 30px;
+            padding: 1.35rem;
+            color: #ffffff;
+            background: radial-gradient(circle at 86% 12%, rgba(255,255,255,0.16), transparent 28%), linear-gradient(135deg, #061C49 0%, var(--er-navy) 58%, var(--er-steel) 130%);
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 360px;
+            gap: 1rem;
+            align-items: center;
+            box-shadow: 0 18px 42px rgba(40,56,94,0.16);
+            margin-bottom: 1rem;
+        }
+
+        .er-hero-copy span,
+        .er-workflow-card > span,
+        .er-toolbar-title span,
+        .er-table-head span {
+            display: block;
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        .er-hero-copy span,
+        .er-workflow-card > span {
+            color: rgba(255,255,255,0.72);
+        }
+
+        .er-hero-copy h1 {
+            margin: 0.18rem 0;
+            color: #ffffff;
+            font-size: clamp(1.5rem, 3vw, 2.25rem);
+            font-weight: 650;
+            letter-spacing: -0.045em;
+            line-height: 1.08;
+        }
+
+        .er-hero-copy p {
+            margin: 0;
+            color: rgba(255,255,255,0.78);
+            max-width: 760px;
+            line-height: 1.6;
+            font-size: 0.92rem;
+        }
+
+        .er-hero-actions {
+            margin-top: 1rem;
+            display: flex;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+        }
+
+        .er-primary-link,
+        .er-soft-link {
+            border-radius: 14px;
+            padding: 0.64rem 0.86rem;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.42rem;
+            font-size: 0.82rem;
+            font-weight: 600;
+        }
+
+        .er-primary-link {
+            color: var(--er-blue);
+            background: #ffffff;
+        }
+
+        .er-soft-link {
+            color: #ffffff;
+            background: rgba(255,255,255,0.13);
+            border: 1px solid rgba(255,255,255,0.16);
+        }
+
+            .er-primary-link:hover,
+            .er-soft-link:hover {
+                color: var(--er-blue);
+                background: #ffffff;
+            }
+
+        .er-workflow-card {
+            border-radius: 24px;
+            padding: 1rem;
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.16);
+            backdrop-filter: blur(6px);
+        }
+
+        .er-flow {
+            margin: 0.9rem 0 0.65rem;
+            display: grid;
+            grid-template-columns: 1fr 32px 1fr 32px 1fr;
+            gap: 0.4rem;
+            align-items: center;
+        }
+
+            .er-flow div {
+                min-height: 76px;
+                border-radius: 18px;
+                background: rgba(255,255,255,0.11);
+                display: grid;
+                place-items: center;
+                align-content: center;
+                gap: 0.25rem;
+            }
+
+            .er-flow i {
+                font-size: 1.22rem;
+            }
+
+            .er-flow small {
+                color: rgba(255,255,255,0.78);
+                font-size: 0.74rem;
+            }
+
+            .er-flow b {
+                height: 2px;
+                background: rgba(255,255,255,0.28);
+                border-radius: 999px;
+            }
+
+        .er-workflow-card p {
+            margin: 0;
+            color: rgba(255,255,255,0.76);
+            font-size: 0.8rem;
+            line-height: 1.45;
+        }
+
+        .er-toolbar-card,
+        .er-table-card,
+        .er-empty {
+            background: #ffffff;
+            border: 1px solid var(--er-border);
+            border-radius: 26px;
+            box-shadow: 0 14px 34px rgba(15,23,42,0.05);
+            overflow: hidden;
+        }
+
+        .er-toolbar-card {
+            margin-bottom: 1rem;
+            padding: 1rem;
+            display: grid;
+            grid-template-columns: minmax(260px, 0.45fr) minmax(0, 1fr);
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .er-toolbar-title span,
+        .er-table-head span {
+            color: var(--er-steel);
+        }
+
+        .er-toolbar-title h2,
+        .er-table-head h2 {
+            margin: 0.16rem 0 0;
+            color: var(--er-text);
+            font-size: 1.05rem;
+            font-weight: 620;
+            letter-spacing: -0.02em;
+        }
+
+        .er-filter-form {
+            display: grid;
+            grid-template-columns: minmax(240px, 1.25fr) repeat(3, minmax(150px, 0.7fr)) auto;
+            gap: 0.55rem;
+            align-items: center;
+        }
+
+        .er-search-box {
+            height: 42px;
+            border: 1px solid #DDE5EF;
+            border-radius: 14px;
+            background: #ffffff;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0 0.75rem;
+        }
+
+            .er-search-box i {
+                color: var(--er-muted);
+            }
+
+        .er-filter-form input,
+        .er-filter-form select {
+            width: 100%;
+            height: 42px;
+            border: 1px solid #DDE5EF;
+            border-radius: 14px;
+            color: #334155;
+            background: #ffffff;
+            padding: 0 0.7rem;
+            font-size: 0.8rem;
+            outline: 0;
+        }
+
+        .er-search-box input {
+            border: 0;
+            padding: 0;
+            height: auto;
+        }
+
+        .er-filter-form button {
+            height: 42px;
+            border: 0;
+            border-radius: 14px;
+            background: linear-gradient(135deg, #061C49, var(--er-blue));
+            color: #ffffff;
+            padding: 0 0.9rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.38rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .er-table-head {
+            min-height: 72px;
+            padding: 1rem;
+            border-bottom: 1px solid var(--er-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+            .er-table-head small {
+                color: var(--er-muted);
+                font-size: 0.78rem;
+            }
+
+        .er-table-wrap {
+            overflow-x: auto;
+        }
+
+        .er-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+        }
+
+            .er-table thead th {
+                background: #FAFBFD;
+                border-bottom: 1px solid #E8EEF5;
+                color: var(--er-blue);
+                font-size: 0.72rem;
+                font-weight: 620;
+                padding: 0.85rem 1rem;
+                white-space: nowrap;
+            }
+
+            .er-table tbody td {
+                border-bottom: 1px solid #EEF2F7;
+                color: #1F2937;
+                font-size: 0.82rem;
+                padding: 0.92rem 1rem;
+                vertical-align: middle;
+            }
+
+            .er-table tbody tr {
+                transition: 0.14s ease;
+            }
+
+                .er-table tbody tr:hover {
+                    background: #FAFBFD;
+                }
+
+                    .er-table tbody tr:hover td:first-child {
+                        box-shadow: inset 4px 0 0 var(--er-steel);
+                    }
+
+        .er-student-cell {
+            display: flex;
+            align-items: center;
+            gap: 0.7rem;
+            white-space: nowrap;
+        }
+
+        .er-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 14px;
+            color: var(--er-blue);
+            background: #EEF2F6;
+            display: grid;
+            place-items: center;
+            font-size: 0.72rem;
+            font-weight: 620;
+        }
+
+        .er-student-cell strong,
+        .er-project-cell strong {
+            display: block;
+            color: var(--er-text);
+            font-size: 0.84rem;
+            font-weight: 600;
+            line-height: 1.35;
+        }
+
+        .er-student-cell small,
+        .er-project-cell small,
+        .er-feedback-cell small {
+            display: block;
+            color: var(--er-muted);
+            font-size: 0.74rem;
+            margin-top: 0.12rem;
+        }
+
+        .er-project-cell strong {
+            max-width: 360px;
+        }
+
+        .er-score-line {
+            display: grid;
+            grid-template-columns: minmax(88px, 1fr) auto;
+            gap: 0.45rem;
+            align-items: center;
+            min-width: 130px;
+        }
+
+            .er-score-line div {
+                height: 7px;
+                border-radius: 999px;
+                background: #E5E7EB;
+                overflow: hidden;
+            }
+
+            .er-score-line i {
+                display: block;
+                height: 100%;
+                border-radius: inherit;
+                background: linear-gradient(135deg, #061C49, var(--er-steel));
+            }
+
+            .er-score-line span,
+            .er-muted {
+                color: var(--er-muted);
+                font-size: 0.78rem;
+            }
+
+        .er-row-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+        }
+
+            .er-row-actions a {
+                color: var(--er-blue);
+                background: var(--er-tint);
+                border-radius: 999px;
+                padding: 0.34rem 0.55rem;
+                text-decoration: none;
+                font-size: 0.72rem;
+                font-weight: 600;
+                display: inline-flex;
+                align-items: center;
+                gap: 0.25rem;
+            }
+
+                .er-row-actions a:hover {
+                    color: #ffffff;
+                    background: var(--er-blue);
+                }
+
+        .er-pill {
+            display: inline-flex;
+            width: fit-content;
+            border-radius: 999px;
+            padding: 0.27rem 0.56rem;
+            font-size: 0.7rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+            .er-pill.pending {
+                background: #FFF7ED;
+                color: #9A3412;
+            }
+
+            .er-pill.approved,
+            .er-pill.complete,
+            .er-pill.safe {
+                background: #ECFDF5;
+                color: #047857;
+            }
+
+            .er-pill.revision,
+            .er-pill.partial,
+            .er-pill.medium {
+                background: #FEF3C7;
+                color: #92400E;
+            }
+
+            .er-pill.rejected,
+            .er-pill.missing,
+            .er-pill.high {
+                background: #FEF2F2;
+                color: #B91C1C;
+            }
+
+        .er-feedback-cell {
+            max-width: 250px;
+        }
+
+        .er-empty {
+            min-height: 520px;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            text-align: center;
+            gap: 0.6rem;
+            padding: 2rem;
+        }
+
+            .er-empty.compact {
+                min-height: 280px;
+                box-shadow: none;
+                border: 0;
+            }
+
+            .er-empty i {
+                width: 74px;
+                height: 74px;
+                border-radius: 26px;
+                color: var(--er-steel);
+                background: #EEF2F6;
+                display: grid;
+                place-items: center;
+                font-size: 1.9rem;
+            }
+
+            .er-empty h2 {
+                margin: 0;
+                color: var(--er-text);
+                font-size: 1.3rem;
+                font-weight: 620;
+            }
+
+            .er-empty p {
+                margin: 0;
+                color: var(--er-muted);
+                max-width: 540px;
+                line-height: 1.6;
+            }
+
+            .er-empty a {
+                color: #ffffff;
+                background: var(--er-blue);
+                border-radius: 14px;
+                padding: 0.64rem 0.9rem;
+                text-decoration: none;
+                font-size: 0.82rem;
+                font-weight: 600;
+            }
+
+        @@media (max-width: 1280px) {
+            .er-hero,
+            .er-toolbar-card,
+            .er-filter-form {
+                grid-template-columns: 1fr;
+            }
+
+            .er-workflow-card {
+                max-width: 100%;
+            }
+        }
+
+        @@media (max-width: 767px) {
+            .er-flow {
+                grid-template-columns: 1fr;
+            }
+
+                .er-flow b {
+                    display: none;
+                }
+
+            .er-table-head {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+        }
+    </style>
+}
+
+@functions {
+    private static string NormalizeStatus(string? status)
+    {
+        return string.IsNullOrWhiteSpace(status)
+            ? "pending"
+            : status.Trim().ToLowerInvariant();
+    }
+
+    private static (string Label, string ClassName) StatusMeta(string? status)
+    {
+        return NormalizeStatus(status) switch
+        {
+            "approved" => ("Approved", "er-pill approved"),
+            "needs_revision" => ("Needs Revision", "er-pill revision"),
+            "rejected" => ("Rejected", "er-pill rejected"),
+            _ => ("Pending", "er-pill pending")
+        };
+    }
+
+    private static string SimilarityClass(int value)
+    {
+        return value >= 70
+            ? "er-pill high"
+            : value >= 50
+                ? "er-pill medium"
+                : "er-pill safe";
+    }
+
+    private static (string Label, string ClassName) FeedbackMeta(FYPilot.Web.Pages.Supervisor.EvaluationsModel.EvalRow item)
+    {
+        var hasComment = !string.IsNullOrWhiteSpace(item.Comment);
+        var hasSuggestions = !string.IsNullOrWhiteSpace(item.ImprovementSuggestions);
+
+        if (hasComment && hasSuggestions)
+        {
+            return ("Complete", "er-pill complete");
+        }
+
+        if (hasComment || hasSuggestions)
+        {
+            return ("Partial", "er-pill partial");
+        }
+
+        return ("Missing", "er-pill missing");
+    }
+
+    private static string FeedbackPreview(FYPilot.Web.Pages.Supervisor.EvaluationsModel.EvalRow item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.Comment))
+        {
+            return item.Comment;
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.ImprovementSuggestions))
+        {
+            return item.ImprovementSuggestions;
+        }
+
+        return "No written feedback added.";
+    }
+
+    private static string ShortText(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "";
+        }
+
+        value = value.Trim().Replace("\r", " ").Replace("\n", " ");
+
+        return value.Length <= maxLength ? value : value[..maxLength] + "...";
+    }
+
+    private static string Initials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "ST";
+        }
+
+        var parts = name
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Take(2)
+            .ToList();
+
+        return parts.Count == 0
+            ? "ST"
+            : string.Join("", parts.Select(part => part[0])).ToUpperInvariant();
+    }
+}

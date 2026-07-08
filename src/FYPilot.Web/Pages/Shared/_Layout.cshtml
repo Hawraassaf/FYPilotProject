@@ -25,6 +25,7 @@
         var path = Context.Request.Path.Value ?? "";
 
         string? navProfileImagePath = null;
+        string? topbarProfileHref = null;
 
         if (isAuth)
         {
@@ -45,26 +46,24 @@
 
                 if (role == "student")
                 {
+                    topbarProfileHref = "/Student/Profile";
+
                     navProfileImagePath = await Db.StudentProfiles
                         .AsNoTracking()
                         .Where(p => p.UserId == navUserId)
                         .Select(p => p.ProfileImagePath)
                         .FirstOrDefaultAsync();
                 }
-            }
-        }
+                else if (role == "supervisor")
+                {
+                    topbarProfileHref = "/Supervisor/Profile";
 
-        if (isAuth && role == "student")
-        {
-            var userIdValue = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-
-            if (int.TryParse(userIdValue, out var navUserId))
-            {
-                navProfileImagePath = await Db.StudentProfiles
-                    .AsNoTracking()
-                    .Where(p => p.UserId == navUserId)
-                    .Select(p => p.ProfileImagePath)
-                    .FirstOrDefaultAsync();
+                    navProfileImagePath = await Db.SupervisorProfiles
+                        .AsNoTracking()
+                        .Where(p => p.UserId == navUserId)
+                        .Select(p => p.ProfileImagePath)
+                        .FirstOrDefaultAsync();
+                }
             }
         }
 
@@ -145,7 +144,6 @@
                             <li><span class="side-nav-label">AI Planning</span></li>
                             <li>@Html.Raw(NavLink("/Student/IdeaGenerator", "lightbulb", "Idea Generator"))</li>
                             <li>@Html.Raw(NavLink("/Student/IdeaComparison", "columns-gap", "Idea Comparison"))</li>
-                            <li>@Html.Raw(NavLink("/Student/ProjectDetails", "file-earmark-text", "Project Details"))</li>
                             <li>@Html.Raw(NavLink("/Student/ProjectDNA", "diagram-3", "Project DNA"))</li>
                             <li>@Html.Raw(NavLink("/Student/Roadmap", "map", "Roadmap"))</li>
                             <li>@Html.Raw(NavLink("/Student/DocumentationGenerator", "journal-code", "SE Documentation"))</li>
@@ -160,8 +158,11 @@
                         {
                             <li><span class="side-nav-label">Supervisor</span></li>
                             <li>@Html.Raw(NavLink("/Supervisor/Dashboard", "speedometer2", "Dashboard"))</li>
-                            <li>@Html.Raw(NavLink("/Supervisor/IdeaReview", "card-checklist", "Idea Review"))</li>
+                            <li>@Html.Raw(NavLink("/Supervisor/IdeaReview", "card-checklist", "Feedback Workspace"))</li>
+                            <li>@Html.Raw(NavLink("/Supervisor/Meetings", "calendar-event", "Meetings"))</li>
                             <li>@Html.Raw(NavLink("/Supervisor/Evaluations", "star-half", "Evaluations"))</li>
+                            <li>@Html.Raw(NavLink("/Supervisor/ProgressTracking", "graph-up-arrow", "Progress Tracking"))</li>
+
                         }
 
                         @if (role == "admin")
@@ -223,9 +224,9 @@
                             </button>
                         </form>
 
-                        @if (role == "student")
+                        @if (!string.IsNullOrWhiteSpace(topbarProfileHref))
                         {
-                            <a href="/Student/Profile" class="topbar-user topbar-user-link" title="Open Profile">
+                            <a href="@topbarProfileHref" class="topbar-user topbar-user-link" title="Open Profile">
                                 @if (!string.IsNullOrWhiteSpace(navProfileImagePath))
                                 {
                                     <img src="@navProfileImagePath"
@@ -239,7 +240,7 @@
 
                                 <div class="d-none d-xl-block">
                                     <div class="topbar-user-name">@userName</div>
-                                    <div class="topbar-user-meta">Student</div>
+                                    <div class="topbar-user-meta text-capitalize">@role</div>
                                 </div>
 
                                 <i class="bi bi-chevron-down topbar-user-arrow d-none d-xl-inline"></i>

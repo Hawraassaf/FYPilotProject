@@ -28,39 +28,48 @@ public class ProjectDNAModel(ApplicationDbContext db, IAiServiceClient aiService
 
     public async Task OnGetAsync(int? ideaId)
     {
-        var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var userId = UserId();
         await LoadPageDataAsync(userId, ideaId);
     }
 
     public async Task<IActionResult> OnPostAnalyzeAsync(int ideaId)
     {
-        var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var userId = UserId();
 
         await LoadPageDataAsync(userId, ideaId);
 
         if (Idea == null)
         {
+            ErrorMessage = "No selected project idea was found. Please select an idea first.";
             return Page();
         }
 
         var profile = await db.StudentProfiles
+            .AsNoTracking()
             .FirstOrDefaultAsync(p => p.UserId == userId);
 
         var request = BuildProjectDnaRequest(profile);
 
-        var response = await aiService.AnalyzeProjectDnaAsync(request);
+        try
+        {
+            var response = await aiService.AnalyzeProjectDnaAsync(request);
 
-        if (response?.Analysis == null)
+            if (response?.Analysis == null)
+            {
+                ErrorMessage = "AI Project DNA analysis could not be generated. Make sure the Python AI service is running.";
+                return Page();
+            }
+
+            Analysis = response.Analysis;
+            LlmUsed = response.LlmUsed;
+            Source = response.Source;
+
+            ApplyAiAnalysis(response.Analysis);
+        }
+        catch
         {
             ErrorMessage = "AI Project DNA analysis could not be generated. Make sure the Python AI service is running.";
-            return Page();
         }
-
-        Analysis = response.Analysis;
-        LlmUsed = response.LlmUsed;
-        Source = response.Source;
-
-        ApplyAiAnalysis(response.Analysis);
 
         return Page();
     }
@@ -68,27 +77,26 @@ public class ProjectDNAModel(ApplicationDbContext db, IAiServiceClient aiService
     private async Task LoadPageDataAsync(int userId, int? ideaId)
     {
         Idea = ideaId.HasValue
-            ? await db.ProjectIdeas.FirstOrDefaultAsync(i => i.Id == ideaId && i.UserId == userId)
-            : await db.ProjectIdeas.FirstOrDefaultAsync(i => i.UserId == userId && i.IsSelected)
-              ?? await db.ProjectIdeas
-                  .Where(i => i.UserId == userId)
-                  .OrderByDescending(i => i.CreatedAt)
-                  .FirstOrDefaultAsync();
-
-        if (Idea == null)
-        {
-            return;
-        }
+            ? await db.ProjectIdeas
+                .AsNoTracking()
+                .FirstOrDefaultAsync(i => i.Id == ideaId && i.UserId == userId)
+            : await db.ProjectIdeas
+                .AsNoTracking()
+                .FirstOrDefaultAsync(i => i.UserId == userId && i.IsSelected);
 
         StudentSkills = await db.StudentSkills
+            .AsNoTracking()
             .Where(s => s.UserId == userId)
+            .OrderByDescending(s => s.Rating)
+            .ThenBy(s => s.SkillName)
             .ToListAsync();
 
         DnaDimensions.Clear();
         Risks.Clear();
         RequiredSkillsAnalysis.Clear();
-
-        BuildFallbackViewData();
+        Analysis = null;
+        LlmUsed = false;
+        Source = null;
     }
 
     private ProjectDnaRequest BuildProjectDnaRequest(StudentProfile? profile)
@@ -117,7 +125,7 @@ public class ProjectDNAModel(ApplicationDbContext db, IAiServiceClient aiService
             RequiredTechnologies: Idea?.RequiredTechnologies ?? "",
             RequiredSkills: Idea?.RequiredSkills ?? "",
             MissingSkills: Idea?.MissingSkills ?? "",
-            DifficultyLevel: Idea?.DifficultyLevel ?? "3",
+            DifficultyLevel: Idea?.DifficultyLevel ?? "intermediate",
             DatasetNeeded: Idea?.DatasetNeeded ?? "",
             FinalDeliverables: Idea?.FinalDeliverables ?? "",
             Domain: Idea?.Domain ?? "",
@@ -135,15 +143,15 @@ public class ProjectDNAModel(ApplicationDbContext db, IAiServiceClient aiService
     {
         DnaDimensions =
         [
-            ("Overall Score", analysis.OverallScore, "#111827"),
-            ("Technical Fit", analysis.TechnicalFitScore, "#3b82f6"),
-            ("Skill Match", analysis.SkillMatchScore, "#10b981"),
-            ("Innovation", analysis.InnovationScore, "#06b6d4"),
-            ("Feasibility", analysis.FeasibilityScore, "#f59e0b"),
-            ("Market Relevance", analysis.MarketRelevanceScore, "#8b5cf6"),
-            ("Data Readiness", analysis.DataReadinessScore, "#ef4444"),
-            ("Scope Clarity", analysis.ScopeClarityScore, "#6366f1"),
-            ("Supervisor Fit", analysis.SupervisorFitScore, "#14b8a6"),
+            ("Overall Score", analysis.OverallScore, "#28385E"),
+            ("Technical Fit", analysis.TechnicalFitScore, "#304163"),
+            ("Skill Match", analysis.SkillMatchScore, "#516C8D"),
+            ("Innovation", analysis.InnovationScore, "#3F5A78"),
+            ("Feasibility", analysis.FeasibilityScore, "#5E7693"),
+            ("Market Relevance", analysis.MarketRelevanceScore, "#7489A3"),
+            ("Data Readiness", analysis.DataReadinessScore, "#8A9AAF"),
+            ("Scope Clarity", analysis.ScopeClarityScore, "#6B7F98"),
+            ("Supervisor Fit", analysis.SupervisorFitScore, "#405577")
         ];
 
         Risks = (analysis.RiskProfile ?? [])
@@ -168,108 +176,8 @@ public class ProjectDNAModel(ApplicationDbContext db, IAiServiceClient aiService
         RequiredSkillsAnalysis = analysis.RequiredSkillsAnalysis ?? [];
     }
 
-    private void BuildFallbackViewData()
+    private int UserId()
     {
-        if (Idea == null)
-        {
-            return;
-        }
-
-        DnaDimensions =
-        [
-            ("Innovation Score", Idea.InnovationScore, "#3b82f6"),
-            ("Feasibility Score", Idea.FeasibilityScore, "#10b981"),
-            ("Market Demand", Idea.MarketDemandScore, "#f59e0b"),
-            ("Academic Value", 75, "#8b5cf6"),
-            ("AI Complexity", Idea.Domain.Contains("AI", StringComparison.OrdinalIgnoreCase) ? 80 : 30, "#06b6d4"),
-            ("Data Dependency", RequiresDataset(Idea.DatasetNeeded) ? 70 : 20, "#ef4444"),
-            ("Deployment Complexity", Idea.DifficultyLevel == "advanced" ? 80 : 40, "#6366f1"),
-            ("Team Fit Score", Math.Min(StudentSkills.Count * 8, 100), "#14b8a6"),
-        ];
-
-        var required = Idea.RequiredSkills
-            .Split(',')
-            .Select(s => s.Trim())
-            .Where(s => s.Length > 0)
-            .ToList();
-
-        var missing = required
-            .Where(rs => !StudentSkills.Any(ss =>
-                ss.SkillName.Contains(rs, StringComparison.OrdinalIgnoreCase) ||
-                rs.Contains(ss.SkillName, StringComparison.OrdinalIgnoreCase)))
-            .ToList();
-
-        if (missing.Count > 2)
-        {
-            Risks.Add(new RiskItem(
-                "Skill Gap",
-                "High",
-                $"Missing {missing.Count} skills: {string.Join(", ", missing.Take(3))}",
-                "Take online courses or reduce scope"
-            ));
-        }
-        else if (missing.Count > 0)
-        {
-            Risks.Add(new RiskItem(
-                "Skill Gap",
-                "Medium",
-                $"Missing: {string.Join(", ", missing)}",
-                "Allocate 2–3 weeks for skill acquisition"
-            ));
-        }
-
-        if (Idea.DifficultyLevel == "advanced" && StudentSkills.Count < 5)
-        {
-            Risks.Add(new RiskItem(
-                "Complexity Risk",
-                "High",
-                "Advanced project with limited skill breadth",
-                "Consider intermediate complexity first"
-            ));
-        }
-
-        if (RequiresDataset(Idea.DatasetNeeded))
-        {
-            Risks.Add(new RiskItem(
-                "Data Risk",
-                "Medium",
-                $"Dataset required: {Idea.DatasetNeeded}",
-                "Identify and validate data source in week 1"
-            ));
-        }
-
-        if (!Risks.Any())
-        {
-            Risks.Add(new RiskItem(
-                "Overall Risk",
-                "Low",
-                "Project appears well-suited to your profile",
-                "Proceed with confidence"
-            ));
-        }
-    }
-
-    private static bool RequiresDataset(string? datasetNeeded)
-    {
-        if (string.IsNullOrWhiteSpace(datasetNeeded))
-        {
-            return false;
-        }
-
-        var text = datasetNeeded.ToLowerInvariant();
-
-        if (text.Contains("no for mvp") ||
-            text == "no" ||
-            text.Contains("not required") ||
-            text.Contains("optional"))
-        {
-            return false;
-        }
-
-        return text.Contains("yes") ||
-               text.Contains("dataset") ||
-               text.Contains("data") ||
-               text.Contains("records") ||
-               text.Contains("logs");
+        return int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
     }
 }

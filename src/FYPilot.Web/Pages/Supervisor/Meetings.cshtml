@@ -1,0 +1,1940 @@
+﻿@page
+@using System
+@using System.Linq
+@using System.Collections.Generic
+@model FYPilot.Web.Pages.Supervisor.MeetingsModel
+@{
+    ViewData["Title"] = "Meetings";
+    ViewData["Subtitle"] = "Schedule, track, and prepare supervisor meetings.";
+
+    var selected = Model.SelectedMeeting;
+    var today = DateTime.Today;
+
+    // ---------- Week navigation via ?week= query string (no PageModel changes needed) ----------
+    int weekOffset = 0;
+    int.TryParse(Request.Query["week"].ToString(), out weekOffset);
+
+    var todayDow = (int)today.DayOfWeek; // Sunday = 0
+    var mondayThisWeek = today.AddDays(todayDow == 0 ? -6 : -(todayDow - 1));
+    var startOfWeek = mondayThisWeek.AddDays(7 * weekOffset);
+    var endOfWeek = startOfWeek.AddDays(6);
+    var weekDays = Enumerable.Range(0, 7).Select(i => startOfWeek.AddDays(i)).ToList();
+
+    string BuildNavLink(int offset)
+    {
+        var qs = $"week={offset}";
+        if (selected != null)
+        {
+            qs += $"&meetingId={selected.Id}";
+        }
+        return "/Supervisor/Meetings?" + qs;
+    }
+
+    // Union of upcoming + recent so a meeting scheduled further ahead still shows on the calendar
+    var allMeetings = Model.UpcomingMeetings
+        .Concat(Model.RecentMeetings)
+        .GroupBy(m => m.Id)
+        .Select(g => g.First())
+        .ToList();
+
+    var weekMeetings = allMeetings
+        .Where(m =>
+        {
+            var d = m.ScheduledAt.ToLocalTime().Date;
+            return d >= startOfWeek && d <= endOfWeek;
+        })
+        .ToList();
+    // Fixed visible working hours: 9 AM until 7 PM.
+    // This keeps the weekly scheduler consistent even when there are only morning meetings.
+    int minHour = 9;
+    int maxHour = 19;
+    var hourSlots = Enumerable.Range(minHour, maxHour - minHour + 1).ToList();
+}
+
+<section class="meet-page">
+
+    <header class="meet-hero">
+        <div class="meet-hero-left">
+            <div class="meet-hero-icon">
+                <i class="bi bi-calendar-check"></i>
+            </div>
+
+            <div class="meet-hero-copy">
+                <h1>Stay aligned. Make progress together.</h1>
+                <p>Plan productive meetings, track action items, and keep your FYP journey on track.</p>
+            </div>
+        </div>
+
+        <button type="button" class="meet-hero-action" id="openSchedulePanel">
+            <i class="bi bi-plus-lg"></i>
+            Schedule Meeting
+        </button>
+    </header>
+
+    <section class="meet-layout">
+
+        <main class="meet-main-column">
+
+            <article class="meet-card">
+                <div class="meet-card-head">
+                    <div class="meet-card-title">
+                        <i class="bi bi-calendar3"></i>
+                        <h2>Upcoming Meetings</h2>
+                    </div>
+
+                    <a href="?week=0" class="meet-view-link">
+                        View Calendar <i class="bi bi-chevron-right"></i>
+                    </a>
+                </div>
+
+                @if (!Model.UpcomingMeetings.Any())
+                {
+                    <div class="meet-empty-state compact">
+                        <i class="bi bi-calendar2-plus"></i>
+                        <h3>No upcoming meetings</h3>
+                        <p>Schedule your first real meeting from the form below.</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="meet-upcoming-list">
+                        @foreach (var meeting in Model.UpcomingMeetings.Take(4))
+                        {
+                            var localStart = meeting.ScheduledAt.ToLocalTime();
+                            var localEnd = meeting.ScheduledAt.AddMinutes(meeting.DurationMinutes).ToLocalTime();
+                            var active = selected?.Id == meeting.Id;
+                            var isToday = localStart.Date == today;
+
+                            <a href="/Supervisor/Meetings?meetingId=@meeting.Id"
+                               class="meet-upcoming-row @(active ? "active" : "")"
+                               data-meeting-start="@meeting.ScheduledAt.ToString("O")"
+                               data-meeting-end="@meeting.ScheduledAt.AddMinutes(meeting.DurationMinutes).ToString("O")">
+
+                                @if (isToday)
+                                {
+                                    <span class="meet-today-badge">TODAY</span>
+                                }
+                                else
+                                {
+                                    <span class="meet-today-badge spacer"></span>
+                                }
+
+                                <div class="meet-upcoming-title">
+                                    <h3>@meeting.Title</h3>
+                                    <p>@ShortText(meeting.Agenda, 72)</p>
+                                </div>
+
+                                <div class="meet-upcoming-cell">
+                                    <i class="bi bi-calendar3"></i>
+                                    <div>
+                                        <span>@localStart.ToString("MMM d, yyyy")</span>
+                                        <small>@localStart.ToString("dddd")</small>
+                                    </div>
+                                </div>
+
+                                <div class="meet-upcoming-cell">
+                                    <i class="bi bi-clock"></i>
+                                    <div>
+                                        <span>@localStart.ToString("hh:mm tt")</span>
+                                        <small>@meeting.DurationMinutes min</small>
+                                    </div>
+                                </div>
+
+                                <div class="meet-upcoming-cell">
+                                    <i class="bi bi-person"></i>
+                                    <div>
+                                        <span>@(meeting.Student?.FullName ?? "No student")</span>
+                                        <small>Student</small>
+                                    </div>
+                                </div>
+
+                                <div class="meet-upcoming-cell">
+                                    <i class="@ModeIcon(meeting.MeetingMode)"></i>
+                                    <div>
+                                        <span>@ModeLabel(meeting.MeetingMode)</span>
+                                        <small class="js-meeting-countdown">Calculating...</small>
+                                    </div>
+                                </div>
+
+                                <span class="@(isToday ? "meet-status-today" : "meet-status") js-meeting-status">
+                                    @(isToday ? "Today" : "Upcoming")
+                                </span>
+                            </a>
+                        }
+                    </div>
+                }
+            </article>
+
+            <article class="meet-card">
+                <div class="meet-card-head">
+                    <div class="meet-card-title">
+                        <i class="bi bi-calendar3"></i>
+                        <h2>Weekly Schedule</h2>
+                    </div>
+
+                    <div class="meet-week-nav">
+                        <span class="meet-week-range">@weekDays.First().ToString("MMM d") &ndash; @weekDays.Last().ToString("MMM d, yyyy")</span>
+                        <a href="@BuildNavLink(weekOffset - 1)" class="meet-nav-btn" title="Previous week">
+                            <i class="bi bi-chevron-left"></i>
+                        </a>
+                        <a href="@BuildNavLink(weekOffset + 1)" class="meet-nav-btn" title="Next week">
+                            <i class="bi bi-chevron-right"></i>
+                        </a>
+                    </div>
+                </div>
+
+                <div class="meet-week-wrap">
+                    <div class="meet-week-grid" id="meetWeeklyGrid">
+                        <div class="meet-week-corner"></div>
+
+                        @foreach (var day in weekDays)
+                        {
+                            <div class="meet-week-day">
+                                <span>@day.ToString("ddd")</span>
+                                @if (day.Date == today)
+                                {
+                                    <strong class="today-circle">@day.Day</strong>
+                                }
+                                else
+                                {
+                                    <strong>@day.Day</strong>
+                                }
+                            </div>
+                        }
+
+                        @foreach (var hour in hourSlots)
+                        {
+                            <div class="meet-hour-label">@DateTime.Today.AddHours(hour).ToString("h tt")</div>
+
+                            @foreach (var day in weekDays)
+                            {
+                                var meetingsAtSlot = weekMeetings
+                                    .Where(m =>
+                                    {
+                                        var local = m.ScheduledAt.ToLocalTime();
+                                        return local.Date == day.Date && local.Hour == hour;
+                                    })
+                                    .OrderBy(m => m.ScheduledAt)
+                                    .ToList();
+
+                                <div class="meet-week-cell" data-day="@day.ToString("yyyy-MM-dd")" data-hour="@hour">
+                                    @foreach (var meeting in meetingsAtSlot)
+                                    {
+                                        var localStart = meeting.ScheduledAt.ToLocalTime();
+
+                                        <a href="/Supervisor/Meetings?meetingId=@meeting.Id"
+                                           class="meet-week-event @(meeting.Status)"
+                                           data-meeting-start="@meeting.ScheduledAt.ToString("O")"
+                                           data-meeting-end="@meeting.ScheduledAt.AddMinutes(meeting.DurationMinutes).ToString("O")">
+                                            <span>@localStart.ToString("h:mm tt") <i class="@ModeIcon(meeting.MeetingMode)"></i></span>
+                                            <strong>@meeting.Title</strong>
+                                        </a>
+                                    }
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
+            </article>
+
+        </main>
+
+        <aside class="meet-details-card">
+            @if (selected == null)
+            {
+                <div class="meet-empty-state tall">
+                    <i class="bi bi-calendar-week"></i>
+                    <h3>Select a meeting</h3>
+                    <p>Meeting details will appear here after you select or schedule a meeting.</p>
+                </div>
+            }
+            else
+            {
+                var selectedStart = selected.ScheduledAt.ToLocalTime();
+                var selectedEnd = selected.ScheduledAt.AddMinutes(selected.DurationMinutes).ToLocalTime();
+                var isSelectedToday = selectedStart.Date == today;
+
+                <div class="meet-details-head">
+                    <h2>Meeting Details</h2>
+                    @if (isSelectedToday)
+                    {
+                        <span class="meet-today-pill">TODAY</span>
+                    }
+                    else
+                    {
+                        <span class="@StatusClass(selected.Status)">@DisplayStatus(selected)</span>
+                    }
+                </div>
+
+                <h3 class="meet-details-title">@selected.Title</h3>
+
+                <div class="meet-detail-meta">
+                    <div>
+                        <i class="bi bi-calendar3"></i>
+                        <span>@selectedStart.ToString("MMM d, yyyy") @(isSelectedToday ? "(Today)" : "")</span>
+                    </div>
+
+                    <div>
+                        <i class="bi bi-clock"></i>
+                        <span>@selectedStart.ToString("hh:mm tt") &ndash; @selectedEnd.ToString("hh:mm tt")</span>
+                    </div>
+
+                    <div>
+                        <i class="@ModeIcon(selected.MeetingMode)"></i>
+                        <span>@ModeLabel(selected.MeetingMode) Meeting</span>
+                    </div>
+                </div>
+
+                <div class="meet-with-box">
+                    <div class="meet-with-avatar">@Initials(selected.Student?.FullName)</div>
+                    <div>
+                        <span>With</span>
+                        <h3>@(selected.Student?.FullName ?? "No student selected")</h3>
+                        <p>@(selected.Student?.Email ?? "No email available")</p>
+                    </div>
+                </div>
+
+                <div class="meet-detail-section">
+                    <h3>Agenda</h3>
+
+                    @if (SplitLines(selected.Agenda).Any())
+                    {
+                        <ul>
+                            @foreach (var item in SplitLines(selected.Agenda))
+                            {
+                                <li>@item</li>
+                            }
+                        </ul>
+                    }
+                    else
+                    {
+                        <p class="meet-muted">No agenda added.</p>
+                    }
+                </div>
+
+                <div class="meet-detail-section">
+                    <h3>Notes to prepare</h3>
+
+                    @if (SplitLines(selected.NotesToPrepare).Any())
+                    {
+                        <ul>
+                            @foreach (var item in SplitLines(selected.NotesToPrepare))
+                            {
+                                <li>@item</li>
+                            }
+                        </ul>
+                    }
+                    else
+                    {
+                        <p class="meet-muted">No preparation notes added.</p>
+                    }
+                </div>
+
+                <div class="meet-join-card">
+                    <div class="meet-join-icon">
+                        <i class="bi bi-camera-video"></i>
+                    </div>
+
+                    <div class="meet-join-copy">
+                        <span>Meeting Access</span>
+                        <h3>@(selected.LocationOrLink != null && selected.LocationOrLink.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? "Online meeting is ready" : "Meeting location")</h3>
+                        <p>@(string.IsNullOrWhiteSpace(selected.LocationOrLink) ? "No online link or room location was added yet." : selected.LocationOrLink)</p>
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(selected.LocationOrLink) && selected.LocationOrLink.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                    {
+                        <a href="@selected.LocationOrLink" target="_blank" rel="noopener" class="meet-join-btn">
+                            <i class="bi bi-box-arrow-up-right"></i>
+                            Join Meet
+                        </a>
+                    }
+                    else
+                    {
+                        <span class="meet-join-disabled">No link</span>
+                    }
+                </div>
+
+                <div class="meet-detail-actions">
+                    @if (selected.Status == "scheduled")
+                    {
+                        <form method="post" asp-page-handler="Complete">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="meetingId" value="@selected.Id" />
+                            <button type="submit" class="meet-soft-btn">
+                                <i class="bi bi-check2 me-1"></i>
+                                Mark Completed
+                            </button>
+                        </form>
+
+                        <form method="post" asp-page-handler="Cancel">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="meetingId" value="@selected.Id" />
+                            <button type="submit" class="meet-danger-btn">
+                                <i class="bi bi-x-lg me-1"></i>
+                                Cancel
+                            </button>
+                        </form>
+                    }
+                </div>
+            }
+        </aside>
+    </section>
+
+    <section class="meet-bottom-grid">
+        <article class="meet-card meet-recent-card">
+            <div class="meet-card-head">
+                <div class="meet-card-title">
+                    <i class="bi bi-chat-square-text"></i>
+                    <h2>Recent Meetings</h2>
+                </div>
+
+                <span class="meet-view-link inactive">View All</span>
+            </div>
+
+            @if (!Model.RecentMeetings.Any())
+            {
+                <div class="meet-compact-empty">
+                    No recent meetings yet.
+                </div>
+            }
+            else
+            {
+                <div class="meet-recent-table">
+                    <div class="meet-recent-header">
+                        <span>Meeting</span>
+                        <span>Date</span>
+                        <span>Time</span>
+                        <span>With</span>
+                        <span>Mode</span>
+                        <span>Duration</span>
+                        <span>Outcome</span>
+                    </div>
+
+                    @foreach (var meeting in Model.RecentMeetings.Take(5))
+                    {
+                        var localStart = meeting.ScheduledAt.ToLocalTime();
+
+                        <a href="/Supervisor/Meetings?meetingId=@meeting.Id" class="meet-recent-row">
+                            <div class="meet-recent-title">
+                                <span class="meet-recent-check @StatusDotClass(meeting.Status)">
+                                    <i class="bi bi-check-circle-fill"></i>
+                                </span>
+                                <div>
+                                    <h3>@meeting.Title</h3>
+                                    <p>@ShortText(meeting.Agenda, 48)</p>
+                                </div>
+                            </div>
+
+                            <span>@localStart.ToString("MMM d, yyyy")<small>@localStart.ToString("dddd")</small></span>
+                            <span>@localStart.ToString("hh:mm tt")</span>
+
+                            <span class="meet-recent-with">
+                                <b class="meet-with-avatar-sm">@Initials(meeting.Student?.FullName)</b>
+                                @(meeting.Student?.FullName ?? "No student")
+                            </span>
+
+                            <span><i class="@ModeIcon(meeting.MeetingMode)"></i> @ModeLabel(meeting.MeetingMode)</span>
+                            <span>@meeting.DurationMinutes min</span>
+                            <span><b class="@StatusClass(meeting.Status)">@DisplayStatus(meeting)</b></span>
+                        </a>
+                    }
+                </div>
+            }
+        </article>
+    </section>
+
+    <div class="meet-schedule-overlay" id="scheduleOverlay"></div>
+
+    <aside class="meet-schedule-panel" id="schedulePanel" aria-hidden="true">
+        <div class="meet-panel-head">
+            <div>
+                <span>Schedule</span>
+                <h2>Create Meeting</h2>
+            </div>
+
+            <button type="button" id="closeSchedulePanel" aria-label="Close schedule form">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+
+        <form method="post" asp-page-handler="Schedule" class="meet-form">
+            @Html.AntiForgeryToken()
+
+            <div class="meet-field">
+                <label asp-for="Input.Title">Meeting title</label>
+                <input asp-for="Input.Title" class="form-control" placeholder="Example: FYP progress meeting" />
+            </div>
+
+            <div class="meet-form-grid">
+                <div class="meet-field">
+                    <label asp-for="Input.StudentId">Student</label>
+                    <select asp-for="Input.StudentId" class="form-select">
+                        <option value="">No student selected</option>
+                        @foreach (var student in Model.Students)
+                        {
+                            <option value="@student.Id">@student.FullName - @student.Email</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="meet-field">
+                    <label asp-for="Input.ScheduledAt">Date and time</label>
+                    <input asp-for="Input.ScheduledAt" class="form-control" type="datetime-local" />
+                </div>
+            </div>
+
+            <div class="meet-form-grid three">
+                <div class="meet-field">
+                    <label asp-for="Input.DurationMinutes">Duration</label>
+                    <select asp-for="Input.DurationMinutes" class="form-select">
+                        <option value="30">30 min</option>
+                        <option value="45">45 min</option>
+                        <option value="60">60 min</option>
+                        <option value="90">90 min</option>
+                        <option value="120">120 min</option>
+                    </select>
+                </div>
+
+                <div class="meet-field">
+                    <label asp-for="Input.MeetingMode">Mode</label>
+                    <select asp-for="Input.MeetingMode" class="form-select">
+                        <option value="online">Online</option>
+                        <option value="in_person">In-person</option>
+                        <option value="hybrid">Hybrid</option>
+                    </select>
+                </div>
+
+                <div class="meet-field">
+                    <label asp-for="Input.LocationOrLink">Location or link</label>
+                    <input asp-for="Input.LocationOrLink" class="form-control" placeholder="Meet link, Zoom, office..." />
+                </div>
+            </div>
+
+            <div class="meet-form-grid">
+                <div class="meet-field">
+                    <label asp-for="Input.Agenda">Agenda</label>
+                    <textarea asp-for="Input.Agenda" class="form-control" rows="4" placeholder="One agenda item per line..."></textarea>
+                </div>
+
+                <div class="meet-field">
+                    <label asp-for="Input.NotesToPrepare">Notes to prepare</label>
+                    <textarea asp-for="Input.NotesToPrepare" class="form-control" rows="4" placeholder="What should be prepared before the meeting?"></textarea>
+                </div>
+            </div>
+
+            <div class="meet-form-actions">
+                <button type="submit" class="btn meet-primary-btn">
+                    <i class="bi bi-calendar-plus me-1"></i>
+                    Save Meeting
+                </button>
+            </div>
+        </form>
+    </aside>
+
+</section>
+
+@section Head {
+    <style>
+        :root {
+            --meet-navy: #28385E;
+            --meet-blue: #304163;
+            --meet-steel: #516C8D;
+            --meet-border: #E8ECF2;
+            --meet-text: #111827;
+            --meet-muted: #64748B;
+            --meet-tint: #EEF2F6;
+        }
+
+        .meet-page {
+            max-width: 1500px;
+            margin: 0 auto;
+            color: var(--meet-text);
+            padding-bottom: 1.5rem;
+        }
+
+        .meet-alert {
+            border: 0;
+            border-radius: 18px;
+            box-shadow: 0 14px 34px rgba(15,23,42,0.08);
+        }
+
+        /* ---------- Hero (matches reference: icon + copy left, button + illustration right) ---------- */
+        .meet-hero {
+            position: relative;
+            min-height: 150px;
+            margin-bottom: 1rem;
+            border-radius: 24px;
+            padding: 1.5rem 1.75rem;
+            color: #ffffff;
+            background: radial-gradient(circle at 92% 20%, rgba(255,255,255,0.10), transparent 32%), linear-gradient(120deg, #0B1F4D 0%, var(--meet-navy) 55%, var(--meet-blue) 100%);
+            box-shadow: 0 18px 42px rgba(40,56,94,0.16);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1.5rem;
+            overflow: hidden;
+        }
+
+        .meet-hero-left {
+            display: flex;
+            align-items: center;
+            gap: 1.1rem;
+            z-index: 1;
+        }
+
+        .meet-hero-icon {
+            width: 56px;
+            height: 56px;
+            min-width: 56px;
+            border-radius: 18px;
+            background: rgba(255,255,255,0.14);
+            border: 1px solid rgba(255,255,255,0.18);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+        }
+
+        .meet-hero-copy h1 {
+            margin: 0;
+            color: #ffffff;
+            font-size: clamp(1.25rem, 2.2vw, 1.6rem);
+            font-weight: 700;
+            letter-spacing: -0.03em;
+        }
+
+        .meet-hero-copy p {
+            margin: 0.3rem 0 0;
+            max-width: 480px;
+            color: rgba(255,255,255,0.78);
+            line-height: 1.5;
+            font-size: 0.88rem;
+        }
+
+        .meet-hero-action {
+            z-index: 1;
+            border: 0;
+            color: var(--meet-blue);
+            background: #ffffff;
+            border-radius: 13px;
+            padding: 0.7rem 1.1rem;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+            white-space: nowrap;
+            box-shadow: 0 14px 30px rgba(0,0,0,0.14);
+        }
+
+            .meet-hero-action:hover {
+                color: var(--meet-blue);
+                background: #F8FAFC;
+            }
+
+        .meet-hero-art {
+            position: absolute;
+            right: 1.75rem;
+            bottom: 0;
+            width: 140px;
+            height: 100px;
+            display: none;
+        }
+
+        @@media (min-width: 1100px) {
+            .meet-hero-art {
+                display: block;
+            }
+        }
+
+        .meet-hero-screen {
+            position: absolute;
+            right: 0;
+            bottom: 0.5rem;
+            width: 110px;
+            height: 70px;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.16);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .meet-hero-screen-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.35);
+        }
+
+        .meet-hero-bubble {
+            position: absolute;
+            right: 8px;
+            top: 0;
+            width: 34px;
+            height: 34px;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.9);
+            color: var(--meet-blue);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9rem;
+            box-shadow: 0 8px 18px rgba(0,0,0,0.2);
+        }
+
+        /* ---------- Layout ---------- */
+        .meet-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1.65fr) minmax(360px, 0.9fr);
+            gap: 1rem;
+            align-items: stretch;
+            margin-bottom: 1rem;
+        }
+
+        .meet-bottom-grid {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .meet-main-column {
+            display: grid;
+            gap: 1rem;
+            min-width: 0;
+        }
+
+        .meet-card,
+        .meet-details-card {
+            background: #ffffff;
+            border: 1px solid var(--meet-border);
+            border-radius: 20px;
+            box-shadow: 0 10px 28px rgba(15,23,42,0.05);
+            overflow: hidden;
+        }
+
+        .meet-details-card {
+            position: sticky;
+            top: 100px;
+            height: 100%;
+            padding-bottom: 0.5rem;
+        }
+
+        .meet-card-head {
+            min-height: 56px;
+            padding: 0.85rem 1.1rem;
+            border-bottom: 1px solid var(--meet-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .meet-card-title {
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+        }
+
+            .meet-card-title i {
+                color: var(--meet-blue);
+                font-size: 1rem;
+            }
+
+            .meet-card-title h2 {
+                margin: 0;
+                color: var(--meet-text);
+                font-size: 1.02rem;
+                font-weight: 700;
+                letter-spacing: -0.02em;
+            }
+
+        .meet-view-link {
+            color: var(--meet-blue);
+            font-size: 0.82rem;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.2rem;
+        }
+
+            .meet-view-link:hover {
+                color: var(--meet-navy);
+            }
+
+        /* ---------- Upcoming meetings: list rows exactly like reference ---------- */
+        .meet-upcoming-list {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .meet-upcoming-row {
+            color: inherit;
+            text-decoration: none;
+            padding: 0.85rem 1.1rem;
+            border-bottom: 1px solid var(--meet-border);
+            display: grid;
+            grid-template-columns: 62px minmax(160px, 1.3fr) minmax(120px, 0.9fr) minmax(100px, 0.75fr) minmax(140px, 0.95fr) minmax(90px, 0.75fr) auto;
+            gap: 1.1rem;
+            align-items: center;
+            transition: background 0.15s ease;
+        }
+
+            .meet-upcoming-row:last-child {
+                border-bottom: 0;
+            }
+
+            .meet-upcoming-row:hover,
+            .meet-upcoming-row.active {
+                color: inherit;
+                background: #FAFBFD;
+            }
+
+        .meet-today-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--meet-tint);
+            color: var(--meet-blue);
+            font-size: 0.66rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            border-radius: 8px;
+            padding: 0.3rem 0.4rem;
+            text-align: center;
+        }
+
+            .meet-today-badge.spacer {
+                background: transparent;
+            }
+
+        .meet-upcoming-title h3 {
+            margin: 0;
+            color: var(--meet-text);
+            font-size: 0.92rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+        }
+
+        .meet-upcoming-title p {
+            margin: 0.18rem 0 0;
+            color: var(--meet-muted);
+            font-size: 0.76rem;
+            line-height: 1.4;
+        }
+
+        .meet-upcoming-cell {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.45rem;
+            min-width: 0;
+        }
+
+            .meet-upcoming-cell i {
+                color: var(--meet-steel);
+                margin-top: 0.15rem;
+                font-size: 0.9rem;
+            }
+
+            .meet-upcoming-cell div {
+                display: flex;
+                flex-direction: column;
+                min-width: 0;
+            }
+
+            .meet-upcoming-cell span {
+                color: #334155;
+                font-size: 0.8rem;
+                font-weight: 600;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+
+            .meet-upcoming-cell small {
+                color: var(--meet-muted);
+                font-size: 0.7rem;
+            }
+
+        .meet-status,
+        .meet-status-today,
+        .meet-status-completed,
+        .meet-status-cancelled,
+        .meet-status-live,
+        .meet-status-ended {
+            display: inline-flex;
+            border-radius: 999px;
+            padding: 0.3rem 0.6rem;
+            font-size: 0.72rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .meet-status {
+            color: var(--meet-blue);
+            background: var(--meet-tint);
+        }
+
+        .meet-status-today {
+            color: var(--meet-navy);
+            background: #D9E2F1;
+        }
+
+        .meet-status-ended {
+            color: #92400E;
+            background: #FEF3C7;
+        }
+
+        .meet-status-completed {
+            color: #16794F;
+            background: #DBF3E6;
+        }
+
+        .meet-status-cancelled {
+            color: #B3403F;
+            background: #F7E7E6;
+        }
+
+        /* ---------- Weekly schedule ---------- */
+        .meet-week-nav {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .meet-week-range {
+            color: var(--meet-muted);
+            font-size: 0.82rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .meet-nav-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            border-radius: 9px;
+            color: var(--meet-blue);
+            background: var(--meet-tint);
+            border: 1px solid var(--meet-border);
+            text-decoration: none;
+            font-size: 0.8rem;
+        }
+
+            .meet-nav-btn:hover {
+                background: #E3E9F1;
+            }
+
+        .meet-week-wrap {
+            overflow-x: auto;
+            padding: 1rem 1.25rem 1.25rem;
+        }
+
+        .meet-week-grid {
+            min-width: 840px;
+            display: grid;
+            grid-template-columns: 56px repeat(7, minmax(100px, 1fr));
+        }
+
+        .meet-week-corner,
+        .meet-week-day,
+        .meet-hour-label,
+        .meet-week-cell {
+            border-bottom: 1px solid #EEF2F7;
+        }
+
+        .meet-week-day {
+            min-height: 46px;
+            display: grid;
+            place-items: center;
+            gap: 0.25rem;
+        }
+
+            .meet-week-day span {
+                color: var(--meet-muted);
+                font-size: 0.72rem;
+            }
+
+            .meet-week-day strong {
+                color: var(--meet-text);
+                font-size: 0.92rem;
+                font-weight: 600;
+            }
+
+                .meet-week-day strong.today-circle {
+                    width: 30px;
+                    height: 30px;
+                    color: #ffffff;
+                    background: var(--meet-navy);
+                    border-radius: 50%;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-weight: 700;
+                }
+
+        .meet-hour-label {
+            min-height: 50px;
+            padding: 0.4rem 0.5rem 0 0;
+            color: var(--meet-muted);
+            font-size: 0.72rem;
+            text-align: right;
+        }
+
+        .meet-week-cell {
+            min-height: 50px;
+            padding: 0.2rem 0.35rem;
+            position: relative;
+            border-left: 1px solid #F3F5F8;
+        }
+
+        .meet-week-event {
+            color: var(--meet-blue);
+            text-decoration: none;
+            border-radius: 8px;
+            padding: 0.3rem 0.4rem;
+            background: #E7EDFA;
+            border-left: 3px solid var(--meet-navy);
+            display: block;
+            font-size: 0.66rem;
+            line-height: 1.35;
+        }
+
+            .meet-week-event:hover {
+                background: #DCE5F5;
+            }
+
+            .meet-week-event span {
+                display: block;
+                color: var(--meet-steel);
+                font-weight: 600;
+            }
+
+            .meet-week-event strong {
+                display: block;
+                color: var(--meet-blue);
+                font-weight: 700;
+            }
+
+        /* ---------- Recent meetings table ---------- */
+        .meet-recent-table {
+            overflow-x: auto;
+        }
+
+        .meet-recent-header,
+        .meet-recent-row {
+            min-width: 920px;
+            display: grid;
+            grid-template-columns: 1.6fr 1fr 0.7fr 1.1fr 0.85fr 0.65fr 0.85fr;
+            gap: 0.75rem;
+            align-items: center;
+        }
+
+        .meet-recent-header {
+            padding: 0.7rem 1.25rem;
+            color: var(--meet-muted);
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            border-bottom: 1px solid var(--meet-border);
+        }
+
+        .meet-recent-row {
+            color: inherit;
+            text-decoration: none;
+            padding: 0.85rem 1.25rem;
+            border-bottom: 1px solid #EEF2F7;
+            font-size: 0.8rem;
+        }
+
+            .meet-recent-row:last-child {
+                border-bottom: 0;
+            }
+
+            .meet-recent-row:hover {
+                color: inherit;
+                background: #FAFBFD;
+            }
+
+        .meet-recent-title {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.55rem;
+        }
+
+        .meet-recent-check {
+            color: #16794F;
+            font-size: 1rem;
+            margin-top: 0.1rem;
+        }
+
+        .meet-recent-title h3 {
+            margin: 0;
+            color: var(--meet-text);
+            font-size: 0.85rem;
+            font-weight: 700;
+        }
+
+        .meet-recent-title p {
+            margin: 0.14rem 0 0;
+            color: var(--meet-muted);
+            font-size: 0.72rem;
+        }
+
+        .meet-recent-row > span {
+            color: #334155;
+            font-size: 0.78rem;
+            display: flex;
+            flex-direction: column;
+        }
+
+            .meet-recent-row > span small {
+                color: var(--meet-muted);
+                font-size: 0.68rem;
+            }
+
+        .meet-recent-with {
+            flex-direction: row !important;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .meet-with-avatar-sm {
+            width: 24px;
+            height: 24px;
+            min-width: 24px;
+            border-radius: 50%;
+            background: var(--meet-navy);
+            color: #ffffff;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.6rem;
+            font-weight: 700;
+        }
+
+        /* ---------- Form ---------- */
+        .meet-form {
+            padding: 1.1rem 1.25rem;
+            display: grid;
+            gap: 0.8rem;
+        }
+
+        .meet-form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.78rem;
+        }
+
+            .meet-form-grid.three {
+                grid-template-columns: 0.75fr 0.75fr 1.5fr;
+            }
+
+        .meet-field label {
+            display: block;
+            margin-bottom: 0.32rem;
+            color: #334155;
+            font-size: 0.76rem;
+            font-weight: 600;
+        }
+
+        .meet-field .form-control,
+        .meet-field .form-select {
+            border-radius: 12px;
+            border-color: #DDE5EF;
+            font-size: 0.84rem;
+        }
+
+        .meet-field textarea {
+            resize: vertical;
+        }
+
+        .meet-field .form-control:focus,
+        .meet-field .form-select:focus {
+            border-color: var(--meet-steel);
+            box-shadow: 0 0 0 0.2rem rgba(81,108,141,0.15);
+        }
+
+        .meet-form-actions {
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .meet-primary-btn,
+        .meet-primary-link,
+        .meet-soft-btn,
+        .meet-danger-btn {
+            border-radius: 12px;
+            padding: 0.62rem 0.9rem;
+            font-size: 0.84rem;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+        }
+
+        .meet-primary-btn,
+        .meet-primary-link {
+            color: #ffffff;
+            background: var(--meet-navy);
+            border: 1px solid rgba(81,108,141,0.25);
+        }
+
+            .meet-primary-btn:hover,
+            .meet-primary-link:hover {
+                color: #ffffff;
+                background: var(--meet-blue);
+            }
+
+        /* ---------- Meeting Details sidebar ---------- */
+        .meet-details-head {
+            padding: 1.1rem 1.25rem 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+            .meet-details-head h2 {
+                margin: 0;
+                color: var(--meet-text);
+                font-size: 0.95rem;
+                font-weight: 700;
+            }
+
+        .meet-today-pill {
+            background: var(--meet-navy);
+            color: #ffffff;
+            font-size: 0.65rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            border-radius: 8px;
+            padding: 0.28rem 0.5rem;
+        }
+
+        .meet-details-title {
+            margin: 0.6rem 1.25rem 0.9rem;
+            color: var(--meet-text);
+            font-size: 1.1rem;
+            font-weight: 700;
+            letter-spacing: -0.01em;
+        }
+
+        .meet-detail-meta {
+            padding: 0 1.25rem 1rem;
+            display: grid;
+            gap: 0.6rem;
+        }
+
+            .meet-detail-meta div {
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                color: #334155;
+                font-size: 0.84rem;
+            }
+
+            .meet-detail-meta i {
+                color: var(--meet-steel);
+            }
+
+        .meet-with-box {
+            margin: 0 1.25rem 1rem;
+            border-top: 1px solid #EEF2F7;
+            padding: 1rem 0 0;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: 0.7rem;
+            align-items: center;
+        }
+
+            .meet-with-box span {
+                display: block;
+                color: var(--meet-muted);
+                font-size: 0.68rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+            }
+
+        .meet-with-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            color: #ffffff;
+            background: var(--meet-navy);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.78rem;
+            font-weight: 700;
+        }
+
+        .meet-with-box h3 {
+            margin: 0.1rem 0 0;
+            color: var(--meet-text);
+            font-size: 0.9rem;
+            font-weight: 700;
+        }
+
+        .meet-with-box p {
+            margin: 0.14rem 0 0;
+            color: var(--meet-muted);
+            font-size: 0.76rem;
+        }
+
+        .meet-detail-section {
+            padding: 0 1.25rem 1rem;
+            border-top: 1px solid #EEF2F7;
+            padding-top: 1rem;
+        }
+
+            .meet-detail-section.no-border {
+                border-top: 0;
+                padding-top: 0;
+            }
+
+            .meet-detail-section h3 {
+                margin: 0 0 0.5rem;
+                color: var(--meet-text);
+                font-size: 0.86rem;
+                font-weight: 700;
+            }
+
+            .meet-detail-section ul {
+                margin: 0;
+                padding-left: 1.1rem;
+                color: #334155;
+                font-size: 0.82rem;
+                line-height: 1.75;
+            }
+
+        .meet-muted {
+            color: var(--meet-muted);
+            margin: 0;
+            font-size: 0.82rem;
+        }
+
+        .meet-detail-actions {
+            padding: 0.4rem 1.25rem 1.1rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+        }
+
+            .meet-detail-actions form {
+                margin: 0;
+                flex: 1;
+            }
+
+            .meet-detail-actions .meet-soft-btn,
+            .meet-detail-actions .meet-danger-btn,
+            .meet-detail-actions .meet-primary-link {
+                width: 100%;
+            }
+
+        .meet-soft-btn {
+            color: var(--meet-blue);
+            background: var(--meet-tint);
+            border: 1px solid #DDE5EF;
+        }
+
+            .meet-soft-btn:hover {
+                background: #E3E9F1;
+            }
+
+        .meet-danger-btn {
+            color: #B3403F;
+            background: #F7E7E6;
+            border: 1px solid #F0D3D2;
+        }
+
+            .meet-danger-btn:hover {
+                background: #F0D3D2;
+            }
+
+        .meet-empty-state {
+            min-height: 220px;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            text-align: center;
+            padding: 2rem;
+        }
+
+            .meet-empty-state.tall {
+                min-height: 480px;
+            }
+
+            .meet-empty-state i {
+                width: 56px;
+                height: 56px;
+                border-radius: 18px;
+                color: var(--meet-steel);
+                background: var(--meet-tint);
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 1.4rem;
+                margin-bottom: 0.7rem;
+            }
+
+            .meet-empty-state h3 {
+                margin: 0;
+                color: var(--meet-text);
+                font-size: 0.98rem;
+                font-weight: 700;
+            }
+
+            .meet-empty-state p {
+                margin: 0.4rem 0 0;
+                max-width: 380px;
+                color: var(--meet-muted);
+                font-size: 0.84rem;
+                line-height: 1.5;
+            }
+
+        .meet-compact-empty {
+            padding: 0.85rem 1.1rem;
+            color: var(--meet-muted);
+            font-size: 0.84rem;
+        }
+
+        .meet-status-live {
+            color: var(--meet-navy);
+            background: #D9E2F1;
+        }
+
+        .meet-week-cell.current-hour {
+            background: #F7FAFF;
+        }
+
+        .meet-week-event.live {
+            color: var(--meet-navy);
+            background: #D9E2F1;
+        }
+
+        .meet-week-event.cancelled {
+            opacity: 0.55;
+            text-decoration: line-through;
+        }
+
+        .meet-schedule-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 998;
+            background: rgba(15,23,42,0.35);
+            opacity: 0;
+            pointer-events: none;
+            transition: 0.2s ease;
+        }
+
+            .meet-schedule-overlay.show {
+                opacity: 1;
+                pointer-events: auto;
+            }
+
+        .meet-schedule-panel {
+            position: fixed;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            width: min(560px, 96vw);
+            z-index: 999;
+            background: #ffffff;
+            box-shadow: -24px 0 50px rgba(15,23,42,0.22);
+            transform: translateX(105%);
+            transition: 0.22s ease;
+            overflow-y: auto;
+        }
+
+            .meet-schedule-panel.show {
+                transform: translateX(0);
+            }
+
+        .meet-panel-head {
+            padding: 1rem 1.15rem;
+            border-bottom: 1px solid var(--meet-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+            .meet-panel-head span {
+                display: block;
+                color: var(--meet-steel);
+                font-size: 0.68rem;
+                font-weight: 700;
+                letter-spacing: 0.1em;
+                text-transform: uppercase;
+            }
+
+            .meet-panel-head h2 {
+                margin: 0.12rem 0 0;
+                font-size: 1.08rem;
+                font-weight: 700;
+                color: var(--meet-text);
+            }
+
+            .meet-panel-head button {
+                width: 36px;
+                height: 36px;
+                border: 0;
+                border-radius: 12px;
+                color: var(--meet-blue);
+                background: var(--meet-tint);
+            }
+
+        /* ---------- Center modal for creating a meeting ---------- */
+        .meet-schedule-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 998;
+            background: rgba(15, 23, 42, 0.42);
+            backdrop-filter: blur(4px);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+        }
+
+            .meet-schedule-overlay.show {
+                opacity: 1;
+                pointer-events: auto;
+            }
+
+        .meet-schedule-panel {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            right: auto;
+            bottom: auto;
+            width: min(760px, calc(100vw - 2rem));
+            max-height: 88vh;
+            z-index: 999;
+            background: #ffffff;
+            border: 1px solid rgba(232,236,242,0.9);
+            border-radius: 28px;
+            box-shadow: 0 32px 80px rgba(15,23,42,0.26);
+            transform: translate(-50%, -46%) scale(0.96);
+            opacity: 0;
+            pointer-events: none;
+            overflow-y: auto;
+            transition: transform 0.22s ease, opacity 0.22s ease;
+        }
+
+            .meet-schedule-panel.show {
+                transform: translate(-50%, -50%) scale(1);
+                opacity: 1;
+                pointer-events: auto;
+            }
+
+        .meet-panel-head {
+            padding: 1rem 1.15rem;
+            border-bottom: 1px solid var(--meet-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: linear-gradient(135deg, #ffffff 0%, #F7F9FC 100%);
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+
+            .meet-panel-head span {
+                display: block;
+                color: var(--meet-steel);
+                font-size: 0.68rem;
+                font-weight: 700;
+                letter-spacing: 0.1em;
+                text-transform: uppercase;
+            }
+
+            .meet-panel-head h2 {
+                margin: 0.12rem 0 0;
+                font-size: 1.08rem;
+                font-weight: 700;
+                color: var(--meet-text);
+            }
+
+            .meet-panel-head button {
+                width: 38px;
+                height: 38px;
+                border: 0;
+                border-radius: 14px;
+                color: var(--meet-blue);
+                background: var(--meet-tint);
+            }
+
+        .meet-schedule-panel .meet-form {
+            padding: 1rem 1.15rem 1.2rem;
+            display: grid;
+            gap: 0.78rem;
+        }
+
+        /* ---------- Meeting access card inside details panel ---------- */
+        .meet-join-card {
+            margin: 0.2rem 1.15rem 0.9rem;
+            padding: 0.95rem;
+            border-radius: 18px;
+            border: 1px solid #DDE5EF;
+            background: linear-gradient(135deg, #F8FAFC 0%, #EEF2F6 100%);
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .meet-join-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 16px;
+            color: #ffffff;
+            background: var(--meet-navy);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+        }
+
+        .meet-join-copy span {
+            display: block;
+            color: var(--meet-steel);
+            font-size: 0.66rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .meet-join-copy h3 {
+            margin: 0.12rem 0 0;
+            color: var(--meet-text);
+            font-size: 0.9rem;
+            font-weight: 700;
+        }
+
+        .meet-join-copy p {
+            margin: 0.12rem 0 0;
+            color: var(--meet-muted);
+            font-size: 0.76rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .meet-join-btn,
+        .meet-join-disabled {
+            border-radius: 12px;
+            padding: 0.58rem 0.72rem;
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.35rem;
+            white-space: nowrap;
+        }
+
+        .meet-join-btn {
+            color: #ffffff;
+            background: var(--meet-navy);
+        }
+
+            .meet-join-btn:hover {
+                color: #ffffff;
+                background: var(--meet-blue);
+            }
+
+        .meet-join-disabled {
+            color: var(--meet-muted);
+            background: #ffffff;
+            border: 1px dashed #CBD5E1;
+        }
+
+        /* Remove the decorative screen under the Schedule Meeting button */
+        .meet-hero-art {
+            display: none !important;
+        }
+
+        @@media (max-width: 1320px) {
+            .meet-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .meet-details-card {
+                position: static;
+            }
+
+            .meet-upcoming-row {
+                grid-template-columns: 46px minmax(0, 1fr);
+                grid-template-areas:
+                    "badge title"
+                    "date  date"
+                    "time  time"
+                    "who   who"
+                    "mode  mode"
+                    "status status";
+                row-gap: 0.4rem;
+            }
+
+            .meet-recent-header,
+            .meet-recent-row {
+                min-width: 720px;
+            }
+        }
+
+        @@media (max-width: 767px) {
+            .meet-hero {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .meet-hero-action {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .meet-form-grid,
+            .meet-form-grid.three {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+}
+
+@section Scripts {
+    <script>
+        const openSchedulePanel = document.getElementById("openSchedulePanel");
+        const closeSchedulePanel = document.getElementById("closeSchedulePanel");
+        const schedulePanel = document.getElementById("schedulePanel");
+        const scheduleOverlay = document.getElementById("scheduleOverlay");
+
+        function openSchedule() {
+            schedulePanel?.classList.add("show");
+            scheduleOverlay?.classList.add("show");
+            schedulePanel?.setAttribute("aria-hidden", "false");
+        }
+
+        function closeSchedule() {
+            schedulePanel?.classList.remove("show");
+            scheduleOverlay?.classList.remove("show");
+            schedulePanel?.setAttribute("aria-hidden", "true");
+        }
+
+        openSchedulePanel?.addEventListener("click", openSchedule);
+        closeSchedulePanel?.addEventListener("click", closeSchedule);
+        scheduleOverlay?.addEventListener("click", closeSchedule);
+
+        document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") {
+                closeSchedule();
+            }
+        });
+
+        function highlightCurrentWeekCell() {
+            const now = new Date();
+            const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+            const day = localDate.toISOString().slice(0, 10);
+            const hour = now.getHours();
+
+            document.querySelectorAll(".meet-week-cell.current-hour").forEach(cell => {
+                cell.classList.remove("current-hour");
+            });
+
+            const target = document.querySelector(`.meet-week-cell[data-day="${day}"][data-hour="${hour}"]`);
+
+            if (target) {
+                target.classList.add("current-hour");
+            }
+        }
+
+        function updateMeetingStatuses() {
+            const now = new Date();
+
+            document.querySelectorAll("[data-meeting-start][data-meeting-end]").forEach(item => {
+                const start = new Date(item.dataset.meetingStart);
+                const end = new Date(item.dataset.meetingEnd);
+
+                if (item.classList.contains("meet-week-event")) {
+                    item.classList.toggle("live", now >= start && now <= end);
+                    return;
+                }
+
+                const status = item.querySelector(".js-meeting-status");
+                const countdown = item.querySelector(".js-meeting-countdown");
+
+                if (!status) {
+                    return;
+                }
+
+                status.className = "meet-status js-meeting-status";
+
+                if (now >= start && now <= end) {
+                    status.textContent = "Live";
+                    status.classList.add("meet-status-live");
+
+                    if (countdown) {
+                        const minutesLeft = Math.max(1, Math.round((end - now) / 60000));
+                        countdown.textContent = `Ends in ${minutesLeft} min`;
+                    }
+
+                    return;
+                }
+
+                if (now > end) {
+                    status.textContent = "Ended";
+                    status.classList.add("meet-status-ended");
+
+                    if (countdown) {
+                        countdown.textContent = "Time passed";
+                    }
+
+                    return;
+                }
+
+                const minutesToStart = Math.round((start - now) / 60000);
+
+                if (minutesToStart <= 60) {
+                    status.textContent = "Soon";
+
+                    if (countdown) {
+                        countdown.textContent = `Starts in ${Math.max(1, minutesToStart)} min`;
+                    }
+
+                    return;
+                }
+
+                const badgeText = item.querySelector(".meet-today-badge")?.textContent?.trim();
+                status.textContent = badgeText === "TODAY" ? "Today" : "Upcoming";
+
+                if (countdown) {
+                    const hours = Math.floor(minutesToStart / 60);
+                    const days = Math.floor(hours / 24);
+
+                    countdown.textContent = days > 0
+                        ? `Starts in ${days} day${days === 1 ? "" : "s"}`
+                        : `Starts in ${hours} hour${hours === 1 ? "" : "s"}`;
+                }
+            });
+        }
+
+        highlightCurrentWeekCell();
+        updateMeetingStatuses();
+
+        setInterval(highlightCurrentWeekCell, 60000);
+        setInterval(updateMeetingStatuses, 30000);
+    </script>
+}
+
+@functions {
+    private static string ModeLabel(string? mode)
+    {
+        return mode switch
+        {
+            "in_person" => "In-person",
+            "hybrid" => "Hybrid",
+            _ => "Online"
+        };
+    }
+
+    private static string ModeIcon(string? mode)
+    {
+        return mode switch
+        {
+            "in_person" => "bi bi-geo-alt",
+            "hybrid" => "bi bi-intersect",
+            _ => "bi bi-camera-video"
+        };
+    }
+
+    private static string DisplayStatus(FYPilot.Domain.Entities.Meeting meeting)
+    {
+        if (meeting.Status == "cancelled")
+        {
+            return "Cancelled";
+        }
+
+        if (meeting.Status == "completed")
+        {
+            return "Completed";
+        }
+
+        var now = DateTime.UtcNow;
+        var end = meeting.ScheduledAt.AddMinutes(meeting.DurationMinutes);
+
+        if (end < now)
+        {
+            return "Ended";
+        }
+
+        return "Scheduled";
+    }
+
+    private static string StatusClass(string? status)
+    {
+        return status switch
+        {
+            "completed" => "meet-status-completed",
+            "cancelled" => "meet-status-cancelled",
+            _ => "meet-status"
+        };
+    }
+
+    private static string StatusDotClass(string? status)
+    {
+        return status switch
+        {
+            "cancelled" => "cancelled",
+            _ => "completed"
+        };
+    }
+
+    private static List<string> SplitLines(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        return value
+            .Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(x => x.Trim())
+            .Where(x => x.Length > 0)
+            .ToList();
+    }
+
+    private static string Initials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "ST";
+        }
+
+        var parts = name
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Take(2)
+            .ToList();
+
+        return parts.Count == 0
+            ? "ST"
+            : string.Join("", parts.Select(p => p[0])).ToUpperInvariant();
+    }
+
+    private static string ShortText(string? value, int length)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "No notes added yet.";
+        }
+
+        value = value.Trim().Replace("\r", " ").Replace("\n", " ");
+
+        return value.Length <= length ? value : value[..length] + "...";
+    }
+}

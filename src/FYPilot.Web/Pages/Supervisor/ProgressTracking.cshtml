@@ -1,0 +1,978 @@
+﻿@page
+@model FYPilot.Web.Pages.Supervisor.ProgressTrackingModel
+@{
+    ViewData["Title"] = "Progress Tracking";
+    ViewData["Subtitle"] = "Monitor student project progress, milestones, risks, and updates.";
+
+    var project = Model.SelectedProject;
+}
+
+<section class="pt-page">
+
+    <header class="pt-topbar">
+        <div>
+            <h1>Progress Tracking</h1>
+            <p>Monitor student project progress, milestones, risks, and updates.</p>
+        </div>
+
+        <div class="pt-actions">
+            <form method="get" class="pt-search">
+                <i class="bi bi-search"></i>
+                <select name="ideaId" onchange="this.form.submit()">
+                    @if (!Model.Projects.Any())
+                    {
+                        <option>No projects available</option>
+                    }
+                    else
+                    {
+                        @foreach (var item in Model.Projects)
+                        {
+                            <option value="@item.IdeaId" selected="@(project?.IdeaId == item.IdeaId)">
+                                @item.StudentName - @item.ProjectTitle
+                            </option>
+                        }
+                    }
+                </select>
+            </form>
+
+            <button type="button" class="pt-export-btn" onclick="window.print()">
+                <i class="bi bi-download"></i>
+                Export Report
+            </button>
+        </div>
+    </header>
+
+    @if (project == null)
+    {
+        <section class="pt-empty">
+            <i class="bi bi-graph-up-arrow"></i>
+            <h2>No projects to track yet</h2>
+            <p>When students generate or submit ideas, their progress tracking view will appear here.</p>
+            <a href="/Supervisor/IdeaReview">Open Feedback Workspace</a>
+        </section>
+    }
+    else
+    {
+        <section class="pt-profile-card">
+            <div class="pt-student-avatar">
+                @project.StudentInitials
+            </div>
+
+            <div class="pt-project-main">
+                <div class="pt-name-line">
+                    <h2>@project.StudentName</h2>
+                    <span>@project.Domain</span>
+                </div>
+
+                <h3>@project.ProjectTitle</h3>
+
+                <div class="pt-project-meta">
+                    <span><i class="bi bi-fingerprint"></i>@project.ProjectCode</span>
+                    <span><i class="bi bi-calendar3"></i>@project.StartDate.ToString("MMM d, yyyy") - @project.EndDate.ToString("MMM d, yyyy")</span>
+                    <span><i class="bi bi-speedometer2"></i>@project.DifficultyLevel</span>
+                </div>
+            </div>
+
+            <div class="pt-profile-info">
+                <div>
+                    <span>Supervisor</span>
+                    <strong>@project.SupervisorName</strong>
+                </div>
+
+                <div>
+                    <span>Department</span>
+                    <strong>@project.Department</strong>
+                </div>
+
+                <div>
+                    <span>Status</span>
+                    <b class="pt-status @project.StatusClass">@project.StatusLabel</b>
+                </div>
+            </div>
+        </section>
+
+        <section class="pt-stat-grid">
+            <article class="pt-stat-card">
+                <div class="pt-stat-icon"><i class="bi bi-graph-up-arrow"></i></div>
+                <div>
+                    <span>Overall Progress</span>
+                    <strong>@project.OverallProgress%</strong>
+                    <div class="pt-progress-bar">
+                        <i style="width:@project.OverallProgress%"></i>
+                    </div>
+                    <small class="@project.StatusClass"><i class="bi bi-circle-fill"></i>@project.StatusLabel</small>
+                </div>
+            </article>
+
+            <article class="pt-stat-card">
+                <div class="pt-stat-icon"><i class="bi bi-flag"></i></div>
+                <div>
+                    <span>Milestones Completed</span>
+                    <strong>@project.MilestonesCompleted / @project.MilestonesTotal</strong>
+                    <div class="pt-progress-bar">
+                        <i style="width:@((project.MilestonesCompleted * 100) / project.MilestonesTotal)%"></i>
+                    </div>
+                    <small>@((project.MilestonesCompleted * 100) / project.MilestonesTotal)% completed</small>
+                </div>
+            </article>
+
+            <article class="pt-stat-card">
+                <div class="pt-stat-icon"><i class="bi bi-calendar-check"></i></div>
+                <div>
+                    <span>Days Elapsed</span>
+                    <strong>@project.DaysElapsed / @project.TotalDays</strong>
+                    <div class="pt-progress-bar">
+                        <i style="width:@Math.Min(100, (project.DaysElapsed * 100) / project.TotalDays)%"></i>
+                    </div>
+                    <small>@project.DaysRemaining days remaining</small>
+                </div>
+            </article>
+
+            <article class="pt-stat-card">
+                <div class="pt-stat-icon"><i class="bi bi-file-earmark-text"></i></div>
+                <div>
+                    <span>Deliverables Submitted</span>
+                    <strong>@project.DeliverablesSubmitted / @project.DeliverablesTotal</strong>
+                    <div class="pt-progress-bar">
+                        <i style="width:@((project.DeliverablesSubmitted * 100) / project.DeliverablesTotal)%"></i>
+                    </div>
+                    <small>Next due: @project.NextDue (@project.NextDueDate.ToString("MMM d"))</small>
+                </div>
+            </article>
+        </section>
+
+        <section class="pt-card pt-roadmap-card">
+            <div class="pt-card-header">
+                <div class="pt-card-title">
+                    <i class="bi bi-map"></i>
+                    <h2>Project Roadmap</h2>
+                </div>
+
+                <a href="/Supervisor/IdeaReview?ideaId=@project.IdeaId" class="pt-header-link">
+                    View Review Details
+                    <i class="bi bi-box-arrow-up-right"></i>
+                </a>
+            </div>
+
+            <div class="pt-roadmap">
+                @foreach (var step in project.Roadmap)
+                {
+                    <div class="pt-roadmap-step @step.State">
+                        <div class="pt-roadmap-line"></div>
+
+                        <div class="pt-roadmap-dot">
+                            @if (step.State == "completed")
+                            {
+                                <i class="bi bi-check-lg"></i>
+                            }
+                            else if (step.State == "current")
+                            {
+                                <i class="bi bi-circle-fill"></i>
+                            }
+                        </div>
+
+                        <strong>@step.Number. @step.Title</strong>
+                        <span>@step.Date.ToString("MMM d, yyyy")</span>
+                        <b>@StepLabel(step.State)</b>
+                    </div>
+                }
+            </div>
+        </section>
+
+        <section class="pt-bottom-grid">
+
+            <article class="pt-card">
+                <div class="pt-card-header">
+                    <div class="pt-card-title danger">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <h2>Risks & Blockers</h2>
+                    </div>
+
+                    <a href="/Supervisor/IdeaReview?ideaId=@project.IdeaId" class="pt-header-link">View All</a>
+                </div>
+
+                <div class="pt-risk-list">
+                    @foreach (var risk in project.Risks)
+                    {
+                        <div class="pt-risk-item">
+                            <div class="pt-risk-bullet @RiskClass(risk.Severity)"></div>
+
+                            <div>
+                                <div class="pt-risk-top">
+                                    <h3>@risk.Title</h3>
+                                    <span class="@RiskClass(risk.Severity)">@risk.Severity</span>
+                                </div>
+
+                                <p>@risk.Description</p>
+                            </div>
+
+                            <div class="pt-risk-side">
+                                <span>Identified: @risk.IdentifiedOn.ToString("MMM d, yyyy")</span>
+                                <span>Impact: @risk.Impact</span>
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div class="pt-card-footer">
+                    <a href="/Supervisor/IdeaReview?ideaId=@project.IdeaId">
+                        <i class="bi bi-plus-lg"></i>
+                        Add Guidance
+                    </a>
+                </div>
+            </article>
+
+            <article class="pt-card">
+                <div class="pt-card-header">
+                    <div class="pt-card-title">
+                        <i class="bi bi-chat-square-text"></i>
+                        <h2>Recent Updates</h2>
+                    </div>
+
+                    <a href="/Supervisor/IdeaDiscussion?ideaId=@project.IdeaId" class="pt-header-link">Open Discussion</a>
+                </div>
+
+                <div class="pt-update-list">
+                    @foreach (var update in project.Updates)
+                    {
+                        <div class="pt-update-item">
+                            <div class="pt-update-icon">
+                                <i class="@update.Icon"></i>
+                            </div>
+
+                            <div>
+                                <h3>@update.Title</h3>
+                                <p>@update.Date.ToString("MMM d, yyyy") · @update.Type</p>
+                                <small>@update.Subtitle</small>
+                            </div>
+
+                            <span>by @update.By</span>
+                        </div>
+                    }
+                </div>
+
+                <div class="pt-card-footer">
+                    <a href="/Supervisor/IdeaDiscussion?ideaId=@project.IdeaId">
+                        <i class="bi bi-plus-lg"></i>
+                        Add Update
+                    </a>
+                </div>
+            </article>
+        </section>
+    }
+</section>
+
+@section Head {
+    <style>
+        :root {
+            --pt-navy: #28385E;
+            --pt-blue: #304163;
+            --pt-steel: #516C8D;
+            --pt-bg: #F7F8FA;
+            --pt-border: #E8ECF2;
+            --pt-text: #111827;
+            --pt-muted: #64748B;
+            --pt-green: #2F8F46;
+            --pt-orange: #F59E0B;
+            --pt-red: #DC2626;
+        }
+
+        .pt-page {
+            max-width: 1500px;
+            margin: 0 auto;
+            color: var(--pt-text);
+            padding-bottom: 1.5rem;
+        }
+
+        .pt-topbar {
+            margin-bottom: 1rem;
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: flex-start;
+        }
+
+            .pt-topbar h1 {
+                margin: 0;
+                color: var(--pt-text);
+                font-size: clamp(1.45rem, 2.6vw, 2rem);
+                font-weight: 650;
+                letter-spacing: -0.045em;
+            }
+
+            .pt-topbar p {
+                margin: 0.25rem 0 0;
+                color: #475569;
+                font-size: 0.92rem;
+            }
+
+        .pt-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.7rem;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .pt-search {
+            min-width: 360px;
+            height: 44px;
+            border: 1px solid #DDE5EF;
+            border-radius: 12px;
+            background: #ffffff;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: 0.5rem;
+            align-items: center;
+            padding: 0 0.75rem;
+        }
+
+            .pt-search i {
+                color: var(--pt-muted);
+            }
+
+            .pt-search select {
+                border: 0;
+                outline: 0;
+                background: transparent;
+                color: #475569;
+                font-size: 0.86rem;
+                width: 100%;
+            }
+
+        .pt-export-btn {
+            height: 44px;
+            border: 0;
+            border-radius: 12px;
+            color: #ffffff;
+            background: linear-gradient(135deg, #061C49, var(--pt-blue));
+            padding: 0 1.1rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.55rem;
+            font-size: 0.84rem;
+            font-weight: 600;
+        }
+
+        .pt-profile-card,
+        .pt-stat-card,
+        .pt-card,
+        .pt-empty {
+            background: #ffffff;
+            border: 1px solid var(--pt-border);
+            border-radius: 18px;
+            box-shadow: 0 14px 34px rgba(15,23,42,0.05);
+        }
+
+        .pt-profile-card {
+            min-height: 135px;
+            margin-bottom: 1rem;
+            padding: 1rem 1.15rem;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) minmax(520px, 0.95fr);
+            gap: 1.2rem;
+            align-items: center;
+        }
+
+        .pt-student-avatar {
+            width: 92px;
+            height: 92px;
+            border-radius: 50%;
+            color: #ffffff;
+            background: linear-gradient(135deg, #061C49, var(--pt-blue));
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.45rem;
+            font-weight: 650;
+            box-shadow: 0 16px 32px rgba(40,56,94,0.18);
+        }
+
+        .pt-name-line {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+        }
+
+            .pt-name-line h2 {
+                margin: 0;
+                color: var(--pt-text);
+                font-size: 1.35rem;
+                font-weight: 650;
+                letter-spacing: -0.03em;
+            }
+
+            .pt-name-line span {
+                display: inline-flex;
+                border-radius: 9px;
+                padding: 0.25rem 0.5rem;
+                background: #EAF0FF;
+                color: #1D4ED8;
+                font-size: 0.72rem;
+                font-weight: 600;
+            }
+
+        .pt-project-main h3 {
+            margin: 0.35rem 0 0;
+            max-width: 620px;
+            color: #111827;
+            font-size: 1.05rem;
+            font-weight: 520;
+            line-height: 1.35;
+        }
+
+        .pt-project-meta {
+            margin-top: 0.65rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.9rem;
+        }
+
+            .pt-project-meta span {
+                color: #475569;
+                display: inline-flex;
+                align-items: center;
+                gap: 0.38rem;
+                font-size: 0.78rem;
+            }
+
+        .pt-profile-info {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 1rem;
+        }
+
+            .pt-profile-info span {
+                display: block;
+                color: var(--pt-muted);
+                font-size: 0.78rem;
+                margin-bottom: 0.25rem;
+            }
+
+            .pt-profile-info strong {
+                color: var(--pt-text);
+                font-size: 0.92rem;
+                font-weight: 560;
+            }
+
+        .pt-status {
+            display: inline-flex;
+            border-radius: 10px;
+            padding: 0.34rem 0.65rem;
+            font-size: 0.78rem;
+            font-weight: 600;
+        }
+
+            .pt-status.on-track,
+            .on-track {
+                color: #166534;
+                background: #DCFCE7;
+            }
+
+            .pt-status.attention,
+            .attention {
+                color: #92400E;
+                background: #FEF3C7;
+            }
+
+            .pt-status.blocked,
+            .blocked {
+                color: #B91C1C;
+                background: #FEE2E2;
+            }
+
+            .pt-status.review,
+            .review {
+                color: #1D4ED8;
+                background: #DBEAFE;
+            }
+
+        .pt-stat-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .pt-stat-card {
+            min-height: 132px;
+            padding: 1.05rem;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: 1rem;
+            align-items: start;
+        }
+
+        .pt-stat-icon {
+            width: 58px;
+            height: 58px;
+            border-radius: 50%;
+            color: #ffffff;
+            background: linear-gradient(135deg, var(--pt-blue), var(--pt-steel));
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.45rem;
+        }
+
+        .pt-stat-card span {
+            display: block;
+            color: #475569;
+            font-size: 0.82rem;
+            font-weight: 520;
+        }
+
+        .pt-stat-card strong {
+            display: block;
+            color: var(--pt-text);
+            font-size: 1.55rem;
+            font-weight: 650;
+            letter-spacing: -0.04em;
+            margin: 0.25rem 0 0.65rem;
+            line-height: 1;
+        }
+
+        .pt-stat-card small {
+            color: #334155;
+            font-size: 0.78rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+
+        .pt-progress-bar {
+            height: 8px;
+            border-radius: 999px;
+            background: #E5E7EB;
+            overflow: hidden;
+            margin-bottom: 0.55rem;
+        }
+
+            .pt-progress-bar i {
+                display: block;
+                height: 100%;
+                border-radius: inherit;
+                background: linear-gradient(135deg, #1E3A8A, var(--pt-steel));
+            }
+
+        .pt-card {
+            overflow: hidden;
+            margin-bottom: 1rem;
+        }
+
+        .pt-card-header {
+            min-height: 64px;
+            padding: 1rem 1.15rem;
+            border-bottom: 1px solid var(--pt-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+        .pt-card-title {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+        }
+
+            .pt-card-title i {
+                color: var(--pt-blue);
+                font-size: 1.2rem;
+            }
+
+            .pt-card-title.danger i {
+                color: var(--pt-red);
+            }
+
+            .pt-card-title h2 {
+                margin: 0;
+                color: var(--pt-text);
+                font-size: 1.02rem;
+                font-weight: 620;
+                letter-spacing: -0.02em;
+            }
+
+        .pt-header-link {
+            color: var(--pt-blue);
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-flex;
+            gap: 0.4rem;
+            align-items: center;
+        }
+
+        .pt-roadmap {
+            padding: 1.25rem 1rem 1.15rem;
+            display: grid;
+            grid-template-columns: repeat(7, minmax(118px, 1fr));
+            gap: 0.5rem;
+            overflow-x: auto;
+        }
+
+        .pt-roadmap-step {
+            position: relative;
+            min-height: 132px;
+            text-align: center;
+            display: grid;
+            justify-items: center;
+            align-content: start;
+            padding: 0.2rem 0.35rem 0.7rem;
+        }
+
+        .pt-roadmap-line {
+            position: absolute;
+            top: 20px;
+            left: -50%;
+            right: 50%;
+            height: 3px;
+            background: #D1D5DB;
+            z-index: 0;
+        }
+
+        .pt-roadmap-step:first-child .pt-roadmap-line {
+            display: none;
+        }
+
+        .pt-roadmap-step.completed .pt-roadmap-line {
+            background: var(--pt-green);
+        }
+
+        .pt-roadmap-dot {
+            position: relative;
+            z-index: 1;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            background: #ffffff;
+            border: 4px solid #9CA3AF;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #9CA3AF;
+            margin-bottom: 0.8rem;
+        }
+
+        .pt-roadmap-step.completed .pt-roadmap-dot {
+            background: var(--pt-green);
+            border-color: var(--pt-green);
+            color: #ffffff;
+        }
+
+        .pt-roadmap-step.current {
+            border: 1px solid #BFDBFE;
+            background: #EFF6FF;
+            border-radius: 14px;
+        }
+
+            .pt-roadmap-step.current .pt-roadmap-dot {
+                border-color: #1D4ED8;
+                color: #1D4ED8;
+            }
+
+        .pt-roadmap-step strong {
+            color: var(--pt-text);
+            font-size: 0.8rem;
+            font-weight: 620;
+            line-height: 1.35;
+        }
+
+        .pt-roadmap-step span {
+            color: var(--pt-muted);
+            font-size: 0.75rem;
+            margin-top: 0.35rem;
+        }
+
+        .pt-roadmap-step b {
+            margin-top: 0.65rem;
+            border-radius: 9px;
+            padding: 0.32rem 0.65rem;
+            font-size: 0.72rem;
+            font-weight: 600;
+            background: #E5E7EB;
+            color: #374151;
+        }
+
+        .pt-roadmap-step.completed b {
+            background: #DCFCE7;
+            color: #166534;
+        }
+
+        .pt-roadmap-step.current b {
+            background: #DBEAFE;
+            color: #1D4ED8;
+        }
+
+        .pt-bottom-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+            gap: 1rem;
+        }
+
+        .pt-risk-list,
+        .pt-update-list {
+            padding: 0.95rem;
+            display: grid;
+            gap: 0.75rem;
+        }
+
+        .pt-risk-item {
+            border: 1px solid var(--pt-border);
+            border-radius: 14px;
+            padding: 0.88rem;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            gap: 0.8rem;
+            align-items: start;
+        }
+
+        .pt-risk-bullet {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            margin-top: 0.25rem;
+            border: 4px solid currentColor;
+        }
+
+        .pt-risk-top {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+        }
+
+            .pt-risk-top h3,
+            .pt-update-item h3 {
+                margin: 0;
+                color: var(--pt-text);
+                font-size: 0.88rem;
+                font-weight: 620;
+            }
+
+            .pt-risk-top span {
+                border-radius: 9px;
+                padding: 0.26rem 0.55rem;
+                font-size: 0.72rem;
+                font-weight: 600;
+            }
+
+        .pt-risk-item p {
+            margin: 0.32rem 0 0;
+            color: #475569;
+            font-size: 0.82rem;
+            line-height: 1.45;
+        }
+
+        .pt-risk-side {
+            display: grid;
+            gap: 0.25rem;
+            color: #475569;
+            font-size: 0.76rem;
+            white-space: nowrap;
+        }
+
+        .low {
+            color: #1D4ED8;
+            background: #DBEAFE;
+        }
+
+        .medium {
+            color: #B45309;
+            background: #FEF3C7;
+        }
+
+        .high {
+            color: #B91C1C;
+            background: #FEE2E2;
+        }
+
+        .pt-update-item {
+            border-bottom: 1px solid #EEF2F7;
+            padding: 0.75rem 0;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            gap: 0.85rem;
+            align-items: center;
+        }
+
+            .pt-update-item:first-child {
+                padding-top: 0;
+            }
+
+            .pt-update-item:last-child {
+                border-bottom: 0;
+                padding-bottom: 0;
+            }
+
+        .pt-update-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            color: var(--pt-blue);
+            background: #EEF2F6;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .pt-update-item p {
+            margin: 0.2rem 0 0;
+            color: #475569;
+            font-size: 0.78rem;
+        }
+
+        .pt-update-item small {
+            color: #64748B;
+            font-size: 0.78rem;
+            display: block;
+            margin-top: 0.25rem;
+            line-height: 1.35;
+        }
+
+        .pt-update-item > span {
+            color: #475569;
+            font-size: 0.75rem;
+            white-space: nowrap;
+        }
+
+        .pt-card-footer {
+            border-top: 1px solid #EEF2F7;
+            padding: 0.75rem 1rem;
+        }
+
+            .pt-card-footer a {
+                color: var(--pt-blue);
+                text-decoration: none;
+                font-size: 0.84rem;
+                font-weight: 600;
+                display: inline-flex;
+                align-items: center;
+                gap: 0.45rem;
+            }
+
+        .pt-empty {
+            min-height: 520px;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            gap: 0.6rem;
+            text-align: center;
+            padding: 2rem;
+        }
+
+            .pt-empty i {
+                width: 74px;
+                height: 74px;
+                border-radius: 24px;
+                color: var(--pt-steel);
+                background: #EEF2F6;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 1.8rem;
+            }
+
+            .pt-empty h2 {
+                margin: 0;
+                color: var(--pt-text);
+                font-size: 1.3rem;
+                font-weight: 620;
+            }
+
+            .pt-empty p {
+                margin: 0;
+                color: var(--pt-muted);
+                max-width: 540px;
+                line-height: 1.6;
+            }
+
+            .pt-empty a {
+                color: #ffffff;
+                background: var(--pt-blue);
+                border-radius: 14px;
+                padding: 0.64rem 0.9rem;
+                text-decoration: none;
+                font-size: 0.82rem;
+                font-weight: 600;
+            }
+
+        @@media (max-width: 1280px) {
+            .pt-profile-card {
+                grid-template-columns: auto minmax(0, 1fr);
+            }
+
+            .pt-profile-info {
+                grid-column: 1 / -1;
+            }
+
+            .pt-stat-grid,
+            .pt-bottom-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        @@media (max-width: 767px) {
+            .pt-topbar {
+                flex-direction: column;
+            }
+
+            .pt-actions,
+            .pt-search,
+            .pt-export-btn {
+                width: 100%;
+            }
+
+            .pt-profile-card,
+            .pt-stat-grid,
+            .pt-bottom-grid,
+            .pt-profile-info {
+                grid-template-columns: 1fr;
+            }
+
+            .pt-risk-item,
+            .pt-update-item {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @@media print {
+            .pt-actions {
+                display: none;
+            }
+
+            .pt-page {
+                max-width: none;
+            }
+
+            .pt-profile-card,
+            .pt-stat-card,
+            .pt-card {
+                box-shadow: none;
+            }
+        }
+    </style>
+}
+
+@functions {
+    private static string StepLabel(string state)
+    {
+        return state switch
+        {
+            "completed" => "Completed",
+            "current" => "In Progress",
+            _ => "Upcoming"
+        };
+    }
+
+    private static string RiskClass(string severity)
+    {
+        return severity.Trim().ToLowerInvariant() switch
+        {
+            "high" => "high",
+            "medium" => "medium",
+            _ => "low"
+        };
+    }
+}

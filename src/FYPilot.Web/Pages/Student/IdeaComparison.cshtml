@@ -9,11 +9,11 @@
 
     var metricDefinitions = new[]
     {
-        new { Key = "feasibility", Label = "Feasibility", Icon = "bar-chart-line", Description = "How achievable the idea is with your time and resources." },
-        new { Key = "innovation", Label = "Innovation", Icon = "lightbulb", Description = "How original and creative the idea feels." },
-        new { Key = "market", Label = "Market Value", Icon = "shop", Description = "How useful the idea is for real users or the Lebanese market." },
-        new { Key = "time", Label = "Time Fit", Icon = "clock", Description = "How realistic the duration is for a semester project." },
-        new { Key = "difficulty", Label = "Difficulty Fit", Icon = "speedometer2", Description = "How suitable the challenge level is for a student FYP." }
+        new { Key = "feasibility", Label = "Feasibility", Icon = "bar-chart-line", Description = "Achievable with your time and resources." },
+        new { Key = "innovation", Label = "Innovation", Icon = "lightbulb", Description = "Originality and creativity of the idea." },
+        new { Key = "market", Label = "Market Value", Icon = "shop", Description = "Usefulness for real users or the Lebanese market." },
+        new { Key = "time", Label = "Time Fit", Icon = "clock", Description = "Realistic duration for a semester project." },
+        new { Key = "difficulty", Label = "Difficulty Fit", Icon = "speedometer2", Description = "Suitable challenge level for an FYP." }
     };
 
     var comparisonData = ideas.Select(idea => new
@@ -21,6 +21,7 @@
         id = idea.Id,
         title = idea.Title,
         domain = idea.Domain,
+        difficulty = idea.DifficultyLevel,
         selected = idea.IsSelected,
         scores = new Dictionary<string, int>
         {
@@ -35,9 +36,9 @@
 
 @if (!ideas.Any())
 {
-    <section class="ic2-empty-page">
-        <div class="ic2-empty-card">
-            <div class="ic2-empty-icon">
+    <section class="ic3-empty-page">
+        <div class="ic3-empty-card">
+            <div class="ic3-empty-icon">
                 <i class="bi bi-columns-gap"></i>
             </div>
 
@@ -47,7 +48,7 @@
                 Generate at least two project ideas first, then come back here to compare them clearly.
             </p>
 
-            <a href="/Student/IdeaGenerator" class="btn ic2-primary-btn">
+            <a href="/Student/IdeaGenerator" class="btn ic3-primary-btn">
                 <i class="bi bi-stars me-2"></i>
                 Generate Ideas
             </a>
@@ -56,209 +57,178 @@
 }
 else
 {
-    <section class="ic2-page">
-        <div class="ic2-hero">
+    <section class="ic3-page">
+
+        <div class="ic3-hero">
             <div>
-                <div class="ic2-kicker">Idea Comparison</div>
-                <h1>Choose based on what matters to you</h1>
+                <div class="ic3-kicker">Idea Comparison</div>
+                <h1>Compare all ideas in one clear view</h1>
                 <p>
-                    Select one or more comparison metrics. FYPilot will show which idea performs better for your priorities.
+                    Select the metrics that matter to you. FYPilot will show the matching score under each selected metric.
                 </p>
             </div>
 
-            <div class="ic2-hero-badge">
-                <i class="bi bi-check2-circle"></i>
-                <span>@ideas.Count idea(s) ready</span>
+            <div class="ic3-hero-actions">
+                <form method="post" asp-page-handler="Compare" class="m-0">
+                    @Html.AntiForgeryToken()
+
+                    <button type="submit" class="btn ic3-soft-btn">
+                        <i class="bi bi-columns-gap me-1"></i>
+                        Compare My Ideas
+                    </button>
+                </form>
+
+                <a href="/Student/IdeaGenerator" class="btn ic3-outline-btn">
+                    <i class="bi bi-plus-circle me-1"></i>
+                    Add Ideas
+                </a>
             </div>
         </div>
 
-        <div class="ic2-layout">
+        <div class="ic3-card">
 
-            <aside class="ic2-left-card">
-                <div class="ic2-left-head">
-                    <div>
-                        <div class="ic2-kicker">Your Ideas</div>
-                        <h2>Ideas list</h2>
-                    </div>
-
-                    <a href="/Student/IdeaGenerator" class="ic2-mini-link">
-                        Add ideas
-                    </a>
+            <div class="ic3-metric-header">
+                <div>
+                    <div class="ic3-kicker">Compare By</div>
+                    <h2>Choose one or more priorities</h2>
                 </div>
 
-                <div class="ic2-idea-list">
+                <button type="button" class="btn ic3-clear-btn" id="ic3ResetMetrics">
+                    Reset
+                </button>
+            </div>
+
+            <div class="ic3-metric-tabs" id="ic3MetricTabs">
+                @foreach (var metric in metricDefinitions)
+                {
+                    var active = metric.Key is "feasibility" or "time";
+
+                    <button type="button"
+                            class="ic3-metric-tab @(active ? "active" : "")"
+                            data-metric="@metric.Key"
+                            title="@metric.Description">
+                        <i class="bi bi-@metric.Icon"></i>
+                        <span>@metric.Label</span>
+                        <b><i class="bi bi-check"></i></b>
+                    </button>
+                }
+            </div>
+
+            <div class="ic3-selected-line" id="ic3SelectedSummary">
+                Showing: <strong>Feasibility</strong> and <strong>Time Fit</strong>
+            </div>
+
+            <div class="ic3-table-card">
+                <div class="ic3-table-head">
+                    <div class="ic3-col-idea">Idea</div>
+
+                    @foreach (var metric in metricDefinitions)
+                    {
+                        var visible = metric.Key is "feasibility" or "time";
+
+                        <div class="ic3-col-metric @(visible ? "" : "d-none")"
+                             data-metric-column="@metric.Key">
+                            <i class="bi bi-@metric.Icon"></i>
+                            <span>@metric.Label</span>
+                        </div>
+                    }
+
+                    <div class="ic3-col-action">Choose</div>
+                </div>
+
+                <div class="ic3-table-body">
                     @for (var i = 0; i < ideas.Count; i++)
                     {
                         var idea = ideas[i];
-                        var avg = AverageScore(idea);
                         var isSelected = idea.IsSelected;
 
-                        <div class="ic2-idea-card @(i == 0 ? "active" : "")"
-                             data-focus-idea="@idea.Id"
-                             role="button"
-                             tabindex="0">
+                        <div class="ic3-idea-row @(isSelected ? "selected" : "")"
+                             data-idea-row="@idea.Id">
 
-                            <div class="ic2-idea-number">
-                                @(i + 1)
-                            </div>
-
-                            <div class="ic2-idea-info">
-                                <h3>@idea.Title</h3>
-
-                                <div class="ic2-idea-meta">
-                                    <span>@idea.Domain</span>
-                                    <span class="text-capitalize">@idea.DifficultyLevel</span>
+                            <div class="ic3-idea-main">
+                                <div class="ic3-idea-number">
+                                    @(i + 1)
                                 </div>
 
-                                <p>@Clip(idea.ProblemStatement, 92)</p>
+                                <div class="ic3-idea-text">
+                                    <h3>@idea.Title</h3>
 
-                                <form method="post" asp-page-handler="Select" class="ic2-inline-select-form">
+                                    <div>
+                                        <span>@idea.Domain</span>
+                                        <span class="text-capitalize">@idea.DifficultyLevel</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            @foreach (var metric in metricDefinitions)
+                            {
+                                var visible = metric.Key is "feasibility" or "time";
+                                var score = ScoreForMetric(idea, metric.Key);
+
+                                <div class="ic3-score-cell @(visible ? "" : "d-none")"
+                                     data-metric-cell="@metric.Key"
+                                     data-score="@score">
+
+                                    <div class="ic3-score-top">
+                                        <strong>@score%</strong>
+                                        <span>@ScoreLabel(score)</span>
+                                    </div>
+
+                                    <div class="ic3-score-track">
+                                        <div style="width:@score%"></div>
+                                    </div>
+                                </div>
+                            }
+
+                            <div class="ic3-select-cell">
+                                <form method="post" asp-page-handler="Select">
                                     @Html.AntiForgeryToken()
                                     <input type="hidden" name="ideaId" value="@idea.Id" />
 
-                                    <button type="submit" class="btn btn-sm ic2-select-small-btn">
-                                        Select Idea
+                                    <button type="submit"
+                                            class="ic3-pick-btn @(isSelected ? "picked" : "")"
+                                            title="Select this idea">
+                                        @if (isSelected)
+                                        {
+                                            <i class="bi bi-check-circle-fill"></i>
+                                            <span>Selected</span>
+                                        }
+                                        else
+                                        {
+                                            <i class="bi bi-circle"></i>
+                                            <span>Select</span>
+                                        }
                                     </button>
                                 </form>
                             </div>
-
-                            <div class="ic2-idea-score">
-                                <strong>@avg%</strong>
-                                <span>overall</span>
-                            </div>
-
-                            @if (isSelected)
-                            {
-                                <div class="ic2-selected-dot" title="Currently selected">
-                                    <i class="bi bi-check"></i>
-                                </div>
-                            }
                         </div>
                     }
                 </div>
+            </div>
 
-                <div class="ic2-left-tip">
-                    <i class="bi bi-info-circle"></i>
-                    <span>
-                        Start with Feasibility and Time Fit if you want the safest choice.
-                    </span>
-                </div>
-            </aside>
-
-            <main class="ic2-main-card">
-                <div class="ic2-main-head">
-                    <div>
-                        <div class="ic2-kicker">Compare By</div>
-                        <h2>Select your priorities</h2>
-                    </div>
-
-                    <div class="d-flex align-items-center gap-2 flex-wrap">
-                        <form method="post" asp-page-handler="Compare" class="m-0">
-                            @Html.AntiForgeryToken()
-
-                            <button type="submit" class="btn ic2-primary-btn">
-                                <i class="bi bi-columns-gap me-1"></i>
-                                Compare My Ideas
-                            </button>
-                        </form>
-
-                        <button type="button" class="btn ic2-clear-btn" id="ic2ResetMetrics">
-                            Reset
-                        </button>
-                    </div>
+            <div class="ic3-recommendation-card">
+                <div class="ic3-recommendation-icon">
+                    <i class="bi bi-award"></i>
                 </div>
 
-                <div class="ic2-metric-tabs" id="ic2MetricTabs">
-                    @foreach (var metric in metricDefinitions)
-                    {
-                        var active = metric.Key is "feasibility" or "time";
-
-                        <button type="button"
-                                class="ic2-metric-tab @(active ? "active" : "")"
-                                data-metric="@metric.Key">
-                            <i class="bi bi-@metric.Icon"></i>
-                            <span>@metric.Label</span>
-                            <b class="ic2-check"><i class="bi bi-check"></i></b>
-                        </button>
-                    }
+                <div>
+                    <div class="ic3-kicker">Recommended Based On Selected Metrics</div>
+                    <h3 id="ic3RecommendedTitle">Best matching idea</h3>
+                    <p id="ic3RecommendedText">
+                        The recommendation updates when you choose comparison metrics.
+                    </p>
                 </div>
 
-                <div class="ic2-selected-summary" id="ic2SelectedSummary">
-                    Showing comparison for: <strong>Feasibility</strong> and <strong>Time Fit</strong>
-                </div>
+                <form method="post" asp-page-handler="Select" class="ic3-recommendation-action">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="ideaId" id="ic3RecommendedIdeaId" value="@ideas.First().Id" />
 
-                <div class="ic2-results-area">
-                    @foreach (var metric in metricDefinitions)
-                    {
-                        var isVisible = metric.Key is "feasibility" or "time";
-
-                        <section class="ic2-metric-panel @(isVisible ? "" : "d-none")"
-                                 data-metric-panel="@metric.Key">
-                            <div class="ic2-panel-title">
-                                <div>
-                                    <h3>@metric.Label</h3>
-                                    <p>@metric.Description</p>
-                                </div>
-                            </div>
-
-                            <div class="ic2-bars">
-                                @{
-                                    var bestScore = ideas.Max(i => ScoreForMetric(i, metric.Key));
-                                }
-
-                                @foreach (var idea in ideas.OrderByDescending(i => ScoreForMetric(i, metric.Key)))
-                                {
-                                    var score = ScoreForMetric(idea, metric.Key);
-                                    var isBest = score == bestScore;
-
-                                    <div class="ic2-bar-row @(isBest ? "best" : "")" data-idea-row="@idea.Id">
-                                        <div class="ic2-bar-title">
-                                            <span>@idea.Title</span>
-
-                                            @if (isBest)
-                                            {
-                                                <small>Best for @metric.Label</small>
-                                            }
-                                        </div>
-
-                                        <div class="ic2-bar-track">
-                                            <div style="width:@score%"></div>
-                                        </div>
-
-                                        <div class="ic2-bar-score">
-                                            @score%
-                                        </div>
-                                    </div>
-                                }
-                            </div>
-                        </section>
-                    }
-                </div>
-
-                <div class="ic2-recommendation-card">
-                    <div class="ic2-recommendation-icon">
-                        <i class="bi bi-award"></i>
-                    </div>
-
-                    <div>
-                        <div class="ic2-kicker">Recommended Based On Your Selected Metrics</div>
-                        <h3 id="ic2RecommendedTitle">Best matching idea</h3>
-                        <p id="ic2RecommendedText">
-                            The recommendation updates when you choose comparison metrics.
-                        </p>
-                    </div>
-
-                    <form method="post" asp-page-handler="Select" class="ic2-recommendation-action">
-                        @Html.AntiForgeryToken()
-                        <input type="hidden" name="ideaId" id="ic2RecommendedIdeaId" value="@ideas.First().Id" />
-
-                        <button type="submit" class="btn ic2-primary-btn">
-                            <i class="bi bi-check2-circle me-1"></i>
-                            Select This Idea
-                        </button>
-                    </form>
-                </div>
-            </main>
+                    <button type="submit" class="btn ic3-primary-btn">
+                        <i class="bi bi-check2-circle me-1"></i>
+                        Select Recommended
+                    </button>
+                </form>
+            </div>
         </div>
     </section>
 }
@@ -266,6 +236,7 @@ else
 @section Scripts {
     <script>
         const comparisonIdeas = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(comparisonData));
+
         const metricLabels = {
             feasibility: "Feasibility",
             innovation: "Innovation",
@@ -275,12 +246,13 @@ else
         };
 
         const metricTabs = document.querySelectorAll("[data-metric]");
-        const metricPanels = document.querySelectorAll("[data-metric-panel]");
-        const selectedSummary = document.getElementById("ic2SelectedSummary");
-        const recommendedTitle = document.getElementById("ic2RecommendedTitle");
-        const recommendedText = document.getElementById("ic2RecommendedText");
-        const recommendedIdeaId = document.getElementById("ic2RecommendedIdeaId");
-        const resetButton = document.getElementById("ic2ResetMetrics");
+        const metricColumns = document.querySelectorAll("[data-metric-column]");
+        const metricCells = document.querySelectorAll("[data-metric-cell]");
+        const selectedSummary = document.getElementById("ic3SelectedSummary");
+        const recommendedTitle = document.getElementById("ic3RecommendedTitle");
+        const recommendedText = document.getElementById("ic3RecommendedText");
+        const recommendedIdeaId = document.getElementById("ic3RecommendedIdeaId");
+        const resetButton = document.getElementById("ic3ResetMetrics");
 
         function getSelectedMetrics() {
             return Array.from(metricTabs)
@@ -300,29 +272,20 @@ else
             return Math.round(total / selectedMetrics.length);
         }
 
-        function updateComparison() {
-            let selectedMetrics = getSelectedMetrics();
-
-            if (selectedMetrics.length === 0) {
-                const feasibilityTab = document.querySelector('[data-metric="feasibility"]');
-
-                if (feasibilityTab) {
-                    feasibilityTab.classList.add("active");
-                }
-
-                selectedMetrics = ["feasibility"];
-            }
-
-            metricPanels.forEach(panel => {
-                const metric = panel.dataset.metricPanel;
-                panel.classList.toggle("d-none", !selectedMetrics.includes(metric));
+        function updateMetricVisibility(selectedMetrics) {
+            metricColumns.forEach(column => {
+                column.classList.toggle("d-none", !selectedMetrics.includes(column.dataset.metricColumn));
             });
 
-            const selectedLabels = selectedMetrics.map(metric => metricLabels[metric]);
+            metricCells.forEach(cell => {
+                cell.classList.toggle("d-none", !selectedMetrics.includes(cell.dataset.metricCell));
+            });
+        }
 
-            selectedSummary.innerHTML =
-                "Showing comparison for: " +
-                selectedLabels.map(label => `<strong>${label}</strong>`).join(", ");
+        function updateTableHighlight(selectedMetrics) {
+            document.querySelectorAll("[data-idea-row]").forEach(row => {
+                row.classList.remove("best-match");
+            });
 
             const ranked = comparisonIdeas
                 .map(idea => ({
@@ -333,43 +296,42 @@ else
 
             const best = ranked[0];
 
-            if (best) {
-                recommendedTitle.textContent = best.title;
-                recommendedText.textContent =
-                    `${best.title} has the strongest average fit across your selected metric(s): ${best.finalScore}%.`;
-
-                recommendedIdeaId.value = best.id;
+            if (!best) {
+                return;
             }
+
+            document.querySelector(`[data-idea-row="${best.id}"]`)?.classList.add("best-match");
+
+            recommendedTitle.textContent = best.title;
+            recommendedText.textContent =
+                `${best.title} is currently the strongest match based on your selected priorities with an average fit of ${best.finalScore}%.`;
+
+            recommendedIdeaId.value = best.id;
+        }
+
+        function updateComparison() {
+            let selectedMetrics = getSelectedMetrics();
+
+            if (selectedMetrics.length === 0) {
+                document.querySelector('[data-metric="feasibility"]')?.classList.add("active");
+                selectedMetrics = ["feasibility"];
+            }
+
+            updateMetricVisibility(selectedMetrics);
+
+            const selectedLabels = selectedMetrics.map(metric => metricLabels[metric]);
+
+            selectedSummary.innerHTML =
+                "Showing: " +
+                selectedLabels.map(label => `<strong>${label}</strong>`).join(", ");
+
+            updateTableHighlight(selectedMetrics);
         }
 
         metricTabs.forEach(tab => {
             tab.addEventListener("click", function () {
                 this.classList.toggle("active");
                 updateComparison();
-            });
-        });
-
-        document.querySelectorAll("[data-focus-idea]").forEach(card => {
-            card.addEventListener("click", function (event) {
-                if (event.target.closest("form")) {
-                    return;
-                }
-
-                document.querySelectorAll("[data-focus-idea]").forEach(item => item.classList.remove("active"));
-                this.classList.add("active");
-
-                const ideaId = this.dataset.focusIdea;
-
-                document.querySelectorAll("[data-idea-row]").forEach(row => {
-                    row.classList.toggle("focused", row.dataset.ideaRow === ideaId);
-                });
-            });
-
-            card.addEventListener("keydown", function (event) {
-                if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    this.click();
-                }
             });
         });
 
@@ -387,16 +349,6 @@ else
 }
 
 @functions {
-    private static string Clip(string? value, int max)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return "No description available.";
-        }
-
-        return value.Length <= max ? value : value[..max] + "...";
-    }
-
     private static int ClampScore(int value)
     {
         return Math.Clamp(value, 0, 100);
@@ -464,5 +416,25 @@ else
             "difficulty" => DifficultyFitScore(idea.DifficultyLevel),
             _ => AverageScore(idea)
         };
+    }
+
+    private static string ScoreLabel(int score)
+    {
+        if (score >= 85)
+        {
+            return "High";
+        }
+
+        if (score >= 65)
+        {
+            return "Good";
+        }
+
+        if (score >= 45)
+        {
+            return "Medium";
+        }
+
+        return "Low";
     }
 }

@@ -1,0 +1,434 @@
+﻿@page
+@model FYPilot.Web.Pages.Supervisor.ProfileModel
+@{
+    ViewData["Title"] = "Supervisor Profile";
+    ViewData["Subtitle"] = "Manage your academic identity.";
+
+    var openEditMode = !ViewData.ModelState.IsValid || !string.IsNullOrWhiteSpace(Model.ErrorMessage);
+}
+
+<div class="profile-page">
+
+    @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
+    {
+        <div id="profileMessage" class="alert alert-success profile-alert">
+            <i class="bi bi-check-circle me-2"></i>@Model.SuccessMessage
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div id="profileMessage" class="alert alert-danger profile-alert">
+            <i class="bi bi-exclamation-triangle me-2"></i>@Model.ErrorMessage
+        </div>
+    }
+
+    <form method="post" enctype="multipart/form-data">
+
+        <input type="hidden" asp-for="Input.Faculty" />
+        <input type="hidden" asp-for="Input.University" />
+        <input type="hidden" asp-for="Input.LinkedInUrl" />
+        <input type="hidden" asp-for="Input.WebsiteUrl" />
+
+        <section class="profile-studio-card">
+
+            <aside class="profile-studio-side">
+                <div class="profile-side-pattern"></div>
+
+                <div class="profile-photo-zone profile-photo-zone-clean">
+                    <div class="profile-avatar-large profile-avatar-studio">
+                        @if (!string.IsNullOrWhiteSpace(Model.ProfileImagePath))
+                        {
+                            <img id="profilePreview"
+                                 src="@Model.ProfileImagePath"
+                                 alt="Profile photo" />
+
+                            <div id="profileInitials" class="profile-initials d-none">
+                                @Model.Initials
+                            </div>
+                        }
+                        else
+                        {
+                            <img id="profilePreview"
+                                 src=""
+                                 alt="Profile photo"
+                                 class="d-none" />
+
+                            <div id="profileInitials" class="profile-initials">
+                                @Model.Initials
+                            </div>
+                        }
+
+                        <label for="ProfilePhotoInput" class="profile-camera-btn" title="Change profile photo">
+                            <i class="bi bi-camera-fill"></i>
+                        </label>
+
+                        <input asp-for="ProfilePhoto"
+                               id="ProfilePhotoInput"
+                               type="file"
+                               class="d-none"
+                               accept=".jpg,.jpeg,.png,.webp" />
+                    </div>
+
+                    <div class="profile-photo-hint">
+                        JPG, PNG, or WEBP • Max 3MB
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(Model.ProfileImagePath))
+                    {
+                        <button type="submit"
+                                asp-page-handler="RemovePhoto"
+                                class="profile-remove-photo-btn profile-remove-photo-light"
+                                formnovalidate>
+                            <i class="bi bi-trash3 me-1"></i>
+                            Remove photo
+                        </button>
+                    }
+                </div>
+
+                <div class="profile-side-identity">
+                    <div class="profile-side-kicker">Supervisor Profile</div>
+
+                    <h1>@Model.DisplayName</h1>
+
+                    <p>
+                        @(string.IsNullOrWhiteSpace(Model.Input.AcademicTitle) ? "Supervisor" : Model.Input.AcademicTitle)
+                        @if (!string.IsNullOrWhiteSpace(Model.Input.Department))
+                        {
+                            <span>• @Model.Input.Department</span>
+                        }
+                    </p>
+                </div>
+
+                <div class="profile-side-info">
+                    <div class="profile-side-info-row">
+                        <i class="bi bi-envelope"></i>
+                        <span>@Model.DisplayEmail</span>
+                    </div>
+
+                    <div class="profile-side-info-row">
+                        <i class="bi bi-building"></i>
+                        <span>@(string.IsNullOrWhiteSpace(Model.Input.Department) ? "Department not set" : Model.Input.Department)</span>
+                    </div>
+
+                    <div class="profile-side-info-row">
+                        <i class="bi bi-mortarboard"></i>
+                        <span>@(string.IsNullOrWhiteSpace(Model.Input.Specialization) ? "Specialization not set" : Model.Input.Specialization)</span>
+                    </div>
+                </div>
+
+                <a asp-page="/Supervisor/IdeaReview" class="btn profile-side-btn">
+                    <i class="bi bi-card-checklist me-1"></i>
+                    Review Ideas
+                </a>
+            </aside>
+
+            <main class="profile-studio-main">
+
+                <div id="profileStaticView" class="@(openEditMode ? "d-none" : "")">
+                    <div class="profile-studio-head">
+                        <div>
+                            <div class="profile-unified-kicker">Profile Overview</div>
+                            <h2>Supervisor information</h2>
+                            <p>
+                                Your supervisor profile is shown across FYPilot to help students understand your expertise,
+                                availability, and preferred supervision style.
+                            </p>
+                        </div>
+
+                        <button type="button" id="editProfileBtn" class="btn btn-profile-primary">
+                            <i class="bi bi-pencil-square me-1"></i>
+                            Edit Profile
+                        </button>
+                    </div>
+
+                    <div class="profile-static-grid">
+                        <div class="profile-static-item">
+                            <div class="profile-static-icon">
+                                <i class="bi bi-person-badge"></i>
+                            </div>
+                            <div>
+                                <span>Full Name</span>
+                                <strong>@(string.IsNullOrWhiteSpace(Model.Input.FullName) ? "Not set" : Model.Input.FullName)</strong>
+                            </div>
+                        </div>
+
+                        <div class="profile-static-item">
+                            <div class="profile-static-icon">
+                                <i class="bi bi-envelope"></i>
+                            </div>
+                            <div>
+                                <span>Email Address</span>
+                                <strong>@Model.DisplayEmail</strong>
+                            </div>
+                        </div>
+
+                        <div class="profile-static-item">
+                            <div class="profile-static-icon">
+                                <i class="bi bi-award"></i>
+                            </div>
+                            <div>
+                                <span>Academic Title</span>
+                                <strong>@(string.IsNullOrWhiteSpace(Model.Input.AcademicTitle) ? "Not set" : Model.Input.AcademicTitle)</strong>
+                            </div>
+                        </div>
+
+                        <div class="profile-static-item">
+                            <div class="profile-static-icon">
+                                <i class="bi bi-building"></i>
+                            </div>
+                            <div>
+                                <span>Department</span>
+                                <strong>@(string.IsNullOrWhiteSpace(Model.Input.Department) ? "Not set" : Model.Input.Department)</strong>
+                            </div>
+                        </div>
+
+                        <div class="profile-static-item">
+                            <div class="profile-static-icon">
+                                <i class="bi bi-mortarboard"></i>
+                            </div>
+                            <div>
+                                <span>Specialization</span>
+                                <strong>@(string.IsNullOrWhiteSpace(Model.Input.Specialization) ? "Not set" : Model.Input.Specialization)</strong>
+                            </div>
+                        </div>
+
+                        <div class="profile-static-item">
+                            <div class="profile-static-icon">
+                                <i class="bi bi-camera-video"></i>
+                            </div>
+                            <div>
+                                <span>Preferred Meeting Mode</span>
+                                <strong>@(string.IsNullOrWhiteSpace(Model.Input.PreferredMeetingMode) ? "Not set" : Model.Input.PreferredMeetingMode)</strong>
+                            </div>
+                        </div>
+
+                        <div class="profile-static-item">
+                            <div class="profile-static-icon">
+                                <i class="bi bi-geo-alt"></i>
+                            </div>
+                            <div>
+                                <span>Office Location</span>
+                                <strong>@(string.IsNullOrWhiteSpace(Model.Input.OfficeLocation) ? "Not set" : Model.Input.OfficeLocation)</strong>
+                            </div>
+                        </div>
+
+                        <div class="profile-static-item">
+                            <div class="profile-static-icon">
+                                <i class="bi bi-clock"></i>
+                            </div>
+                            <div>
+                                <span>Office Hours</span>
+                                <strong>@(string.IsNullOrWhiteSpace(Model.Input.OfficeHours) ? "Not set" : Model.Input.OfficeHours)</strong>
+                            </div>
+                        </div>
+
+                        <div class="profile-static-item profile-static-wide">
+                            <div class="profile-static-icon">
+                                <i class="bi bi-diagram-3"></i>
+                            </div>
+                            <div>
+                                <span>Research Areas</span>
+                                <strong>@(string.IsNullOrWhiteSpace(Model.Input.ResearchAreas) ? "No research areas added yet" : Model.Input.ResearchAreas)</strong>
+                            </div>
+                        </div>
+
+                        <div class="profile-static-item profile-static-wide">
+                            <div class="profile-static-icon">
+                                <i class="bi bi-chat-left-text"></i>
+                            </div>
+                            <div>
+                                <span>Bio / Supervision Introduction</span>
+                                <strong>@(string.IsNullOrWhiteSpace(Model.Input.Bio) ? "No bio added yet" : Model.Input.Bio)</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="profileEditView" class="@(openEditMode ? "" : "d-none")">
+                    <div class="profile-studio-head">
+                        <div>
+                            <div class="profile-unified-kicker">Edit Mode</div>
+                            <h2>Edit supervisor information</h2>
+                            <p>
+                                Update your academic title, department, specialization, research areas, office hours,
+                                and how students should contact or meet you.
+                            </p>
+                        </div>
+
+                        <button type="button" id="cancelEditBtn" class="btn btn-profile-outline d-none d-md-inline-flex">
+                            Cancel
+                        </button>
+                    </div>
+
+                    <div class="profile-form-clean">
+                        <div class="profile-clean-row">
+                            <div class="profile-clean-field">
+                                <label asp-for="Input.FullName" class="form-label profile-label">Full Name</label>
+                                <input asp-for="Input.FullName" class="form-control profile-control" placeholder="Your full name" />
+                                <span asp-validation-for="Input.FullName" class="text-danger small"></span>
+                            </div>
+
+                            <div class="profile-clean-field">
+                                <label class="form-label profile-label">Email Address</label>
+                                <input value="@Model.DisplayEmail" class="form-control profile-control profile-readonly" readonly />
+                                <div class="profile-helper">Used for login and cannot be changed here.</div>
+                            </div>
+                        </div>
+
+                        <div class="profile-clean-row">
+                            <div class="profile-clean-field">
+                                <label asp-for="Input.AcademicTitle" class="form-label profile-label">Academic Title</label>
+                                <input asp-for="Input.AcademicTitle" class="form-control profile-control" placeholder="Example: Lecturer, Assistant Professor, Supervisor" />
+                                <span asp-validation-for="Input.AcademicTitle" class="text-danger small"></span>
+                            </div>
+
+                            <div class="profile-clean-field">
+                                <label asp-for="Input.Department" class="form-label profile-label">Department</label>
+                                <input asp-for="Input.Department" class="form-control profile-control" placeholder="Example: Computer Science" />
+                                <span asp-validation-for="Input.Department" class="text-danger small"></span>
+                            </div>
+                        </div>
+
+                        <div class="profile-clean-row">
+                            <div class="profile-clean-field">
+                                <label asp-for="Input.Specialization" class="form-label profile-label">Specialization</label>
+                                <input asp-for="Input.Specialization" class="form-control profile-control" placeholder="Example: AI, Software Engineering, Data Science" />
+                                <span asp-validation-for="Input.Specialization" class="text-danger small"></span>
+                            </div>
+
+                            <div class="profile-clean-field">
+                                <label asp-for="Input.PreferredMeetingMode" class="form-label profile-label">Preferred Meeting Mode</label>
+                                <select asp-for="Input.PreferredMeetingMode" class="form-select profile-control">
+                                    <option value="">Select meeting mode</option>
+                                    <option>Online</option>
+                                    <option>In-person</option>
+                                    <option>Hybrid</option>
+                                </select>
+                                <span asp-validation-for="Input.PreferredMeetingMode" class="text-danger small"></span>
+                            </div>
+                        </div>
+
+                        <div class="profile-clean-row">
+                            <div class="profile-clean-field">
+                                <label asp-for="Input.OfficeLocation" class="form-label profile-label">Office Location</label>
+                                <input asp-for="Input.OfficeLocation" class="form-control profile-control" placeholder="Example: Building B, Room 204" />
+                                <span asp-validation-for="Input.OfficeLocation" class="text-danger small"></span>
+                            </div>
+
+                            <div class="profile-clean-field">
+                                <label asp-for="Input.OfficeHours" class="form-label profile-label">Office Hours</label>
+                                <input asp-for="Input.OfficeHours" class="form-control profile-control" placeholder="Example: Tuesday 10:00–12:00" />
+                                <span asp-validation-for="Input.OfficeHours" class="text-danger small"></span>
+                            </div>
+                        </div>
+
+                        <div class="profile-clean-field">
+                            <label asp-for="Input.ResearchAreas" class="form-label profile-label">Research Areas</label>
+                            <textarea asp-for="Input.ResearchAreas"
+                                      class="form-control profile-control"
+                                      rows="4"
+                                      placeholder="Example: Machine Learning, Web Systems, Databases, Project Management"></textarea>
+                            <span asp-validation-for="Input.ResearchAreas" class="text-danger small"></span>
+                        </div>
+
+                        <div class="profile-clean-field">
+                            <label asp-for="Input.Bio" class="form-label profile-label">Bio / Supervision Introduction</label>
+                            <textarea asp-for="Input.Bio"
+                                      class="form-control profile-control"
+                                      rows="5"
+                                      placeholder="Write a short professional introduction and explain the types of projects you supervise."></textarea>
+                            <span asp-validation-for="Input.Bio" class="text-danger small"></span>
+                        </div>
+                    </div>
+
+                    <div class="profile-actions profile-actions-final">
+                        <button type="button" id="cancelEditBtnBottom" class="btn btn-profile-outline">
+                            Cancel
+                        </button>
+
+                        <button type="submit" class="btn btn-profile-primary">
+                            <i class="bi bi-save me-1"></i>
+                            Save Profile
+                        </button>
+                    </div>
+                </div>
+            </main>
+        </section>
+    </form>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+
+    <script>
+        const profileInput = document.getElementById("ProfilePhotoInput");
+        const profilePreview = document.getElementById("profilePreview");
+        const profileInitials = document.getElementById("profileInitials");
+
+        if (profileInput) {
+            profileInput.addEventListener("change", function () {
+                const file = this.files && this.files[0];
+
+                if (!file) {
+                    return;
+                }
+
+                const reader = new FileReader();
+
+                reader.onload = function (event) {
+                    profilePreview.src = event.target.result;
+                    profilePreview.classList.remove("d-none");
+
+                    if (profileInitials) {
+                        profileInitials.classList.add("d-none");
+                    }
+                };
+
+                reader.readAsDataURL(file);
+            });
+        }
+
+        const staticView = document.getElementById("profileStaticView");
+        const editView = document.getElementById("profileEditView");
+        const editBtn = document.getElementById("editProfileBtn");
+        const cancelEditBtn = document.getElementById("cancelEditBtn");
+        const cancelEditBtnBottom = document.getElementById("cancelEditBtnBottom");
+
+        function showEditMode() {
+            staticView.classList.add("d-none");
+            editView.classList.remove("d-none");
+        }
+
+        function showStaticMode() {
+            editView.classList.add("d-none");
+            staticView.classList.remove("d-none");
+        }
+
+        if (editBtn) {
+            editBtn.addEventListener("click", showEditMode);
+        }
+
+        if (cancelEditBtn) {
+            cancelEditBtn.addEventListener("click", showStaticMode);
+        }
+
+        if (cancelEditBtnBottom) {
+            cancelEditBtnBottom.addEventListener("click", showStaticMode);
+        }
+
+        setTimeout(function () {
+            const message = document.getElementById("profileMessage");
+
+            if (message) {
+                message.style.transition = "opacity 0.35s ease, transform 0.35s ease";
+                message.style.opacity = "0";
+                message.style.transform = "translateY(-6px)";
+
+                setTimeout(function () {
+                    message.remove();
+                }, 350);
+            }
+        }, 2000);
+    </script>
+}

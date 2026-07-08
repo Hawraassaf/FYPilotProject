@@ -66,14 +66,47 @@ public class SupervisorProfile
     [Column("user_id")]
     public int UserId { get; set; }
 
+    [Column("academic_title")]
+    public string? AcademicTitle { get; set; }
+
     [Column("department")]
-    public string Department { get; set; } = "Computer Science";
+    public string? Department { get; set; }
+
+    [Column("faculty")]
+    public string? Faculty { get; set; }
+
+    [Column("university")]
+    public string? University { get; set; }
 
     [Column("specialization")]
-    public string Specialization { get; set; } = "";
+    public string? Specialization { get; set; }
+
+    [Column("research_areas")]
+    public string? ResearchAreas { get; set; }
+
+    [Column("office_location")]
+    public string? OfficeLocation { get; set; }
+
+    [Column("office_hours")]
+    public string? OfficeHours { get; set; }
+
+    [Column("preferred_meeting_mode")]
+    public string? PreferredMeetingMode { get; set; }
 
     [Column("bio")]
-    public string Bio { get; set; } = "";
+    public string? Bio { get; set; }
+
+    [Column("linkedin_url")]
+    public string? LinkedInUrl { get; set; }
+
+    [Column("website_url")]
+    public string? WebsiteUrl { get; set; }
+
+    [Column("profile_image_path")]
+    public string? ProfileImagePath { get; set; }
+
+    [Column("updated_at")]
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     [ForeignKey(nameof(UserId))]
     public User? User { get; set; }
