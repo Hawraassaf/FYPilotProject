@@ -1,125 +1,1200 @@
 @page
+@using System
+@using System.Linq
+@using System.Collections.Generic
 @model FYPilot.Web.Pages.Supervisor.IdeaReviewModel
 @{
-    ViewData["Title"]    = "Idea Review";
-    ViewData["Subtitle"] = "Evaluate and provide feedback on student project ideas";
+    ViewData["Title"] = "Feedback Workspace";
+    ViewData["Subtitle"] = "Review student ideas, save evaluations, and open a separate discussion per idea.";
 }
 
-<div class="row g-4">
-    <!-- Ideas list -->
-    <div class="col-lg-4">
-        <div class="page-card p-3">
-            <h6 class="fw-bold mb-3 small text-muted text-uppercase">Student Ideas</h6>
-            @foreach (var idea in Model.AllIdeas)
-            {
-                <a href="/Supervisor/IdeaReview?ideaId=@idea.Id"
-                   class="d-block p-3 rounded-2 mb-1 text-decoration-none @(idea.Id == Model.SelectedIdea?.Id ? "bg-primary-subtle" : "bg-light hover-bg-light")">
-                    <div class="d-flex align-items-start justify-content-between">
-                        <div>
-                            <div class="small fw-semibold text-dark">@idea.Title.Substring(0, Math.Min(idea.Title.Length, 35))…</div>
-                            <div class="text-muted-sm">@(idea.User?.FullName ?? "Student")</div>
-                        </div>
-                        <span class="badge @(idea.Id == Model.SelectedIdea?.Id ? "bg-primary" : "bg-secondary-subtle text-secondary")">@idea.FeasibilityScore%</span>
-                    </div>
-                </a>
-            }
-            @if (!Model.AllIdeas.Any())
-            {
-                <div class="text-muted small p-2">No ideas submitted for review.</div>
-            }
+<section class="sfr-page">
+
+    @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
+    {
+        <div class="alert alert-success sfr-alert">
+            <i class="bi bi-check-circle me-2"></i>
+            @Model.SuccessMessage
         </div>
-    </div>
+    }
 
-    <!-- Review form -->
-    <div class="col-lg-8">
-        @if (Model.SelectedIdea == null)
-        {
-            <div class="page-card p-5 text-center text-muted">
-                <i class="bi bi-card-checklist display-4"></i>
-                <p class="mt-3">Select a student idea from the list to review it.</p>
-            </div>
-        }
-        else
-        {
-            var idea = Model.SelectedIdea;
-            <div class="page-card p-4 mb-3">
-                <div class="d-flex align-items-start justify-content-between mb-3">
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div class="alert alert-danger sfr-alert">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            @Model.ErrorMessage
+        </div>
+    }
+
+    <header class="sfr-hero">
+        <div class="sfr-hero-copy">
+            <span>Supervisor Review Center</span>
+            <h1>Feedback Workspace</h1>
+            <p>Review student ideas in a clean workspace, open a dedicated discussion, and save your academic decision.</p>
+        </div>
+    </header>
+
+    @if (!Model.AllIdeas.Any())
+    {
+        <section class="sfr-empty-page">
+            <i class="bi bi-inbox"></i>
+            <h2>No ideas are available yet</h2>
+            <p>When students submit or generate project ideas, they will appear here for supervisor review.</p>
+        </section>
+    }
+    else
+    {
+        <section class="sfr-workspace-top">
+
+            <aside class="sfr-ideas-panel">
+                <div class="sfr-section-head">
                     <div>
-                        <h5 class="fw-bold mb-1">@idea.Title</h5>
-                        <div class="d-flex gap-1 flex-wrap">
-                            <span class="badge bg-primary-subtle text-primary">@idea.Domain</span>
-                            <span class="badge bg-warning-subtle text-warning text-capitalize">@idea.DifficultyLevel</span>
-                            <span class="badge bg-secondary-subtle text-secondary">@idea.ExpectedDurationWeeks weeks</span>
-                        </div>
+                        <span>Review Queue</span>
+                        <h2>Ideas to Review</h2>
                     </div>
-                    <div class="text-end">
-                        <div class="score-ring text-success" style="width:56px;height:56px;font-size:0.9rem">@idea.FeasibilityScore%</div>
-                    </div>
-                </div>
-                <div class="row g-3 mb-2 small">
-                    <div class="col-6">
-                        <div class="fw-semibold text-muted mb-1">Problem</div>
-                        <div>@idea.ProblemStatement</div>
-                    </div>
-                    <div class="col-6">
-                        <div class="fw-semibold text-muted mb-1">Target Users</div>
-                        <div>@idea.TargetUsers</div>
-                    </div>
-                    <div class="col-6">
-                        <div class="fw-semibold text-muted mb-1">Technologies</div>
-                        <div>@idea.RequiredTechnologies</div>
-                    </div>
-                    <div class="col-6">
-                        <div class="fw-semibold text-muted mb-1">Dataset</div>
-                        <div>@(string.IsNullOrEmpty(idea.DatasetNeeded) ? "None" : idea.DatasetNeeded)</div>
-                    </div>
-                </div>
-                <div class="d-flex gap-3 small">
-                    <div>Innovation: <strong>@idea.InnovationScore%</strong></div>
-                    <div>Market: <strong>@idea.MarketDemandScore%</strong></div>
-                </div>
-            </div>
 
-            <div class="page-card p-4">
-                <h6 class="fw-bold mb-3"><i class="bi bi-pencil-square me-2"></i>Supervisor Evaluation</h6>
-                <form method="post">
-                    @Html.AntiForgeryToken()
-                    <input type="hidden" name="IdeaId" value="@idea.Id" />
-                    <div class="mb-3">
-                        <label class="form-label fw-semibold small">Decision</label>
-                        @{
-                            var evalStatus = Model.Evaluation?.Status ?? "pending";
-                        }
-                        <select name="Status" class="form-select">
-                            @if (evalStatus == "pending") { <option value="pending" selected>Pending Review</option> } else { <option value="pending">Pending Review</option> }
-                            @if (evalStatus == "approved") { <option value="approved" selected>Approve</option> } else { <option value="approved">Approve</option> }
-                            @if (evalStatus == "needs_revision") { <option value="needs_revision" selected>Needs Revision</option> } else { <option value="needs_revision">Needs Revision</option> }
-                            @if (evalStatus == "rejected") { <option value="rejected" selected>Reject</option> } else { <option value="rejected">Reject</option> }
-                        </select>
+                    <div class="sfr-count-pill">
+                        <strong>@Model.TotalIdeas</strong>
+                        <small>Total</small>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label fw-semibold small">Comments</label>
-                        <textarea name="Comment" class="form-control" rows="4" placeholder="Provide detailed feedback…">@Model.Evaluation?.Comment</textarea>
+                </div>
+
+                <div class="sfr-queue-summary">
+                    <div class="active">
+                        <strong>@Model.TotalIdeas</strong>
+                        <span>All</span>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label fw-semibold small">Improvement Suggestions</label>
-                        <textarea name="ImprovementSuggestions" class="form-control" rows="3" placeholder="Specific improvements the student should make…">@Model.Evaluation?.ImprovementSuggestions</textarea>
+
+                    <div>
+                        <strong>@Model.PendingReviews</strong>
+                        <span>Pending</span>
                     </div>
-                    <div class="row g-2 mb-3">
-                        <div class="col-6">
-                            <label class="form-label fw-semibold small">Originality Score (0–100)</label>
-                            <input type="number" name="OriginalityScore" class="form-control" min="0" max="100" value="@(Model.Evaluation?.OriginalityScore ?? 75)" />
+
+                    <div>
+                        <strong>@Model.NeedsRevisionIdeas</strong>
+                        <span>Revision</span>
+                    </div>
+                </div>
+
+                <div class="sfr-ideas-grid">
+                    @foreach (var ideaItem in Model.AllIdeas)
+                    {
+                        var statusMeta = StatusMeta(ideaItem.Status);
+
+                        <a href="/Supervisor/IdeaReview?ideaId=@ideaItem.Id"
+                           class="sfr-idea-tile @(ideaItem.IsSelected ? "active" : "")">
+                            <div class="sfr-tile-top">
+                                <div class="sfr-student-avatar">@Initials(ideaItem.StudentName)</div>
+                                <span class="@statusMeta.ClassName">@statusMeta.Label</span>
+                            </div>
+
+                            <h3>@ideaItem.Title</h3>
+
+                            <div class="sfr-tile-meta">
+                                <span><i class="bi bi-person"></i>@ValueOrStudent(ideaItem.StudentName)</span>
+
+                                @if (!string.IsNullOrWhiteSpace(ideaItem.Domain))
+                                {
+                                    <span><i class="bi bi-folder2"></i>@ideaItem.Domain</span>
+                                }
+
+                                @if (!string.IsNullOrWhiteSpace(ideaItem.DifficultyLevel))
+                                {
+                                    <span><i class="bi bi-speedometer2"></i>@ideaItem.DifficultyLevel</span>
+                                }
+
+                                <span><i class="bi bi-calendar3"></i>@ideaItem.CreatedAt.ToString("MMM d")</span>
+                            </div>
+                        </a>
+                    }
+                </div>
+            </aside>
+
+            <main class="sfr-brief-panel">
+                @if (Model.SelectedIdea == null)
+                {
+                    <section class="sfr-empty-page compact">
+                        <i class="bi bi-card-checklist"></i>
+                        <h2>Select an idea to review</h2>
+                        <p>Choose a student idea from the review queue to view its brief and save an evaluation.</p>
+                    </section>
+                }
+                else
+                {
+                    var idea = Model.SelectedIdea;
+                    var evaluationStatus = Model.Evaluation?.Status ?? "pending";
+                    var selectedStatusMeta = StatusMeta(evaluationStatus);
+                    var technologies = SplitItems(idea.RequiredTechnologies);
+                    var requiredSkills = SplitItems(idea.RequiredSkills);
+                    var hasDataset = HasUsefulDataset(idea.DatasetNeeded);
+                    var hasMarketNote = !string.IsNullOrWhiteSpace(idea.LebaneseMarketRelevance);
+                    var hasScopeContent = technologies.Any() || requiredSkills.Any() || hasDataset;
+
+                    <article class="sfr-current-idea-card">
+                        <div class="sfr-current-title-row">
+                            <div class="sfr-current-title-main">
+                                <div class="sfr-document-mark">
+                                    <i class="bi bi-file-earmark-text"></i>
+                                </div>
+
+                                <div>
+                                    <span>Current Review</span>
+                                    <h2>@idea.Title</h2>
+                                </div>
+                            </div>
+
+                            <div class="sfr-current-actions">
+                                <span class="@selectedStatusMeta.ClassName">@selectedStatusMeta.Label</span>
+
+                                <a href="/Supervisor/IdeaDiscussion?ideaId=@idea.Id" class="sfr-discussion-btn">
+                                    <i class="bi bi-chat-dots"></i>
+                                    Start Discussion
+                                </a>
+                            </div>
                         </div>
-                        <div class="col-6">
-                            <label class="form-label fw-semibold small">Similarity Score (0–100)</label>
-                            <input type="number" name="SimilarityScore" class="form-control" min="0" max="100" value="@(Model.Evaluation?.SimilarityScore ?? 25)" />
+
+                        <div class="sfr-current-meta-strip">
+                            <small><i class="bi bi-person"></i>@(idea.User?.FullName ?? "Student")</small>
+
+                            @if (!string.IsNullOrWhiteSpace(idea.Domain))
+                            {
+                                <small><i class="bi bi-folder2-open"></i>@idea.Domain</small>
+                            }
+
+                            @if (!string.IsNullOrWhiteSpace(idea.DifficultyLevel))
+                            {
+                                <small><i class="bi bi-speedometer2"></i>@idea.DifficultyLevel</small>
+                            }
+
+                            @if (idea.ExpectedDurationWeeks > 0)
+                            {
+                                <small><i class="bi bi-calendar-week"></i>@idea.ExpectedDurationWeeks weeks</small>
+                            }
                         </div>
-                    </div>
-                    <button type="submit" class="btn btn-primary fw-semibold">
-                        <i class="bi bi-save me-2"></i>Save Evaluation
-                    </button>
-                </form>
-            </div>
+
+                        <div class="sfr-idea-tabs">
+                            <input type="radio" name="ideaBriefTab" id="ideaTabProblem" class="sfr-tab-radio" checked="checked" />
+                            <input type="radio" name="ideaBriefTab" id="ideaTabValue" class="sfr-tab-radio" />
+                            <input type="radio" name="ideaBriefTab" id="ideaTabScope" class="sfr-tab-radio" />
+
+                            <div class="sfr-tab-bar">
+                                <label for="ideaTabProblem"><i class="bi bi-bullseye"></i> Problem</label>
+                                <label for="ideaTabValue"><i class="bi bi-people"></i> Users &amp; Value</label>
+                                <label for="ideaTabScope"><i class="bi bi-diagram-3"></i> Scope &amp; Tech</label>
+                            </div>
+
+                            <div class="sfr-tab-panels">
+                                <div class="sfr-tab-panel" id="panelProblem">
+                                    @if (!string.IsNullOrWhiteSpace(idea.ProblemStatement))
+                                    {
+                                        <div class="sfr-focus-box">
+                                            <div class="sfr-box-icon">
+                                                <i class="bi bi-bullseye"></i>
+                                            </div>
+
+                                            <div>
+                                                <span>Problem Statement</span>
+                                                <p>@idea.ProblemStatement</p>
+                                            </div>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <p class="sfr-tab-empty">No problem statement was provided for this idea.</p>
+                                    }
+                                </div>
+
+                                <div class="sfr-tab-panel" id="panelValue">
+                                    <div class="sfr-two-mini">
+                                        @if (!string.IsNullOrWhiteSpace(idea.TargetUsers))
+                                        {
+                                            <div>
+                                                <i class="bi bi-people"></i>
+                                                <span>Target Users</span>
+                                                <p>@idea.TargetUsers</p>
+                                            </div>
+                                        }
+
+                                        @if (!string.IsNullOrWhiteSpace(idea.WhyUseful))
+                                        {
+                                            <div>
+                                                <i class="bi bi-lightbulb"></i>
+                                                <span>Usefulness</span>
+                                                <p>@idea.WhyUseful</p>
+                                            </div>
+                                        }
+                                    </div>
+
+                                    @if (hasMarketNote)
+                                    {
+                                        <div class="sfr-mini-line">
+                                            <i class="bi bi-geo-alt"></i>
+
+                                            <div>
+                                                <span>Lebanese Market Relevance</span>
+                                                <p>@idea.LebaneseMarketRelevance</p>
+                                            </div>
+                                        </div>
+                                    }
+
+                                    @if (string.IsNullOrWhiteSpace(idea.TargetUsers) && string.IsNullOrWhiteSpace(idea.WhyUseful) && !hasMarketNote)
+                                    {
+                                        <p class="sfr-tab-empty">No target user, usefulness, or market notes were provided.</p>
+                                    }
+                                </div>
+
+                                <div class="sfr-tab-panel" id="panelScope">
+                                    @if (hasScopeContent)
+                                    {
+                                        <div class="sfr-scope-box">
+                                            @if (technologies.Any())
+                                            {
+                                                <div>
+                                                    <span>Technologies</span>
+
+                                                    <div class="sfr-chip-row">
+                                                        @foreach (var item in technologies.Take(8))
+                                                        {
+                                                            <b>@item</b>
+                                                        }
+
+                                                        @if (technologies.Count > 8)
+                                                        {
+                                                            <b>+@(technologies.Count - 8)</b>
+                                                        }
+                                                    </div>
+                                                </div>
+                                            }
+
+                                            @if (requiredSkills.Any())
+                                            {
+                                                <div>
+                                                    <span>Required Skills</span>
+
+                                                    <div class="sfr-chip-row muted">
+                                                        @foreach (var item in requiredSkills.Take(8))
+                                                        {
+                                                            <b>@item</b>
+                                                        }
+
+                                                        @if (requiredSkills.Count > 8)
+                                                        {
+                                                            <b>+@(requiredSkills.Count - 8)</b>
+                                                        }
+                                                    </div>
+                                                </div>
+                                            }
+
+                                            @if (hasDataset)
+                                            {
+                                                <div>
+                                                    <span>Dataset</span>
+                                                    <p>@idea.DatasetNeeded</p>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <p class="sfr-tab-empty">No technologies, skills, or dataset notes were provided.</p>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </article>
+
+                    <article class="sfr-evaluation-studio">
+                        <div class="sfr-evaluation-side">
+                            <span>Evaluation Studio</span>
+                            <h2>Decision & feedback</h2>
+                            <p>Save your academic decision and guide the student with clear improvement notes.</p>
+
+                            <a href="/Supervisor/IdeaDiscussion?ideaId=@idea.Id" class="sfr-soft-discussion">
+                                <i class="bi bi-chat-left-text"></i>
+                                Open idea discussion
+                            </a>
+                        </div>
+
+                        <form method="post" asp-page-handler="SaveEvaluation" class="sfr-evaluation-form">
+                            @Html.AntiForgeryToken()
+
+                            <input type="hidden" asp-for="EvaluationInput.IdeaId" value="@idea.Id" />
+
+                            <div class="sfr-eval-topline">
+                                <div class="sfr-field">
+                                    <label asp-for="EvaluationInput.Status">Decision</label>
+                                    <select asp-for="EvaluationInput.Status" class="form-select">
+                                        <option value="pending">Pending Review</option>
+                                        <option value="approved">Approved</option>
+                                        <option value="needs_revision">Needs Revision</option>
+                                        <option value="rejected">Rejected</option>
+                                    </select>
+                                </div>
+
+                                <div class="sfr-score-grid">
+                                    <div class="sfr-field">
+                                        <label asp-for="EvaluationInput.OriginalityScore">Originality</label>
+                                        <input asp-for="EvaluationInput.OriginalityScore" class="form-control" type="number" min="0" max="100" placeholder="0 - 100" />
+                                    </div>
+
+                                    <div class="sfr-field">
+                                        <label asp-for="EvaluationInput.SimilarityScore">Similarity</label>
+                                        <input asp-for="EvaluationInput.SimilarityScore" class="form-control" type="number" min="0" max="100" placeholder="0 - 100" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="sfr-feedback-grid">
+                                <div class="sfr-field">
+                                    <label asp-for="EvaluationInput.Comment">Supervisor Comment</label>
+                                    <textarea asp-for="EvaluationInput.Comment" class="form-control" rows="4" placeholder="Write the main review feedback..."></textarea>
+                                </div>
+
+                                <div class="sfr-field">
+                                    <label asp-for="EvaluationInput.ImprovementSuggestions">Improvement Suggestions</label>
+                                    <textarea asp-for="EvaluationInput.ImprovementSuggestions" class="form-control" rows="4" placeholder="Write specific improvements the student should make..."></textarea>
+                                </div>
+                            </div>
+
+                            <div class="sfr-form-actions">
+                                <button type="submit" class="btn sfr-primary-btn">
+                                    <i class="bi bi-save me-1"></i>
+                                    Save Evaluation
+                                </button>
+                            </div>
+                        </form>
+                    </article>
+                }
+            </main>
+        </section>
+    }
+</section>
+
+@section Head {
+    <style>
+        :root {
+            --sfr-navy: #28385E;
+            --sfr-blue: #304163;
+            --sfr-steel: #516C8D;
+            --sfr-bg: #F7F8FA;
+            --sfr-border: #E8ECF2;
+            --sfr-text: #111827;
+            --sfr-muted: #64748B;
+            --sfr-tint: #F1F4F8;
         }
-    </div>
-</div>
+
+        .sfr-page {
+            max-width: 1500px;
+            margin: 0 auto;
+            color: var(--sfr-text);
+            padding-bottom: 1.5rem;
+        }
+
+        .sfr-alert {
+            border: 0;
+            border-radius: 18px;
+            box-shadow: 0 14px 34px rgba(15,23,42,0.08);
+        }
+
+        .sfr-hero {
+            margin-bottom: 1rem;
+            border-radius: 26px;
+            padding: 1.15rem 1.3rem;
+            color: #ffffff;
+            background: radial-gradient(circle at 88% 12%, rgba(255,255,255,0.18), transparent 28%), linear-gradient(135deg, #061C49 0%, var(--sfr-navy) 56%, var(--sfr-steel) 125%);
+            box-shadow: 0 18px 42px rgba(40,56,94,0.16);
+        }
+
+        .sfr-hero-copy span,
+        .sfr-section-head span,
+        .sfr-current-title-main span,
+        .sfr-evaluation-side span {
+            display: block;
+            font-size: 0.72rem;
+            font-weight: 760;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        .sfr-hero-copy span {
+            color: rgba(255,255,255,0.72);
+        }
+
+        .sfr-hero-copy h1 {
+            margin: 0.15rem 0;
+            font-size: clamp(1.45rem, 3vw, 2.15rem);
+            font-weight: 760;
+            letter-spacing: -0.045em;
+        }
+
+        .sfr-hero-copy p {
+            margin: 0;
+            max-width: 850px;
+            color: rgba(255,255,255,0.78);
+            font-size: 0.9rem;
+            line-height: 1.55;
+        }
+
+        .sfr-workspace-top {
+            display: grid;
+            grid-template-columns: minmax(420px, 0.95fr) minmax(0, 1.45fr);
+            gap: 1rem;
+            align-items: stretch;
+        }
+
+        .sfr-ideas-panel,
+        .sfr-current-idea-card,
+        .sfr-evaluation-studio,
+        .sfr-empty-page {
+            background: #ffffff;
+            border: 1px solid var(--sfr-border);
+            border-radius: 26px;
+            box-shadow: 0 14px 34px rgba(15,23,42,0.05);
+        }
+
+        .sfr-ideas-panel {
+            padding: 1rem;
+        }
+
+        .sfr-section-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 0.9rem;
+        }
+
+            .sfr-section-head span,
+            .sfr-current-title-main span,
+            .sfr-evaluation-side span {
+                color: var(--sfr-steel);
+            }
+
+            .sfr-section-head h2,
+            .sfr-evaluation-side h2 {
+                margin: 0.16rem 0 0;
+                color: var(--sfr-text);
+                font-size: 1.06rem;
+                font-weight: 740;
+                letter-spacing: -0.02em;
+            }
+
+        .sfr-count-pill {
+            min-width: 64px;
+            border-radius: 18px;
+            padding: 0.52rem 0.65rem;
+            color: #ffffff;
+            background: linear-gradient(135deg, #061C49, var(--sfr-blue));
+            display: grid;
+            place-items: center;
+            line-height: 1.05;
+        }
+
+            .sfr-count-pill strong {
+                font-size: 1.05rem;
+                font-weight: 760;
+            }
+
+            .sfr-count-pill small {
+                color: rgba(255,255,255,0.72);
+                font-size: 0.62rem;
+            }
+
+        .sfr-queue-summary {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.55rem;
+            margin-bottom: 0.9rem;
+        }
+
+            .sfr-queue-summary div {
+                border-radius: 16px;
+                padding: 0.56rem 0.62rem;
+                background: var(--sfr-tint);
+                display: grid;
+                gap: 0.1rem;
+            }
+
+                .sfr-queue-summary div.active {
+                    background: #E7EDF8;
+                }
+
+            .sfr-queue-summary strong {
+                color: var(--sfr-blue);
+                font-size: 1rem;
+                font-weight: 760;
+            }
+
+            .sfr-queue-summary span {
+                color: var(--sfr-muted);
+                font-size: 0.68rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+            }
+
+        .sfr-ideas-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.7rem;
+        }
+
+        .sfr-idea-tile {
+            color: inherit;
+            text-decoration: none;
+            border: 1px solid var(--sfr-border);
+            border-radius: 20px;
+            padding: 0.78rem;
+            background: #ffffff;
+            transition: 0.16s ease;
+            min-width: 0;
+        }
+
+            .sfr-idea-tile:hover,
+            .sfr-idea-tile.active {
+                color: inherit;
+                border-color: #B8C8DD;
+                background: linear-gradient(180deg, #ffffff, #F8FAFC);
+                box-shadow: 0 12px 24px rgba(40,56,94,0.08);
+                transform: translateY(-2px);
+            }
+
+        .sfr-tile-top {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.55rem;
+            align-items: center;
+        }
+
+        .sfr-student-avatar {
+            width: 38px;
+            height: 38px;
+            min-width: 38px;
+            border-radius: 15px;
+            background: #EEF2F6;
+            color: var(--sfr-blue);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.72rem;
+            font-weight: 760;
+        }
+
+        .sfr-idea-tile h3 {
+            margin: 0.65rem 0 0;
+            color: var(--sfr-text);
+            font-size: 0.86rem;
+            line-height: 1.35;
+            font-weight: 700;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .sfr-tile-meta {
+            margin-top: 0.7rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+        }
+
+            .sfr-tile-meta span {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.22rem;
+                color: var(--sfr-muted);
+                font-size: 0.64rem;
+                max-width: 100%;
+            }
+
+        .sfr-status {
+            display: inline-flex;
+            width: fit-content;
+            border-radius: 999px;
+            padding: 0.24rem 0.5rem;
+            font-size: 0.62rem;
+            font-weight: 730;
+            white-space: nowrap;
+        }
+
+            .sfr-status.pending {
+                background: #FFF7ED;
+                color: #9A3412;
+            }
+
+            .sfr-status.approved {
+                background: #ECFDF5;
+                color: #047857;
+            }
+
+            .sfr-status.revision {
+                background: #FEF3C7;
+                color: #92400E;
+            }
+
+            .sfr-status.rejected {
+                background: #FEF2F2;
+                color: #B91C1C;
+            }
+
+        .sfr-review-area {
+            min-width: 0;
+            display: grid;
+            gap: 1rem;
+        }
+
+        .sfr-current-idea-card {
+            overflow: hidden;
+        }
+
+        .sfr-current-title-row {
+            padding: 1rem 1.05rem;
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: flex-start;
+            border-bottom: 1px solid var(--sfr-border);
+            background: linear-gradient(180deg, #ffffff, #FAFBFD);
+        }
+
+        .sfr-current-title-main {
+            display: flex;
+            gap: 0.85rem;
+            align-items: center;
+            min-width: 0;
+        }
+
+        .sfr-document-mark {
+            width: 58px;
+            height: 58px;
+            min-width: 58px;
+            border-radius: 20px;
+            background: linear-gradient(135deg, #061C49, var(--sfr-blue));
+            color: #ffffff;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.35rem;
+            box-shadow: 0 14px 28px rgba(40,56,94,0.16);
+        }
+
+        .sfr-current-title-main h2 {
+            margin: 0.18rem 0 0;
+            color: var(--sfr-text);
+            font-size: clamp(1.15rem, 2vw, 1.42rem);
+            line-height: 1.18;
+            font-weight: 760;
+            letter-spacing: -0.035em;
+        }
+
+        .sfr-current-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .sfr-discussion-btn,
+        .sfr-soft-discussion {
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.38rem;
+            white-space: nowrap;
+            transition: 0.15s ease;
+        }
+
+        .sfr-discussion-btn {
+            color: #ffffff;
+            background: linear-gradient(135deg, #061C49, var(--sfr-blue));
+            border-radius: 999px;
+            padding: 0.5rem 0.78rem;
+            font-size: 0.78rem;
+            font-weight: 720;
+        }
+
+            .sfr-discussion-btn:hover {
+                color: #ffffff;
+                background: linear-gradient(135deg, var(--sfr-blue), var(--sfr-steel));
+            }
+
+        .sfr-current-meta-strip {
+            padding: 0.7rem 1.05rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.65rem;
+            border-bottom: 1px solid var(--sfr-border);
+        }
+
+            .sfr-current-meta-strip small {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.32rem;
+                color: #475569;
+                font-size: 0.72rem;
+                font-weight: 620;
+            }
+
+        .sfr-idea-tabs {
+            padding: 1rem;
+        }
+
+        .sfr-tab-radio {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .sfr-tab-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+            margin-bottom: 1rem;
+        }
+
+            .sfr-tab-bar label {
+                cursor: pointer;
+                user-select: none;
+                display: inline-flex;
+                align-items: center;
+                gap: 0.4rem;
+                padding: 0.58rem 0.9rem;
+                border-radius: 13px;
+                font-size: 0.8rem;
+                font-weight: 700;
+                color: var(--sfr-muted);
+                background: var(--sfr-tint);
+                border: 1px solid transparent;
+                transition: 0.15s ease;
+            }
+
+                .sfr-tab-bar label:hover {
+                    color: var(--sfr-blue);
+                }
+
+        #ideaTabProblem:checked ~ .sfr-tab-bar label[for="ideaTabProblem"],
+        #ideaTabValue:checked ~ .sfr-tab-bar label[for="ideaTabValue"],
+        #ideaTabScope:checked ~ .sfr-tab-bar label[for="ideaTabScope"] {
+            color: #ffffff;
+            background: linear-gradient(135deg, #061C49, var(--sfr-blue));
+            box-shadow: 0 10px 22px rgba(40,56,94,0.22);
+        }
+
+        .sfr-tab-panel {
+            display: none;
+        }
+
+        #ideaTabProblem:checked ~ .sfr-tab-panels #panelProblem,
+        #ideaTabValue:checked ~ .sfr-tab-panels #panelValue,
+        #ideaTabScope:checked ~ .sfr-tab-panels #panelScope {
+            display: grid;
+            gap: 0.78rem;
+            animation: sfrFadeIn 0.18s ease;
+        }
+
+        @@keyframes sfrFadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(4px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .sfr-tab-empty {
+            margin: 0;
+            padding: 1.4rem 1rem;
+            border: 1px dashed var(--sfr-border);
+            border-radius: 18px;
+            background: #FAFBFD;
+            color: var(--sfr-muted);
+            font-size: 0.86rem;
+            text-align: center;
+        }
+
+        .sfr-focus-box,
+        .sfr-two-mini > div,
+        .sfr-mini-line,
+        .sfr-scope-box {
+            border: 1px solid var(--sfr-border);
+            border-radius: 20px;
+            background: #ffffff;
+            padding: 0.92rem;
+        }
+
+        .sfr-focus-box {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: 0.72rem;
+            align-items: start;
+            background: linear-gradient(180deg, #ffffff, #FAFBFD);
+        }
+
+        .sfr-box-icon,
+        .sfr-two-mini i,
+        .sfr-mini-line > i {
+            width: 36px;
+            height: 36px;
+            border-radius: 14px;
+            color: var(--sfr-steel);
+            background: #EEF2F6;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .sfr-focus-box span,
+        .sfr-two-mini span,
+        .sfr-mini-line span,
+        .sfr-scope-box span {
+            display: block;
+            color: var(--sfr-steel);
+            font-size: 0.72rem;
+            font-weight: 760;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 0.25rem;
+        }
+
+        .sfr-focus-box p,
+        .sfr-two-mini p,
+        .sfr-mini-line p,
+        .sfr-scope-box p {
+            margin: 0;
+            color: #334155;
+            font-size: 0.86rem;
+            line-height: 1.65;
+        }
+
+        .sfr-two-mini {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.78rem;
+        }
+
+            .sfr-two-mini i {
+                margin-bottom: 0.55rem;
+            }
+
+        .sfr-mini-line {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: 0.7rem;
+            align-items: start;
+        }
+
+        .sfr-scope-box {
+            display: grid;
+            gap: 0.75rem;
+            background: #FAFBFD;
+        }
+
+        .sfr-chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+        }
+
+            .sfr-chip-row b {
+                display: inline-flex;
+                border-radius: 999px;
+                padding: 0.32rem 0.56rem;
+                background: #EEF2F6;
+                color: var(--sfr-blue);
+                font-size: 0.72rem;
+                font-weight: 680;
+            }
+
+            .sfr-chip-row.muted b {
+                color: #475569;
+                background: #F1F5F9;
+            }
+
+        .sfr-evaluation-studio {
+            display: grid;
+            grid-template-columns: minmax(250px, 0.55fr) minmax(0, 1.45fr);
+            overflow: hidden;
+        }
+
+        .sfr-evaluation-side {
+            padding: 1.1rem;
+            color: #ffffff;
+            background: radial-gradient(circle at 88% 18%, rgba(255,255,255,0.14), transparent 28%), linear-gradient(135deg, #061C49, var(--sfr-blue));
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+            .sfr-evaluation-side span {
+                color: rgba(255,255,255,0.72);
+            }
+
+            .sfr-evaluation-side h2 {
+                color: #ffffff;
+                font-size: 1.25rem;
+                margin: 0.2rem 0 0;
+            }
+
+            .sfr-evaluation-side p {
+                margin: 0.45rem 0 0;
+                color: rgba(255,255,255,0.78);
+                font-size: 0.86rem;
+                line-height: 1.55;
+            }
+
+        .sfr-soft-discussion {
+            width: fit-content;
+            color: var(--sfr-blue);
+            background: #ffffff;
+            border-radius: 999px;
+            padding: 0.52rem 0.78rem;
+            font-size: 0.78rem;
+            font-weight: 730;
+        }
+
+            .sfr-soft-discussion:hover {
+                color: var(--sfr-blue);
+                background: #F8FAFC;
+            }
+
+        .sfr-evaluation-form {
+            padding: 1rem;
+            display: grid;
+            gap: 0.85rem;
+        }
+
+        .sfr-eval-topline {
+            display: grid;
+            grid-template-columns: minmax(220px, 0.75fr) minmax(0, 1.25fr);
+            gap: 0.8rem;
+        }
+
+        .sfr-score-grid,
+        .sfr-feedback-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.75rem;
+        }
+
+        .sfr-field label {
+            display: block;
+            margin-bottom: 0.32rem;
+            color: #334155;
+            font-size: 0.76rem;
+            font-weight: 760;
+        }
+
+        .sfr-field .form-control,
+        .sfr-field .form-select {
+            border-radius: 15px;
+            border-color: #DDE5EF;
+            font-size: 0.84rem;
+        }
+
+            .sfr-field .form-control:focus,
+            .sfr-field .form-select:focus {
+                border-color: var(--sfr-steel);
+                box-shadow: 0 0 0 0.2rem rgba(81,108,141,0.15);
+            }
+
+        .sfr-form-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+        }
+
+        .sfr-primary-btn {
+            border-radius: 15px;
+            padding: 0.65rem 0.95rem;
+            font-size: 0.84rem;
+            font-weight: 760;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #ffffff;
+            background: linear-gradient(135deg, #061C49, var(--sfr-blue));
+            border: 1px solid rgba(81,108,141,0.25);
+        }
+
+            .sfr-primary-btn:hover {
+                color: #ffffff;
+                background: linear-gradient(135deg, var(--sfr-blue), var(--sfr-steel));
+            }
+
+        .sfr-empty-page {
+            min-height: 420px;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            text-align: center;
+            padding: 2rem;
+        }
+
+            .sfr-empty-page.compact {
+                min-height: 100%;
+            }
+
+            .sfr-empty-page > i {
+                width: 72px;
+                height: 72px;
+                border-radius: 24px;
+                color: var(--sfr-steel);
+                background: #EEF2F6;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 1.9rem;
+                margin-bottom: 1rem;
+            }
+
+            .sfr-empty-page h2 {
+                margin: 0;
+                color: var(--sfr-text);
+                font-size: 1.3rem;
+                font-weight: 760;
+            }
+
+            .sfr-empty-page p {
+                margin: 0.45rem 0 0;
+                color: var(--sfr-muted);
+                line-height: 1.6;
+                max-width: 520px;
+            }
+
+        @@media (max-width: 1280px) {
+            .sfr-workspace-top,
+            .sfr-evaluation-studio {
+                grid-template-columns: 1fr;
+            }
+
+            .sfr-ideas-grid {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+        }
+
+        @@media (max-width: 900px) {
+            .sfr-ideas-grid,
+            .sfr-two-mini,
+            .sfr-eval-topline,
+            .sfr-score-grid,
+            .sfr-feedback-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .sfr-current-title-row {
+                flex-direction: column;
+            }
+
+            .sfr-current-actions {
+                justify-content: flex-start;
+            }
+        }
+
+        @@media (max-width: 767px) {
+            .sfr-form-actions,
+            .sfr-form-actions .btn,
+            .sfr-discussion-btn,
+            .sfr-soft-discussion {
+                width: 100%;
+            }
+
+            .sfr-tab-bar {
+                width: 100%;
+            }
+
+                .sfr-tab-bar label {
+                    flex: 1;
+                    justify-content: center;
+                }
+        }
+    </style>
+}
+
+@functions {
+    private static List<string> SplitItems(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        return value
+            .Split(new[] { ',', ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(item => item.Trim())
+            .Where(item => item.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static bool HasUsefulDataset(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var normalized = value.Trim();
+
+        if (normalized.Equals("None", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("No", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("N/A", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("not required", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("no dataset", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static string Initials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "ST";
+        }
+
+        var parts = name
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Take(2)
+            .ToList();
+
+        if (!parts.Any())
+        {
+            return "ST";
+        }
+
+        return string.Join("", parts.Select(p => p[0])).ToUpperInvariant();
+    }
+
+    private static string ValueOrStudent(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "Student" : value;
+    }
+
+    private static (string Label, string ClassName) StatusMeta(string? status)
+    {
+        return NormalizeStatus(status) switch
+        {
+            "approved" => ("Approved", "sfr-status approved"),
+            "needs_revision" => ("Needs Revision", "sfr-status revision"),
+            "rejected" => ("Rejected", "sfr-status rejected"),
+            _ => ("Pending", "sfr-status pending")
+        };
+    }
+
+    private static string NormalizeStatus(string? status)
+    {
+        return string.IsNullOrWhiteSpace(status)
+            ? "pending"
+            : status.Trim().ToLowerInvariant();
+    }
+}

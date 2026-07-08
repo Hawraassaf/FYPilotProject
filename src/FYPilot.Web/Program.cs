@@ -1,6 +1,7 @@
 using FYPilot.Application.Interfaces;
 using FYPilot.Infrastructure.Data;
 using FYPilot.Infrastructure.Services;
+using FYPilot.Web.Hubs;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,7 +12,10 @@ static string BuildConnectionString()
 {
     // Priority 1: full DATABASE_URL
     var url = Environment.GetEnvironmentVariable("DATABASE_URL");
-    if (!string.IsNullOrWhiteSpace(url)) return url;
+    if (!string.IsNullOrWhiteSpace(url))
+    {
+        return url;
+    }
 
     // Priority 2: individual PG* variables, with local-dev defaults
     var host = Environment.GetEnvironmentVariable("PGHOST") ?? "localhost";
@@ -19,6 +23,7 @@ static string BuildConnectionString()
     var db = Environment.GetEnvironmentVariable("PGDATABASE") ?? "fyp_db";
     var user = Environment.GetEnvironmentVariable("PGUSER") ?? "postgres";
     var pass = Environment.GetEnvironmentVariable("PGPASSWORD") ?? "123456";
+
     return $"Host={host};Port={port};Database={db};Username={user};Password={pass};SSL Mode=Disable;Trust Server Certificate=true;";
 }
 
@@ -37,9 +42,11 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = SameSiteMode.Lax;
     });
-// email sender------------------------------------------------  
+
+// ── Email Sender ──────────────────────────────────────────────────────────────
 builder.Services.Configure<SmtpSettings>(builder.Configuration.GetSection("Smtp"));
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
+
 // ── Authorization ─────────────────────────────────────────────────────────────
 builder.Services.AddAuthorization(options =>
 {
@@ -65,7 +72,8 @@ builder.Services.AddSession(options =>
     options.Cookie.IsEssential = true;
 });
 
-// ── Razor Pages ───────────────────────────────────────────────────────────────
+// ── Razor Pages + SignalR ─────────────────────────────────────────────────────
+builder.Services.AddSignalR();
 builder.Services.AddRazorPages();
 builder.Services.AddAntiforgery();
 builder.Services.AddHealthChecks();
@@ -86,6 +94,11 @@ app.UseSession();
 app.UseAuthentication();
 app.UseAuthorization();
 
+// ── SignalR Hub ───────────────────────────────────────────────────────────────
+// Important: MapHub must be after UseAuthentication and UseAuthorization
+app.MapHub<FeedbackChatHub>("/hubs/feedback-chat");
+
+// ── Endpoints ─────────────────────────────────────────────────────────────────
 app.MapHealthChecks("/healthz");
 app.MapRazorPages();
 
@@ -93,6 +106,7 @@ app.MapRazorPages();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
     try
     {
         db.Database.EnsureCreated();

@@ -1,117 +1,675 @@
 ﻿@page
+@using System.Linq
+@using Microsoft.AspNetCore.Html
 @model FYPilot.Web.Pages.Student.DocumentationGeneratorModel
+
 @{
-    ViewData["Title"] = "Smart Project Specification Generator";
+    ViewData["Title"] = "Software Documentation";
+
+    var docs = Model.GeneratedDocumentation;
+
+    var hasSelectedIdea =
+        Model.SelectedProjectIdeaId > 0 &&
+        !string.IsNullOrWhiteSpace(Model.Request.ProjectTitle);
+
+    var functionalRequirements = docs?.FunctionalRequirements ?? Enumerable.Empty<string>();
+    var nonFunctionalRequirements = docs?.NonFunctionalRequirements ?? Enumerable.Empty<string>();
+    var useCases = docs?.UseCases ?? Enumerable.Empty<string>();
+    var edgeCases = docs?.EdgeCases ?? Enumerable.Empty<string>();
+    var databaseDesign = docs?.DatabaseDesign ?? Enumerable.Empty<string>();
+    var uiDesign = docs?.UiDesign ?? Enumerable.Empty<string>();
+
+    var functionalCount = functionalRequirements.Count();
+    var nonFunctionalCount = nonFunctionalRequirements.Count();
+    var useCaseCount = useCases.Count();
+    var edgeCaseCount = edgeCases.Count();
+    var databaseCount = databaseDesign.Count();
+    var uiCount = uiDesign.Count();
+
+    var totalGeneratedItems =
+        functionalCount +
+        nonFunctionalCount +
+        useCaseCount +
+        edgeCaseCount +
+        databaseCount +
+        uiCount;
 }
 
 @section Head {
     <style>
-        .spec-hero {
-            background: linear-gradient(135deg, #0f172a, #1e3a8a);
-            border-radius: 24px;
-            color: white;
-            padding: 28px;
-            box-shadow: 0 20px 45px rgba(15, 23, 42, 0.18);
+        .sdoc-page {
+            max-width: 1480px;
+            margin: 0 auto;
         }
 
-        .spec-hero-badge {
-            background: rgba(255, 255, 255, 0.15);
-            border: 1px solid rgba(255, 255, 255, 0.25);
-            color: white;
+        .sdoc-hero {
+            position: relative;
+            overflow: hidden;
+            border-radius: 26px;
+            padding: 1.45rem;
+            color: #ffffff;
+            background: radial-gradient(circle at 12% 18%, rgba(255,255,255,0.14), transparent 26%), linear-gradient(135deg, #28385E 0%, #304163 58%, #516C8D 120%);
+            box-shadow: 0 16px 40px rgba(40, 56, 94, 0.16);
+            border: 1px solid rgba(255,255,255,0.14);
+        }
+
+            .sdoc-hero::before {
+                content: "";
+                position: absolute;
+                inset: 0;
+                opacity: 0.14;
+                background-image: linear-gradient(rgba(255,255,255,0.14) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.14) 1px, transparent 1px);
+                background-size: 42px 42px;
+                mask-image: linear-gradient(90deg, black, transparent 92%);
+            }
+
+        .sdoc-hero-content {
+            position: relative;
+            z-index: 2;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 1.4rem;
+            align-items: center;
+        }
+
+        .sdoc-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.35rem 0.72rem;
             border-radius: 999px;
-            padding: 6px 14px;
-            font-size: 0.8rem;
+            color: rgba(255,255,255,0.88);
+            background: rgba(255,255,255,0.13);
+            border: 1px solid rgba(255,255,255,0.18);
+            font-size: 0.72rem;
+            font-weight: 760;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+            margin-bottom: 0.75rem;
         }
 
-        .glass-card {
+        .sdoc-hero h1 {
+            color: #ffffff;
+            margin: 0;
+            font-size: clamp(1.65rem, 3vw, 2.35rem);
+            font-weight: 780;
+            letter-spacing: -0.05em;
+        }
+
+        .sdoc-hero p {
+            max-width: 880px;
+            color: rgba(255,255,255,0.72);
+            margin: 0.5rem 0 0;
+            line-height: 1.62;
+            font-size: 0.92rem;
+        }
+
+        .sdoc-hero-badge {
+            min-width: 180px;
+            padding: 0.95rem 1rem;
+            border-radius: 20px;
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.16);
+            text-align: right;
+        }
+
+            .sdoc-hero-badge span {
+                display: block;
+                color: rgba(255,255,255,0.62);
+                font-size: 0.72rem;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.07em;
+                margin-bottom: 0.3rem;
+            }
+
+            .sdoc-hero-badge strong {
+                color: #ffffff;
+                font-size: 1.05rem;
+                font-weight: 760;
+            }
+
+        .sdoc-alert {
             border: 0;
-            border-radius: 22px;
-            box-shadow: 0 12px 35px rgba(15, 23, 42, 0.08);
-            overflow: hidden;
+            border-radius: 16px;
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
         }
 
-        .section-card {
-            border: 1px solid #e5e7eb;
-            border-radius: 18px;
+        .sdoc-shell {
+            display: grid;
+            grid-template-columns: 390px minmax(0, 1fr);
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .sdoc-panel,
+        .sdoc-report,
+        .sdoc-empty {
             background: #ffffff;
-            margin-bottom: 18px;
-            overflow: hidden;
+            border: 1px solid #E8E8E8;
+            border-radius: 24px;
+            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
         }
 
-        .section-title {
+        .sdoc-panel {
+            overflow: hidden;
+            align-self: start;
+            position: sticky;
+            top: 104px;
+        }
+
+        .sdoc-panel-head {
+            padding: 1.15rem 1.15rem 1rem;
+            border-bottom: 1px solid #EEF2F7;
+            background: linear-gradient(180deg, #FFFFFF, #FAFBFD);
+        }
+
+            .sdoc-panel-head h2 {
+                color: #111827;
+                margin: 0;
+                font-size: 1.05rem;
+                font-weight: 760;
+                letter-spacing: -0.025em;
+            }
+
+            .sdoc-panel-head p {
+                color: #64748B;
+                margin: 0.3rem 0 0;
+                font-size: 0.82rem;
+                line-height: 1.5;
+            }
+
+        .sdoc-panel-body {
+            padding: 1.15rem;
+        }
+
+        .sdoc-label {
+            color: #111827;
+            font-size: 0.8rem;
+            font-weight: 700;
+            margin-bottom: 0.42rem;
+        }
+
+        .sdoc-select {
+            min-height: 48px;
+            border-radius: 15px;
+            border: 1px solid #DDDDDD;
+            color: #111827;
+            font-size: 0.9rem;
+        }
+
+            .sdoc-select:focus {
+                border-color: #516C8D;
+                box-shadow: 0 0 0 0.2rem rgba(81, 108, 141, 0.15);
+            }
+
+        .sdoc-helper {
+            color: #64748B;
+            font-size: 0.76rem;
+            line-height: 1.45;
+            margin-top: 0.45rem;
+        }
+
+        .sdoc-selected-card {
+            margin-top: 1rem;
+            padding: 1rem;
+            border-radius: 20px;
+            background: #FAFBFD;
+            border: 1px solid #EEF2F7;
+        }
+
+        .sdoc-selected-top {
+            display: flex;
+            gap: 0.75rem;
+            align-items: flex-start;
+            margin-bottom: 0.9rem;
+        }
+
+        .sdoc-selected-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 15px;
             display: flex;
             align-items: center;
-            gap: 10px;
-            padding: 16px 18px;
-            background: #f8fafc;
-            border-bottom: 1px solid #e5e7eb;
+            justify-content: center;
+            color: #516C8D;
+            background: #EEF2F6;
+            flex-shrink: 0;
+            font-size: 1.1rem;
+        }
+
+        .sdoc-selected-card h3 {
+            color: #111827;
+            margin: 0;
+            font-size: 0.98rem;
+            font-weight: 760;
+            line-height: 1.35;
+        }
+
+        .sdoc-selected-card p {
+            color: #64748B;
+            margin: 0.25rem 0 0;
+            font-size: 0.78rem;
+            line-height: 1.5;
+        }
+
+        .sdoc-mini-grid {
+            display: grid;
+            gap: 0.65rem;
+        }
+
+        .sdoc-mini-item {
+            padding: 0.75rem;
+            border-radius: 16px;
+            background: #ffffff;
+            border: 1px solid #EEF2F7;
+        }
+
+            .sdoc-mini-item span {
+                display: block;
+                color: #64748B;
+                font-size: 0.68rem;
+                font-weight: 740;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                margin-bottom: 0.25rem;
+            }
+
+            .sdoc-mini-item strong {
+                display: block;
+                color: #111827;
+                font-size: 0.82rem;
+                font-weight: 700;
+                line-height: 1.38;
+                word-break: break-word;
+                white-space: pre-wrap;
+            }
+
+        .sdoc-ai-check {
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            margin-top: 0.8rem;
+            padding: 0.72rem;
+            border-radius: 16px;
+            background: #EEF2F6;
+            color: #304163;
+            font-size: 0.78rem;
             font-weight: 700;
         }
 
-        .section-icon {
-            width: 34px;
-            height: 34px;
-            border-radius: 10px;
+            .sdoc-ai-check i {
+                color: #516C8D;
+            }
+
+        .sdoc-primary-btn {
+            width: 100%;
+            min-height: 50px;
+            margin-top: 1rem;
+            border-radius: 16px;
+            color: #ffffff;
+            background: linear-gradient(135deg, #304163, #516C8D);
+            border: 1px solid rgba(81, 108, 141, 0.25);
+            box-shadow: 0 12px 24px rgba(81, 108, 141, 0.17);
+            font-weight: 730;
+        }
+
+            .sdoc-primary-btn:hover {
+                color: #ffffff;
+                background: linear-gradient(135deg, #28385E, #304163);
+            }
+
+            .sdoc-primary-btn:disabled {
+                opacity: 0.75;
+                cursor: wait;
+            }
+
+        .sdoc-side-note {
+            margin-top: 1rem;
+            padding: 0.9rem;
+            border-radius: 18px;
+            background: linear-gradient(135deg, #28385E, #304163);
+            color: #ffffff;
+        }
+
+            .sdoc-side-note h4 {
+                margin: 0 0 0.35rem;
+                color: #ffffff;
+                font-size: 0.88rem;
+                font-weight: 740;
+            }
+
+            .sdoc-side-note p {
+                margin: 0;
+                color: rgba(255,255,255,0.72);
+                font-size: 0.76rem;
+                line-height: 1.5;
+            }
+
+        .sdoc-empty {
+            min-height: 600px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 2rem;
+            background: radial-gradient(circle at 50% 20%, rgba(81, 108, 141, 0.06), transparent 30%), linear-gradient(180deg, #FFFFFF, #FAFBFD);
+        }
+
+        .sdoc-empty-icon {
+            width: 78px;
+            height: 78px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            background: #dbeafe;
-            color: #1d4ed8;
+            border-radius: 26px;
+            color: #516C8D;
+            background: #EEF2F6;
+            font-size: 2rem;
+            margin-bottom: 1rem;
         }
 
-        .requirement-item {
-            padding: 14px 16px;
-            border-bottom: 1px solid #eef2f7;
-            line-height: 1.65;
+        .sdoc-empty h2 {
+            color: #111827;
+            font-size: 1.35rem;
+            font-weight: 780;
+            letter-spacing: -0.035em;
+            margin: 0;
         }
 
-            .requirement-item:last-child {
+        .sdoc-empty p {
+            max-width: 560px;
+            color: #64748B;
+            line-height: 1.6;
+            margin: 0.55rem auto 0;
+            font-size: 0.92rem;
+        }
+
+        .sdoc-empty-actions {
+            display: flex;
+            justify-content: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            margin-top: 1.2rem;
+        }
+
+        .sdoc-soft-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.55rem 0.82rem;
+            border-radius: 999px;
+            color: #304163;
+            background: #EEF2F6;
+            font-size: 0.78rem;
+            font-weight: 700;
+        }
+
+        .sdoc-report {
+            overflow: hidden;
+        }
+
+        .sdoc-report-toolbar {
+            position: sticky;
+            top: 86px;
+            z-index: 5;
+            padding: 1rem 1.1rem;
+            background: rgba(255,255,255,0.96);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid #EEF2F7;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+            .sdoc-report-toolbar span {
+                display: block;
+                color: #516C8D;
+                font-size: 0.7rem;
+                font-weight: 800;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                margin-bottom: 0.2rem;
+            }
+
+            .sdoc-report-toolbar h2 {
+                color: #111827;
+                margin: 0;
+                font-size: 1.15rem;
+                font-weight: 780;
+                letter-spacing: -0.035em;
+            }
+
+        .sdoc-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.48rem 0.75rem;
+            border-radius: 999px;
+            color: #304163;
+            background: #EEF2F6;
+            font-size: 0.78rem;
+            font-weight: 760;
+            white-space: nowrap;
+        }
+
+        .sdoc-print-btn {
+            border-radius: 999px;
+            border: 1px solid #DDDDDD;
+            color: #304163;
+            background: #ffffff;
+            font-size: 0.82rem;
+            font-weight: 700;
+            padding: 0.48rem 0.8rem;
+        }
+
+            .sdoc-print-btn:hover {
+                color: #516C8D;
+                border-color: #516C8D;
+                background: #F7F8FA;
+            }
+
+        .sdoc-report-body {
+            padding: 1.15rem;
+        }
+
+        .sdoc-stats {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.8rem;
+            margin-bottom: 1rem;
+        }
+
+        .sdoc-stat {
+            padding: 0.95rem;
+            border-radius: 18px;
+            background: #FAFBFD;
+            border: 1px solid #EEF2F7;
+        }
+
+            .sdoc-stat strong {
+                display: block;
+                color: #28385E;
+                font-size: 1.45rem;
+                font-weight: 800;
+                line-height: 1;
+            }
+
+            .sdoc-stat span {
+                display: block;
+                color: #64748B;
+                font-size: 0.74rem;
+                line-height: 1.35;
+                margin-top: 0.35rem;
+                font-weight: 650;
+            }
+
+        .sdoc-section {
+            border: 1px solid #E8E8E8;
+            border-radius: 20px;
+            overflow: hidden;
+            background: #ffffff;
+            margin-bottom: 0.9rem;
+        }
+
+        .sdoc-section-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 0.95rem 1rem;
+            background: #FAFBFD;
+            border-bottom: 1px solid #EEF2F7;
+        }
+
+        .sdoc-section-title {
+            display: flex;
+            align-items: center;
+            gap: 0.7rem;
+            min-width: 0;
+        }
+
+        .sdoc-section-icon {
+            width: 38px;
+            height: 38px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 14px;
+            color: #516C8D;
+            background: #EEF2F6;
+            flex-shrink: 0;
+        }
+
+        .sdoc-section-title h3 {
+            margin: 0;
+            color: #111827;
+            font-size: 0.95rem;
+            font-weight: 760;
+            letter-spacing: -0.02em;
+        }
+
+        .sdoc-section-title p {
+            margin: 0.15rem 0 0;
+            color: #64748B;
+            font-size: 0.74rem;
+        }
+
+        .sdoc-count {
+            padding: 0.28rem 0.58rem;
+            border-radius: 999px;
+            color: #304163;
+            background: #EEF2F6;
+            font-size: 0.7rem;
+            font-weight: 780;
+            white-space: nowrap;
+        }
+
+        .sdoc-list {
+            display: grid;
+            gap: 0;
+        }
+
+        .sdoc-item {
+            display: grid;
+            grid-template-columns: 34px minmax(0, 1fr);
+            gap: 0.75rem;
+            padding: 0.9rem 1rem;
+            border-bottom: 1px solid #EEF2F7;
+            color: #111827;
+            line-height: 1.62;
+            font-size: 0.88rem;
+        }
+
+            .sdoc-item:last-child {
                 border-bottom: 0;
             }
 
-        .report-toolbar {
-            position: sticky;
-            top: 0;
-            z-index: 5;
-            background: white;
-            border-bottom: 1px solid #e5e7eb;
-            padding: 14px 18px;
+        .sdoc-item-number {
+            width: 34px;
+            height: 34px;
+            border-radius: 12px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #F7F8FA;
+            color: #516C8D;
+            font-size: 0.74rem;
+            font-weight: 800;
         }
 
-        .mini-stat {
+        .sdoc-code {
+            margin: 1rem;
+            padding: 1rem;
             border-radius: 18px;
-            background: #f8fafc;
-            border: 1px solid #e5e7eb;
-            padding: 16px;
-            height: 100%;
-        }
-
-            .mini-stat .number {
-                font-size: 1.35rem;
-                font-weight: 800;
-                color: #0f172a;
-            }
-
-            .mini-stat .label {
-                color: #64748b;
-                font-size: 0.85rem;
-            }
-
-        .code-block {
+            background: #28385E;
+            color: #E8EDF5;
             white-space: pre-wrap;
-            background: #0f172a;
-            color: #e2e8f0;
-            border-radius: 18px;
-            padding: 18px;
-            font-size: 0.9rem;
-            line-height: 1.7;
+            font-size: 0.86rem;
+            line-height: 1.68;
+            overflow-x: auto;
         }
 
-        .empty-state {
-            min-height: 520px;
-            border-radius: 22px;
-            background: linear-gradient(180deg, #ffffff, #f8fafc);
-            border: 1px dashed #cbd5e1;
+        .sdoc-section-empty {
+            padding: 1rem;
+            color: #64748B;
+            font-size: 0.84rem;
+        }
+
+        .sdoc-loading {
+            position: fixed;
+            inset: 0;
+            z-index: 2000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(247, 248, 250, 0.82);
+            backdrop-filter: blur(8px);
+        }
+
+            .sdoc-loading.show {
+                display: flex;
+            }
+
+        .sdoc-loading-card {
+            width: min(440px, calc(100% - 2rem));
+            padding: 1.4rem;
+            border-radius: 24px;
+            background: #ffffff;
+            border: 1px solid #E8E8E8;
+            box-shadow: 0 20px 55px rgba(15, 23, 42, 0.14);
+            text-align: center;
+        }
+
+        .sdoc-spinner {
+            width: 54px;
+            height: 54px;
+            border-radius: 999px;
+            border: 4px solid #EEF2F6;
+            border-top-color: #516C8D;
+            margin: 0 auto 1rem;
+            animation: sdocSpin 0.9s linear infinite;
+        }
+
+        @@keyframes sdocSpin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .sdoc-loading-card h3 {
+            color: #111827;
+            font-size: 1.05rem;
+            font-weight: 760;
+            margin: 0;
+        }
+
+        .sdoc-loading-card p {
+            color: #64748B;
+            font-size: 0.84rem;
+            line-height: 1.55;
+            margin: 0.4rem 0 0;
         }
 
         @@media print {
@@ -119,7 +677,8 @@
                 visibility: hidden;
             }
 
-            #se-report, #se-report * {
+            #se-report,
+            #se-report * {
                 visibility: visible;
             }
 
@@ -130,184 +689,310 @@
                 width: 100%;
                 background: white;
                 padding: 30px;
+                box-shadow: none !important;
+                border: 0 !important;
             }
 
-            .no-print {
+            .no-print,
+            .sdoc-panel,
+            .sdoc-hero,
+            .sdoc-loading {
                 display: none !important;
             }
 
-            .card, .section-card {
-                border: none !important;
-                box-shadow: none !important;
+            .sdoc-report-toolbar {
+                position: static !important;
+                border-bottom: 1px solid #ddd;
             }
 
-            .code-block {
+            .sdoc-section,
+            .sdoc-stat {
+                box-shadow: none !important;
+                break-inside: avoid;
+            }
+
+            .sdoc-code {
                 background: white !important;
                 color: black !important;
                 border: 1px solid #ddd;
             }
         }
+
+        @@media (max-width: 1199px) {
+            .sdoc-shell {
+                grid-template-columns: 1fr;
+            }
+
+            .sdoc-panel {
+                position: static;
+            }
+        }
+
+        @@media (max-width: 991px) {
+            .sdoc-hero-content {
+                grid-template-columns: 1fr;
+            }
+
+            .sdoc-hero-badge {
+                text-align: left;
+            }
+
+            .sdoc-report-toolbar {
+                position: static;
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .sdoc-stats {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @@media (max-width: 575px) {
+            .sdoc-hero,
+            .sdoc-panel-body,
+            .sdoc-report-body {
+                padding: 1rem;
+            }
+
+            .sdoc-stats {
+                grid-template-columns: 1fr;
+            }
+
+            .sdoc-section-head {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .sdoc-item {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 }
 
-<div class="container-fluid py-4">
+<section class="sdoc-page">
 
-    <div class="spec-hero mb-4">
-        <div class="d-flex flex-column flex-lg-row justify-content-between gap-3">
+    <div class="sdoc-hero mb-3 no-print">
+        <div class="sdoc-hero-content">
             <div>
-                <div class="mb-3">
-                    <span class="spec-hero-badge">
-                        <i class="bi bi-file-earmark-text me-1"></i>
-                        Software Engineering Intelligence Module
-                    </span>
+                <div class="sdoc-kicker">
+                    <i class="bi bi-file-earmark-code"></i>
+                    AI Software Documentation
                 </div>
 
-                <h1 class="fw-bold mb-2">Smart Project Specification Generator</h1>
+                <h1>Software Documentation Generator</h1>
 
-                <p class="mb-0 opacity-75" style="max-width: 900px;">
-                    Generate a complete software engineering package for your selected FYP idea:
-                    requirements, use cases, edge cases, database design, UI structure, diagrams,
-                    and AI technical report when the project contains an AI component.
+                <p>
+                    Generate a professional software engineering documentation package from your selected FYP idea.
+                    The page uses your real saved idea and prepares the content for AI-generated requirements,
+                    use cases, database design, UI structure, diagrams, and AI technical reporting.
                 </p>
             </div>
 
-            <div class="text-lg-end">
-                <div class="small opacity-75">Output</div>
-                <div class="fw-bold fs-5">SE Report Package</div>
+            <div class="sdoc-hero-badge">
+                <span>Output Type</span>
+                <strong>SE Report Package</strong>
             </div>
         </div>
     </div>
 
     @if (!string.IsNullOrWhiteSpace(Model.Message))
     {
-        <div class="alert alert-success shadow-sm border-0 rounded-4 no-print">
+        <div class="alert alert-success sdoc-alert no-print">
             <i class="bi bi-check-circle me-2"></i>
             @Model.Message
         </div>
     }
 
-    <div class="row g-4">
+    <div asp-validation-summary="ModelOnly" class="text-danger mb-3 no-print"></div>
 
-        <!-- LEFT PANEL -->
-        <div class="col-xl-4">
+    <div class="sdoc-shell">
 
-            <div class="card glass-card mb-4 no-print">
-                <div class="card-header bg-white border-0 p-4 pb-0">
-                    <h4 class="fw-bold mb-1">Project Information</h4>
-                    <p class="text-muted mb-0">
-                        Select a saved idea or customize the project details before generating the report.
-                    </p>
-                </div>
-
-                <div class="card-body p-4">
-                    <form method="post">
-
-                        <div class="mb-3">
-                            <label class="form-label fw-semibold">Use Saved Project Idea</label>
-                            <select asp-for="SelectedProjectIdeaId"
-                                    asp-items="Model.ProjectIdeaOptions"
-                                    class="form-select form-select-lg"
-                                    onchange="if(this.value) window.location='?projectIdeaId=' + this.value;">
-                            </select>
-                            <div class="form-text">
-                                Select a saved idea to generate documentation based on the real project you chose.
-                            </div>
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label fw-semibold">Project Title</label>
-                            <input asp-for="Request.ProjectTitle"
-                                   class="form-control form-control-lg"
-                                   placeholder="Example: AI Clinic Appointment and Triage System" />
-                            <span asp-validation-for="Request.ProjectTitle" class="text-danger"></span>
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label fw-semibold">Project Description</label>
-                            <textarea asp-for="Request.ProjectDescription"
-                                      class="form-control"
-                                      rows="7"
-                                      placeholder="Describe what the project does, who uses it, and what problem it solves."></textarea>
-                            <span asp-validation-for="Request.ProjectDescription" class="text-danger"></span>
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label fw-semibold">Domain</label>
-                            <input asp-for="Request.Domain"
-                                   class="form-control"
-                                   placeholder="Healthcare, Education, FinTech..." />
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label fw-semibold">Technology Stack</label>
-                            <input asp-for="Request.TechStack"
-                                   class="form-control"
-                                   placeholder="ASP.NET Core, PostgreSQL, Python AI..." />
-                        </div>
-
-                        <div class="form-check mb-4">
-                            <input asp-for="Request.ContainsAi" class="form-check-input" />
-                            <label class="form-check-label">
-                                This project contains an AI/Data Science component
-                            </label>
-                        </div>
-
-                        <button type="submit" class="btn btn-primary btn-lg w-100 rounded-4">
-                            <i class="bi bi-magic me-2"></i>
-                            Generate Full SE Package
-                        </button>
-                    </form>
-                </div>
+        <aside class="sdoc-panel no-print">
+            <div class="sdoc-panel-head">
+                <h2>Documentation Setup</h2>
+                <p>Select the saved project idea that should be used by the AI documentation generator.</p>
             </div>
 
-            <div class="card glass-card no-print">
-                <div class="card-body p-4">
-                    <h5 class="fw-bold mb-3">Generated Sections</h5>
+            <div class="sdoc-panel-body">
+                <form method="post" asp-page-handler="Generate" id="sdocGenerateForm">
+                    @Html.AntiForgeryToken()
 
-                    <div class="d-grid gap-2 small">
-                        <div><i class="bi bi-check2-circle text-success me-2"></i>Functional Requirements</div>
-                        <div><i class="bi bi-check2-circle text-success me-2"></i>Non-Functional Requirements</div>
-                        <div><i class="bi bi-check2-circle text-success me-2"></i>Use Cases</div>
-                        <div><i class="bi bi-check2-circle text-success me-2"></i>Edge Cases</div>
-                        <div><i class="bi bi-check2-circle text-success me-2"></i>Database Design</div>
-                        <div><i class="bi bi-check2-circle text-success me-2"></i>UI / Front Design</div>
-                        <div><i class="bi bi-check2-circle text-success me-2"></i>Diagram Descriptions</div>
-                        <div><i class="bi bi-check2-circle text-success me-2"></i>AI Technical Report</div>
+                    <div class="mb-3">
+                        <label class="sdoc-label">Saved Project Idea</label>
+
+                        <select asp-for="SelectedProjectIdeaId"
+                                asp-items="Model.ProjectIdeaOptions"
+                                class="form-select sdoc-select"
+                                onchange="if(this.value){ window.location='?projectIdeaId=' + this.value; }">
+                        </select>
+
+                        <div class="sdoc-helper">
+                            Documentation will be generated from the project idea stored under your account.
+                        </div>
+
+                        <span asp-validation-for="SelectedProjectIdeaId" class="text-danger small"></span>
                     </div>
+
+                    @if (hasSelectedIdea)
+                    {
+                        <input type="hidden" asp-for="SelectedProjectIdeaId" />
+
+                        <div class="sdoc-selected-card">
+                            <div class="sdoc-selected-top">
+                                <div class="sdoc-selected-icon">
+                                    <i class="bi bi-lightbulb"></i>
+                                </div>
+
+                                <div class="min-w-0">
+                                    <h3>@Model.Request.ProjectTitle</h3>
+                                    <p>This selected idea will be sent to the documentation AI service.</p>
+                                </div>
+                            </div>
+
+                            <div class="sdoc-mini-grid">
+                                <div class="sdoc-mini-item">
+                                    <span>Domain</span>
+                                    <strong>
+                                        @(string.IsNullOrWhiteSpace(Model.Request.Domain) ? "Not specified" : Model.Request.Domain)
+                                    </strong>
+                                </div>
+
+                                <div class="sdoc-mini-item">
+                                    <span>Technology Stack</span>
+                                    <strong>
+                                        @(string.IsNullOrWhiteSpace(Model.Request.TechStack) ? "Not specified" : Model.Request.TechStack)
+                                    </strong>
+                                </div>
+
+                                <div class="sdoc-mini-item">
+                                    <span>Project Summary</span>
+                                    <strong>
+                                        @(string.IsNullOrWhiteSpace(Model.Request.ProjectDescription)
+                                            ? "No description available."
+                                            : Model.Request.ProjectDescription)
+                                    </strong>
+                                </div>
+                            </div>
+
+                            @if (Model.Request.ContainsAi)
+                            {
+                                <div class="sdoc-ai-check">
+                                    <i class="bi bi-cpu"></i>
+                                    AI/Data Science component detected
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="sdoc-ai-check">
+                                    <i class="bi bi-diagram-3"></i>
+                                    Standard software engineering documentation
+                                </div>
+                            }
+                        </div>
+
+                        <button type="submit" class="btn sdoc-primary-btn" id="sdocGenerateBtn">
+                            <i class="bi bi-stars me-2"></i>
+                            Generate AI Software Documentation
+                        </button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn sdoc-primary-btn" disabled>
+                            <i class="bi bi-lock me-2"></i>
+                            Select an Idea First
+                        </button>
+                    }
+                </form>
+
+                <div class="sdoc-side-note">
+                    <h4>
+                        <i class="bi bi-info-circle me-1"></i>
+                        What will be generated?
+                    </h4>
+                    <p>
+                        Functional requirements, non-functional requirements, use cases, edge cases,
+                        database design, UI structure, diagram descriptions, and AI technical report.
+                    </p>
                 </div>
             </div>
-        </div>
+        </aside>
 
-        <!-- RIGHT PANEL -->
-        <div class="col-xl-8">
-            @if (Model.GeneratedDocumentation == null)
+        <main class="min-w-0">
+            @if (docs == null)
             {
-                <div class="empty-state d-flex flex-column justify-content-center align-items-center text-center p-5">
-                    <div class="display-3 mb-3">📄</div>
-                    <h2 class="fw-bold">No documentation generated yet</h2>
-                    <p class="text-muted mb-0" style="max-width: 520px;">
-                        Fill the project information, or select a saved idea, then click
-                        <strong>Generate Full SE Package</strong> to create a structured software engineering report.
-                    </p>
+                <div class="sdoc-empty">
+                    <div>
+                        <div class="sdoc-empty-icon">
+                            <i class="bi bi-file-earmark-text"></i>
+                        </div>
+
+                        @if (hasSelectedIdea)
+                        {
+                            <h2>Ready to generate documentation</h2>
+
+                            <p>
+                                Your selected project idea is loaded. Click
+                                <strong>Generate AI Software Documentation</strong>
+                                to create the full software engineering package.
+                            </p>
+
+                            <div class="sdoc-empty-actions">
+                                <span class="sdoc-soft-pill">
+                                    <i class="bi bi-check2-circle"></i>
+                                    Real project idea loaded
+                                </span>
+
+                                <span class="sdoc-soft-pill">
+                                    <i class="bi bi-stars"></i>
+                                    AI-ready request
+                                </span>
+                            </div>
+                        }
+                        else
+                        {
+                            <h2>No project idea selected</h2>
+
+                            <p>
+                                Select one of your saved project ideas from the left panel.
+                                The page no longer uses static sample data, so documentation will only be generated
+                                from a real saved idea.
+                            </p>
+
+                            <div class="sdoc-empty-actions">
+                                <span class="sdoc-soft-pill">
+                                    <i class="bi bi-lightbulb"></i>
+                                    Choose saved idea
+                                </span>
+
+                                <span class="sdoc-soft-pill">
+                                    <i class="bi bi-magic"></i>
+                                    Generate with AI
+                                </span>
+                            </div>
+                        }
+                    </div>
                 </div>
             }
             else
             {
-                <div id="se-report" class="card glass-card mb-4">
+                <div id="se-report" class="sdoc-report">
 
-                    <div class="report-toolbar d-flex flex-column flex-lg-row justify-content-between gap-3">
-                        <div>
-                            <div class="text-muted small">Generated Documentation Package</div>
-                            <h3 class="fw-bold mb-0">@Model.GeneratedDocumentation.Title</h3>
+                    <div class="sdoc-report-toolbar">
+                        <div class="min-w-0">
+                            <span>Generated Documentation Package</span>
+                            <h2>@docs.Title</h2>
                         </div>
 
-                        <div class="d-flex gap-2 align-items-center no-print">
-                            <span class="badge rounded-pill bg-success">
-                                @Model.GeneratedDocumentation.SupervisorStatus
-                            </span>
+                        <div class="d-flex flex-wrap gap-2 align-items-center no-print">
+                            <div class="sdoc-status">
+                                <i class="bi bi-check-circle"></i>
+                                @docs.SupervisorStatus
+                            </div>
 
                             <button type="button"
-                                    class="btn btn-outline-dark btn-sm rounded-pill"
+                                    class="btn sdoc-print-btn"
                                     onclick="window.print()">
                                 <i class="bi bi-download me-1"></i>
                                 Download PDF
@@ -315,131 +1000,174 @@
                         </div>
                     </div>
 
-                    <div class="card-body p-4">
+                    <div class="sdoc-report-body">
 
-                        <div class="row g-3 mb-4">
-                            <div class="col-md-3">
-                                <div class="mini-stat">
-                                    <div class="number">@Model.GeneratedDocumentation.FunctionalRequirements.Count</div>
-                                    <div class="label">Functional Requirements</div>
+                        <div class="sdoc-stats">
+                            <div class="sdoc-stat">
+                                <strong>@functionalCount</strong>
+                                <span>Functional Requirements</span>
+                            </div>
+
+                            <div class="sdoc-stat">
+                                <strong>@nonFunctionalCount</strong>
+                                <span>Non-Functional Requirements</span>
+                            </div>
+
+                            <div class="sdoc-stat">
+                                <strong>@useCaseCount</strong>
+                                <span>Use Cases</span>
+                            </div>
+
+                            <div class="sdoc-stat">
+                                <strong>@totalGeneratedItems</strong>
+                                <span>Total Generated Items</span>
+                            </div>
+                        </div>
+
+                        @RenderListSection("1. Functional Requirements", "Core features the system must provide.", "bi-list-check", "FR", functionalRequirements)
+                        @RenderListSection("2. Non-Functional Requirements", "Quality, performance, security, and usability requirements.", "bi-shield-check", "NFR", nonFunctionalRequirements)
+                        @RenderListSection("3. Use Cases", "Main user interactions and system behavior.", "bi-person-gear", "UC", useCases)
+                        @RenderListSection("4. Edge Cases", "Special conditions and unusual system scenarios.", "bi-exclamation-triangle", "EC", edgeCases)
+                        @RenderListSection("5. Database Design", "Suggested entities, relationships, and database structure.", "bi-database", "DB", databaseDesign)
+                        @RenderListSection("6. UI / Frontend Design", "Suggested screens, pages, and interface structure.", "bi-window-sidebar", "UI", uiDesign)
+
+                        <section class="sdoc-section">
+                            <div class="sdoc-section-head">
+                                <div class="sdoc-section-title">
+                                    <span class="sdoc-section-icon">
+                                        <i class="bi bi-diagram-3"></i>
+                                    </span>
+
+                                    <div>
+                                        <h3>7. Diagram Descriptions</h3>
+                                        <p>Descriptions for diagrams that can be drawn later.</p>
+                                    </div>
                                 </div>
+
+                                <span class="sdoc-count">Text block</span>
                             </div>
 
-                            <div class="col-md-3">
-                                <div class="mini-stat">
-                                    <div class="number">@Model.GeneratedDocumentation.UseCases.Count</div>
-                                    <div class="label">Use Cases</div>
+                            <div class="sdoc-code">
+                                @(string.IsNullOrWhiteSpace(docs.DiagramDescriptions)
+                                    ? "No diagram descriptions returned."
+                                    : docs.DiagramDescriptions)
+                            </div>
+                        </section>
+
+                        <section class="sdoc-section mb-0">
+                            <div class="sdoc-section-head">
+                                <div class="sdoc-section-title">
+                                    <span class="sdoc-section-icon">
+                                        <i class="bi bi-cpu"></i>
+                                    </span>
+
+                                    <div>
+                                        <h3>8. AI Technical Report</h3>
+                                        <p>Technical explanation of the AI/Data Science component if available.</p>
+                                    </div>
                                 </div>
+
+                                <span class="sdoc-count">AI section</span>
                             </div>
 
-                            <div class="col-md-3">
-                                <div class="mini-stat">
-                                    <div class="number">@Model.GeneratedDocumentation.EdgeCases.Count</div>
-                                    <div class="label">Edge Cases</div>
-                                </div>
+                            <div class="sdoc-code">
+                                @(string.IsNullOrWhiteSpace(docs.AiTechnicalReport)
+                                    ? "No AI technical report returned."
+                                    : docs.AiTechnicalReport)
                             </div>
-
-                            <div class="col-md-3">
-                                <div class="mini-stat">
-                                    <div class="number">8</div>
-                                    <div class="label">Report Sections</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="section-card">
-                            <div class="section-title">
-                                <span class="section-icon"><i class="bi bi-list-check"></i></span>
-                                1. Functional Requirements
-                            </div>
-                            @foreach (var item in Model.GeneratedDocumentation.FunctionalRequirements)
-                            {
-                                <div class="requirement-item">@item</div>
-                            }
-                        </div>
-
-                        <div class="section-card">
-                            <div class="section-title">
-                                <span class="section-icon"><i class="bi bi-shield-check"></i></span>
-                                2. Non-Functional Requirements
-                            </div>
-                            @foreach (var item in Model.GeneratedDocumentation.NonFunctionalRequirements)
-                            {
-                                <div class="requirement-item">@item</div>
-                            }
-                        </div>
-
-                        <div class="section-card">
-                            <div class="section-title">
-                                <span class="section-icon"><i class="bi bi-person-gear"></i></span>
-                                3. Use Cases
-                            </div>
-                            @foreach (var item in Model.GeneratedDocumentation.UseCases)
-                            {
-                                <div class="requirement-item">@item</div>
-                            }
-                        </div>
-
-                        <div class="section-card">
-                            <div class="section-title">
-                                <span class="section-icon"><i class="bi bi-exclamation-triangle"></i></span>
-                                4. Edge Cases
-                            </div>
-                            @foreach (var item in Model.GeneratedDocumentation.EdgeCases)
-                            {
-                                <div class="requirement-item">@item</div>
-                            }
-                        </div>
-
-                        <div class="section-card">
-                            <div class="section-title">
-                                <span class="section-icon"><i class="bi bi-database"></i></span>
-                                5. Database Design
-                            </div>
-                            @foreach (var item in Model.GeneratedDocumentation.DatabaseDesign)
-                            {
-                                <div class="requirement-item">@item</div>
-                            }
-                        </div>
-
-                        <div class="section-card">
-                            <div class="section-title">
-                                <span class="section-icon"><i class="bi bi-window-sidebar"></i></span>
-                                6. UI / Front Design
-                            </div>
-                            @foreach (var item in Model.GeneratedDocumentation.UiDesign)
-                            {
-                                <div class="requirement-item">@item</div>
-                            }
-                        </div>
-
-                        <div class="section-card">
-                            <div class="section-title">
-                                <span class="section-icon"><i class="bi bi-diagram-3"></i></span>
-                                7. Diagram Descriptions
-                            </div>
-                            <div class="p-3">
-                                <div class="code-block">@Model.GeneratedDocumentation.DiagramDescriptions</div>
-                            </div>
-                        </div>
-
-                        <div class="section-card mb-0">
-                            <div class="section-title">
-                                <span class="section-icon"><i class="bi bi-cpu"></i></span>
-                                8. AI Technical Report
-                            </div>
-                            <div class="p-3">
-                                <div class="code-block">@Model.GeneratedDocumentation.AiTechnicalReport</div>
-                            </div>
-                        </div>
+                        </section>
 
                     </div>
                 </div>
             }
-        </div>
+        </main>
+    </div>
+</section>
+
+<div class="sdoc-loading" id="sdocLoading">
+    <div class="sdoc-loading-card">
+        <div class="sdoc-spinner"></div>
+
+        <h3>Generating software documentation...</h3>
+
+        <p>
+            FYPilot is preparing requirements, use cases, database design,
+            UI structure, diagrams, and technical documentation.
+        </p>
     </div>
 </div>
 
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />
+
+    <script>
+        const sdocForm = document.getElementById("sdocGenerateForm");
+        const sdocLoading = document.getElementById("sdocLoading");
+        const sdocGenerateBtn = document.getElementById("sdocGenerateBtn");
+
+        if (sdocForm) {
+            sdocForm.addEventListener("submit", function () {
+                if (sdocLoading) {
+                    sdocLoading.classList.add("show");
+                }
+
+                if (sdocGenerateBtn) {
+                    sdocGenerateBtn.disabled = true;
+                    sdocGenerateBtn.innerHTML = `
+                        <span class="spinner-border spinner-border-sm me-2"></span>
+                        Generating Documentation...
+                    `;
+                }
+            });
+        }
+    </script>
+}
+
+@functions {
+    private IHtmlContent RenderListSection(
+        string title,
+        string subtitle,
+        string icon,
+        string prefix,
+        IEnumerable<string> items)
+    {
+        var list = items.ToList();
+
+        var builder = new System.Text.StringBuilder();
+
+        builder.AppendLine("<section class=\"sdoc-section\">");
+        builder.AppendLine("<div class=\"sdoc-section-head\">");
+        builder.AppendLine("<div class=\"sdoc-section-title\">");
+        builder.AppendLine($"<span class=\"sdoc-section-icon\"><i class=\"bi {icon}\"></i></span>");
+        builder.AppendLine("<div>");
+        builder.AppendLine($"<h3>{System.Net.WebUtility.HtmlEncode(title)}</h3>");
+        builder.AppendLine($"<p>{System.Net.WebUtility.HtmlEncode(subtitle)}</p>");
+        builder.AppendLine("</div>");
+        builder.AppendLine("</div>");
+        builder.AppendLine($"<span class=\"sdoc-count\">{list.Count} items</span>");
+        builder.AppendLine("</div>");
+
+        if (list.Any())
+        {
+            builder.AppendLine("<div class=\"sdoc-list\">");
+
+            for (var i = 0; i < list.Count; i++)
+            {
+                builder.AppendLine("<div class=\"sdoc-item\">");
+                builder.AppendLine($"<span class=\"sdoc-item-number\">{prefix}{i + 1}</span>");
+                builder.AppendLine($"<div>{System.Net.WebUtility.HtmlEncode(list[i])}</div>");
+                builder.AppendLine("</div>");
+            }
+
+            builder.AppendLine("</div>");
+        }
+        else
+        {
+            builder.AppendLine($"<div class=\"sdoc-section-empty\">No {System.Net.WebUtility.HtmlEncode(title.ToLower())} returned.</div>");
+        }
+
+        builder.AppendLine("</section>");
+
+        return new HtmlString(builder.ToString());
+    }
 }

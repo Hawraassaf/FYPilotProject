@@ -79,6 +79,9 @@ public class MentorChatModel(
         if (string.IsNullOrWhiteSpace(finalMessage))
         {
             ErrorMessage = "Please write a message before sending.";
+
+            ClearMessageInput();
+
             return Page();
         }
 
@@ -87,6 +90,7 @@ public class MentorChatModel(
         var recentMessages = Messages
             .OrderBy(m => m.CreatedAt)
             .TakeLast(8)
+            .Where(m => m.Role == "user" || m.Role == "assistant")
             .Select(m => new MentorRecentMessageDto(
                 Role: m.Role,
                 Content: m.Content
@@ -111,11 +115,19 @@ public class MentorChatModel(
             CodeContext: BuildCodeContextDto()
         );
 
-        MentorResponse = await aiService.AskFypMentorAsync(request);
+        try
+        {
+            MentorResponse = await aiService.AskFypMentorAsync(request);
+        }
+        catch (Exception ex)
+        {
+            MentorResponse = null;
+            ErrorMessage = $"The FYP Mentor Chat could not respond. Backend error: {ex.Message}";
+        }
 
         if (MentorResponse == null)
         {
-            ErrorMessage = "The FYP Mentor Chat could not respond. Make sure the Python AI service is running.";
+            ErrorMessage ??= "The FYP Mentor Chat could not respond. Make sure the Python AI service is running and the /fyp-chat request body is valid.";
 
             db.ChatMessages.Add(new ChatMessage
             {
@@ -127,6 +139,8 @@ public class MentorChatModel(
 
             await db.SaveChangesAsync();
             await LoadAsync(SelectedIdeaId);
+
+            ClearMessageInput();
 
             return Page();
         }
@@ -143,6 +157,8 @@ public class MentorChatModel(
 
         await db.SaveChangesAsync();
         await LoadAsync(SelectedIdeaId);
+
+        ClearMessageInput();
 
         return Page();
     }
@@ -181,13 +197,8 @@ public class MentorChatModel(
             .ToListAsync();
     }
 
-    private MentorStudentProfileDto? BuildStudentProfileDto()
+    private MentorStudentProfileDto BuildStudentProfileDto()
     {
-        if (Profile == null && Skills.Count == 0)
-        {
-            return null;
-        }
-
         var studentSkills = Skills
             .Select(s => GetString(s, "SkillName", "Name", "Title"))
             .Where(s => !string.IsNullOrWhiteSpace(s))
@@ -209,9 +220,22 @@ public class MentorChatModel(
             skillRatings[skillName] = rating;
         }
 
+        var major = GetString(Profile, "Major");
+        var experienceLevel = GetString(Profile, "ExperienceLevel");
+
+        if (string.IsNullOrWhiteSpace(major))
+        {
+            major = "Computer Science";
+        }
+
+        if (string.IsNullOrWhiteSpace(experienceLevel))
+        {
+            experienceLevel = "intermediate";
+        }
+
         return new MentorStudentProfileDto(
-            Major: GetString(Profile, "Major"),
-            ExperienceLevel: GetString(Profile, "ExperienceLevel"),
+            Major: major,
+            ExperienceLevel: experienceLevel,
             TeamSize: GetInt(Profile, 1, "TeamMembers", "TeamSize"),
             AvailableHoursPerWeek: GetInt(Profile, 10, "AvailableHoursPerWeek"),
             Skills: studentSkills,
@@ -340,6 +364,12 @@ public class MentorChatModel(
         }
 
         return content;
+    }
+
+    private void ClearMessageInput()
+    {
+        MessageText = "";
+        ModelState.Remove(nameof(MessageText));
     }
 
     private int UserId()

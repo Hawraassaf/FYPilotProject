@@ -1,217 +1,1001 @@
 @page
+@using System
+@using System.Linq
 @model FYPilot.Web.Pages.Student.ProjectDetailsModel
 @{
     ViewData["Title"] = "Project Details";
-    ViewData["Subtitle"] = "Full details of your generated or selected project idea";
+    ViewData["Subtitle"] = "Selected project idea details from the database";
 }
 
-@if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
-{
-    <div class="alert alert-success">
-        <i class="bi bi-check-circle me-2"></i>@Model.SuccessMessage
-    </div>
-}
+<div class="pd-page">
 
-@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
-{
-    <div class="alert alert-danger">
-        <i class="bi bi-exclamation-triangle me-2"></i>@Model.ErrorMessage
-    </div>
-}
-
-@if (Model.Idea == null)
-{
-    <div class="page-card p-5 text-center">
-        <i class="bi bi-folder2-open display-3 text-muted"></i>
-        <h5 class="mt-3">No Project Selected</h5>
-        <p class="text-muted">
-            You have not selected a final project idea yet. Generate ideas and select one to view it here.
-        </p>
-        <a href="/Student/IdeaGenerator" class="btn btn-primary">
-            <i class="bi bi-stars me-2"></i>Generate Ideas
-        </a>
-    </div>
-}
-else
-{
-    var idea = Model.Idea;
-    var requiresDataset =
-        !string.IsNullOrWhiteSpace(idea.DatasetNeeded) &&
-        !idea.DatasetNeeded.Equals("None", StringComparison.OrdinalIgnoreCase);
-
-    <div class="row g-4">
-        <div class="col-lg-8">
-            <div class="page-card p-4 mb-3">
-                <div class="d-flex align-items-start justify-content-between mb-3">
-                    <div>
-                        <h5 class="fw-bold mb-1">@idea.Title</h5>
-
-                        <div class="d-flex flex-wrap gap-1">
-                            <span class="badge bg-primary-subtle text-primary">@idea.Domain</span>
-                            <span class="badge bg-warning-subtle text-warning text-capitalize">@idea.DifficultyLevel</span>
-                            <span class="badge bg-secondary-subtle text-secondary">@idea.ExpectedDurationWeeks weeks</span>
-
-                            @if (idea.IsSelected)
-                            {
-                                <span class="badge bg-success-subtle text-success">
-                                    <i class="bi bi-check-circle me-1"></i>Selected Project
-                                </span>
-                            }
-                            else
-                            {
-                                <span class="badge bg-light text-muted border">
-                                    Not Selected
-                                </span>
-                            }
-                        </div>
-                    </div>
-
-                    <div class="text-end">
-                        <div class="score-ring @(idea.FeasibilityScore >= 70 ? "text-success" : idea.FeasibilityScore >= 50 ? "text-warning" : "text-danger")"
-                             style="width:64px;height:64px;font-size:1rem">
-                            @idea.FeasibilityScore%
-                        </div>
-                        <div class="small text-muted mt-1">Feasibility</div>
-                    </div>
-                </div>
-
-                <h6 class="small fw-bold text-muted mb-1">Problem Statement</h6>
-                <p class="text-muted small">@idea.ProblemStatement</p>
-
-                <h6 class="small fw-bold text-muted mb-1">Target Users</h6>
-                <p class="text-muted small">@idea.TargetUsers</p>
-
-                <h6 class="small fw-bold text-muted mb-1">Why It Is Useful</h6>
-                <p class="text-muted small">@idea.WhyUseful</p>
-
-                <h6 class="small fw-bold text-muted mb-1">Lebanese Market Relevance</h6>
-                <p class="text-muted small">
-                    @(string.IsNullOrWhiteSpace(idea.LebaneseMarketRelevance)
-                        ? "No Lebanese market relevance description was provided."
-                        : idea.LebaneseMarketRelevance)
-                </p>
-            </div>
-
-            <div class="page-card p-4">
-                <h6 class="fw-bold mb-3">Technical and Delivery Details</h6>
-
-                <div class="row g-3">
-                    <div class="col-md-6">
-                        <div class="small fw-semibold text-muted mb-1">Required Technologies</div>
-                        <div class="small">@idea.RequiredTechnologies</div>
-                    </div>
-
-                    <div class="col-md-6">
-                        <div class="small fw-semibold text-muted mb-1">Required Skills</div>
-                        <div class="small">@idea.RequiredSkills</div>
-                    </div>
-
-                    <div class="col-md-6">
-                        <div class="small fw-semibold text-muted mb-1">Missing Skills</div>
-                        <div class="small">
-                            @(string.IsNullOrWhiteSpace(idea.MissingSkills) ? "None" : idea.MissingSkills)
-                        </div>
-                    </div>
-
-                    <div class="col-md-6">
-                        <div class="small fw-semibold text-muted mb-1">Dataset Requirement</div>
-                        <div class="small">
-                            @(requiresDataset ? idea.DatasetNeeded : "No dataset is required for this idea.")
-                        </div>
-                    </div>
-
-                    <div class="col-md-6">
-                        <div class="small fw-semibold text-muted mb-1">Expected Duration</div>
-                        <div class="small">@idea.ExpectedDurationWeeks weeks</div>
-                    </div>
-
-                    <div class="col-md-6">
-                        <div class="small fw-semibold text-muted mb-1">Lebanese Sector</div>
-                        <div class="small">
-                            @(string.IsNullOrWhiteSpace(idea.LebanesesSector) ? "Not specified" : idea.LebanesesSector)
-                        </div>
-                    </div>
-
-                    <div class="col-12">
-                        <div class="small fw-semibold text-muted mb-1">Final Deliverables</div>
-                        <div class="small">@idea.FinalDeliverables</div>
-                    </div>
-                </div>
-            </div>
+    @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
+    {
+        <div class="alert alert-success pd-alert">
+            <i class="bi bi-check-circle me-2"></i>
+            @Model.SuccessMessage
         </div>
+    }
 
-        <div class="col-lg-4">
-            <div class="page-card p-4 mb-3">
-                <h6 class="fw-bold mb-3">Idea Scores</h6>
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div class="alert alert-danger pd-alert">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            @Model.ErrorMessage
+        </div>
+    }
 
-                @foreach (var score in new[] {
-                    new { Label = "Innovation", Value = idea.InnovationScore, Color = "#3b82f6" },
-                    new { Label = "Feasibility", Value = idea.FeasibilityScore, Color = "#10b981" },
-                    new { Label = "Market Demand", Value = idea.MarketDemandScore, Color = "#f59e0b" },
-                })
-                {
-                    <div class="mb-3">
-                        <div class="d-flex justify-content-between small mb-1">
-                            <span>@score.Label</span>
-                            <span class="fw-semibold" style="color:@score.Color">@score.Value%</span>
-                        </div>
-
-                        <div class="progress" style="height:6px">
-                            <div class="progress-bar" style="width:@score.Value%;background:@score.Color"></div>
-                        </div>
-                    </div>
-                }
+    @if (Model.Idea == null)
+    {
+        <section class="pd-empty">
+            <div class="pd-empty-icon">
+                <i class="bi bi-folder2-open"></i>
             </div>
 
-            <div class="page-card p-4">
-                <h6 class="fw-bold mb-3">Actions</h6>
+            <h1>No Project Idea Selected</h1>
 
-                @if (!idea.IsSelected)
-                {
-                    <form method="post" asp-page-handler="Select" class="mb-2">
-                        @Html.AntiForgeryToken()
-                        <input type="hidden" name="ideaId" value="@idea.Id" />
-                        <button type="submit" class="btn btn-primary btn-sm w-100">
-                            <i class="bi bi-check2-circle me-1"></i>Select This Idea
-                        </button>
-                    </form>
-                }
+            <p>
+                Select one generated idea to view its real project details from the database.
+            </p>
 
-                <div class="d-grid gap-2">
-                    <a href="/Student/IdeaGenerator" class="btn btn-outline-secondary btn-sm">
-                        <i class="bi bi-arrow-left me-1"></i>Back to Ideas
-                    </a>
+            <div class="pd-empty-actions">
+                <a href="/Student/IdeaComparison" class="btn pd-primary-btn">
+                    <i class="bi bi-check2-circle me-1"></i>
+                    Choose an Idea
+                </a>
 
-                    <a href="/Student/ProjectDNA?ideaId=@idea.Id" class="btn btn-outline-primary btn-sm">
-                        <i class="bi bi-diagram-3 me-1"></i>DNA Analysis
-                    </a>
+                <a href="/Student/IdeaGenerator" class="btn pd-light-btn">
+                    <i class="bi bi-stars me-1"></i>
+                    Generate Ideas
+                </a>
+            </div>
+        </section>
+    }
+    else
+    {
+        var idea = Model.Idea;
 
-                    <a href="/Student/ScopeOptimizer?ideaId=@idea.Id" class="btn btn-outline-warning btn-sm">
-                        <i class="bi bi-funnel me-1"></i>Scope Optimizer
-                    </a>
+        var technologies = SplitItems(idea.RequiredTechnologies);
+        var requiredSkills = SplitItems(idea.RequiredSkills);
+
+        var studentSkillKeys = Model.StudentSkillNames
+            .Select(NormalizeSkill)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var missingSkills = SplitItems(idea.MissingSkills)
+            .Where(skill => !studentSkillKeys.Contains(NormalizeSkill(skill)))
+            .ToList();
+
+        var hasDomain = HasText(idea.Domain);
+        var hasDifficulty = HasText(idea.DifficultyLevel);
+        var hasDuration = idea.ExpectedDurationWeeks > 0;
+        var hasSector = HasText(idea.LebanesesSector);
+        var hasProblem = HasText(idea.ProblemStatement);
+        var hasUsers = HasText(idea.TargetUsers);
+        var hasUsefulness = HasText(idea.WhyUseful);
+        var hasLebaneseRelevance = HasText(idea.LebaneseMarketRelevance);
+        var hasDataset = HasUsefulDataset(idea.DatasetNeeded);
+        var hasSupervisorCategory = HasText(idea.SupervisorCategory);
+
+        var innovation = ClampScore(idea.InnovationScore);
+        var feasibility = ClampScore(idea.FeasibilityScore);
+        var market = ClampScore(idea.MarketDemandScore);
+
+        var hasInnovation = idea.InnovationScore > 0;
+        var hasFeasibility = idea.FeasibilityScore > 0;
+        var hasMarket = idea.MarketDemandScore > 0;
+        var hasAnyScore = hasInnovation || hasFeasibility || hasMarket;
+
+        var scoreCount = 0;
+        var scoreTotal = 0;
+
+        if (hasInnovation)
+        {
+            scoreCount++;
+            scoreTotal += innovation;
+        }
+
+        if (hasFeasibility)
+        {
+            scoreCount++;
+            scoreTotal += feasibility;
+        }
+
+        if (hasMarket)
+        {
+            scoreCount++;
+            scoreTotal += market;
+        }
+
+        var overall = scoreCount > 0 ? ClampScore(scoreTotal / scoreCount) : 0;
+
+        var hasOverview = hasProblem || hasUsers || hasUsefulness || hasLebaneseRelevance;
+        var hasTechnicalScope = technologies.Any() || requiredSkills.Any() || missingSkills.Any() || hasDataset;
+        var hasMeta = hasDomain || hasDifficulty || hasDuration || hasSector || hasSupervisorCategory;
+
+        <section class="pd-hero">
+            <div class="pd-hero-main">
+                <div class="pd-eyebrow">
+                    <span>
+                        <i class="bi bi-folder-check"></i>
+                        Project Details
+                    </span>
 
                     @if (idea.IsSelected)
                     {
-                        <a href="/Student/Roadmap?ideaId=@idea.Id" class="btn btn-outline-success btn-sm">
-                            <i class="bi bi-map me-1"></i>View Roadmap
-                        </a>
-
-                        <a href="/Student/DefenseSimulator?ideaId=@idea.Id" class="btn btn-outline-danger btn-sm">
-                            <i class="bi bi-shield-check me-1"></i>Defense Prep
-                        </a>
-
-                        <a href="/Student/MentorChat?ideaId=@idea.Id" class="btn btn-outline-secondary btn-sm">
-                            <i class="bi bi-chat-dots me-1"></i>Mentor Chat
-                        </a>
+                        <span class="pd-selected-badge">
+                            <i class="bi bi-check-circle-fill"></i>
+                            Selected Idea
+                        </span>
                     }
                     else
                     {
-                        <div class="alert alert-info small mb-0">
-                            Select this idea before creating a roadmap, using mentor chat, or preparing defense questions.
-                        </div>
+                        <span class="pd-draft-badge">
+                            <i class="bi bi-circle"></i>
+                            Draft Idea
+                        </span>
                     }
                 </div>
+
+                <h1>@idea.Title</h1>
+
+                @if (hasMeta)
+                {
+                    <div class="pd-meta">
+                        @if (hasDomain)
+                        {
+                            <span><i class="bi bi-grid"></i>@idea.Domain</span>
+                        }
+
+                        @if (hasDifficulty)
+                        {
+                            <span class="text-capitalize"><i class="bi bi-speedometer2"></i>@idea.DifficultyLevel</span>
+                        }
+
+                        @if (hasDuration)
+                        {
+                            <span><i class="bi bi-calendar-week"></i>@idea.ExpectedDurationWeeks weeks</span>
+                        }
+
+                        @if (hasSector)
+                        {
+                            <span><i class="bi bi-geo-alt"></i>@idea.LebanesesSector</span>
+                        }
+
+                        @if (hasSupervisorCategory)
+                        {
+                            <span><i class="bi bi-person-workspace"></i>@idea.SupervisorCategory</span>
+                        }
+                    </div>
+                }
             </div>
-        </div>
-    </div>
+
+            @if (hasAnyScore)
+            {
+                <aside class="pd-overall-card">
+                    <span>Overall Project Fit</span>
+                    <strong>@overall%</strong>
+                    <div class="pd-score-bar">
+                        <b style="width:@overall%"></b>
+                    </div>
+                    <small>@ScoreLabel(overall)</small>
+                </aside>
+            }
+        </section>
+
+        <section class="pd-layout">
+
+            <main class="pd-main">
+
+                @if (hasOverview)
+                {
+                    <section class="pd-card">
+                        <div class="pd-card-head">
+                            <div>
+                                <span>Overview</span>
+                                <h2>Project Idea Summary</h2>
+                            </div>
+                        </div>
+
+                        <div class="pd-overview-grid">
+                            @if (hasProblem)
+                            {
+                                <article class="pd-info-block wide">
+                                    <div class="pd-info-icon"><i class="bi bi-bullseye"></i></div>
+                                    <div>
+                                        <h3>Problem Statement</h3>
+                                        <p>@idea.ProblemStatement</p>
+                                    </div>
+                                </article>
+                            }
+
+                            @if (hasUsers)
+                            {
+                                <article class="pd-info-block">
+                                    <div class="pd-info-icon"><i class="bi bi-people"></i></div>
+                                    <div>
+                                        <h3>Target Users</h3>
+                                        <p>@idea.TargetUsers</p>
+                                    </div>
+                                </article>
+                            }
+
+                            @if (hasUsefulness)
+                            {
+                                <article class="pd-info-block">
+                                    <div class="pd-info-icon"><i class="bi bi-lightbulb"></i></div>
+                                    <div>
+                                        <h3>Usefulness</h3>
+                                        <p>@idea.WhyUseful</p>
+                                    </div>
+                                </article>
+                            }
+
+                            @if (hasLebaneseRelevance)
+                            {
+                                <article class="pd-info-block wide">
+                                    <div class="pd-info-icon"><i class="bi bi-shop"></i></div>
+                                    <div>
+                                        <h3>Lebanese Market Relevance</h3>
+                                        <p>@idea.LebaneseMarketRelevance</p>
+                                    </div>
+                                </article>
+                            }
+                        </div>
+                    </section>
+                }
+
+                @if (hasTechnicalScope)
+                {
+                    <section class="pd-card">
+                        <div class="pd-card-head">
+                            <div>
+                                <span>Technical Scope</span>
+                                <h2>Implementation Requirements</h2>
+                            </div>
+                        </div>
+
+                        <div class="pd-tech-grid">
+                            @if (technologies.Any())
+                            {
+                                <article>
+                                    <h3><i class="bi bi-code-slash"></i> Required Technologies</h3>
+
+                                    <div class="pd-chip-cloud">
+                                        @foreach (var tech in technologies)
+                                        {
+                                            <span>@tech</span>
+                                        }
+                                    </div>
+                                </article>
+                            }
+
+                            @if (requiredSkills.Any())
+                            {
+                                <article>
+                                    <h3><i class="bi bi-person-check"></i> Required Skills</h3>
+
+                                    <div class="pd-list">
+                                        @foreach (var skill in requiredSkills)
+                                        {
+                                            <div><i class="bi bi-check2"></i><span>@skill</span></div>
+                                        }
+                                    </div>
+                                </article>
+                            }
+
+                            @if (missingSkills.Any())
+                            {
+                                <article>
+                                    <h3><i class="bi bi-exclamation-circle"></i> Missing Skills</h3>
+
+                                    <div class="pd-chip-cloud warning">
+                                        @foreach (var skill in missingSkills)
+                                        {
+                                            <span>@skill</span>
+                                        }
+                                    </div>
+                                </article>
+                            }
+
+                            @if (hasDataset)
+                            {
+                                <article>
+                                    <h3><i class="bi bi-database"></i> Dataset Requirement</h3>
+                                    <p class="pd-soft-text">@idea.DatasetNeeded</p>
+                                </article>
+                            }
+                        </div>
+                    </section>
+                }
+            </main>
+
+            <aside class="pd-sidebar">
+
+                <section class="pd-side-card pd-actions-card">
+                    <div class="pd-side-head">
+                        <span>Actions</span>
+                        <h2>Continue From This Idea</h2>
+                    </div>
+
+                    @if (!idea.IsSelected)
+                    {
+                        <form method="post" asp-page-handler="Select" class="pd-select-form">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="ideaId" value="@idea.Id" />
+
+                            <button type="submit" class="btn pd-primary-btn w-100">
+                                <i class="bi bi-check2-circle me-1"></i>
+                                Select This Idea
+                            </button>
+                        </form>
+                    }
+
+                    <div class="pd-action-list">
+                        <a href="/Student/IdeaComparison">
+                            <i class="bi bi-columns-gap"></i>
+                            <span>Compare Ideas</span>
+                        </a>
+
+                        @if (idea.IsSelected)
+                        {
+                            <a href="/Student/ProjectDNA?ideaId=@idea.Id">
+                                <i class="bi bi-fingerprint"></i>
+                                <span>Project DNA</span>
+                            </a>
+
+                            <a href="/Student/Roadmap?ideaId=@idea.Id">
+                                <i class="bi bi-map"></i>
+                                <span>Roadmap</span>
+                            </a>
+
+                            <a href="/Student/MentorChat?ideaId=@idea.Id">
+                                <i class="bi bi-chat-dots"></i>
+                                <span>Mentor Chat</span>
+                            </a>
+
+                            <a href="/Student/Feedback">
+                                <i class="bi bi-chat-square-text"></i>
+                                <span>Supervisor Feedback</span>
+                            </a>
+                        }
+                    </div>
+                </section>
+
+                @if (hasAnyScore)
+                {
+                    <section class="pd-side-card">
+                        <div class="pd-side-head">
+                            <span>Scores</span>
+                            <h2>Evaluation Snapshot</h2>
+                        </div>
+
+                        <div class="pd-score-list">
+                            @if (hasInnovation)
+                            {
+                                <div>
+                                    <label>Innovation</label>
+                                    <strong>@innovation%</strong>
+                                    <span><b style="width:@innovation%"></b></span>
+                                </div>
+                            }
+
+                            @if (hasFeasibility)
+                            {
+                                <div>
+                                    <label>Feasibility</label>
+                                    <strong>@feasibility%</strong>
+                                    <span><b style="width:@feasibility%"></b></span>
+                                </div>
+                            }
+
+                            @if (hasMarket)
+                            {
+                                <div>
+                                    <label>Market Demand</label>
+                                    <strong>@market%</strong>
+                                    <span><b style="width:@market%"></b></span>
+                                </div>
+                            }
+                        </div>
+                    </section>
+                }
+            </aside>
+        </section>
+    }
+</div>
+
+@section Head {
+    <style>
+        .pd-page {
+            max-width: 1480px;
+            margin: 0 auto;
+        }
+
+        .pd-alert {
+            border-radius: 16px;
+            border: 0;
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+        }
+
+        .pd-empty {
+            min-height: 560px;
+            border-radius: 26px;
+            background: linear-gradient(180deg, #ffffff, #F7F8FA);
+            border: 1px solid #E8E8E8;
+            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.06);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            text-align: center;
+        }
+
+        .pd-empty-icon {
+            width: 82px;
+            height: 82px;
+            border-radius: 26px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #EEF2F6;
+            color: #516C8D;
+            font-size: 2.15rem;
+            margin-bottom: 1rem;
+        }
+
+        .pd-empty h1 {
+            margin: 0;
+            color: #111827;
+            font-size: 1.65rem;
+            font-weight: 800;
+            letter-spacing: -0.04em;
+        }
+
+        .pd-empty p {
+            margin: 0.6rem auto 0;
+            max-width: 640px;
+            color: #64748B;
+            line-height: 1.7;
+        }
+
+        .pd-empty-actions {
+            margin-top: 1.25rem;
+            display: flex;
+            gap: 0.7rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .pd-hero {
+            border-radius: 26px;
+            padding: 1.35rem;
+            color: #ffffff;
+            background: linear-gradient(135deg, #28385E 0%, #304163 58%, #516C8D 120%);
+            box-shadow: 0 18px 45px rgba(40, 56, 94, 0.18);
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 260px;
+            gap: 1rem;
+            align-items: stretch;
+            margin-bottom: 1rem;
+        }
+
+        .pd-hero-main {
+            min-width: 0;
+        }
+
+        .pd-eyebrow {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-bottom: 0.75rem;
+        }
+
+            .pd-eyebrow span {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.4rem;
+                padding: 0.36rem 0.62rem;
+                border-radius: 999px;
+                background: rgba(255,255,255,0.12);
+                border: 1px solid rgba(255,255,255,0.16);
+                color: rgba(255,255,255,0.86);
+                font-size: 0.76rem;
+                font-weight: 750;
+            }
+
+            .pd-eyebrow .pd-selected-badge {
+                background: rgba(16,185,129,0.16);
+                border-color: rgba(167,243,208,0.35);
+                color: #D1FAE5;
+            }
+
+        .pd-hero h1 {
+            margin: 0;
+            max-width: 980px;
+            font-size: clamp(1.55rem, 3vw, 2.35rem);
+            font-weight: 820;
+            line-height: 1.12;
+            letter-spacing: -0.05em;
+        }
+
+        .pd-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+            margin-top: 1rem;
+        }
+
+            .pd-meta span {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.4rem;
+                padding: 0.46rem 0.68rem;
+                border-radius: 999px;
+                background: rgba(255,255,255,0.12);
+                border: 1px solid rgba(255,255,255,0.15);
+                color: rgba(255,255,255,0.86);
+                font-size: 0.78rem;
+                font-weight: 720;
+            }
+
+        .pd-overall-card {
+            border-radius: 22px;
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.16);
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-height: 175px;
+        }
+
+            .pd-overall-card span {
+                color: rgba(255,255,255,0.72);
+                font-size: 0.78rem;
+                font-weight: 720;
+            }
+
+            .pd-overall-card strong {
+                color: #ffffff;
+                font-size: 3rem;
+                line-height: 1;
+                letter-spacing: -0.06em;
+                margin-top: 0.4rem;
+            }
+
+            .pd-overall-card small {
+                color: rgba(255,255,255,0.82);
+                font-weight: 760;
+                margin-top: 0.45rem;
+            }
+
+        .pd-score-bar,
+        .pd-score-list span {
+            display: block;
+            height: 8px;
+            border-radius: 999px;
+            overflow: hidden;
+            background: rgba(255,255,255,0.2);
+            margin-top: 0.75rem;
+        }
+
+            .pd-score-bar b,
+            .pd-score-list span b {
+                display: block;
+                height: 100%;
+                border-radius: 999px;
+                background: #ffffff;
+            }
+
+        .pd-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 340px;
+            gap: 1rem;
+            align-items: start;
+        }
+
+        .pd-main {
+            display: grid;
+            gap: 1rem;
+            min-width: 0;
+        }
+
+        .pd-card,
+        .pd-side-card {
+            background: #ffffff;
+            border: 1px solid #E8E8E8;
+            border-radius: 24px;
+            box-shadow: 0 14px 34px rgba(15, 23, 42, 0.05);
+            overflow: hidden;
+        }
+
+        .pd-card-head,
+        .pd-side-head {
+            padding: 1rem 1.1rem;
+            background: #FAFBFD;
+            border-bottom: 1px solid #EEF2F7;
+        }
+
+            .pd-card-head span,
+            .pd-side-head span {
+                display: block;
+                color: #516C8D;
+                font-size: 0.72rem;
+                font-weight: 820;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                margin-bottom: 0.18rem;
+            }
+
+            .pd-card-head h2,
+            .pd-side-head h2 {
+                margin: 0;
+                color: #111827;
+                font-size: 1rem;
+                font-weight: 800;
+                letter-spacing: -0.025em;
+            }
+
+        .pd-overview-grid {
+            padding: 1.1rem;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.85rem;
+        }
+
+        .pd-info-block {
+            display: flex;
+            gap: 0.8rem;
+            padding: 1rem;
+            border-radius: 20px;
+            background: #ffffff;
+            border: 1px solid #EEF2F7;
+        }
+
+            .pd-info-block.wide {
+                grid-column: 1 / -1;
+            }
+
+        .pd-info-icon {
+            width: 42px;
+            height: 42px;
+            min-width: 42px;
+            border-radius: 16px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #516C8D;
+            background: #EEF2F6;
+            font-size: 1.05rem;
+        }
+
+        .pd-info-block h3,
+        .pd-tech-grid h3 {
+            margin: 0 0 0.35rem;
+            color: #111827;
+            font-size: 0.9rem;
+            font-weight: 780;
+        }
+
+        .pd-info-block p,
+        .pd-soft-text {
+            margin: 0;
+            color: #4B5563;
+            font-size: 0.88rem;
+            line-height: 1.65;
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
+
+        .pd-tech-grid {
+            padding: 1.1rem;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.85rem;
+        }
+
+            .pd-tech-grid article {
+                border: 1px solid #EEF2F7;
+                background: #FAFBFD;
+                border-radius: 20px;
+                padding: 1rem;
+                min-height: 120px;
+            }
+
+            .pd-tech-grid h3 {
+                display: flex;
+                align-items: center;
+                gap: 0.45rem;
+            }
+
+                .pd-tech-grid h3 i {
+                    color: #516C8D;
+                }
+
+        .pd-chip-cloud {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+        }
+
+            .pd-chip-cloud span {
+                display: inline-flex;
+                align-items: center;
+                padding: 0.38rem 0.62rem;
+                border-radius: 999px;
+                background: #EEF2F6;
+                color: #304163;
+                font-size: 0.76rem;
+                font-weight: 720;
+            }
+
+            .pd-chip-cloud.warning span {
+                background: #FFF7ED;
+                color: #9A3412;
+            }
+
+        .pd-list {
+            display: grid;
+            gap: 0.42rem;
+        }
+
+            .pd-list div {
+                display: flex;
+                align-items: flex-start;
+                gap: 0.45rem;
+                color: #374151;
+                font-size: 0.84rem;
+                line-height: 1.45;
+            }
+
+            .pd-list i {
+                color: #10B981;
+                margin-top: 0.08rem;
+            }
+
+        .pd-sidebar {
+            display: grid;
+            gap: 1rem;
+            position: sticky;
+            top: 104px;
+        }
+
+        .pd-side-card {
+            padding-bottom: 1rem;
+        }
+
+        .pd-select-form {
+            padding: 1rem 1rem 0;
+        }
+
+        .pd-action-list {
+            padding: 1rem 1rem 0;
+            display: grid;
+            gap: 0.55rem;
+        }
+
+            .pd-action-list a {
+                display: flex;
+                align-items: center;
+                gap: 0.65rem;
+                padding: 0.75rem 0.85rem;
+                border-radius: 16px;
+                background: #FAFBFD;
+                border: 1px solid #EEF2F7;
+                color: #304163;
+                text-decoration: none;
+                font-weight: 760;
+                font-size: 0.86rem;
+                transition: 0.18s ease;
+            }
+
+                .pd-action-list a:hover {
+                    background: #EEF2F6;
+                    transform: translateX(2px);
+                }
+
+            .pd-action-list i {
+                width: 34px;
+                height: 34px;
+                border-radius: 13px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                color: #ffffff;
+                background: linear-gradient(135deg, #304163, #516C8D);
+            }
+
+        .pd-score-list {
+            padding: 1rem;
+            display: grid;
+            gap: 0.85rem;
+        }
+
+            .pd-score-list div {
+                display: grid;
+                grid-template-columns: 1fr auto;
+                gap: 0.45rem;
+                align-items: center;
+            }
+
+            .pd-score-list label {
+                color: #64748B;
+                font-size: 0.78rem;
+                font-weight: 720;
+            }
+
+            .pd-score-list strong {
+                color: #28385E;
+                font-size: 0.88rem;
+                font-weight: 820;
+            }
+
+            .pd-score-list span {
+                grid-column: 1 / -1;
+                background: #EEF2F6;
+                margin-top: 0;
+            }
+
+                .pd-score-list span b {
+                    background: linear-gradient(90deg, #516C8D, #28385E);
+                }
+
+        .pd-primary-btn,
+        .pd-light-btn {
+            border-radius: 14px;
+            padding: 0.65rem 0.95rem;
+            font-size: 0.86rem;
+            font-weight: 760;
+        }
+
+        .pd-primary-btn {
+            color: #ffffff;
+            background: linear-gradient(135deg, #304163, #516C8D);
+            border: 1px solid rgba(81,108,141,0.25);
+        }
+
+            .pd-primary-btn:hover {
+                color: #ffffff;
+                background: linear-gradient(135deg, #28385E, #304163);
+            }
+
+        .pd-light-btn {
+            color: #304163;
+            background: #ffffff;
+            border: 1px solid #DDE5EF;
+        }
+
+            .pd-light-btn:hover {
+                color: #28385E;
+                background: #F7F8FA;
+            }
+
+        @@media (max-width: 1199px) {
+            .pd-hero,
+            .pd-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .pd-sidebar {
+                position: static;
+            }
+        }
+
+        @@media (max-width: 767px) {
+            .pd-hero {
+                padding: 1rem;
+            }
+
+            .pd-overview-grid,
+            .pd-tech-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .pd-info-block,
+            .pd-info-block.wide {
+                grid-column: auto;
+            }
+
+            .pd-info-block {
+                flex-direction: column;
+            }
+
+            .pd-empty-actions {
+                flex-direction: column;
+                width: 100%;
+            }
+
+                .pd-empty-actions .btn {
+                    width: 100%;
+                }
+        }
+    </style>
+}
+
+@functions {
+    private static bool HasText(string? value)
+    {
+        return !string.IsNullOrWhiteSpace(value);
+    }
+
+    private static List<string> SplitItems(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        return value
+            .Split(new[] { ',', ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(item => item.Trim())
+            .Where(item => item.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static bool HasUsefulDataset(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var normalized = value.Trim();
+
+        if (normalized.Equals("None", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("No", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Equals("N/A", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("not required", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("no dataset", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static string NormalizeSkill(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "";
+        }
+
+        return value
+            .Trim()
+            .ToLowerInvariant()
+            .Replace(" ", "")
+            .Replace("-", "")
+            .Replace("_", "");
+    }
+
+    private static int ClampScore(int value)
+    {
+        return Math.Clamp(value, 0, 100);
+    }
+
+    private static string ScoreLabel(int score)
+    {
+        score = ClampScore(score);
+
+        if (score >= 85)
+        {
+            return "Excellent";
+        }
+
+        if (score >= 70)
+        {
+            return "Strong";
+        }
+
+        if (score >= 55)
+        {
+            return "Moderate";
+        }
+
+        return "Needs Review";
+    }
 }

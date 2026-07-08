@@ -29,8 +29,11 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<MarketNeed> MarketNeeds { get; set; }
     public DbSet<PreviousProject> PreviousProjects { get; set; }
     public DbSet<SupervisorEvaluation> SupervisorEvaluations { get; set; }
+    public DbSet<Meeting> Meetings { get; set; }
     public DbSet<ProjectDocumentation> ProjectDocumentations => Set<ProjectDocumentation>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+   public DbSet<FeedbackMessage> FeedbackMessages => Set<FeedbackMessage>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -39,6 +42,36 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         {
             e.HasIndex(u => u.Email).IsUnique();
             e.Property(u => u.Role).HasDefaultValue("student");
+        });
+        modelBuilder.Entity<SupervisorProfile>(entity =>
+        {
+            entity.ToTable("supervisor_profiles");
+
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.AcademicTitle).HasColumnName("academic_title").HasMaxLength(100);
+            entity.Property(e => e.Department).HasColumnName("department").HasMaxLength(150);
+            entity.Property(e => e.Faculty).HasColumnName("faculty").HasMaxLength(150);
+            entity.Property(e => e.University).HasColumnName("university").HasMaxLength(150);
+            entity.Property(e => e.Specialization).HasColumnName("specialization").HasMaxLength(200);
+            entity.Property(e => e.ResearchAreas).HasColumnName("research_areas");
+            entity.Property(e => e.OfficeLocation).HasColumnName("office_location").HasMaxLength(150);
+            entity.Property(e => e.OfficeHours).HasColumnName("office_hours").HasMaxLength(150);
+            entity.Property(e => e.PreferredMeetingMode).HasColumnName("preferred_meeting_mode").HasMaxLength(80);
+            entity.Property(e => e.Bio).HasColumnName("bio");
+            entity.Property(e => e.LinkedInUrl).HasColumnName("linkedin_url").HasMaxLength(300);
+            entity.Property(e => e.WebsiteUrl).HasColumnName("website_url").HasMaxLength(300);
+            entity.Property(e => e.ProfileImagePath).HasColumnName("profile_image_path").HasMaxLength(500);
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+
+            entity.HasOne(e => e.User)
+                .WithOne(u => u.SupervisorProfile)
+                .HasForeignKey<SupervisorProfile>(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.UserId).IsUnique();
         });
 
         modelBuilder.Entity<Project>(e =>
