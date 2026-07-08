@@ -5,7 +5,7 @@ Endpoint:
 POST /fyp-chat
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter
 
@@ -26,9 +26,13 @@ def fyp_chat(request: FypMentorRequest):
         "answer": result.model_dump(),
         "agent": "FypMentorAgent",
         "llmUsed": agent.last_llm_used,
+        # repairUsed=True means the first response was invalid JSON and a
+        # second repair call was made (doubles latency). Watch this during
+        # testing: if it fires often, something is wrong with the prompt.
+        "repairUsed": agent.last_repair_used,
         "source": "ollama" if agent.last_llm_used else "dynamic-fallback",
         "ollamaError": agent.last_error,
         "ollamaRawPreview": agent.last_raw_llm_response,
-        "generatedAt": datetime.utcnow().isoformat(),
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
         "message": "FYP mentor response generated successfully",
     }

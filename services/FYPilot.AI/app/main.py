@@ -101,6 +101,21 @@ try:
 except Exception as e:
     logger.warning(f"FYP Mentor Chat router skipped: {e}")
     
+try:
+    from app.routers import se_documentation
+    app.include_router(se_documentation.router)
+    logger.info("SE Documentation router loaded")
+except Exception as e:
+    logger.warning(f"SE Documentation router skipped: {e}")
+
+try:
+    from app.routers import defense_simulator
+
+    app.include_router(defense_simulator.router)
+    logger.info("Defense Simulator router loaded")
+except Exception as e:
+    print(f"Defense Simulator router skipped: {e}")
+    logger.warning(f"Defense Simulator router skipped: {e}")
 # Heavy ML routers — loaded only if dependencies are available
 try:
     from app.routers import analytics
