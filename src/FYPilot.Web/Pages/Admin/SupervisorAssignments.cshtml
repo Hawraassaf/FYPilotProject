@@ -1,0 +1,1098 @@
+﻿@page
+@model FYPilot.Web.Pages.Admin.SupervisorAssignmentsModel
+
+@{
+    ViewData["Title"] = "Supervisor Assignments";
+    ViewData["Subtitle"] = "Approve student supervisor requests and manage supervision capacity";
+}
+
+@section Head {
+    <style>
+        .asa-page {
+            max-width: 1480px;
+            margin: 0 auto;
+        }
+
+        .asa-hero {
+            position: relative;
+            overflow: hidden;
+            border-radius: 28px;
+            padding: 1.45rem;
+            color: #ffffff;
+            background: linear-gradient(135deg, #28385E 0%, #304163 58%, #516C8D 120%);
+            box-shadow: 0 18px 42px rgba(40, 56, 94, 0.18);
+            margin-bottom: 1rem;
+        }
+
+            .asa-hero::after {
+                content: "";
+                position: absolute;
+                width: 270px;
+                height: 270px;
+                right: -80px;
+                top: -100px;
+                border-radius: 999px;
+                background: rgba(255,255,255,0.12);
+            }
+
+        .asa-hero-content {
+            position: relative;
+            z-index: 2;
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: flex-end;
+        }
+
+        .asa-hero h1 {
+            margin: 0;
+            font-size: clamp(1.65rem, 3vw, 2.35rem);
+            font-weight: 850;
+            letter-spacing: -0.05em;
+        }
+
+        .asa-hero p {
+            margin: 0.45rem 0 0;
+            color: rgba(255,255,255,0.72);
+            max-width: 820px;
+            line-height: 1.6;
+        }
+
+        .asa-hero-badge {
+            border: 1px solid rgba(255,255,255,0.22);
+            background: rgba(255,255,255,0.12);
+            backdrop-filter: blur(10px);
+            border-radius: 18px;
+            padding: 0.8rem 1rem;
+            text-align: center;
+            min-width: 150px;
+        }
+
+            .asa-hero-badge strong {
+                display: block;
+                font-size: 1.55rem;
+                line-height: 1;
+            }
+
+            .asa-hero-badge span {
+                display: block;
+                margin-top: 0.25rem;
+                color: rgba(255,255,255,0.72);
+                font-size: 0.75rem;
+                font-weight: 700;
+            }
+
+        .asa-alert {
+            border-radius: 18px;
+            padding: 0.95rem 1rem;
+            margin-bottom: 1rem;
+            border: 1px solid #E8ECF2;
+            font-weight: 750;
+        }
+
+            .asa-alert.success {
+                color: #166534;
+                background: #F0FDF4;
+                border-color: #BBF7D0;
+            }
+
+            .asa-alert.error {
+                color: #991B1B;
+                background: #FEF2F2;
+                border-color: #FECACA;
+            }
+
+        .asa-stats {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.85rem;
+            margin-bottom: 1rem;
+        }
+
+        .asa-stat {
+            background: #ffffff;
+            border: 1px solid #E8ECF2;
+            border-radius: 22px;
+            padding: 1rem;
+            box-shadow: 0 12px 28px rgba(15,23,42,0.04);
+        }
+
+            .asa-stat span {
+                color: #64748B;
+                font-size: 0.76rem;
+                font-weight: 750;
+            }
+
+            .asa-stat strong {
+                display: block;
+                color: #28385E;
+                margin-top: 0.3rem;
+                font-size: 1.75rem;
+                font-weight: 880;
+                letter-spacing: -0.04em;
+            }
+
+        .asa-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.85fr);
+            gap: 1rem;
+            align-items: start;
+        }
+
+        .asa-panel {
+            background: #ffffff;
+            border: 1px solid #E8ECF2;
+            border-radius: 24px;
+            box-shadow: 0 14px 34px rgba(15,23,42,0.05);
+            overflow: hidden;
+        }
+
+        .asa-panel-head {
+            padding: 1rem 1.1rem;
+            border-bottom: 1px solid #EEF2F7;
+            background: #FAFBFD;
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: center;
+        }
+
+            .asa-panel-head h2 {
+                margin: 0;
+                color: #111827;
+                font-size: 1rem;
+                font-weight: 820;
+            }
+
+            .asa-panel-head p {
+                margin: 0.25rem 0 0;
+                color: #64748B;
+                font-size: 0.78rem;
+            }
+
+        .asa-count-pill {
+            color: #28385E;
+            background: #EEF2F6;
+            border-radius: 999px;
+            padding: 0.4rem 0.7rem;
+            font-size: 0.75rem;
+            font-weight: 850;
+            white-space: nowrap;
+        }
+
+        .asa-panel-body {
+            padding: 1rem;
+        }
+
+        .asa-empty {
+            text-align: center;
+            padding: 2.2rem 1rem;
+            color: #64748B;
+        }
+
+            .asa-empty i {
+                display: inline-flex;
+                width: 56px;
+                height: 56px;
+                align-items: center;
+                justify-content: center;
+                border-radius: 18px;
+                color: #516C8D;
+                background: #EEF2F6;
+                font-size: 1.45rem;
+                margin-bottom: 0.75rem;
+            }
+
+        .asa-request-list {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .asa-request-card {
+            border: 1px solid #E8ECF2;
+            border-radius: 22px;
+            background: #ffffff;
+            overflow: hidden;
+        }
+
+        .asa-request-top {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 1rem;
+            background: linear-gradient(180deg, #ffffff, #FAFBFD);
+            border-bottom: 1px solid #EEF2F7;
+        }
+
+        .asa-student-name {
+            color: #111827;
+            font-size: 1.05rem;
+            font-weight: 850;
+            letter-spacing: -0.02em;
+        }
+
+        .asa-subline {
+            color: #64748B;
+            font-size: 0.78rem;
+            margin-top: 0.25rem;
+        }
+
+        .asa-status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            border-radius: 999px;
+            padding: 0.38rem 0.65rem;
+            font-size: 0.72rem;
+            font-weight: 850;
+            white-space: nowrap;
+        }
+
+            .asa-status-pill.pending {
+                color: #92400E;
+                background: #FFFBEB;
+                border: 1px solid #FDE68A;
+            }
+
+            .asa-status-pill.full {
+                color: #991B1B;
+                background: #FEF2F2;
+                border: 1px solid #FECACA;
+            }
+
+            .asa-status-pill.available {
+                color: #166534;
+                background: #F0FDF4;
+                border: 1px solid #BBF7D0;
+            }
+
+        .asa-request-body {
+            padding: 1rem;
+            display: grid;
+            gap: 0.9rem;
+        }
+
+        .asa-info-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.75rem;
+        }
+
+        .asa-info-box {
+            border: 1px solid #EEF2F7;
+            background: #FAFBFD;
+            border-radius: 18px;
+            padding: 0.85rem;
+        }
+
+            .asa-info-box span {
+                display: block;
+                color: #64748B;
+                font-size: 0.72rem;
+                font-weight: 760;
+                margin-bottom: 0.25rem;
+            }
+
+            .asa-info-box strong {
+                display: block;
+                color: #28385E;
+                font-size: 0.9rem;
+                font-weight: 820;
+                line-height: 1.35;
+            }
+
+        .asa-message {
+            border-radius: 18px;
+            border: 1px solid #E8ECF2;
+            background: #F7F8FA;
+            padding: 0.85rem;
+            color: #475569;
+            font-size: 0.82rem;
+            line-height: 1.55;
+        }
+
+        .asa-actions {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 0.75rem;
+        }
+
+        .asa-action-row {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: 0.65rem;
+            align-items: center;
+            border: 1px solid #EEF2F7;
+            border-radius: 18px;
+            padding: 0.75rem;
+            background: #ffffff;
+        }
+
+            .asa-action-row.reject-row {
+                grid-template-columns: 1fr auto;
+            }
+
+            .asa-action-row select,
+            .asa-action-row input {
+                min-height: 38px;
+                border: 1px solid #E8ECF2;
+                border-radius: 12px;
+                padding: 0.48rem 0.65rem;
+                color: #111827;
+                outline: none;
+            }
+
+        .asa-btn {
+            border: 0;
+            border-radius: 13px;
+            padding: 0.58rem 0.85rem;
+            font-size: 0.78rem;
+            font-weight: 850;
+            white-space: nowrap;
+        }
+
+            .asa-btn.primary {
+                color: #ffffff;
+                background: #28385E;
+            }
+
+            .asa-btn.secondary {
+                color: #28385E;
+                background: #EEF2F6;
+            }
+
+            .asa-btn.danger {
+                color: #ffffff;
+                background: #B91C1C;
+            }
+
+            .asa-btn:disabled {
+                opacity: 0.45;
+                cursor: not-allowed;
+            }
+
+        .asa-capacity-list {
+            display: grid;
+            gap: 0.7rem;
+        }
+
+        .asa-capacity-card {
+            border: 1px solid #E8ECF2;
+            border-radius: 18px;
+            padding: 0.85rem;
+            background: #ffffff;
+        }
+
+        .asa-capacity-top {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.65rem;
+            align-items: flex-start;
+        }
+
+            .asa-capacity-top strong {
+                color: #111827;
+                font-size: 0.88rem;
+                line-height: 1.3;
+            }
+
+            .asa-capacity-top small {
+                display: block;
+                color: #64748B;
+                margin-top: 0.2rem;
+            }
+
+        .asa-capacity-bar {
+            margin-top: 0.65rem;
+            height: 8px;
+            border-radius: 999px;
+            background: #EEF2F6;
+            overflow: hidden;
+        }
+
+        .asa-capacity-fill {
+            height: 100%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #516C8D, #28385E);
+        }
+
+            .asa-capacity-fill.full {
+                background: linear-gradient(90deg, #DC2626, #991B1B);
+            }
+
+        .asa-capacity-meta {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 0.5rem;
+            color: #64748B;
+            font-size: 0.72rem;
+            font-weight: 760;
+        }
+
+        .asa-table-wrap {
+            margin-top: 1rem;
+            background: #ffffff;
+            border: 1px solid #E8ECF2;
+            border-radius: 24px;
+            overflow: hidden;
+            box-shadow: 0 14px 34px rgba(15,23,42,0.05);
+        }
+
+        .asa-table-head {
+            padding: 1rem 1.1rem;
+            border-bottom: 1px solid #EEF2F7;
+            background: #FAFBFD;
+        }
+
+            .asa-table-head h2 {
+                margin: 0;
+                color: #111827;
+                font-size: 1rem;
+                font-weight: 820;
+            }
+
+        .asa-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+            .asa-table th,
+            .asa-table td {
+                padding: 0.85rem 1rem;
+                border-bottom: 1px solid #EEF2F7;
+                text-align: left;
+                vertical-align: top;
+                font-size: 0.82rem;
+            }
+
+            .asa-table th {
+                color: #64748B;
+                background: #FFFFFF;
+                font-size: 0.72rem;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+            }
+
+            .asa-table td strong {
+                color: #111827;
+            }
+
+        .asa-muted {
+            color: #64748B;
+        }
+
+        @@media (max-width: 1199px) {
+            .asa-grid,
+            .asa-stats {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .asa-hero-content {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+        }
+
+        @@media (max-width: 767px) {
+            .asa-grid,
+            .asa-stats,
+            .asa-info-grid,
+            .asa-action-row,
+            .asa-action-row.reject-row {
+                grid-template-columns: 1fr;
+            }
+
+            .asa-request-top {
+                flex-direction: column;
+            }
+
+            .asa-table {
+                min-width: 900px;
+            }
+
+            .asa-table-wrap {
+                overflow-x: auto;
+            }
+        }
+
+        .transfer-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+        }
+
+            .transfer-head p {
+                margin: .25rem 0 0;
+                color: #64748B;
+                font-size: .78rem;
+            }
+
+        .asa-active-list {
+            display: grid;
+            gap: .85rem;
+            padding: 1rem;
+        }
+
+        .asa-active-card {
+            border: 1px solid #E8ECF2;
+            border-radius: 22px;
+            background: #ffffff;
+            overflow: hidden;
+            box-shadow: 0 10px 24px rgba(40, 56, 94, .04);
+        }
+
+        .asa-active-main {
+            display: grid;
+            grid-template-columns: minmax(180px, 1fr) 44px minmax(180px, 1fr) minmax(180px, 1fr);
+            gap: .8rem;
+            align-items: center;
+            padding: 1rem;
+            background: radial-gradient(circle at 10% 10%, rgba(81,108,141,.10), transparent 20%), linear-gradient(180deg, #FFFFFF, #FAFBFD);
+            border-bottom: 1px solid #EEF2F7;
+        }
+
+        .asa-person-block,
+        .asa-idea-block {
+            min-width: 0;
+        }
+
+            .asa-person-block span,
+            .asa-idea-block span {
+                display: block;
+                color: #64748B;
+                font-size: .68rem;
+                text-transform: uppercase;
+                letter-spacing: .06em;
+                font-weight: 750;
+                margin-bottom: .25rem;
+            }
+
+            .asa-person-block strong,
+            .asa-idea-block strong {
+                display: block;
+                color: #111827;
+                font-size: .88rem;
+                font-weight: 800;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .asa-person-block small,
+            .asa-idea-block small {
+                display: block;
+                color: #64748B;
+                font-size: .72rem;
+                margin-top: .12rem;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+        .asa-arrow-transfer {
+            width: 38px;
+            height: 38px;
+            display: grid;
+            place-items: center;
+            justify-self: center;
+            color: #28385E;
+            background: #EEF2F6;
+            border-radius: 14px;
+        }
+
+        .asa-transfer-form {
+            display: grid;
+            grid-template-columns: minmax(180px, .9fr) minmax(220px, 1fr) minmax(260px, 1.2fr) auto;
+            gap: .7rem;
+            align-items: center;
+            padding: .85rem 1rem 1rem;
+            background: #ffffff;
+        }
+
+        .asa-transfer-title {
+            display: flex;
+            align-items: center;
+            gap: .6rem;
+        }
+
+            .asa-transfer-title i {
+                width: 36px;
+                height: 36px;
+                display: grid;
+                place-items: center;
+                color: #28385E;
+                background: #EEF2F6;
+                border-radius: 13px;
+                flex: none;
+            }
+
+            .asa-transfer-title strong {
+                display: block;
+                color: #111827;
+                font-size: .8rem;
+                font-weight: 800;
+            }
+
+            .asa-transfer-title span {
+                display: block;
+                color: #64748B;
+                font-size: .68rem;
+                line-height: 1.35;
+            }
+
+        .asa-transfer-form select,
+        .asa-transfer-form input {
+            min-height: 40px;
+            border: 1px solid #E8ECF2;
+            border-radius: 13px;
+            padding: .5rem .68rem;
+            color: #111827;
+            outline: none;
+            font-size: .78rem;
+        }
+
+            .asa-transfer-form select:focus,
+            .asa-transfer-form input:focus {
+                border-color: #516C8D;
+                box-shadow: 0 0 0 4px rgba(81,108,141,.12);
+            }
+
+        @@media (max-width: 1199px) {
+            .asa-active-main,
+            .asa-transfer-form {
+                grid-template-columns: 1fr;
+            }
+
+            .asa-arrow-transfer {
+                transform: rotate(90deg);
+            }
+        }
+    </style>
+}
+
+<section class="asa-page">
+
+    <div class="asa-hero">
+        <div class="asa-hero-content">
+            <div>
+                <h1>Supervisor Assignments</h1>
+                <p>
+                    Review student supervisor requests, approve official assignments, and keep each supervisor within the 4-student capacity limit.
+                </p>
+            </div>
+
+            <div class="asa-hero-badge">
+                <strong>4</strong>
+                <span>max active students</span>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
+    {
+        <div class="asa-alert success">
+            <i class="bi bi-check-circle me-2"></i>
+            @Model.SuccessMessage
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div class="asa-alert error">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            @Model.ErrorMessage
+        </div>
+    }
+
+    <div class="asa-stats">
+        <div class="asa-stat">
+            <span>Pending requests</span>
+            <strong>@Model.Stats.PendingRequests</strong>
+        </div>
+
+        <div class="asa-stat">
+            <span>Active assignments</span>
+            <strong>@Model.Stats.ActiveAssignments</strong>
+        </div>
+
+        <div class="asa-stat">
+            <span>Available supervisors</span>
+            <strong>@Model.Stats.AvailableSupervisors</strong>
+        </div>
+
+        <div class="asa-stat">
+            <span>Full supervisors</span>
+            <strong>@Model.Stats.FullSupervisors</strong>
+        </div>
+    </div>
+
+    <div class="asa-grid">
+
+        <section class="asa-panel">
+            <div class="asa-panel-head">
+                <div>
+                    <h2>Pending Student Requests</h2>
+                    <p>Approve the requested supervisor, assign a different available supervisor, or reject the request.</p>
+                </div>
+
+                <div class="asa-count-pill">@Model.PendingRequests.Count pending</div>
+            </div>
+
+            <div class="asa-panel-body">
+                @if (!Model.PendingRequests.Any())
+                {
+                    <div class="asa-empty">
+                        <i class="bi bi-inbox"></i>
+                        <div>No pending supervisor requests right now.</div>
+                    </div>
+                }
+                else
+                {
+                    <div class="asa-request-list">
+                        @foreach (var request in Model.PendingRequests)
+                        {
+                            <article class="asa-request-card">
+                                <div class="asa-request-top">
+                                    <div>
+                                        <div class="asa-student-name">@request.StudentName</div>
+                                        <div class="asa-subline">
+                                            @request.StudentEmail
+                                            @if (!string.IsNullOrWhiteSpace(request.StudentMajor))
+                                            {
+                                                <text> · @request.StudentMajor</text>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(request.PreferredDomain))
+                                            {
+                                                <text> · @request.PreferredDomain</text>
+                                            }
+                                        </div>
+                                    </div>
+
+                                    <span class="asa-status-pill pending">
+                                        <i class="bi bi-hourglass-split"></i>
+                                        waiting admin approval
+                                    </span>
+                                </div>
+
+                                <div class="asa-request-body">
+                                    <div class="asa-info-grid">
+                                        <div class="asa-info-box">
+                                            <span>Latest idea</span>
+                                            <strong>@request.StudentIdeaTitle</strong>
+                                            @if (!string.IsNullOrWhiteSpace(request.StudentIdeaDomain))
+                                            {
+                                                <div class="asa-subline">@request.StudentIdeaDomain</div>
+                                            }
+                                        </div>
+
+                                        <div class="asa-info-box">
+                                            <span>Requested supervisor</span>
+                                            <strong>@request.RequestedSupervisorName</strong>
+                                            <div class="asa-subline">
+                                                @request.RequestedSupervisorSpecialization
+                                                @if (!string.IsNullOrWhiteSpace(request.RequestedSupervisorDepartment))
+                                                {
+                                                    <text> · @request.RequestedSupervisorDepartment</text>
+                                                }
+                                            </div>
+                                        </div>
+
+                                        <div class="asa-info-box">
+                                            <span>Supervisor capacity</span>
+                                            <strong>
+                                                @request.RequestedSupervisorCapacityUsed / @request.RequestedSupervisorCapacityLimit
+                                                @if (request.RequestedSupervisorIsFull)
+                                                {
+                                                    <text> FULL</text>
+                                                }
+                                            </strong>
+                                        </div>
+
+                                        <div class="asa-info-box">
+                                            <span>Requested at</span>
+                                            <strong>@request.RequestedAt.ToString("MMM d, yyyy · HH:mm")</strong>
+                                        </div>
+                                    </div>
+
+                                    @if (!string.IsNullOrWhiteSpace(request.StudentSkills))
+                                    {
+                                        <div class="asa-message">
+                                            <strong>Student skills:</strong>
+                                            @request.StudentSkills
+                                        </div>
+                                    }
+
+                                    @if (!string.IsNullOrWhiteSpace(request.StudentMessage))
+                                    {
+                                        <div class="asa-message">
+                                            <strong>Student message:</strong>
+                                            @request.StudentMessage
+                                        </div>
+                                    }
+
+                                    <div class="asa-actions">
+                                        <form method="post" asp-page-handler="Approve" class="asa-action-row">
+                                            @Html.AntiForgeryToken()
+                                            <input type="hidden" name="assignmentId" value="@request.AssignmentId" />
+
+                                            @if (request.RequestedSupervisorIsFull)
+                                            {
+                                                <span class="asa-status-pill full">
+                                                    <i class="bi bi-x-circle"></i>
+                                                    requested supervisor full
+                                                </span>
+                                            }
+                                            else
+                                            {
+                                                <span class="asa-status-pill available">
+                                                    <i class="bi bi-check-circle"></i>
+                                                    requested supervisor available
+                                                </span>
+                                            }
+
+                                            <div class="asa-muted">
+                                                Approves the supervisor selected by the student.
+                                            </div>
+
+                                            <button type="submit"
+                                                    class="asa-btn primary"
+                                                    disabled="@request.RequestedSupervisorIsFull">
+                                                Approve Requested
+                                            </button>
+                                        </form>
+
+                                        <form method="post" asp-page-handler="AssignDifferent" class="asa-action-row">
+                                            @Html.AntiForgeryToken()
+                                            <input type="hidden" name="assignmentId" value="@request.AssignmentId" />
+
+                                            <span class="asa-status-pill available">
+                                                <i class="bi bi-shuffle"></i>
+                                                assign different
+                                            </span>
+
+                                            <select name="supervisorId" required>
+                                                <option value="">Choose available supervisor</option>
+                                                @foreach (var supervisor in Model.AssignableSupervisors)
+                                                {
+                                                    <option value="@supervisor.SupervisorId"
+                                                            selected="@(supervisor.SupervisorId == request.RequestedSupervisorId)">
+                                                        @supervisor.FullName — @supervisor.CapacityUsed/@supervisor.CapacityLimit
+                                                    </option>
+                                                }
+                                            </select>
+
+                                            <button type="submit" class="asa-btn secondary">
+                                                Assign
+                                            </button>
+
+                                            <input name="adminNote"
+                                                   placeholder="Optional admin note"
+                                                   style="grid-column:2 / 4;" />
+                                        </form>
+
+                                        <form method="post" asp-page-handler="Reject" class="asa-action-row reject-row">
+                                            @Html.AntiForgeryToken()
+                                            <input type="hidden" name="assignmentId" value="@request.AssignmentId" />
+
+                                            <input name="adminNote"
+                                                   placeholder="Reason for rejection, shown to the student" />
+
+                                            <button type="submit" class="asa-btn danger">
+                                                Reject
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </article>
+                        }
+                    </div>
+                }
+            </div>
+        </section>
+
+        <aside class="asa-panel">
+            <div class="asa-panel-head">
+                <div>
+                    <h2>Supervisor Capacity</h2>
+                    <p>Active assignments count toward the 4-student limit.</p>
+                </div>
+            </div>
+
+            <div class="asa-panel-body">
+                @if (!Model.SupervisorCapacity.Any())
+                {
+                    <div class="asa-empty">
+                        <i class="bi bi-person-workspace"></i>
+                        <div>No supervisor profiles found.</div>
+                    </div>
+                }
+                else
+                {
+                    <div class="asa-capacity-list">
+                        @foreach (var supervisor in Model.SupervisorCapacity)
+                        {
+                            var percent = supervisor.CapacityLimit == 0
+                                ? 0
+                                : Math.Clamp((supervisor.ActiveCount * 100) / supervisor.CapacityLimit, 0, 100);
+
+                            <div class="asa-capacity-card">
+                                <div class="asa-capacity-top">
+                                    <div>
+                                        <strong>@supervisor.FullName</strong>
+                                        <small>@supervisor.Specialization</small>
+                                    </div>
+
+                                    @if (supervisor.IsFull)
+                                    {
+                                        <span class="asa-status-pill full">FULL</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="asa-status-pill available">Available</span>
+                                    }
+                                </div>
+
+                                <div class="asa-capacity-bar">
+                                    <div class="asa-capacity-fill @(supervisor.IsFull ? "full" : "")"
+                                         style="width:@percent%"></div>
+                                </div>
+
+                                <div class="asa-capacity-meta">
+                                    <span>@supervisor.ActiveCount / @supervisor.CapacityLimit active</span>
+                                    <span>@supervisor.PendingCount pending</span>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </aside>
+    </div>
+
+    <section class="asa-table-wrap transfer-wrap">
+        <div class="asa-table-head transfer-head">
+            <div>
+                <h2>Active Assignments & Transfers</h2>
+                <p>Transfer a student only when supervision needs to be changed by admin decision.</p>
+            </div>
+
+            <span class="asa-count-pill">@Model.ActiveAssignments.Count active</span>
+        </div>
+
+        @if (!Model.ActiveAssignments.Any())
+        {
+            <div class="asa-empty">
+                <i class="bi bi-people"></i>
+                <div>No active assignments yet.</div>
+            </div>
+        }
+        else
+        {
+            <div class="asa-active-list">
+                @foreach (var assignment in Model.ActiveAssignments)
+                {
+                    var transferOptions = Model.AssignableSupervisors
+                        .Where(s => s.SupervisorId != assignment.SupervisorId)
+                        .ToList();
+
+                    <article class="asa-active-card">
+                        <div class="asa-active-main">
+                            <div class="asa-person-block">
+                                <span>Student</span>
+                                <strong>@assignment.StudentName</strong>
+                                <small>@assignment.StudentEmail</small>
+                                <small>@assignment.StudentMajor · @assignment.PreferredDomain</small>
+                            </div>
+
+                            <div class="asa-arrow-transfer">
+                                <i class="bi bi-arrow-right"></i>
+                            </div>
+
+                            <div class="asa-person-block">
+                                <span>Current Supervisor</span>
+                                <strong>@assignment.SupervisorName</strong>
+                                <small>@assignment.SupervisorSpecialization</small>
+                                <small>Approved @assignment.ApprovedAt.ToString("MMM d, yyyy")</small>
+                            </div>
+
+                            <div class="asa-idea-block">
+                                <span>Project idea</span>
+                                <strong>@assignment.IdeaTitle</strong>
+                            </div>
+                        </div>
+
+                        <form method="post" asp-page-handler="Transfer" class="asa-transfer-form">
+                            @Html.AntiForgeryToken()
+
+                            <input type="hidden" name="assignmentId" value="@assignment.AssignmentId" />
+
+                            <div class="asa-transfer-title">
+                                <i class="bi bi-shuffle"></i>
+                                <div>
+                                    <strong>Transfer student</strong>
+                                    <span>Choose another available supervisor and write the reason.</span>
+                                </div>
+                            </div>
+
+                            <select name="newSupervisorId" required>
+                                <option value="">Choose new supervisor</option>
+                                @foreach (var supervisor in transferOptions)
+                                {
+                                    <option value="@supervisor.SupervisorId">
+                                        @supervisor.FullName — @supervisor.CapacityUsed/@supervisor.CapacityLimit
+                                        @if (!string.IsNullOrWhiteSpace(supervisor.Specialization))
+                                        {
+                                            <text> · @supervisor.Specialization</text>
+                                        }
+                                    </option>
+                                }
+                            </select>
+
+                            <input name="transferReason"
+                                   required
+                                   placeholder="Reason, e.g. better domain match or supervisor workload" />
+
+                            <button type="submit"
+                                    class="asa-btn primary"
+                                    disabled="@(!transferOptions.Any())">
+                                Transfer
+                            </button>
+                        </form>
+                    </article>
+                }
+            </div>
+        }
+    </section>
+
+    @if (Model.RecentRejectedRequests.Any())
+    {
+        <section class="asa-table-wrap">
+            <div class="asa-table-head">
+                <h2>Recent Rejected Requests</h2>
+            </div>
+
+            <table class="asa-table">
+                <thead>
+                    <tr>
+                        <th>Student</th>
+                        <th>Requested supervisor</th>
+                        <th>Admin note</th>
+                        <th>Rejected</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in Model.RecentRejectedRequests)
+                    {
+                        <tr>
+                            <td><strong>@item.StudentName</strong></td>
+                            <td>@item.SupervisorName</td>
+                            <td>@item.AdminNote</td>
+                            <td>@item.RejectedAt.ToString("MMM d, yyyy")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+    }
+</section>

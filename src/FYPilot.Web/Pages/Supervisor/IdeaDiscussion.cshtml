@@ -1,0 +1,1124 @@
+﻿@page
+@using System.Security.Claims
+@model FYPilot.Web.Pages.Supervisor.IdeaDiscussionModel
+@{
+    ViewData["Title"] = "Idea Discussion";
+    ViewData["Subtitle"] = "Live discussion connected to one selected project idea.";
+
+    var currentSupervisorId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0";
+    var idea = Model.Idea;
+}
+
+<section class="sd-page">
+
+    @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
+    {
+        <div class="alert alert-success sd-alert">
+            <i class="bi bi-check-circle me-2"></i>
+            @Model.SuccessMessage
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div class="alert alert-danger sd-alert">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            @Model.ErrorMessage
+        </div>
+    }
+
+    @if (idea == null)
+    {
+        <section class="sd-empty-page">
+            <i class="bi bi-exclamation-circle"></i>
+            <h2>Idea not found</h2>
+            <p>Please go back to the feedback workspace and choose an idea.</p>
+            <a href="/Supervisor/IdeaReview" class="sd-primary-link">Back to Feedback Workspace</a>
+        </section>
+    }
+    else
+    {
+        <header class="sd-hero">
+            <a href="/Supervisor/IdeaReview?ideaId=@idea.Id" class="sd-back-link">
+                <i class="bi bi-arrow-left"></i>
+                Back to Review
+            </a>
+
+            <div class="sd-hero-main">
+                <div class="sd-idea-mark">
+                    <i class="bi bi-chat-dots-fill"></i>
+                </div>
+
+                <div>
+                    <span>Dedicated Idea Discussion</span>
+                    <h1>@idea.Title</h1>
+
+                    <div class="sd-meta-row">
+                        <small><i class="bi bi-person"></i>@(idea.User?.FullName ?? "Student")</small>
+
+                        @if (!string.IsNullOrWhiteSpace(idea.Domain))
+                        {
+                            <small><i class="bi bi-folder2-open"></i>@idea.Domain</small>
+                        }
+
+                        @if (!string.IsNullOrWhiteSpace(idea.DifficultyLevel))
+                        {
+                            <small><i class="bi bi-speedometer2"></i>@idea.DifficultyLevel</small>
+                        }
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <section class="sd-chat-card">
+            <div class="sd-chat-head">
+                <div>
+                    <span>Live Discussion</span>
+                    <h2>Conversation with @(idea.User?.FullName ?? "Student")</h2>
+                </div>
+
+                <div class="sd-chat-status">
+                    <span></span>
+                    Online
+                </div>
+            </div>
+
+            <div class="sw-thread" id="supervisorFeedbackThread" data-evaluation-id="@(Model.Evaluation?.Id ?? 0)" data-current-user-id="@currentSupervisorId" data-idea-id="@idea.Id">
+                @if (!Model.Messages.Any())
+                {
+                    <div class="sw-thread-empty">
+                        <i class="bi bi-chat-dots"></i>
+                        <strong>No discussion yet</strong>
+                        <span>Start a discussion for this idea only.</span>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var message in Model.Messages)
+                    {
+                        var isDeleted = message.DeletedAt.HasValue;
+
+                        <article class="sw-message @(message.IsSupervisor ? "supervisor" : "student")" data-message-id="@message.Id" data-sender-id="@message.SenderUserId">
+                            <div class="sw-message-avatar">@Initials(message.SenderName)</div>
+
+                            <div class="sw-message-bubble">
+                                <div class="sw-message-meta">
+                                    <strong>@message.SenderName</strong>
+                                    <span>
+                                        @message.SenderRole · @message.CreatedAt.ToLocalTime().ToString("MMM d, HH:mm")
+                                        @(message.EditedAt.HasValue && !isDeleted ? " · Edited" : "")
+                                        @(message.IsSupervisor && message.SeenAt.HasValue && !isDeleted ? " · Seen" : "")
+                                    </span>
+                                </div>
+
+                                @if (!string.IsNullOrWhiteSpace(message.ReplyPreview))
+                                {
+                                    <div class="sw-message-reply">
+                                        Replying to: @message.ReplyPreview
+                                    </div>
+                                }
+
+                                @if (isDeleted)
+                                {
+                                    <p class="sw-message-text sw-message-deleted">This message was deleted.</p>
+                                }
+                                else
+                                {
+                                    <p class="sw-message-text">@message.MessageText</p>
+
+                                    <div class="sw-message-actions">
+                                        <button type="button" data-chat-action="reply" data-message-id="@message.Id" data-message-text="@message.MessageText">Reply</button>
+
+                                        @if (message.IsSupervisor)
+                                        {
+                                            <button type="button" data-chat-action="edit" data-message-id="@message.Id" data-message-text="@message.MessageText">Edit</button>
+                                            <button type="button" data-chat-action="delete" data-message-id="@message.Id">Delete</button>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </article>
+                    }
+                }
+            </div>
+
+            <div class="sw-chat-state">
+                <span id="supervisorTyping" class="sw-typing">
+                    <span id="supervisorTypingName">Student</span> is typing
+                    <span class="sw-typing-dot"></span>
+                    <span class="sw-typing-dot"></span>
+                    <span class="sw-typing-dot"></span>
+                </span>
+            </div>
+
+            <form method="post" asp-page-handler="SendMessage" class="sw-message-form" id="supervisorRealtimeForm">
+                @Html.AntiForgeryToken()
+
+                <input type="hidden" asp-for="MessageInput.IdeaId" value="@idea.Id" />
+
+                <div id="supervisorReplyPreview" class="sw-reply-preview">
+                    <span id="supervisorReplyPreviewText"></span>
+                    <button type="button" id="supervisorCancelReply">×</button>
+                </div>
+
+                <input type="hidden" id="supervisorReplyToMessageId" value="" />
+
+                <div class="sd-message-box">
+                    <textarea asp-for="MessageInput.MessageText" id="supervisorMessageInput" class="form-control" rows="2" placeholder="Write a message about this idea..."></textarea>
+
+                    <button type="submit" class="sd-send-btn" title="Send message">
+                        <i class="bi bi-send-fill"></i>
+                    </button>
+                </div>
+            </form>
+        </section>
+    }
+</section>
+
+@section Head {
+    <style>
+        :root {
+            --sd-navy: #28385E;
+            --sd-blue: #304163;
+            --sd-steel: #516C8D;
+            --sd-border: #E8ECF2;
+            --sd-text: #111827;
+            --sd-muted: #64748B;
+        }
+
+        .sd-page {
+            max-width: 1300px;
+            margin: 0 auto;
+            color: var(--sd-text);
+            padding-bottom: 1.5rem;
+        }
+
+        .sd-alert {
+            border: 0;
+            border-radius: 18px;
+            box-shadow: 0 14px 34px rgba(15,23,42,0.08);
+        }
+
+        .sd-hero {
+            margin-bottom: 1rem;
+            border-radius: 28px;
+            padding: 1.15rem 1.25rem;
+            color: #ffffff;
+            background: radial-gradient(circle at 88% 12%, rgba(255,255,255,0.22), transparent 28%), linear-gradient(135deg, #061C49 0%, var(--sd-navy) 55%, var(--sd-steel) 120%);
+            box-shadow: 0 18px 42px rgba(40,56,94,0.16);
+        }
+
+        .sd-back-link {
+            width: fit-content;
+            margin-bottom: 0.9rem;
+            color: rgba(255,255,255,0.82);
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.42rem;
+            font-size: 0.82rem;
+            font-weight: 760;
+        }
+
+            .sd-back-link:hover {
+                color: #ffffff;
+            }
+
+        .sd-hero-main {
+            display: flex;
+            align-items: center;
+            gap: 0.95rem;
+        }
+
+        .sd-idea-mark {
+            width: 66px;
+            height: 66px;
+            min-width: 66px;
+            border-radius: 24px;
+            background: rgba(255,255,255,0.14);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.65rem;
+            border: 1px solid rgba(255,255,255,0.16);
+        }
+
+        .sd-hero-main span,
+        .sd-chat-head span {
+            display: block;
+            font-size: 0.72rem;
+            font-weight: 880;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+
+        .sd-hero-main span {
+            color: rgba(255,255,255,0.72);
+        }
+
+        .sd-hero-main h1 {
+            margin: 0.14rem 0 0;
+            color: #ffffff;
+            font-size: clamp(1.45rem, 2.7vw, 2.25rem);
+            font-weight: 900;
+            letter-spacing: -0.055em;
+        }
+
+        .sd-meta-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.65rem;
+            margin-top: 0.55rem;
+        }
+
+            .sd-meta-row small {
+                color: rgba(255,255,255,0.78);
+                display: inline-flex;
+                align-items: center;
+                gap: 0.34rem;
+                font-size: 0.76rem;
+                font-weight: 720;
+            }
+
+        .sd-chat-card {
+            min-height: calc(100vh - 265px);
+            border-radius: 28px;
+            background: #ffffff;
+            border: 1px solid var(--sd-border);
+            box-shadow: 0 14px 34px rgba(15,23,42,0.05);
+            overflow: hidden;
+            display: grid;
+            grid-template-rows: auto minmax(420px, 1fr) auto auto;
+        }
+
+        .sd-chat-head {
+            padding: 1rem 1.15rem;
+            border-bottom: 1px solid var(--sd-border);
+            background: #FAFBFD;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+        }
+
+            .sd-chat-head span {
+                color: var(--sd-steel);
+            }
+
+            .sd-chat-head h2 {
+                margin: 0.16rem 0 0;
+                color: var(--sd-text);
+                font-size: 1.1rem;
+                font-weight: 880;
+                letter-spacing: -0.035em;
+            }
+
+        .sd-chat-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            color: var(--sd-muted);
+            font-size: 0.76rem;
+            font-weight: 760;
+        }
+
+            .sd-chat-status span {
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: #22C55E;
+            }
+
+        .sw-thread {
+            min-height: 0;
+            overflow-y: auto;
+            padding: 1rem 1.15rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.7rem;
+            background: linear-gradient(180deg, #ffffff, #FAFBFD);
+        }
+
+        .sw-thread-empty {
+            min-height: 360px;
+            border: 1px dashed #CBD5E1;
+            border-radius: 22px;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            gap: 0.42rem;
+            text-align: center;
+            color: var(--sd-muted);
+            padding: 1rem;
+        }
+
+            .sw-thread-empty i {
+                color: var(--sd-steel);
+                font-size: 1.8rem;
+            }
+
+            .sw-thread-empty strong {
+                color: var(--sd-text);
+            }
+
+        .sw-message {
+            display: flex;
+            gap: 0.55rem;
+            align-items: flex-start;
+        }
+
+            .sw-message.supervisor {
+                flex-direction: row-reverse;
+            }
+
+        .sw-message-avatar {
+            width: 38px;
+            height: 38px;
+            min-width: 38px;
+            border-radius: 14px;
+            background: #EEF2F6;
+            color: var(--sd-blue);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.74rem;
+            font-weight: 850;
+        }
+
+        .sw-message-bubble {
+            max-width: min(650px, 78%);
+            border: 1px solid var(--sd-border);
+            border-radius: 18px;
+            background: #ffffff;
+            padding: 0.72rem 0.8rem;
+            box-shadow: 0 8px 18px rgba(15,23,42,0.03);
+        }
+
+        .sw-message.supervisor .sw-message-bubble {
+            color: #ffffff;
+            background: linear-gradient(135deg, #061C49, var(--sd-blue));
+            border-color: transparent;
+        }
+
+        .sw-message-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35rem;
+            margin-bottom: 0.3rem;
+            align-items: center;
+        }
+
+            .sw-message-meta strong {
+                color: inherit;
+                font-size: 0.73rem;
+            }
+
+            .sw-message-meta span {
+                color: #94A3B8;
+                font-size: 0.62rem;
+                font-weight: 720;
+            }
+
+        .sw-message.supervisor .sw-message-meta span,
+        .sw-message.supervisor .sw-message-text {
+            color: rgba(255,255,255,0.82);
+        }
+
+        .sw-message-text {
+            margin: 0;
+            color: #334155;
+            font-size: 0.84rem;
+            line-height: 1.55;
+            overflow-wrap: anywhere;
+        }
+
+        .sw-message-actions {
+            display: flex;
+            gap: 0.35rem;
+            margin-top: 0.42rem;
+            opacity: 0;
+            transition: 0.16s ease;
+        }
+
+        .sw-message:hover .sw-message-actions {
+            opacity: 1;
+        }
+
+        .sw-message-actions button {
+            border: 0;
+            border-radius: 999px;
+            padding: 0.16rem 0.45rem;
+            font-size: 0.65rem;
+            font-weight: 800;
+            color: #475569;
+            background: #E2E8F0;
+        }
+
+        .sw-message.supervisor .sw-message-actions button {
+            color: #ffffff;
+            background: rgba(255,255,255,0.16);
+        }
+
+        .sw-message-reply {
+            margin-bottom: 0.4rem;
+            padding: 0.4rem 0.5rem;
+            border-radius: 12px;
+            background: rgba(15,23,42,0.08);
+            font-size: 0.7rem;
+            opacity: 0.86;
+            border-left: 3px solid rgba(81,108,141,0.45);
+        }
+
+        .sw-message-deleted {
+            opacity: 0.78;
+            font-style: italic;
+        }
+
+        .sw-chat-state {
+            padding: 0.42rem 1.1rem;
+            min-height: 1.65rem;
+            background: #ffffff;
+            color: var(--sd-muted);
+            font-size: 0.74rem;
+            font-weight: 680;
+            border-top: 1px solid var(--sd-border);
+        }
+
+        .sw-typing {
+            display: none;
+            align-items: center;
+            gap: 0.35rem;
+        }
+
+            .sw-typing.show {
+                display: inline-flex;
+            }
+
+        .sw-typing-dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: var(--sd-steel);
+            animation: swTyping 1s infinite ease-in-out;
+        }
+
+            .sw-typing-dot:nth-child(2) {
+                animation-delay: 0.15s;
+            }
+
+            .sw-typing-dot:nth-child(3) {
+                animation-delay: 0.3s;
+            }
+
+        @@keyframes swTyping {
+            0%, 80%, 100% {
+                opacity: 0.35;
+                transform: translateY(0);
+            }
+
+            40% {
+                opacity: 1;
+                transform: translateY(-2px);
+            }
+        }
+
+        .sw-message-form {
+            padding: 0.85rem 1.1rem 1rem;
+            border-top: 1px solid var(--sd-border);
+            display: grid;
+            gap: 0.6rem;
+            background: #ffffff;
+        }
+
+        .sd-message-box {
+            border: 1px solid #DDE5EF;
+            border-radius: 18px;
+            padding: 0.55rem;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 0.55rem;
+            align-items: end;
+            background: #ffffff;
+        }
+
+            .sd-message-box textarea {
+                border: 0 !important;
+                box-shadow: none !important;
+                resize: none;
+                padding: 0.25rem 0.2rem;
+                font-size: 0.84rem;
+            }
+
+        .sd-send-btn {
+            width: 42px;
+            height: 42px;
+            border: 0;
+            border-radius: 15px;
+            color: #ffffff;
+            background: linear-gradient(135deg, #061C49, var(--sd-blue));
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+            .sd-send-btn:hover {
+                background: linear-gradient(135deg, var(--sd-blue), var(--sd-steel));
+            }
+
+        .sw-reply-preview {
+            display: none;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 0.75rem;
+            padding: 0.6rem 0.7rem;
+            border-radius: 14px;
+            background: #F1F5F9;
+            border-left: 4px solid var(--sd-steel);
+            color: #334155;
+            font-size: 0.76rem;
+            line-height: 1.45;
+        }
+
+            .sw-reply-preview.show {
+                display: flex;
+            }
+
+            .sw-reply-preview button {
+                border: 0;
+                background: transparent;
+                color: var(--sd-muted);
+                font-weight: 850;
+            }
+
+        .sw-inline-editor {
+            width: min(420px, 100%);
+            display: grid;
+            gap: 0.45rem;
+            margin-top: 0.35rem;
+        }
+
+            .sw-inline-editor textarea {
+                width: 100%;
+                min-height: 74px;
+                resize: vertical;
+                border: 1px solid rgba(148, 163, 184, 0.65);
+                border-radius: 14px;
+                padding: 0.6rem 0.7rem;
+                font-size: 0.84rem;
+                line-height: 1.5;
+                outline: none;
+            }
+
+        .sw-message.supervisor .sw-inline-editor textarea {
+            color: #111827;
+            background: #ffffff;
+        }
+
+        .sw-inline-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.4rem;
+        }
+
+            .sw-inline-actions button {
+                border: 0;
+                border-radius: 999px;
+                padding: 0.28rem 0.68rem;
+                font-size: 0.72rem;
+                font-weight: 800;
+            }
+
+        .sw-inline-save {
+            color: #ffffff;
+            background: var(--sd-blue);
+        }
+
+        .sw-inline-cancel {
+            color: #334155;
+            background: #E2E8F0;
+        }
+
+        .sw-seen-text,
+        .sw-edited-text {
+            margin-left: 0.25rem;
+            opacity: 0.72;
+        }
+
+        .sd-empty-page {
+            min-height: 520px;
+            border-radius: 26px;
+            background: linear-gradient(180deg, #ffffff, #FAFBFD);
+            border: 1px solid var(--sd-border);
+            box-shadow: 0 16px 40px rgba(15,23,42,0.05);
+            display: grid;
+            place-items: center;
+            align-content: center;
+            text-align: center;
+            padding: 2rem;
+        }
+
+            .sd-empty-page > i {
+                width: 72px;
+                height: 72px;
+                border-radius: 24px;
+                color: var(--sd-steel);
+                background: #EEF2F6;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 1.9rem;
+                margin-bottom: 1rem;
+            }
+
+            .sd-empty-page h2 {
+                margin: 0;
+                color: var(--sd-text);
+                font-size: 1.3rem;
+                font-weight: 860;
+            }
+
+            .sd-empty-page p {
+                margin: 0.45rem 0 1rem;
+                color: var(--sd-muted);
+                line-height: 1.6;
+                max-width: 520px;
+            }
+
+        .sd-primary-link {
+            color: #ffffff;
+            background: linear-gradient(135deg, #061C49, var(--sd-blue));
+            border-radius: 14px;
+            padding: 0.62rem 0.9rem;
+            text-decoration: none;
+            font-size: 0.84rem;
+            font-weight: 830;
+        }
+
+            .sd-primary-link:hover {
+                color: #ffffff;
+            }
+
+        @@media (max-width: 767px) {
+            .sd-hero-main,
+            .sd-chat-head {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .sw-message-bubble {
+                max-width: 100%;
+            }
+        }
+    </style>
+}
+
+@section Scripts {
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+
+    <script>
+        const supervisorThread = document.getElementById("supervisorFeedbackThread");
+        const supervisorForm = document.getElementById("supervisorRealtimeForm");
+        const supervisorInput = document.getElementById("supervisorMessageInput");
+        const supervisorTyping = document.getElementById("supervisorTyping");
+        const supervisorTypingName = document.getElementById("supervisorTypingName");
+        const supervisorReplyPreview = document.getElementById("supervisorReplyPreview");
+        const supervisorReplyPreviewText = document.getElementById("supervisorReplyPreviewText");
+        const supervisorReplyToMessageId = document.getElementById("supervisorReplyToMessageId");
+        const supervisorCancelReply = document.getElementById("supervisorCancelReply");
+
+        if (supervisorThread && supervisorForm && supervisorInput && window.signalR) {
+        const currentUserId = Number(supervisorThread.dataset.currentUserId);
+        let evaluationId = Number(supervisorThread.dataset.evaluationId);
+        const ideaId = Number(supervisorThread.dataset.ideaId);
+
+        const connection = new signalR.HubConnectionBuilder()
+        .withUrl("/hubs/feedback-chat")
+        .withAutomaticReconnect()
+        .build();
+
+        function scrollSupervisorThreadToBottom() {
+        supervisorThread.scrollTop = supervisorThread.scrollHeight;
+        }
+
+        function hideSupervisorEmptyState() {
+        supervisorThread.querySelectorAll(".sw-thread-empty").forEach(x => x.remove());
+        }
+
+        function escapeHtml(value) {
+        const div = document.createElement("div");
+        div.textContent = value ?? "";
+        return div.innerHTML;
+        }
+
+        function formatMessageTime(value) {
+        const date = new Date(value);
+        return date.toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+        });
+        }
+
+        function initials(name) {
+        const parts = (name || "ST").split(" ").filter(Boolean).slice(0, 2);
+        return parts.map(p => p[0]).join("").toUpperCase() || "ST";
+        }
+
+        function setSupervisorReplyTarget(messageId, text) {
+        supervisorReplyToMessageId.value = messageId || "";
+        supervisorReplyPreviewText.textContent = text ? `Replying to: ${text}` : "";
+        supervisorReplyPreview.classList.toggle("show", !!messageId);
+        supervisorInput.focus();
+        }
+
+        if (supervisorCancelReply) {
+        supervisorCancelReply.addEventListener("click", function () {
+        setSupervisorReplyTarget("", "");
+        });
+        }
+
+        function buildSupervisorActions(messageId, messageText, isMine) {
+        return `
+        <div class="sw-message-actions">
+        <button type="button" data-chat-action="reply" data-message-id="${messageId}" data-message-text="${escapeHtml(messageText)}">Reply</button>
+        ${isMine ? `
+        <button type="button" data-chat-action="edit" data-message-id="${messageId}" data-message-text="${escapeHtml(messageText)}">Edit</button>
+        <button type="button" data-chat-action="delete" data-message-id="${messageId}">Delete</button>
+        ` : ""}
+        </div>
+        `;
+        }
+
+        function appendSupervisorMessage(message) {
+        hideSupervisorEmptyState();
+
+        const senderUserId = Number(message.senderUserId ?? message.SenderUserId);
+        const isSupervisor = senderUserId === currentUserId;
+        const senderName = isSupervisor ? "You" : (message.senderName ?? message.SenderName ?? "Student");
+        const senderRole = isSupervisor ? "Supervisor" : "Student";
+        const messageText = message.messageText ?? message.MessageText ?? "";
+        const createdAt = message.createdAt ?? message.CreatedAt ?? new Date().toISOString();
+        const messageId = message.id ?? message.Id ?? 0;
+        const replyPreview = message.replyPreview ?? message.ReplyPreview ?? "";
+
+        const row = document.createElement("article");
+        row.className = `sw-message ${isSupervisor ? "supervisor" : "student"}`;
+        row.dataset.messageId = messageId;
+        row.dataset.senderId = senderUserId;
+
+        row.innerHTML = `
+        <div class="sw-message-avatar">${isSupervisor ? "You" : initials(senderName)}</div>
+
+        <div class="sw-message-bubble">
+        <div class="sw-message-meta">
+        <strong>${escapeHtml(senderName)}</strong>
+        <span>${escapeHtml(senderRole)} · ${formatMessageTime(createdAt)}${isSupervisor ? '<span class="sw-seen-placeholder"></span>' : ''}</span>
+        </div>
+
+        ${replyPreview ? `<div class="sw-message-reply">Replying to: ${escapeHtml(replyPreview)}</div>` : ""}
+
+        <p class="sw-message-text">${escapeHtml(messageText)}</p>
+
+        ${buildSupervisorActions(messageId, messageText, isSupervisor)}
+        </div>
+        `;
+
+        supervisorThread.appendChild(row);
+        scrollSupervisorThreadToBottom();
+
+        if (evaluationId) {
+        connection.invoke("MarkFeedbackSeenByIdea", ideaId, evaluationId).catch(() => {});
+        }
+        }
+
+        function markMySupervisorMessagesSeen(seenByUserId) {
+        if (Number(seenByUserId) === currentUserId) {
+        return;
+        }
+
+        supervisorThread
+        .querySelectorAll(`.sw-message.supervisor[data-sender-id="${currentUserId}"] .sw-message-meta span`)
+        .forEach(time => {
+        if (!time.textContent.includes("Seen")) {
+        time.insertAdjacentHTML("beforeend", '<span class="sw-seen-text"> · Seen</span>');
+        }
+        });
+        }
+
+        function startInlineEdit(row, messageId, currentText) {
+        const textElement = row.querySelector(".sw-message-text");
+        const actions = row.querySelector(".sw-message-actions");
+
+        if (!textElement) {
+        return;
+        }
+
+        if (row.querySelector(".sw-inline-editor")) {
+        return;
+        }
+
+        if (actions) {
+        actions.style.display = "none";
+        }
+
+        textElement.style.display = "none";
+
+        const editor = document.createElement("div");
+        editor.className = "sw-inline-editor";
+        editor.innerHTML = `
+        <textarea>${escapeHtml(currentText)}</textarea>
+        <div class="sw-inline-actions">
+        <button type="button" class="sw-inline-cancel">Cancel</button>
+        <button type="button" class="sw-inline-save">Save</button>
+        </div>
+        `;
+
+        textElement.insertAdjacentElement("afterend", editor);
+
+        const textarea = editor.querySelector("textarea");
+        const saveBtn = editor.querySelector(".sw-inline-save");
+        const cancelBtn = editor.querySelector(".sw-inline-cancel");
+
+        textarea.focus();
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+        function closeEditor() {
+        editor.remove();
+        textElement.style.display = "";
+        if (actions) {
+        actions.style.display = "";
+        }
+        }
+
+        cancelBtn.addEventListener("click", closeEditor);
+
+        saveBtn.addEventListener("click", async function () {
+        const newText = textarea.value.trim();
+
+        if (!newText || newText === currentText.trim()) {
+        closeEditor();
+        return;
+        }
+
+        await connection.invoke("EditFeedbackMessage", messageId, newText);
+        closeEditor();
+        });
+
+        textarea.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        saveBtn.click();
+        }
+
+        if (event.key === "Escape") {
+        closeEditor();
+        }
+        });
+        }
+
+        let typingTimer = null;
+
+        supervisorInput.addEventListener("input", function () {
+        if (!ideaId) {
+        return;
+        }
+
+        connection.invoke("TypingFeedbackRoom", ideaId).catch(() => {});
+
+        clearTimeout(typingTimer);
+
+        typingTimer = setTimeout(function () {
+        connection.invoke("StopTypingFeedbackRoom", ideaId).catch(() => {});
+        }, 900);
+        });
+
+        supervisorInput.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        supervisorForm.requestSubmit();
+        }
+        });
+
+        supervisorForm.addEventListener("submit", async function (event) {
+        event.preventDefault();
+
+        const value = supervisorInput.value.trim();
+
+        if (!value) {
+        return;
+        }
+
+        const replyToId = Number(supervisorReplyToMessageId.value || 0);
+
+        supervisorInput.value = "";
+        setSupervisorReplyTarget("", "");
+
+        try {
+        await connection.invoke("SendFeedbackMessage", evaluationId, ideaId, value, replyToId || null);
+
+        if (ideaId) {
+        await connection.invoke("StopTypingFeedbackRoom", ideaId);
+        }
+        } catch (error) {
+        console.error(error);
+        alert("Message could not be sent. Please refresh and try again.");
+        }
+        });
+
+        supervisorThread.addEventListener("click", async function (event) {
+        const button = event.target.closest("[data-chat-action]");
+
+        if (!button) {
+        return;
+        }
+
+        const action = button.dataset.chatAction;
+        const messageId = Number(button.dataset.messageId);
+        const messageText = button.dataset.messageText || "";
+        const row = button.closest(".sw-message");
+
+        if (action === "reply") {
+        setSupervisorReplyTarget(messageId, messageText);
+        return;
+        }
+
+        if (action === "edit") {
+        startInlineEdit(row, messageId, messageText);
+        return;
+        }
+
+        if (action === "delete") {
+        await connection.invoke("DeleteFeedbackMessage", messageId);
+        }
+        });
+
+        connection.on("ReceiveFeedbackMessage", function (message) {
+        const incomingEvaluationId = Number(message.evaluationId ?? message.EvaluationId);
+        const incomingIdeaId = Number(message.ideaId ?? message.IdeaId);
+
+        if (incomingIdeaId && incomingIdeaId !== ideaId) {
+        return;
+        }
+
+        if (!evaluationId && incomingEvaluationId) {
+        evaluationId = incomingEvaluationId;
+        supervisorThread.dataset.evaluationId = incomingEvaluationId;
+        }
+
+        appendSupervisorMessage(message);
+        });
+
+        connection.on("FeedbackMessageEdited", function (message) {
+        const row = supervisorThread.querySelector(`[data-message-id="${message.id ?? message.Id}"]`);
+
+        if (!row) {
+        return;
+        }
+
+        const text = message.messageText ?? message.MessageText ?? "";
+        const textElement = row.querySelector(".sw-message-text");
+        const time = row.querySelector(".sw-message-meta span");
+
+        if (textElement) {
+        textElement.textContent = text;
+        }
+
+        row.querySelectorAll("[data-message-text]").forEach(btn => {
+        btn.dataset.messageText = text;
+        });
+
+        if (time && !time.textContent.includes("Edited")) {
+        time.insertAdjacentHTML("beforeend", '<span class="sw-edited-text"> · Edited</span>');
+        }
+        });
+
+        connection.on("FeedbackMessageDeleted", function (message) {
+        const row = supervisorThread.querySelector(`[data-message-id="${message.id ?? message.Id}"]`);
+
+        if (!row) {
+        return;
+        }
+
+        const textElement = row.querySelector(".sw-message-text");
+
+        if (textElement) {
+        textElement.textContent = "This message was deleted.";
+        textElement.classList.add("sw-message-deleted");
+        textElement.style.display = "";
+        }
+
+        row.querySelector(".sw-inline-editor")?.remove();
+        row.querySelector(".sw-message-actions")?.remove();
+        });
+
+        connection.on("FeedbackUserTyping", function (data) {
+        const userId = Number(data.userId ?? data.UserId);
+
+        if (userId === currentUserId) {
+        return;
+        }
+
+        supervisorTypingName.textContent = data.name ?? data.Name ?? "Student";
+        supervisorTyping.classList.add("show");
+        });
+
+        connection.on("FeedbackUserStoppedTyping", function (data) {
+        const userId = Number(data.userId ?? data.UserId);
+
+        if (userId === currentUserId) {
+        return;
+        }
+
+        supervisorTyping.classList.remove("show");
+        });
+
+        connection.on("FeedbackMessagesSeen", function (data) {
+        markMySupervisorMessagesSeen(data.seenByUserId ?? data.SeenByUserId);
+        });
+
+        async function startSupervisorChat() {
+        try {
+        await connection.start();
+
+        if (ideaId) {
+        await connection.invoke("JoinFeedbackRoom", ideaId, evaluationId);
+        await connection.invoke("MarkFeedbackSeenByIdea", ideaId, evaluationId);
+        }
+
+        if (supervisorThread.querySelector(".sw-message")) {
+        hideSupervisorEmptyState();
+        }
+
+        scrollSupervisorThreadToBottom();
+        } catch (error) {
+        console.error(error);
+        }
+        }
+
+        startSupervisorChat();
+        }
+    </script>
+}
+
+@functions {
+    private static string Initials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "ST";
+        }
+
+        var parts = name
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Take(2)
+            .ToList();
+
+        if (!parts.Any())
+        {
+            return "ST";
+        }
+
+        return string.Join("", parts.Select(p => p[0])).ToUpperInvariant();
+    }
+}

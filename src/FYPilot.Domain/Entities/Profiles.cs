@@ -6,42 +6,134 @@ namespace FYPilot.Domain.Entities;
 [Table("student_profiles")]
 public class StudentProfile
 {
-    [Key] [Column("id")] public int Id { get; set; }
-    [Column("user_id")] public int UserId { get; set; }
-    [Column("university")] public string University { get; set; } = "";
-    [Column("major")] public string Major { get; set; } = "Computer Science";
-    [Column("year")] public string Year { get; set; } = "3rd Year";
-    [Column("skills")] public string Skills { get; set; } = "";
-    [Column("interests")] public string Interests { get; set; } = "";
-    [Column("experience_level")] public string ExperienceLevel { get; set; } = "beginner";
-    [Column("preferred_domain")] public string PreferredDomain { get; set; } = "";
-    [Column("preferred_stack")] public string PreferredStack { get; set; } = "";
-    [Column("available_hours_per_week")] public int AvailableHoursPerWeek { get; set; } = 20;
-    [Column("team_members")] public int TeamMembers { get; set; } = 1;
-    [Column("target_difficulty")] public string TargetDifficulty { get; set; } = "intermediate";
-    [Column("project_goals")] public string ProjectGoals { get; set; } = "";
-    [ForeignKey(nameof(UserId))] public User? User { get; set; }
+    [Key]
+    [Column("id")]
+    public int Id { get; set; }
+
+    [Column("user_id")]
+    public int UserId { get; set; }
+
+    [Column("university")]
+    public string University { get; set; } = "";
+
+    [Column("major")]
+    public string Major { get; set; } = "Computer Science";
+
+    [Column("year")]
+    public string Year { get; set; } = "3rd Year";
+
+    [Column("skills")]
+    public string Skills { get; set; } = "";
+
+    [Column("interests")]
+    public string Interests { get; set; } = "";
+
+    [Column("experience_level")]
+    public string ExperienceLevel { get; set; } = "beginner";
+
+    [Column("preferred_domain")]
+    public string PreferredDomain { get; set; } = "";
+
+    [Column("preferred_stack")]
+    public string PreferredStack { get; set; } = "";
+
+    [Column("available_hours_per_week")]
+    public int AvailableHoursPerWeek { get; set; } = 20;
+
+    [Column("team_members")]
+    public int TeamMembers { get; set; } = 1;
+
+    [Column("target_difficulty")]
+    public string TargetDifficulty { get; set; } = "intermediate";
+
+    [Column("project_goals")]
+    public string ProjectGoals { get; set; } = "";
+
+    [Column("profile_image_path")]
+    public string? ProfileImagePath { get; set; }
+
+    [ForeignKey(nameof(UserId))]
+    public User? User { get; set; }
 }
 
 [Table("supervisor_profiles")]
 public class SupervisorProfile
 {
-    [Key] [Column("id")] public int Id { get; set; }
-    [Column("user_id")] public int UserId { get; set; }
-    [Column("department")] public string Department { get; set; } = "Computer Science";
-    [Column("specialization")] public string Specialization { get; set; } = "";
-    [Column("bio")] public string Bio { get; set; } = "";
-    [ForeignKey(nameof(UserId))] public User? User { get; set; }
+    [Key]
+    [Column("id")]
+    public int Id { get; set; }
+
+    [Column("user_id")]
+    public int UserId { get; set; }
+
+    [Column("academic_title")]
+    public string? AcademicTitle { get; set; }
+
+    [Column("department")]
+    public string? Department { get; set; }
+
+    [Column("faculty")]
+    public string? Faculty { get; set; }
+
+    [Column("university")]
+    public string? University { get; set; }
+
+    [Column("specialization")]
+    public string? Specialization { get; set; }
+
+    [Column("research_areas")]
+    public string? ResearchAreas { get; set; }
+
+    [Column("office_location")]
+    public string? OfficeLocation { get; set; }
+
+    [Column("office_hours")]
+    public string? OfficeHours { get; set; }
+
+    [Column("preferred_meeting_mode")]
+    public string? PreferredMeetingMode { get; set; }
+
+    [Column("bio")]
+    public string? Bio { get; set; }
+
+    [Column("linkedin_url")]
+    public string? LinkedInUrl { get; set; }
+
+    [Column("website_url")]
+    public string? WebsiteUrl { get; set; }
+
+    [Column("profile_image_path")]
+    public string? ProfileImagePath { get; set; }
+
+    [Column("updated_at")]
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    [ForeignKey(nameof(UserId))]
+    public User? User { get; set; }
 }
 
 [Table("company_profiles")]
 public class CompanyProfile
 {
-    [Key] [Column("id")] public int Id { get; set; }
-    [Column("user_id")] public int UserId { get; set; }
-    [Column("company_name")] public string CompanyName { get; set; } = "";
-    [Column("industry")] public string Industry { get; set; } = "Technology";
-    [Column("description")] public string Description { get; set; } = "";
-    [Column("website")] public string Website { get; set; } = "";
-    [ForeignKey(nameof(UserId))] public User? User { get; set; }
+    [Key]
+    [Column("id")]
+    public int Id { get; set; }
+
+    [Column("user_id")]
+    public int UserId { get; set; }
+
+    [Column("company_name")]
+    public string CompanyName { get; set; } = "";
+
+    [Column("industry")]
+    public string Industry { get; set; } = "Technology";
+
+    [Column("description")]
+    public string Description { get; set; } = "";
+
+    [Column("website")]
+    public string Website { get; set; } = "";
+
+    [ForeignKey(nameof(UserId))]
+    public User? User { get; set; }
 }

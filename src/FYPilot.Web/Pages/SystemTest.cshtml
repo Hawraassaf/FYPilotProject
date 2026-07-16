@@ -6,86 +6,493 @@
     ViewData["Subtitle"] = "Verify all platform connections are operational";
 }
 
-<div class="row g-3 mb-4">
-    <div class="col-12">
-        <div class="page-card p-4">
-            <div class="d-flex align-items-center justify-content-between mb-4">
+<section class="system-test-page">
+
+    <header class="system-hero">
+        <div>
+            <span class="system-eyebrow">FYPilot Health Monitor</span>
+            <h1>System Test Center</h1>
+            <p>
+                Verify the web app, database, API layer, and Python AI services from one
+                clean operational health dashboard.
+            </p>
+        </div>
+    </header>
+
+    @{
+        var tests = new[] {
+            ("frontend",      "bi-window",           "Razor Pages Web App",          "Verifies the .NET Razor Pages frontend is running"),
+            ("database",      "bi-database",         "PostgreSQL Database",           "Checks EF Core can connect and query the database"),
+            ("ai-health",     "bi-cpu",              "Python AI Service /health",     "Calls GET /health on the Python FastAPI service"),
+            ("skill-analysis","bi-lightning-charge", "AI Skill Analysis",             "Calls POST /analyze-skills with sample data"),
+            ("feasibility",   "bi-graph-up-arrow",   "AI Feasibility Prediction",     "Calls POST /predict-feasibility with sample features"),
+            ("similarity",    "bi-diagram-3",        "AI Similarity / Originality",   "Calls POST /check-similarity with a sample idea"),
+            ("market-match",  "bi-shop",             "AI Market Matching",            "Calls POST /match-market with a sample idea"),
+            ("risk-alarms",   "bi-exclamation-triangle", "AI Risk Alarms",            "Calls POST /risk-alarms with sample project data"),
+        };
+    }
+
+    <section class="system-main-grid">
+
+        <article class="system-panel test-panel">
+            <div class="system-panel-head">
                 <div>
-                    <h6 class="fw-bold mb-1">System Health Check</h6>
-                    <div class="text-muted small">Tests all critical service connections. No login required.</div>
+                    <span class="system-eyebrow">Live Tests</span>
+                    <h2>System Health Check</h2>
+                    <p>Tests all critical service connections. Admin access only.</p>
                 </div>
-                <button id="run-btn" class="btn btn-primary fw-semibold" onclick="FYPilot.SystemTest.run()">
-                    <i class="bi bi-play-circle me-2"></i>Run Tests
+
+                <button id="run-btn" class="system-run-btn inside-card" onclick="FYPilot.SystemTest.run()">
+                    <i class="bi bi-play-circle"></i>
+                    Run Tests
                 </button>
             </div>
 
-            @{
-                var tests = new[] {
-                    ("frontend",      "bi-window",           "Razor Pages Web App",          "Verifies the .NET Razor Pages frontend is running"),
-                    ("database",      "bi-database",         "PostgreSQL Database",           "Checks EF Core can connect and query the database"),
-                    ("ai-health",     "bi-cpu",              "Python AI Service /health",     "Calls GET /health on the Python FastAPI service"),
-                    ("skill-analysis","bi-lightning-charge", "AI Skill Analysis",             "Calls POST /analyze-skills with sample data"),
-                    ("feasibility",   "bi-graph-up-arrow",   "AI Feasibility Prediction",     "Calls POST /predict-feasibility with sample features"),
-                    ("similarity",    "bi-diagram-3",        "AI Similarity / Originality",   "Calls POST /check-similarity with a sample idea"),
-                    ("market-match",  "bi-shop",             "AI Market Matching",            "Calls POST /match-market with a sample idea"),
-                    ("risk-alarms",   "bi-exclamation-triangle", "AI Risk Alarms",            "Calls POST /risk-alarms with sample project data"),
-                };
-            }
-
-            <div class="d-flex flex-column gap-2">
+            <div class="system-test-list">
                 @foreach (var (id, icon, label, desc) in tests)
                 {
                     <div id="test-@id" class="test-card">
                         <div class="status-dot bg-secondary"></div>
-                        <div class="flex-shrink-0" style="width:36px;height:36px;background:#f1f5f9;border-radius:8px;display:flex;align-items:center;justify-content:center">
-                            <i class="@icon text-muted"></i>
+
+                        <div class="system-test-icon">
+                            <i class="@icon"></i>
                         </div>
-                        <div class="flex-grow-1">
-                            <div class="fw-semibold small">@label</div>
-                            <div class="test-detail text-muted-sm" style="display:none"></div>
-                            <div class="text-muted-sm">@desc</div>
+
+                        <div class="system-test-content">
+                            <div class="system-test-title">@label</div>
+                            <div class="test-detail system-test-detail" style="display:none"></div>
+                            <div class="system-test-desc">@desc</div>
                         </div>
+
                         <span class="test-badge badge bg-secondary">PENDING</span>
                     </div>
                 }
             </div>
 
-            <div id="test-summary" class="alert mt-3" style="display:none"></div>
-        </div>
-    </div>
-</div>
+            <div id="test-summary" class="alert mt-3 system-summary" style="display:none"></div>
+        </article>
 
-<!-- Static info cards -->
-<div class="row g-3">
-    @foreach (var (label, val, icon, color) in new[] {
-        ("Razor Pages App",      "FYPilot.Web — ASP.NET Core 8",      "window",           "#3b82f6"),
-        ("API Server",           "FYPilot.Api — REST / JWT",           "server",           "#8b5cf6"),
-        ("Database",             "PostgreSQL fyp_db + EF Core 8",      "database",         "#10b981"),
-        ("Python AI Service",    "FastAPI — localhost:8000",            "cpu",              "#f59e0b"),
-        ("Architecture",         "Clean Architecture — 7 .NET projects","layers",           "#ef4444"),
-        ("Auth",                 "Cookie Auth (Web) + JWT (API)",       "shield-lock",      "#6366f1"),
-    })
-    {
-        <div class="col-sm-6 col-xl-4">
-            <div class="page-card p-3 d-flex align-items-center gap-3">
-                <div style="width:36px;height:36px;background:@(color)20;border-radius:8px;display:flex;align-items:center;justify-content:center">
-                    <i class="bi bi-@icon" style="color:@color"></i>
-                </div>
-                <div>
-                    <div class="small fw-semibold">@label</div>
-                    <div class="text-muted-sm">@val</div>
-                </div>
+    </section>
+
+    <section class="architecture-section">
+        <div class="architecture-head">
+            <div>
+                <span class="system-eyebrow">Architecture</span>
+                <h2>Platform Components</h2>
             </div>
         </div>
-    }
-</div>
+
+        <div class="architecture-grid">
+            @foreach (var (label, val, icon, tone) in new[] {
+                ("Razor Pages App",      "FYPilot.Web — ASP.NET Core 8",        "window",      "blue"),
+                ("API Server",           "FYPilot.Api — REST / JWT",            "server",      "steel"),
+                ("Database",             "PostgreSQL fyp_db + EF Core 8",       "database",    "green"),
+                ("Python AI Service",    "FastAPI — localhost:8000",            "cpu",         "amber"),
+                ("Architecture",         "Clean Architecture — 7 .NET projects","layers",      "navy"),
+                ("Auth",                 "Cookie Auth (Web) + JWT (API)",       "shield-lock", "purple"),
+            })
+            {
+                <article class="architecture-card @tone">
+                    <div class="architecture-icon">
+                        <i class="bi bi-@icon"></i>
+                    </div>
+
+                    <div>
+                        <strong>@label</strong>
+                        <span>@val</span>
+                    </div>
+                </article>
+            }
+        </div>
+    </section>
+
+</section>
 
 @Html.AntiForgeryToken()
 
 @section Scripts {
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    FYPilot.SystemTest.setStatus('frontend', 'ok', 'Razor Pages running on .NET 8');
-});
-</script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            FYPilot.SystemTest.setStatus('frontend', 'ok', 'Razor Pages running on .NET 8');
+        });
+    </script>
+}
+
+@section Head {
+    <style>
+        :root {
+            --sys-navy: #28385E;
+            --sys-deep: #061C49;
+            --sys-blue: #304163;
+            --sys-steel: #516C8D;
+            --sys-border: #E8ECF2;
+            --sys-bg: #F7F8FA;
+            --sys-soft: #EEF2F6;
+            --sys-text: #111827;
+            --sys-muted: #64748B;
+            --sys-green: #2F7D5E;
+            --sys-red: #B94A48;
+            --sys-amber: #B7791F;
+        }
+
+        .system-test-page {
+            max-width: 1500px;
+            margin: 0 auto;
+            color: var(--sys-text);
+            padding-bottom: 1.5rem;
+        }
+
+        .system-hero {
+            margin-bottom: 1rem;
+            padding: 1.15rem;
+            border-radius: 30px;
+            color: white;
+            background: radial-gradient(circle at 15% 12%, rgba(255,255,255,.18), transparent 22%), radial-gradient(circle at 88% 20%, rgba(255,255,255,.10), transparent 20%), linear-gradient(135deg, var(--sys-deep), var(--sys-navy) 58%, var(--sys-steel) 135%);
+            box-shadow: 0 22px 48px rgba(40,56,94,.16);
+        }
+
+        .system-eyebrow {
+            display: block;
+            margin-bottom: .28rem;
+            color: var(--sys-steel);
+            font-size: .68rem;
+            font-weight: 600;
+            letter-spacing: .12em;
+            text-transform: uppercase;
+        }
+
+        .system-hero .system-eyebrow {
+            color: rgba(255,255,255,.72);
+        }
+
+        .system-hero h1 {
+            margin: 0;
+            color: white;
+            font-size: clamp(1.8rem, 3vw, 2.85rem);
+            line-height: 1.05;
+            letter-spacing: -.04em;
+            font-weight: 600;
+        }
+
+        .system-hero p {
+            max-width: 850px;
+            margin: .65rem 0 0;
+            color: rgba(255,255,255,.76);
+            font-size: .9rem;
+            line-height: 1.6;
+        }
+
+        .system-main-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .system-panel,
+        .architecture-section {
+            background: white;
+            border: 1px solid var(--sys-border);
+            box-shadow: 0 14px 34px rgba(40,56,94,.055);
+        }
+
+        .system-panel {
+            width: 100%;
+            border-radius: 28px;
+            overflow: hidden;
+        }
+
+        .system-panel-head {
+            min-height: 92px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 1rem;
+            background: radial-gradient(circle at 8% 20%, rgba(81,108,141,.12), transparent 18%), linear-gradient(180deg, #FBFCFE, #FFFFFF);
+            border-bottom: 1px solid var(--sys-border);
+        }
+
+            .system-panel-head h2,
+            .architecture-head h2 {
+                margin: 0;
+                color: var(--sys-text);
+                font-size: 1.12rem;
+                font-weight: 600;
+                letter-spacing: -.02em;
+            }
+
+            .system-panel-head p {
+                margin: .25rem 0 0;
+                color: var(--sys-muted);
+                font-size: .76rem;
+            }
+
+        .system-run-btn {
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            gap: .48rem;
+            border: 0;
+            color: white;
+            background: linear-gradient(135deg, var(--sys-navy), var(--sys-steel));
+            border-radius: 15px;
+            padding: .78rem 1.1rem;
+            font-size: .84rem;
+            font-weight: 600;
+            transition: .15s ease;
+            white-space: nowrap;
+            box-shadow: 0 12px 24px rgba(40,56,94,.16);
+        }
+
+            .system-run-btn:hover {
+                transform: translateY(-1px);
+                box-shadow: 0 16px 30px rgba(40,56,94,.20);
+            }
+
+        .system-test-list {
+            display: grid;
+            gap: .65rem;
+            padding: 1rem;
+        }
+
+        .test-card {
+            display: grid;
+            grid-template-columns: auto auto minmax(0, 1fr) auto;
+            gap: .75rem;
+            align-items: center;
+            min-height: 76px;
+            padding: .78rem;
+            border: 1px solid var(--sys-border);
+            border-radius: 19px;
+            background: #FFFFFF;
+            position: relative;
+            overflow: hidden;
+            transition: .18s ease;
+        }
+
+            .test-card::before {
+                content: "";
+                position: absolute;
+                left: .45rem;
+                top: 18px;
+                bottom: 18px;
+                width: 3px;
+                border-radius: 999px;
+                background: var(--sys-steel);
+                opacity: .22;
+                transition: .18s ease;
+            }
+
+            .test-card:hover {
+                background: linear-gradient(90deg, rgba(238,242,246,.70), #FFFFFF 48%);
+                transform: translateY(-1px);
+                box-shadow: 0 12px 24px rgba(40,56,94,.06);
+            }
+
+                .test-card:hover::before {
+                    opacity: .75;
+                    background: var(--sys-blue);
+                }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            position: relative;
+            z-index: 1;
+        }
+
+        .system-test-icon {
+            width: 42px;
+            height: 42px;
+            display: grid;
+            place-items: center;
+            border-radius: 15px;
+            color: var(--sys-blue);
+            background: var(--sys-soft);
+            font-size: 1rem;
+            transition: .18s ease;
+        }
+
+        .test-card:hover .system-test-icon {
+            color: white;
+            background: linear-gradient(135deg, var(--sys-navy), var(--sys-steel));
+            box-shadow: 0 10px 22px rgba(40,56,94,.14);
+        }
+
+        .system-test-title {
+            color: var(--sys-text);
+            font-size: .84rem;
+            font-weight: 600;
+        }
+
+        .system-test-desc,
+        .system-test-detail,
+        .text-muted-sm {
+            color: var(--sys-muted);
+            font-size: .72rem;
+            line-height: 1.4;
+        }
+
+        .test-badge {
+            border-radius: 999px;
+            padding: .35rem .55rem;
+            font-size: .64rem;
+            font-weight: 600;
+        }
+
+        .system-summary {
+            margin: 0 1rem 1rem;
+            border-radius: 16px;
+            font-size: .82rem;
+        }
+
+        .architecture-section {
+            border-radius: 28px;
+            padding: 1rem;
+        }
+
+        .architecture-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: .85rem;
+        }
+
+        .architecture-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: .75rem;
+        }
+
+        .architecture-card {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: .75rem;
+            align-items: center;
+            min-height: 86px;
+            padding: .85rem;
+            border: 1px solid var(--sys-border);
+            border-radius: 20px;
+            background: #FFFFFF;
+            transition: .18s ease;
+        }
+
+            .architecture-card:hover {
+                transform: translateY(-1px);
+                border-color: #B8C8DD;
+                box-shadow: 0 10px 22px rgba(40,56,94,.07);
+            }
+
+        .architecture-icon {
+            width: 44px;
+            height: 44px;
+            display: grid;
+            place-items: center;
+            border-radius: 16px;
+            color: var(--sys-blue);
+            background: var(--sys-soft);
+            font-size: 1.05rem;
+        }
+
+        .architecture-card.green .architecture-icon {
+            color: var(--sys-green);
+            background: #EFF8F3;
+        }
+
+        .architecture-card.amber .architecture-icon {
+            color: var(--sys-amber);
+            background: #FFF8EA;
+        }
+
+        .architecture-card.navy .architecture-icon,
+        .architecture-card.blue .architecture-icon,
+        .architecture-card.steel .architecture-icon,
+        .architecture-card.purple .architecture-icon {
+            color: var(--sys-blue);
+            background: var(--sys-soft);
+        }
+
+        .architecture-card strong {
+            display: block;
+            color: var(--sys-text);
+            font-size: .84rem;
+            font-weight: 600;
+        }
+
+        .architecture-card span {
+            display: block;
+            margin-top: .15rem;
+            color: var(--sys-muted);
+            font-size: .72rem;
+            line-height: 1.35;
+        }
+
+        .status-dot.bg-secondary,
+        .test-badge.bg-secondary {
+            background-color: #94A3B8 !important;
+        }
+
+        .status-dot.bg-success,
+        .test-badge.bg-success {
+            background-color: var(--sys-green) !important;
+        }
+
+        .status-dot.bg-danger,
+        .test-badge.bg-danger {
+            background-color: var(--sys-red) !important;
+        }
+
+        .status-dot.bg-warning,
+        .test-badge.bg-warning {
+            background-color: var(--sys-amber) !important;
+        }
+
+        .test-badge.bg-success,
+        .test-badge.bg-danger,
+        .test-badge.bg-warning,
+        .test-badge.bg-secondary {
+            color: white !important;
+        }
+
+        @@media (max-width: 1280px) {
+            .architecture-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @@media (max-width: 767px) {
+            .system-panel-head {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .system-run-btn {
+                width: 100%;
+            }
+
+            .test-card {
+                grid-template-columns: auto minmax(0, 1fr);
+            }
+
+            .system-test-icon {
+                grid-column: 1;
+            }
+
+            .system-test-content {
+                grid-column: 2;
+            }
+
+            .test-badge {
+                grid-column: 2;
+                justify-self: start;
+            }
+
+            .architecture-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
 }

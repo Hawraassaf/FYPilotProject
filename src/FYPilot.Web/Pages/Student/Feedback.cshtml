@@ -1,143 +1,1851 @@
 @page
+@using System.Security.Claims
 @model FYPilot.Web.Pages.Student.FeedbackModel
+
 @{
-    ViewData["Title"]    = "Supervisor Feedback";
-    ViewData["Subtitle"] = "Reviews and evaluations from your supervisor";
+    ViewData["Title"] = "Supervisor Feedback";
+    ViewData["Subtitle"] = "Feedback history and communication with your supervisor";
+
+    var selected = Model.SelectedFeedback;
 }
 
-@if (!Model.Feedbacks.Any())
-{
-    <div class="page-card p-5 text-center text-muted">
-        <i class="bi bi-chat-square-text display-4 d-block mb-3" style="color:#cbd5e1"></i>
-        <h5 class="fw-semibold">No Feedback Yet</h5>
-        <p class="mb-0 small">Your supervisor hasn't reviewed any of your ideas yet.<br/>Submit ideas via the Idea Generator and your supervisor will be notified.</p>
+@section Head {
+    <style>
+        .sf-page {
+            max-width: 1480px;
+            margin: 0 auto;
+        }
+
+        .sf-hero {
+            border-radius: 24px;
+            padding: 1.35rem;
+            color: #ffffff;
+            background: linear-gradient(135deg, #28385E 0%, #304163 60%, #516C8D 120%);
+            box-shadow: 0 16px 38px rgba(40, 56, 94, 0.15);
+            margin-bottom: 1rem;
+        }
+
+            .sf-hero h1 {
+                margin: 0;
+                font-size: clamp(1.6rem, 3vw, 2.25rem);
+                font-weight: 780;
+                letter-spacing: -0.04em;
+            }
+
+            .sf-hero p {
+                margin: 0.45rem 0 0;
+                color: rgba(255,255,255,0.72);
+                max-width: 800px;
+                line-height: 1.6;
+            }
+
+        .sf-layout {
+            display: grid;
+            grid-template-columns: 360px minmax(0, 1fr);
+            gap: 1rem;
+            align-items: start;
+        }
+
+        .sf-panel,
+        .sf-main,
+        .sf-empty {
+            background: #ffffff;
+            border: 1px solid #E8E8E8;
+            border-radius: 22px;
+            box-shadow: 0 12px 30px rgba(15,23,42,0.05);
+        }
+
+        .sf-panel {
+            overflow: hidden;
+            position: sticky;
+            top: 104px;
+        }
+
+        .sf-panel-head {
+            padding: 1rem;
+            border-bottom: 1px solid #EEF2F7;
+            background: #FAFBFD;
+        }
+
+            .sf-panel-head h2 {
+                margin: 0;
+                color: #111827;
+                font-size: 1rem;
+                font-weight: 760;
+            }
+
+            .sf-panel-head p {
+                margin: 0.25rem 0 0;
+                color: #64748B;
+                font-size: 0.8rem;
+            }
+
+        .sf-feedback-list {
+            padding: 0.75rem;
+            display: grid;
+            gap: 0.55rem;
+        }
+
+        .sf-feedback-link {
+            display: block;
+            border-radius: 17px;
+            padding: 0.85rem;
+            color: inherit;
+            border: 1px solid #EEF2F7;
+            background: #ffffff;
+            transition: 0.18s ease;
+            text-decoration: none;
+        }
+
+            .sf-feedback-link:hover,
+            .sf-feedback-link.active {
+                background: #F7F8FA;
+                border-color: #DDE5EF;
+                transform: translateX(2px);
+            }
+
+            .sf-feedback-link.active {
+                box-shadow: 0 8px 20px rgba(15,23,42,0.06);
+            }
+
+        .sf-item-title {
+            color: #111827;
+            font-size: 0.88rem;
+            font-weight: 740;
+            line-height: 1.3;
+        }
+
+        .sf-item-meta {
+            color: #64748B;
+            font-size: 0.74rem;
+            margin-top: 0.25rem;
+        }
+
+        .sf-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            margin-top: 0.55rem;
+            padding: 0.3rem 0.55rem;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 760;
+        }
+
+        .sf-empty {
+            min-height: 520px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 2rem;
+            background: linear-gradient(180deg, #ffffff, #FAFBFD);
+        }
+
+        .sf-empty-icon {
+            width: 76px;
+            height: 76px;
+            border-radius: 24px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #516C8D;
+            background: #EEF2F6;
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        .sf-empty h2 {
+            color: #111827;
+            font-size: 1.25rem;
+            font-weight: 760;
+            margin: 0;
+        }
+
+        .sf-empty p {
+            max-width: 520px;
+            margin: 0.55rem auto 0;
+            color: #64748B;
+            line-height: 1.6;
+        }
+
+        .sf-main {
+            overflow: hidden;
+        }
+
+        .sf-main-head {
+            padding: 1.1rem;
+            border-bottom: 1px solid #EEF2F7;
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: flex-start;
+        }
+
+            .sf-main-head h2 {
+                margin: 0;
+                color: #111827;
+                font-size: 1.25rem;
+                font-weight: 780;
+                letter-spacing: -0.035em;
+            }
+
+        .sf-main-sub {
+            color: #64748B;
+            font-size: 0.82rem;
+            margin-top: 0.3rem;
+        }
+
+        .sf-main-body {
+            padding: 1.1rem;
+        }
+
+        .sf-score-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.8rem;
+            margin-bottom: 1rem;
+        }
+
+        .sf-score-card {
+            border-radius: 18px;
+            background: #FAFBFD;
+            border: 1px solid #EEF2F7;
+            padding: 0.95rem;
+        }
+
+            .sf-score-card span {
+                display: block;
+                color: #64748B;
+                font-size: 0.75rem;
+                font-weight: 700;
+                margin-bottom: 0.35rem;
+            }
+
+            .sf-score-card strong {
+                color: #28385E;
+                font-size: 1.4rem;
+                font-weight: 820;
+            }
+
+        .sf-progress {
+            height: 8px;
+            background: #EEF2F6;
+            border-radius: 999px;
+            overflow: hidden;
+            margin-top: 0.6rem;
+        }
+
+        .sf-progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #516C8D, #28385E);
+            border-radius: 999px;
+        }
+
+        .sf-section {
+            border: 1px solid #EEF2F7;
+            border-radius: 20px;
+            overflow: hidden;
+            margin-bottom: 1rem;
+        }
+
+        .sf-section-head {
+            padding: 0.85rem 1rem;
+            background: #FAFBFD;
+            border-bottom: 1px solid #EEF2F7;
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            color: #111827;
+            font-weight: 750;
+            font-size: 0.9rem;
+        }
+
+            .sf-section-head i {
+                color: #516C8D;
+            }
+
+        .sf-section-body {
+            padding: 1rem;
+            color: #111827;
+            line-height: 1.7;
+            white-space: pre-wrap;
+            font-size: 0.9rem;
+        }
+
+        .sf-muted {
+            color: #64748B;
+            font-style: italic;
+        }
+
+        .sf-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+            margin-bottom: 1rem;
+        }
+
+        .sf-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            border-radius: 999px;
+            padding: 0.38rem 0.65rem;
+            color: #304163;
+            background: #EEF2F6;
+            font-size: 0.74rem;
+            font-weight: 720;
+        }
+
+        .sf-chat {
+            border: 1px solid #EEF2F7;
+            border-radius: 22px;
+            overflow: hidden;
+            background: #FAFBFD;
+        }
+
+        .sf-chat-head {
+            padding: 0.95rem 1rem;
+            background: #ffffff;
+            border-bottom: 1px solid #EEF2F7;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+            .sf-chat-head h3 {
+                margin: 0;
+                color: #111827;
+                font-size: 1rem;
+                font-weight: 760;
+            }
+
+            .sf-chat-head p {
+                margin: 0.2rem 0 0;
+                color: #64748B;
+                font-size: 0.78rem;
+            }
+
+        /* Chat container */
+        .sf-chat-body {
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            max-height: 420px;
+            overflow-y: auto;
+        }
+
+        /* Message row */
+        .sf-message {
+            width: 100%;
+            display: flex;
+            align-items: flex-start;
+            gap: 0.55rem;
+        }
+
+            .sf-message.supervisor {
+                justify-content: flex-start;
+            }
+
+            .sf-message.student {
+                justify-content: flex-end;
+            }
+
+                .sf-message.student .sf-avatar {
+                    order: 2;
+                }
+
+                .sf-message.student .sf-bubble {
+                    order: 1;
+                }
+
+        .sf-avatar {
+            width: 34px;
+            height: 34px;
+            min-width: 34px;
+            border-radius: 13px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #516C8D;
+            background: #EEF2F6;
+            flex-shrink: 0;
+        }
+
+        /*
+                                   IMPORTANT:
+                                   white-space: normal is what fixes the giant message cards.
+                                   The old pre-wrap preserved Razor indentation/new lines and made bubbles huge.
+                                */
+        .sf-bubble {
+            display: inline-flex;
+            flex-direction: column;
+            width: max-content;
+            max-width: min(520px, 74%);
+            min-width: 0;
+            height: auto;
+            min-height: 0;
+            padding: 0.65rem 0.85rem;
+            border-radius: 18px;
+            background: #ffffff;
+            border: 1px solid #EEF2F7;
+            color: #111827;
+            font-size: 0.86rem;
+            line-height: 1.55;
+            white-space: normal;
+            overflow-wrap: anywhere;
+            word-break: normal;
+            box-shadow: 0 8px 18px rgba(15,23,42,0.02);
+        }
+
+        .sf-message.student .sf-bubble {
+            align-items: flex-end;
+            text-align: right;
+            max-width: min(360px, 70%);
+            color: #ffffff;
+            background: linear-gradient(135deg, #304163, #516C8D);
+            border-color: transparent;
+        }
+
+        .sf-message.supervisor .sf-bubble {
+            align-items: flex-start;
+            text-align: left;
+            max-width: min(560px, 74%);
+        }
+
+        .sf-bubble time {
+            display: block;
+            width: max-content;
+            max-width: 100%;
+            margin-top: 0.25rem;
+            color: #94A3B8;
+            font-size: 0.64rem;
+            line-height: 1.2;
+            white-space: normal;
+        }
+
+        .sf-message.student .sf-bubble time {
+            align-self: flex-start;
+            color: rgba(255,255,255,0.68);
+        }
+
+        .sf-reply {
+            padding: 0.9rem;
+            border-top: 1px solid #EEF2F7;
+            background: #ffffff;
+        }
+
+            .sf-reply textarea {
+                min-height: 82px;
+                border-radius: 16px;
+                border-color: #DDDDDD;
+                resize: vertical;
+            }
+
+                .sf-reply textarea:focus {
+                    border-color: #516C8D;
+                    box-shadow: 0 0 0 0.2rem rgba(81,108,141,0.15);
+                }
+
+        .sf-reply-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-top: 0.65rem;
+        }
+
+        .sf-reply-note {
+            color: #64748B;
+            font-size: 0.74rem;
+        }
+
+
+
+        .sf-reply-preview {
+            display: none;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-bottom: 0.65rem;
+            padding: 0.65rem 0.75rem;
+            border-radius: 14px;
+            background: #F1F5F9;
+            border-left: 4px solid #516C8D;
+            color: #334155;
+            font-size: 0.78rem;
+            line-height: 1.45;
+        }
+
+            .sf-reply-preview.show {
+                display: flex;
+            }
+
+            .sf-reply-preview button {
+                border: 0;
+                background: transparent;
+                color: #64748B;
+                font-weight: 800;
+            }
+
+        .sf-message-reply {
+            margin-bottom: 0.45rem;
+            padding: 0.45rem 0.55rem;
+            border-radius: 12px;
+            background: rgba(15,23,42,0.06);
+            font-size: 0.72rem;
+            color: inherit;
+            opacity: 0.86;
+            border-left: 3px solid rgba(81,108,141,0.45);
+        }
+
+        .sf-message-actions {
+            display: flex;
+            gap: 0.35rem;
+            margin-top: 0.35rem;
+            opacity: 0;
+            transition: 0.16s ease;
+        }
+
+        .sf-message:hover .sf-message-actions {
+            opacity: 1;
+        }
+
+        .sf-message-actions button {
+            border: 0;
+            border-radius: 999px;
+            padding: 0.18rem 0.48rem;
+            font-size: 0.68rem;
+            font-weight: 750;
+            color: #475569;
+            background: #EEF2F6;
+        }
+
+        .sf-message.student .sf-message-actions button {
+            color: #ffffff;
+            background: rgba(255,255,255,0.16);
+        }
+
+        .sf-message-actions button:hover {
+            filter: brightness(0.96);
+        }
+
+
+        .sf-inline-editor {
+            width: min(420px, 100%);
+            display: grid;
+            gap: 0.45rem;
+            margin-top: 0.35rem;
+        }
+
+            .sf-inline-editor textarea {
+                width: 100%;
+                min-height: 74px;
+                resize: vertical;
+                border: 1px solid rgba(148, 163, 184, 0.65);
+                border-radius: 14px;
+                padding: 0.6rem 0.7rem;
+                font-size: 0.84rem;
+                line-height: 1.5;
+                outline: none;
+            }
+
+        .sf-message.student .sf-inline-editor textarea {
+            color: #111827;
+            background: #ffffff;
+        }
+
+        .sf-inline-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.4rem;
+        }
+
+            .sf-inline-actions button {
+                border: 0;
+                border-radius: 999px;
+                padding: 0.28rem 0.68rem;
+                font-size: 0.72rem;
+                font-weight: 800;
+            }
+
+        .sf-inline-save {
+            color: #ffffff;
+            background: #304163;
+        }
+
+        .sf-inline-cancel {
+            color: #334155;
+            background: #E2E8F0;
+        }
+
+
+        .sf-message-deleted {
+            opacity: 0.78;
+            font-style: italic;
+        }
+
+        .sf-edited-text {
+            margin-left: 0.25rem;
+            opacity: 0.72;
+        }
+
+        .sf-chat-state {
+            min-height: 1.2rem;
+            margin-bottom: 0.55rem;
+            color: #64748B;
+            font-size: 0.76rem;
+            font-weight: 650;
+        }
+
+        .sf-typing {
+            display: none;
+            align-items: center;
+            gap: 0.35rem;
+        }
+
+            .sf-typing.show {
+                display: inline-flex;
+            }
+
+        .sf-typing-dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: #516C8D;
+            animation: sfTyping 1s infinite ease-in-out;
+        }
+
+            .sf-typing-dot:nth-child(2) {
+                animation-delay: 0.15s;
+            }
+
+            .sf-typing-dot:nth-child(3) {
+                animation-delay: 0.3s;
+            }
+
+        .sf-seen-text {
+            margin-left: 0.25rem;
+            color: rgba(255,255,255,0.74);
+        }
+
+        @@keyframes sfTyping {
+            0%, 80%, 100% {
+                opacity: 0.35;
+                transform: translateY(0);
+            }
+
+            40% {
+                opacity: 1;
+                transform: translateY(-2px);
+            }
+        }
+
+        .sf-send-btn {
+            border-radius: 14px;
+            color: #ffffff;
+            background: linear-gradient(135deg, #304163, #516C8D);
+            border: 1px solid rgba(81,108,141,0.25);
+            padding: 0.6rem 0.9rem;
+            font-size: 0.84rem;
+            font-weight: 720;
+        }
+
+            .sf-send-btn:hover {
+                color: #ffffff;
+                background: linear-gradient(135deg, #28385E, #304163);
+            }
+
+        @@media (max-width: 1199px) {
+            .sf-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .sf-panel {
+                position: static;
+            }
+        }
+
+        @@media (max-width: 767px) {
+            .sf-main-head {
+                flex-direction: column;
+            }
+
+            .sf-score-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .sf-bubble,
+            .sf-message.student .sf-bubble,
+            .sf-message.supervisor .sf-bubble {
+                max-width: 100%;
+            }
+
+            .sf-reply-actions {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .sf-send-btn {
+                width: 100%;
+            }
+        }
+        /* Supervisor assignment gate */
+        .sf-gate {
+            position: relative;
+            min-height: 650px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            border-radius: 28px;
+            padding: 2rem;
+            background: linear-gradient(135deg, #28385E 0%, #304163 55%, #516C8D 120%);
+            box-shadow: 0 18px 46px rgba(40,56,94,0.18);
+        }
+
+            .sf-gate::before {
+                content: "";
+                position: absolute;
+                inset: 0;
+                background: radial-gradient(circle at 12% 18%, rgba(255,255,255,0.22), transparent 30%), radial-gradient(circle at 92% 82%, rgba(255,255,255,0.16), transparent 28%), rgba(15,23,42,0.18);
+                backdrop-filter: blur(8px);
+            }
+
+        .sf-gate-card {
+            position: relative;
+            z-index: 2;
+            width: min(1120px, 100%);
+            background: rgba(255,255,255,0.96);
+            border: 1px solid rgba(255,255,255,0.7);
+            border-radius: 28px;
+            padding: 1.6rem;
+            box-shadow: 0 28px 80px rgba(15,23,42,0.28);
+        }
+
+        .sf-gate-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: flex-start;
+            margin-bottom: 1.2rem;
+        }
+
+        .sf-gate-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            color: #516C8D;
+            background: #EEF2F6;
+            border: 1px solid #E8ECF2;
+            border-radius: 999px;
+            padding: 0.42rem 0.7rem;
+            font-size: 0.74rem;
+            font-weight: 800;
+            margin-bottom: 0.8rem;
+        }
+
+        .sf-gate-card h2 {
+            margin: 0;
+            color: #28385E;
+            font-size: clamp(1.45rem, 3vw, 2.25rem);
+            font-weight: 850;
+            letter-spacing: -0.05em;
+        }
+
+        .sf-gate-card p {
+            color: #64748B;
+            line-height: 1.65;
+            margin: 0.65rem 0 0;
+            max-width: 780px;
+        }
+
+        .sf-gate-state {
+            min-width: 150px;
+            text-align: center;
+            border-radius: 20px;
+            padding: 0.85rem;
+            background: #F7F8FA;
+            border: 1px solid #E8ECF2;
+            color: #28385E;
+            font-weight: 850;
+        }
+
+            .sf-gate-state span {
+                display: block;
+                color: #64748B;
+                font-size: 0.72rem;
+                font-weight: 750;
+                margin-top: 0.2rem;
+            }
+
+        .sf-requested-box,
+        .sf-admin-note,
+        .sf-gate-empty {
+            border-radius: 20px;
+            border: 1px solid #E8ECF2;
+            background: #F7F8FA;
+            padding: 1rem;
+            color: #28385E;
+            margin-top: 1rem;
+        }
+
+            .sf-requested-box span,
+            .sf-requested-box small {
+                display: block;
+                color: #64748B;
+            }
+
+            .sf-requested-box strong {
+                display: block;
+                font-size: 1.35rem;
+                color: #28385E;
+                margin: 0.25rem 0;
+            }
+
+        .sf-supervisor-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+            gap: 1rem;
+            margin-top: 1.2rem;
+        }
+
+        .sf-supervisor-card {
+            display: flex;
+            flex-direction: column;
+            gap: 0.8rem;
+            border: 1px solid #E8ECF2;
+            border-radius: 22px;
+            padding: 1rem;
+            background: #ffffff;
+            box-shadow: 0 14px 32px rgba(40,56,94,0.08);
+        }
+
+        .sf-supervisor-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 0.75rem;
+        }
+
+            .sf-supervisor-top h3 {
+                margin: 0;
+                color: #111827;
+                font-size: 1rem;
+                font-weight: 820;
+                line-height: 1.3;
+            }
+
+            .sf-supervisor-top span {
+                display: block;
+                color: #64748B;
+                font-size: 0.76rem;
+                margin-top: 0.2rem;
+            }
+
+        .sf-match-pill {
+            white-space: nowrap;
+            color: #166534;
+            background: #F0FDF4;
+            border: 1px solid #BBF7D0;
+            border-radius: 999px;
+            padding: 0.35rem 0.55rem;
+            font-size: 0.72rem;
+            font-weight: 850;
+        }
+
+        .sf-supervisor-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+        }
+
+            .sf-supervisor-tags span {
+                color: #304163;
+                background: #EEF2F6;
+                border: 1px solid #E8ECF2;
+                border-radius: 999px;
+                padding: 0.34rem 0.58rem;
+                font-size: 0.72rem;
+                font-weight: 760;
+            }
+
+        .sf-capacity-line {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            align-items: center;
+            color: #64748B;
+            font-size: 0.76rem;
+            font-weight: 750;
+        }
+
+        .sf-capacity-bar {
+            height: 7px;
+            border-radius: 999px;
+            background: #EEF2F6;
+            overflow: hidden;
+        }
+
+        .sf-capacity-fill {
+            height: 100%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #516C8D, #28385E);
+        }
+
+        .sf-supervisor-reason {
+            min-height: 42px;
+            color: #64748B;
+            font-size: 0.78rem;
+            line-height: 1.55;
+        }
+
+        .sf-supervisor-card textarea {
+            width: 100%;
+            min-height: 74px;
+            resize: vertical;
+            border: 1px solid #E8ECF2;
+            border-radius: 16px;
+            padding: 0.75rem;
+            color: #111827;
+            font-family: inherit;
+            font-size: 0.84rem;
+            outline: none;
+        }
+
+            .sf-supervisor-card textarea:focus {
+                border-color: #516C8D;
+                box-shadow: 0 0 0 0.2rem rgba(81,108,141,0.14);
+            }
+
+        .sf-request-btn {
+            border: 0;
+            border-radius: 16px;
+            padding: 0.75rem 0.9rem;
+            color: #ffffff;
+            background: linear-gradient(135deg, #304163, #516C8D);
+            font-size: 0.84rem;
+            font-weight: 820;
+        }
+
+            .sf-request-btn:hover {
+                background: linear-gradient(135deg, #28385E, #304163);
+            }
+
+        @@media (max-width: 767px) {
+            .sf-gate {
+                padding: 1rem;
+            }
+
+            .sf-gate-card {
+                padding: 1rem;
+            }
+
+            .sf-gate-header {
+                flex-direction: column;
+            }
+
+            .sf-gate-state {
+                width: 100%;
+            }
+        }
+    </style>
+}
+
+<section class="sf-page">
+
+    <div class="sf-hero">
+        <h1>Supervisor Feedback</h1>
+        <p>
+            View your supervisor’s previous reviews and continue the discussion directly under each feedback.
+        </p>
     </div>
-}
-else
-{
-    <div class="row g-4">
-        @foreach (var item in Model.Feedbacks)
-        {
-            var statusColor = item.Evaluation.Status switch {
-                "approved"       => "#10b981",
-                "needs_revision" => "#f59e0b",
-                "rejected"       => "#ef4444",
-                _                => "#64748b"
-            };
-            var statusBg = item.Evaluation.Status switch {
-                "approved"       => "#f0fdf4",
-                "needs_revision" => "#fffbeb",
-                "rejected"       => "#fef2f2",
-                _                => "#f8fafc"
-            };
-            var statusLabel = item.Evaluation.Status switch {
-                "approved"       => "Approved",
-                "needs_revision" => "Needs Revision",
-                "rejected"       => "Rejected",
-                _                => "Pending Review"
-            };
-            var statusIcon = item.Evaluation.Status switch {
-                "approved"       => "check-circle-fill",
-                "needs_revision" => "exclamation-circle-fill",
-                "rejected"       => "x-circle-fill",
-                _                => "clock-fill"
-            };
 
-            <div class="col-12">
-                <div class="page-card p-0 overflow-hidden">
+    @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
+    {
+        <div class="alert alert-success rounded-4">
+            <i class="bi bi-check-circle me-2"></i>
+            @Model.SuccessMessage
+        </div>
+    }
 
-                    <!-- Card header -->
-                    <div class="d-flex align-items-center justify-content-between px-4 py-3"
-                         style="background:@(statusBg);border-bottom:1px solid #e2e8f0">
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div class="alert alert-danger rounded-4">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            @Model.ErrorMessage
+        </div>
+    }
+
+    @if (!Model.CanAccessFeedback)
+    {
+        <section class="sf-gate">
+            <div class="sf-gate-card">
+
+                @if (Model.CurrentAssignment?.Status == "pending_admin")
+                {
+                    <div class="sf-gate-header">
                         <div>
-                            <h6 class="mb-0 fw-bold">@item.Idea.Title</h6>
-                            <div class="text-muted small mt-1">
-                                <i class="bi bi-person me-1"></i>Reviewed by <strong>@item.SupervisorName</strong>
-                                &nbsp;·&nbsp;
-                                <i class="bi bi-calendar3 me-1"></i>@item.Evaluation.UpdatedAt.ToString("MMM d, yyyy")
+                            <div class="sf-gate-kicker">
+                                <i class="bi bi-hourglass-split"></i>
+                                Assignment request submitted
+                            </div>
+
+                            <h2>Waiting for Admin Approval</h2>
+
+                            <p>
+                                You selected a supervisor. The admin must review and approve the assignment before
+                                you can access supervisor feedback and official discussion.
+                            </p>
+                        </div>
+
+                        <div class="sf-gate-state">
+                            Pending
+                            <span>Admin approval</span>
+                        </div>
+                    </div>
+
+                    <div class="sf-requested-box">
+                        <span>Requested supervisor</span>
+                        <strong>@Model.CurrentAssignment.Supervisor?.FullName</strong>
+                        <small>
+                            @Model.CurrentAssignment.Supervisor?.SupervisorProfile?.Specialization
+                            @if (!string.IsNullOrWhiteSpace(Model.CurrentAssignment.Supervisor?.SupervisorProfile?.Department))
+                            {
+                                <text> · @Model.CurrentAssignment.Supervisor?.SupervisorProfile?.Department</text>
+                            }
+                        </small>
+                    </div>
+                }
+                else
+                {
+                    <div class="sf-gate-header">
+                        <div>
+                            <div class="sf-gate-kicker">
+                                <i class="bi bi-person-check"></i>
+                                Supervisor assignment required
+                            </div>
+
+                            @if (Model.CurrentAssignment?.Status == "rejected")
+                            {
+                                <h2>Supervisor Request Not Approved</h2>
+                                <p>
+                                    The admin did not approve your previous supervisor request.
+                                    Please choose another available supervisor from the list below.
+                                </p>
+
+                                @if (!string.IsNullOrWhiteSpace(Model.CurrentAssignment.AdminNote))
+                                {
+                                    <div class="sf-admin-note">
+                                        <strong>Admin note:</strong>
+                                        @Model.CurrentAssignment.AdminNote
+                                    </div>
+                                }
+                            }
+                            else
+                            {
+                                <h2>Choose Your Supervisor</h2>
+                                <p>
+                                    Select one available supervisor that matches your major and profile.
+                                    Supervisors who already reached 4 active students are hidden from this list.
+                                </p>
+                            }
+                        </div>
+
+                        <div class="sf-gate-state">
+                            4 max
+                            <span>students per supervisor</span>
+                        </div>
+                    </div>
+
+                    @if (Model.AvailableSupervisors.Any())
+                    {
+                        <div class="sf-supervisor-grid">
+                            @foreach (var supervisor in Model.AvailableSupervisors)
+                            {
+                                var capacityPercent = supervisor.CapacityLimit == 0
+                                    ? 0
+                                    : Math.Clamp((supervisor.CapacityUsed * 100) / supervisor.CapacityLimit, 0, 100);
+
+                                <form method="post" asp-page-handler="RequestSupervisor" class="sf-supervisor-card">
+                                    @Html.AntiForgeryToken()
+
+                                    <input type="hidden" name="supervisorId" value="@supervisor.SupervisorId" />
+
+                                    <div class="sf-supervisor-top">
+                                        <div>
+                                            <h3>@supervisor.FullName</h3>
+                                            <span>
+                                                @supervisor.AcademicTitle
+                                                @if (!string.IsNullOrWhiteSpace(supervisor.Department))
+                                                {
+                                                    <text> · @supervisor.Department</text>
+                                                }
+                                            </span>
+                                        </div>
+
+                                        <div class="sf-match-pill">@supervisor.MatchScore% match</div>
+                                    </div>
+
+                                    <div class="sf-supervisor-tags">
+                                        @if (!string.IsNullOrWhiteSpace(supervisor.Specialization))
+                                        {
+                                            <span>@supervisor.Specialization</span>
+                                        }
+
+                                        @if (!string.IsNullOrWhiteSpace(supervisor.MeetingMode))
+                                        {
+                                            <span>@supervisor.MeetingMode</span>
+                                        }
+
+                                        @if (!string.IsNullOrWhiteSpace(supervisor.OfficeHours))
+                                        {
+                                            <span>@supervisor.OfficeHours</span>
+                                        }
+                                    </div>
+
+                                    <div class="sf-capacity-line">
+                                        <span>Capacity</span>
+                                        <strong>@supervisor.CapacityUsed / @supervisor.CapacityLimit</strong>
+                                    </div>
+
+                                    <div class="sf-capacity-bar">
+                                        <div class="sf-capacity-fill" style="width:@capacityPercent%"></div>
+                                    </div>
+
+                                    <div class="sf-supervisor-reason">
+                                        @if (!string.IsNullOrWhiteSpace(supervisor.MatchReason))
+                                        {
+                                            <span>Matched because @supervisor.MatchReason.</span>
+                                        }
+                                        else
+                                        {
+                                            <span>Available supervisor for your profile.</span>
+                                        }
+                                    </div>
+
+                                    <textarea name="studentMessage"
+                                              placeholder="Optional message to admin explaining why you selected this supervisor..."></textarea>
+
+                                    <button type="submit" class="sf-request-btn">
+                                        <i class="bi bi-send me-1"></i>
+                                        Request This Supervisor
+                                    </button>
+                                </form>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="sf-gate-empty">
+                            <strong>No available supervisors right now.</strong>
+                            <p>
+                                No supervisor matching your major is currently available, or all matching supervisors are full.
+                                Please contact the admin.
+                            </p>
+                        </div>
+                    }
+                }
+            </div>
+        </section>
+    }
+    else if (!Model.Feedbacks.Any())
+    {
+        <div class="sf-empty">
+            <div>
+                <div class="sf-empty-icon">
+                    <i class="bi bi-chat-square-text"></i>
+                </div>
+
+                <h2>No Feedback Yet</h2>
+
+                <p>
+                    Your supervisor has not reviewed any of your ideas yet.
+                    Submit ideas through the Idea Generator and your supervisor will be able to send feedback.
+                </p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="sf-layout">
+
+            <aside class="sf-panel">
+                <div class="sf-panel-head">
+                    <h2>Previous Feedback</h2>
+                    <p>Select a feedback item to view its details and discussion.</p>
+                </div>
+
+                <div class="sf-feedback-list">
+                    @foreach (var item in Model.Feedbacks)
+                    {
+                        var meta = StatusMeta(item.Evaluation.Status);
+                        var active = Model.SelectedFeedback?.Evaluation.Id == item.Evaluation.Id;
+
+                        <a asp-page="./Feedback"
+                           asp-route-evaluationId="@item.Evaluation.Id"
+                           class="sf-feedback-link @(active ? "active" : "")">
+
+                            <div class="sf-item-title">@item.Idea.Title</div>
+
+                            <div class="sf-item-meta">
+                                @item.SupervisorName · @item.Evaluation.UpdatedAt.ToString("MMM d, yyyy")
+                            </div>
+
+                            <span class="sf-status" style="color:@meta.Color;background:@meta.Background">
+                                <i class="bi bi-@meta.Icon"></i>
+                                @meta.Label
+                            </span>
+                        </a>
+                    }
+                </div>
+            </aside>
+
+            @if (selected != null)
+            {
+                var meta = StatusMeta(selected.Evaluation.Status);
+
+                <main class="sf-main">
+
+                    <div class="sf-main-head" style="background:@meta.Background">
+                        <div>
+                            <h2>@selected.Idea.Title</h2>
+
+                            <div class="sf-main-sub">
+                                Reviewed by <strong>@selected.SupervisorName</strong>
+                                · @selected.Evaluation.UpdatedAt.ToString("MMM d, yyyy")
                             </div>
                         </div>
-                        <span class="badge d-flex align-items-center gap-1 px-3 py-2"
-                              style="background:@(statusColor);font-size:0.8rem">
-                            <i class="bi bi-@(statusIcon)"></i> @statusLabel
+
+                        <span class="sf-status" style="color:@meta.Color;background:#ffffff;border:1px solid @meta.Border">
+                            <i class="bi bi-@meta.Icon"></i>
+                            @meta.Label
                         </span>
                     </div>
 
-                    <div class="p-4">
-                        <div class="row g-4">
+                    <div class="sf-main-body">
 
-                            <!-- Scores -->
-                            <div class="col-md-3">
-                                <div class="d-flex flex-column align-items-center gap-3">
-                                    <div class="text-center">
-                                        <div class="score-ring" style="width:72px;height:72px;font-size:1rem;color:#10b981">
-                                            @item.Evaluation.OriginalityScore%
-                                        </div>
-                                        <div class="small text-muted mt-1 fw-semibold">Originality</div>
-                                    </div>
-                                    <div class="text-center">
-                                        <div class="score-ring" style="width:72px;height:72px;font-size:1rem;color:#3b82f6">
-                                            @item.Evaluation.SimilarityScore%
-                                        </div>
-                                        <div class="small text-muted mt-1 fw-semibold">Similarity</div>
-                                    </div>
-                                    <div class="text-center">
-                                        <div class="score-ring" style="width:72px;height:72px;font-size:1rem;color:#8b5cf6">
-                                            @item.Idea.FeasibilityScore%
-                                        </div>
-                                        <div class="small text-muted mt-1 fw-semibold">Feasibility</div>
-                                    </div>
+                        <div class="sf-score-grid">
+                            <div class="sf-score-card">
+                                <span>Originality</span>
+                                <strong>@selected.Evaluation.OriginalityScore%</strong>
+                                <div class="sf-progress">
+                                    <div class="sf-progress-fill" style="width:@selected.Evaluation.OriginalityScore%"></div>
                                 </div>
                             </div>
 
-                            <!-- Feedback text -->
-                            <div class="col-md-9">
-                                @if (!string.IsNullOrWhiteSpace(item.Evaluation.Comment))
-                                {
-                                    <div class="mb-4">
-                                        <div class="d-flex align-items-center gap-2 mb-2">
-                                            <i class="bi bi-chat-left-text" style="color:#3b82f6"></i>
-                                            <span class="fw-semibold small text-uppercase text-muted">Supervisor Comments</span>
-                                        </div>
-                                        <div class="p-3 rounded-3" style="background:#f8fafc;border:1px solid #e2e8f0;line-height:1.7">
-                                            @item.Evaluation.Comment
-                                        </div>
-                                    </div>
-                                }
+                            <div class="sf-score-card">
+                                <span>Similarity</span>
+                                <strong>@selected.Evaluation.SimilarityScore%</strong>
+                                <div class="sf-progress">
+                                    <div class="sf-progress-fill" style="width:@selected.Evaluation.SimilarityScore%"></div>
+                                </div>
+                            </div>
 
-                                @if (!string.IsNullOrWhiteSpace(item.Evaluation.ImprovementSuggestions))
-                                {
-                                    <div class="mb-3">
-                                        <div class="d-flex align-items-center gap-2 mb-2">
-                                            <i class="bi bi-lightbulb" style="color:#f59e0b"></i>
-                                            <span class="fw-semibold small text-uppercase text-muted">Improvement Suggestions</span>
-                                        </div>
-                                        <div class="p-3 rounded-3" style="background:#fffbeb;border:1px solid #fde68a;line-height:1.7">
-                                            @item.Evaluation.ImprovementSuggestions
-                                        </div>
-                                    </div>
-                                }
-
-                                @if (string.IsNullOrWhiteSpace(item.Evaluation.Comment) && string.IsNullOrWhiteSpace(item.Evaluation.ImprovementSuggestions))
-                                {
-                                    <div class="text-muted small fst-italic">No written comments provided yet.</div>
-                                }
-
-                                <!-- Idea tags -->
-                                <div class="d-flex gap-2 flex-wrap mt-3 pt-3" style="border-top:1px solid #e2e8f0">
-                                    <span class="badge bg-primary-subtle text-primary">@item.Idea.Domain</span>
-                                    <span class="badge bg-warning-subtle text-warning text-capitalize">@item.Idea.DifficultyLevel</span>
-                                    <span class="badge bg-secondary-subtle text-secondary">@item.Idea.ExpectedDurationWeeks weeks</span>
-                                    @if (!string.IsNullOrEmpty(item.Idea.RequiredTechnologies))
-                                    {
-                                        <span class="badge bg-info-subtle text-info">@item.Idea.RequiredTechnologies</span>
-                                    }
+                            <div class="sf-score-card">
+                                <span>Feasibility</span>
+                                <strong>@selected.Idea.FeasibilityScore%</strong>
+                                <div class="sf-progress">
+                                    <div class="sf-progress-fill" style="width:@selected.Idea.FeasibilityScore%"></div>
                                 </div>
                             </div>
                         </div>
+
+                        <div class="sf-tags">
+                            @if (!string.IsNullOrWhiteSpace(selected.Idea.Domain))
+                            {
+                                <span class="sf-tag">
+                                    <i class="bi bi-folder2-open"></i>
+                                    @selected.Idea.Domain
+                                </span>
+                            }
+
+                            @if (!string.IsNullOrWhiteSpace(selected.Idea.DifficultyLevel))
+                            {
+                                <span class="sf-tag">
+                                    <i class="bi bi-bar-chart"></i>
+                                    @selected.Idea.DifficultyLevel
+                                </span>
+                            }
+
+                            <span class="sf-tag">
+                                <i class="bi bi-clock-history"></i>
+                                @selected.Idea.ExpectedDurationWeeks weeks
+                            </span>
+
+                            @if (!string.IsNullOrWhiteSpace(selected.Idea.RequiredTechnologies))
+                            {
+                                <span class="sf-tag">
+                                    <i class="bi bi-code-square"></i>
+                                    @selected.Idea.RequiredTechnologies
+                                </span>
+                            }
+                        </div>
+
+                        <section class="sf-section">
+                            <div class="sf-section-head">
+                                <i class="bi bi-chat-left-text"></i>
+                                Supervisor Comment
+                            </div>
+
+                            @if (!string.IsNullOrWhiteSpace(selected.Evaluation.Comment))
+                            {
+                                <div class="sf-section-body">@selected.Evaluation.Comment</div>
+                            }
+                            else
+                            {
+                                <div class="sf-section-body sf-muted">No written comment provided.</div>
+                            }
+                        </section>
+
+                        <section class="sf-section">
+                            <div class="sf-section-head">
+                                <i class="bi bi-lightbulb"></i>
+                                Improvement Suggestions
+                            </div>
+
+                            @if (!string.IsNullOrWhiteSpace(selected.Evaluation.ImprovementSuggestions))
+                            {
+                                <div class="sf-section-body">@selected.Evaluation.ImprovementSuggestions</div>
+                            }
+                            else
+                            {
+                                <div class="sf-section-body sf-muted">No improvement suggestions provided.</div>
+                            }
+                        </section>
+
+                        <section class="sf-chat">
+                            <div class="sf-chat-head">
+                                <div>
+                                    <h3>Discussion with Supervisor</h3>
+                                    <p>Continue the conversation about this specific feedback.</p>
+                                </div>
+
+                                <i class="bi bi-chat-dots" style="color:#516C8D"></i>
+                            </div>
+
+                            <div class="sf-chat-body" id="feedbackChatBody" data-evaluation-id="@selected.Evaluation.Id" data-current-user-id="@Model.CurrentUserId" data-idea-id="@selected.Idea.Id" data-other-name="@selected.SupervisorName">
+
+                                @if (!string.IsNullOrWhiteSpace(selected.Evaluation.Comment))
+                                {
+                                    <div class="sf-message supervisor">
+                                        <div class="sf-avatar">
+                                            <i class="bi bi-person-workspace"></i>
+                                        </div>
+
+                                        <div class="sf-bubble">
+                                            @selected.Evaluation.Comment
+                                            <time>@selected.SupervisorName · @selected.Evaluation.UpdatedAt.ToString("HH:mm")</time>
+                                        </div>
+                                    </div>
+                                }
+
+                                @foreach (var message in selected.Messages)
+                                {
+                                    var isStudent = message.SenderUserId == Model.CurrentUserId;
+                                    var isDeleted = message.DeletedAt.HasValue;
+                                    var replyTarget = message.ReplyToMessageId.HasValue
+                                        ? selected.Messages.FirstOrDefault(m => m.Id == message.ReplyToMessageId.Value)
+                                        : null;
+
+                                    <div class="sf-message @(isStudent ? "student" : "supervisor")" data-message-id="@message.Id" data-sender-id="@message.SenderUserId">
+                                        <div class="sf-avatar">
+                                            <i class="bi @(isStudent ? "bi-person" : "bi-person-workspace")"></i>
+                                        </div>
+
+                                        <div class="sf-bubble">
+                                            @if (replyTarget != null && !replyTarget.DeletedAt.HasValue)
+                                            {
+                                                <div class="sf-message-reply">
+                                                    Replying to: @TrimPreview(replyTarget.MessageText)
+                                                </div>
+                                            }
+
+                                            @if (isDeleted)
+                                            {
+                                                <span class="sf-message-text sf-message-deleted">This message was deleted.</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="sf-message-text">@message.MessageText</span>
+                                            }
+
+                                            <time>
+                                                @(isStudent ? "You" : selected.SupervisorName) · @message.CreatedAt.ToString("MMM d, HH:mm")
+                                                @(message.EditedAt.HasValue && !isDeleted ? " · Edited" : "")
+                                                @(isStudent && message.SeenAt.HasValue && !isDeleted ? " · Seen" : "")
+                                            </time>
+
+                                            @if (!isDeleted)
+                                            {
+                                                <div class="sf-message-actions">
+                                                    <button type="button" data-chat-action="reply" data-message-id="@message.Id" data-message-text="@message.MessageText">Reply</button>
+
+                                                    @if (isStudent)
+                                                    {
+                                                        <button type="button" data-chat-action="edit" data-message-id="@message.Id" data-message-text="@message.MessageText">Edit</button>
+                                                        <button type="button" data-chat-action="delete" data-message-id="@message.Id">Delete</button>
+                                                    }
+                                                </div>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+
+
+                            <div class="sf-chat-state">
+                                <span id="feedbackTyping" class="sf-typing">
+                                    <span id="feedbackTypingName">Supervisor</span> is typing
+                                    <span class="sf-typing-dot"></span>
+                                    <span class="sf-typing-dot"></span>
+                                    <span class="sf-typing-dot"></span>
+                                </span>
+                            </div>
+
+                            <form method="post" asp-page-handler="Reply" class="sf-reply" id="feedbackRealtimeForm">
+                                @Html.AntiForgeryToken()
+
+                                <input type="hidden" name="SelectedEvaluationId" value="@selected.Evaluation.Id" />
+
+                                <div id="studentReplyPreview" class="sf-reply-preview">
+                                    <span id="studentReplyPreviewText"></span>
+                                    <button type="button" id="studentCancelReply">×</button>
+                                </div>
+
+                                <input type="hidden" id="studentReplyToMessageId" value="" />
+
+                                <textarea asp-for="ReplyText"
+                                          id="feedbackMessageInput"
+                                          maxlength="2000"
+                                          class="form-control"
+                                          placeholder="Write a reply to your supervisor..."></textarea>
+
+                                <span asp-validation-for="ReplyText" class="text-danger small"></span>
+
+                                <div class="sf-reply-actions">
+                                    <div class="sf-reply-note">
+                                        Your reply will be saved under this feedback discussion.
+                                    </div>
+
+                                    <button type="submit" class="btn sf-send-btn">
+                                        <i class="bi bi-send me-1"></i>
+                                        Send Reply
+                                    </button>
+                                </div>
+                            </form>
+                        </section>
                     </div>
-                </div>
-            </div>
+                </main>
+            }
+        </div>
+    }
+</section>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+
+    <script>
+        const feedbackChatBody = document.getElementById("feedbackChatBody");
+        const feedbackForm = document.getElementById("feedbackRealtimeForm");
+        const feedbackInput = document.getElementById("feedbackMessageInput");
+        const feedbackTyping = document.getElementById("feedbackTyping");
+        const feedbackTypingName = document.getElementById("feedbackTypingName");
+        const studentReplyPreview = document.getElementById("studentReplyPreview");
+        const studentReplyPreviewText = document.getElementById("studentReplyPreviewText");
+        const studentReplyToMessageId = document.getElementById("studentReplyToMessageId");
+        const studentCancelReply = document.getElementById("studentCancelReply");
+
+        if (feedbackChatBody && feedbackForm && feedbackInput && window.signalR) {
+        const currentUserId = Number(feedbackChatBody.dataset.currentUserId);
+        let evaluationId = Number(feedbackChatBody.dataset.evaluationId);
+        const ideaId = Number(feedbackChatBody.dataset.ideaId);
+
+        const connection = new signalR.HubConnectionBuilder()
+        .withUrl("/hubs/feedback-chat")
+        .withAutomaticReconnect()
+        .build();
+
+        function scrollFeedbackChatToBottom() {
+        feedbackChatBody.scrollTop = feedbackChatBody.scrollHeight;
         }
-    </div>
+
+        function hideEmptyState() {
+        feedbackChatBody.querySelectorAll(".sf-thread-empty, .sw-thread-empty, .sf-chat-empty").forEach(x => x.remove());
+        }
+
+        function escapeHtml(value) {
+        const div = document.createElement("div");
+        div.textContent = value ?? "";
+        return div.innerHTML;
+        }
+
+        function formatMessageTime(value) {
+        const date = new Date(value);
+        return date.toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit"
+        });
+        }
+
+        function setReplyTarget(messageId, text) {
+        studentReplyToMessageId.value = messageId || "";
+        studentReplyPreviewText.textContent = text ? `Replying to: ${text}` : "";
+        studentReplyPreview.classList.toggle("show", !!messageId);
+        feedbackInput.focus();
+        }
+
+        if (studentCancelReply) {
+        studentCancelReply.addEventListener("click", function () {
+        setReplyTarget("", "");
+        });
+        }
+
+        function buildStudentActions(messageId, messageText, isMine) {
+        return `
+        <div class="sf-message-actions">
+        <button type="button" data-chat-action="reply" data-message-id="${messageId}" data-message-text="${escapeHtml(messageText)}">Reply</button>
+        ${isMine ? `
+        <button type="button" data-chat-action="edit" data-message-id="${messageId}" data-message-text="${escapeHtml(messageText)}">Edit</button>
+        <button type="button" data-chat-action="delete" data-message-id="${messageId}">Delete</button>
+        ` : ""}
+        </div>
+        `;
+        }
+
+        function appendFeedbackMessage(message) {
+        hideEmptyState();
+
+        const senderUserId = Number(message.senderUserId ?? message.SenderUserId);
+        const isStudent = senderUserId === currentUserId;
+        const senderName = isStudent ? "You" : (message.senderName ?? message.SenderName ?? "Supervisor");
+        const messageText = message.messageText ?? message.MessageText ?? "";
+        const createdAt = message.createdAt ?? message.CreatedAt ?? new Date().toISOString();
+        const messageId = message.id ?? message.Id ?? 0;
+        const replyPreview = message.replyPreview ?? message.ReplyPreview ?? "";
+
+        const row = document.createElement("div");
+        row.className = `sf-message ${isStudent ? "student" : "supervisor"}`;
+        row.dataset.messageId = messageId;
+        row.dataset.senderId = senderUserId;
+
+        row.innerHTML = `
+        <div class="sf-avatar">
+        <i class="bi ${isStudent ? "bi-person" : "bi-person-workspace"}"></i>
+        </div>
+
+        <div class="sf-bubble">
+        ${replyPreview ? `<div class="sf-message-reply">Replying to: ${escapeHtml(replyPreview)}</div>` : ""}
+        <span class="sf-message-text">${escapeHtml(messageText)}</span>
+        <time>${escapeHtml(senderName)} · ${formatMessageTime(createdAt)}${isStudent ? '<span class="sf-seen-placeholder"></span>' : ''}</time>
+        ${buildStudentActions(messageId, messageText, isStudent)}
+        </div>
+        `;
+
+        feedbackChatBody.appendChild(row);
+        scrollFeedbackChatToBottom();
+
+        if (evaluationId) {
+        connection.invoke("MarkFeedbackSeenByIdea", ideaId, evaluationId).catch(() => {});
+        }
+        }
+
+        function markMyMessagesSeen(seenByUserId) {
+        if (Number(seenByUserId) === currentUserId) {
+        return;
+        }
+
+        feedbackChatBody
+        .querySelectorAll(`.sf-message.student[data-sender-id="${currentUserId}"] time`)
+        .forEach(time => {
+        if (!time.textContent.includes("Seen")) {
+        time.insertAdjacentHTML("beforeend", '<span class="sf-seen-text"> · Seen</span>');
+        }
+        });
+        }
+
+        function startInlineEdit(row, messageId, currentText) {
+        const bubble = row.querySelector(".sf-bubble");
+        const textElement = row.querySelector(".sf-message-text");
+        const actions = row.querySelector(".sf-message-actions");
+
+        if (!bubble || !textElement) {
+        return;
+        }
+
+        if (row.querySelector(".sf-inline-editor")) {
+        return;
+        }
+
+        if (actions) {
+        actions.style.display = "none";
+        }
+
+        textElement.style.display = "none";
+
+        const editor = document.createElement("div");
+        editor.className = "sf-inline-editor";
+        editor.innerHTML = `
+        <textarea>${escapeHtml(currentText)}</textarea>
+        <div class="sf-inline-actions">
+        <button type="button" class="sf-inline-cancel">Cancel</button>
+        <button type="button" class="sf-inline-save">Save</button>
+        </div>
+        `;
+
+        textElement.insertAdjacentElement("afterend", editor);
+
+        const textarea = editor.querySelector("textarea");
+        const saveBtn = editor.querySelector(".sf-inline-save");
+        const cancelBtn = editor.querySelector(".sf-inline-cancel");
+
+        textarea.focus();
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+        function closeEditor() {
+        editor.remove();
+        textElement.style.display = "";
+        if (actions) {
+        actions.style.display = "";
+        }
+        }
+
+        cancelBtn.addEventListener("click", closeEditor);
+
+        saveBtn.addEventListener("click", async function () {
+        const newText = textarea.value.trim();
+
+        if (!newText || newText === currentText.trim()) {
+        closeEditor();
+        return;
+        }
+
+        await connection.invoke("EditFeedbackMessage", messageId, newText);
+        closeEditor();
+        });
+
+        textarea.addEventListener("keydown", async function (event) {
+        if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        saveBtn.click();
+        }
+
+        if (event.key === "Escape") {
+        closeEditor();
+        }
+        });
+        }
+
+        let typingTimer = null;
+
+        feedbackInput.addEventListener("input", function () {
+        if (!evaluationId) {
+        return;
+        }
+
+        connection.invoke("TypingFeedbackRoom", ideaId).catch(() => {});
+
+        clearTimeout(typingTimer);
+
+        typingTimer = setTimeout(function () {
+        connection.invoke("StopTypingFeedbackRoom", ideaId).catch(() => {});
+        }, 900);
+        });
+
+        feedbackInput.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        feedbackForm.requestSubmit();
+        }
+        });
+
+        feedbackForm.addEventListener("submit", async function (event) {
+        event.preventDefault();
+
+        const value = feedbackInput.value.trim();
+
+        if (!value) {
+        return;
+        }
+
+        const replyToId = Number(studentReplyToMessageId.value || 0);
+
+        feedbackInput.value = "";
+        setReplyTarget("", "");
+
+        try {
+        await connection.invoke("SendFeedbackMessage", evaluationId, ideaId, value, replyToId || null);
+        if (evaluationId) {
+        await connection.invoke("StopTypingFeedbackRoom", ideaId);
+        }
+        } catch (error) {
+        console.error(error);
+        alert("Message could not be sent. Please refresh and try again.");
+        }
+        });
+
+        feedbackChatBody.addEventListener("click", async function (event) {
+        const button = event.target.closest("[data-chat-action]");
+
+        if (!button) {
+        return;
+        }
+
+        const action = button.dataset.chatAction;
+        const messageId = Number(button.dataset.messageId);
+        const messageText = button.dataset.messageText || "";
+        const row = button.closest(".sf-message");
+
+        if (action === "reply") {
+        setReplyTarget(messageId, messageText);
+        return;
+        }
+
+        if (action === "edit") {
+        startInlineEdit(row, messageId, messageText);
+        return;
+        }
+
+        if (action === "delete") {
+        await connection.invoke("DeleteFeedbackMessage", messageId);
+        }
+        });
+
+        connection.on("ReceiveFeedbackMessage", function (message) {
+        const incomingEvaluationId = Number(message.evaluationId ?? message.EvaluationId);
+        const incomingIdeaId = Number(message.ideaId ?? message.IdeaId);
+
+        if (incomingIdeaId && incomingIdeaId !== ideaId) {
+        return;
+        }
+
+        if (!evaluationId && incomingEvaluationId) {
+        evaluationId = incomingEvaluationId;
+        feedbackChatBody.dataset.evaluationId = incomingEvaluationId;
+        }
+
+        appendFeedbackMessage(message);
+        });
+
+        connection.on("FeedbackMessageEdited", function (message) {
+        const row = feedbackChatBody.querySelector(`[data-message-id="${message.id ?? message.Id}"]`);
+
+        if (!row) {
+        return;
+        }
+
+        const text = message.messageText ?? message.MessageText ?? "";
+        const textElement = row.querySelector(".sf-message-text");
+        const time = row.querySelector("time");
+
+        if (textElement) {
+        textElement.textContent = text;
+        }
+
+        row.querySelectorAll("[data-message-text]").forEach(btn => {
+        btn.dataset.messageText = text;
+        });
+
+        if (time && !time.textContent.includes("Edited")) {
+        time.insertAdjacentHTML("beforeend", '<span class="sf-edited-text"> · Edited</span>');
+        }
+        });
+
+        connection.on("FeedbackMessageDeleted", function (message) {
+        const row = feedbackChatBody.querySelector(`[data-message-id="${message.id ?? message.Id}"]`);
+
+        if (!row) {
+        return;
+        }
+
+        const textElement = row.querySelector(".sf-message-text");
+
+        if (textElement) {
+        textElement.textContent = "This message was deleted.";
+        textElement.classList.add("sf-message-deleted");
+        textElement.style.display = "";
+        }
+
+        row.querySelector(".sf-inline-editor")?.remove();
+        row.querySelector(".sf-message-actions")?.remove();
+        });
+
+        connection.on("FeedbackUserTyping", function (data) {
+        const userId = Number(data.userId ?? data.UserId);
+
+        if (userId === currentUserId) {
+        return;
+        }
+
+        feedbackTypingName.textContent = data.name ?? data.Name ?? "Supervisor";
+        feedbackTyping.classList.add("show");
+        });
+
+        connection.on("FeedbackUserStoppedTyping", function (data) {
+        const userId = Number(data.userId ?? data.UserId);
+
+        if (userId === currentUserId) {
+        return;
+        }
+
+        feedbackTyping.classList.remove("show");
+        });
+
+        connection.on("FeedbackMessagesSeen", function (data) {
+        markMyMessagesSeen(data.seenByUserId ?? data.SeenByUserId);
+        });
+
+        async function startFeedbackChat() {
+        try {
+        await connection.start();
+
+        if (evaluationId) {
+        await connection.invoke("JoinFeedbackRoom", ideaId, evaluationId);
+        await connection.invoke("MarkFeedbackSeenByIdea", ideaId, evaluationId);
+        }
+
+        if (feedbackChatBody.querySelector(".sf-message")) {
+        hideEmptyState();
+        }
+
+        scrollFeedbackChatToBottom();
+        } catch (error) {
+        console.error(error);
+        }
+        }
+
+        startFeedbackChat();
+        }
+    </script>
+}
+@functions {
+    private static string TrimPreview(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "";
+        }
+
+        value = value.Trim();
+
+        return value.Length <= 80 ? value : value[..80] + "...";
+    }
+
+    private static (string Label, string Icon, string Color, string Background, string Border) StatusMeta(string? status)
+    {
+        var normalized = (status ?? "").Trim().ToLowerInvariant();
+
+        return normalized switch
+        {
+            "approved" => ("Approved", "check-circle-fill", "#166534", "#F0FDF4", "#BBF7D0"),
+            "needs_revision" => ("Needs Revision", "exclamation-circle-fill", "#92400E", "#FFFBEB", "#FDE68A"),
+            "rejected" => ("Rejected", "x-circle-fill", "#991B1B", "#FEF2F2", "#FECACA"),
+            _ => ("Pending Review", "clock-fill", "#475569", "#F8FAFC", "#E2E8F0")
+        };
+    }
 }

@@ -15,15 +15,24 @@ namespace FYPilot.Infrastructure.Services;
 public class AiServiceClient : IAiServiceClient
 {
     private readonly HttpClient _http;
-    private readonly string     _baseUrl;
+    private readonly string _baseUrl;
     private readonly ILogger<AiServiceClient> _logger;
 
-    private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
+    private static readonly JsonSerializerOptions JsonOpts = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
 
     public AiServiceClient(IConfiguration configuration, ILogger<AiServiceClient> logger)
     {
-        _logger  = logger;
-        _http    = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        _logger = logger;
+
+        // Ollama/Python idea generation can take time, so 10 seconds is too short.
+        _http = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(600)
+        };
+
         _baseUrl = Environment.GetEnvironmentVariable("AI_SERVICE_URL")
                 ?? configuration["AiService:BaseUrl"]
                 ?? "http://localhost:8000";
@@ -34,19 +43,38 @@ public class AiServiceClient : IAiServiceClient
     {
         try
         {
-            var body = new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, "application/json");
+            var body = new StringContent(
+                JsonSerializer.Serialize(request),
+                Encoding.UTF8,
+                "application/json"
+            );
+
             var resp = await _http.PostAsync($"{_baseUrl}{path}", body);
             var json = await resp.Content.ReadAsStringAsync();
+
             if (!resp.IsSuccessStatusCode)
             {
-                _logger.LogWarning("AI service {Path} returned {Code}: {Body}", path, (int)resp.StatusCode, json);
+                _logger.LogWarning(
+                    "AI service {Path} returned {Code}: {Body}",
+                    path,
+                    (int)resp.StatusCode,
+                    json
+                );
+
                 return default;
             }
+
             return JsonSerializer.Deserialize<T>(json, JsonOpts);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to call {Path} on AI service at {Url}", path, _baseUrl);
+            _logger.LogError(
+                ex,
+                "Failed to call {Path} on AI service at {Url}",
+                path,
+                _baseUrl
+            );
+
             return default;
         }
     }
@@ -58,6 +86,7 @@ public class AiServiceClient : IAiServiceClient
         {
             var resp = await _http.GetAsync($"{_baseUrl}/health");
             var json = await resp.Content.ReadAsStringAsync();
+
             return JsonSerializer.Deserialize<AiHealthResponse>(json, JsonOpts);
         }
         catch (Exception ex)
@@ -70,6 +99,10 @@ public class AiServiceClient : IAiServiceClient
     // ── Skill Analysis ────────────────────────────────────────────────────────
     public Task<SkillAnalysisResponse?> AnalyzeSkillsAsync(SkillAnalysisRequest request)
         => PostAsync<SkillAnalysisResponse>("/analyze-skills", request);
+
+    // ── AI Idea Generation ────────────────────────────────────────────────────
+    public Task<GenerateIdeasResponse?> GenerateIdeasAsync(GenerateIdeasRequest request)
+        => PostAsync<GenerateIdeasResponse>("/generate-ideas", request);
 
     // ── Feasibility Prediction ────────────────────────────────────────────────
     public Task<FeasibilityPredictionResponse?> PredictFeasibilityAsync(FeasibilityPredictionRequest request)
@@ -86,4 +119,16 @@ public class AiServiceClient : IAiServiceClient
     // ── Risk Alarms ───────────────────────────────────────────────────────────
     public Task<RiskAlarmResponse?> GetRiskAlarmsAsync(RiskAlarmRequest request)
         => PostAsync<RiskAlarmResponse>("/risk-alarms", request);
+    // ── Project DNA Analysis ─────────────────────────────────────────────────────
+    public Task<ProjectDnaServiceResponse?> AnalyzeProjectDnaAsync(ProjectDnaRequest request)
+        => PostAsync<ProjectDnaServiceResponse>("/analyze-project-dna", request);
+
+    public Task<ProjectRoadmapServiceResponse?> GenerateProjectRoadmapAsync(ProjectRoadmapRequest request)
+    => PostAsync<ProjectRoadmapServiceResponse>("/generate-project-roadmap", request);
+
+    public Task<IdeaComparisonServiceResponse?> CompareGeneratedIdeasAsync(IdeaComparisonRequest request)
+    => PostAsync<IdeaComparisonServiceResponse>("/compare-generated-ideas", request);
+
+    public Task<FypMentorServiceResponse?> AskFypMentorAsync(FypMentorRequest request)
+        => PostAsync<FypMentorServiceResponse>("/fyp-chat", request);
 }

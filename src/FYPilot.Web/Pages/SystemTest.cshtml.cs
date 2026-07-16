@@ -4,9 +4,10 @@ using FYPilot.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
-
+using Microsoft.AspNetCore.Authorization;
 namespace FYPilot.Web.Pages;
 
+[Authorize(Roles = "admin")]
 public class SystemTestModel(ApplicationDbContext db, IAiServiceClient ai) : PageModel
 {
     public void OnGet() { }

@@ -1,91 +1,1200 @@
 @page
-@model FYPilot.Web.Pages.Supervisor.DashboardModel
+@using System
+@using System.Linq
+@using System.Collections.Generic
+@model FYPilot.Web.Pages.Supervisor.IdeaReviewModel
 @{
-    ViewData["Title"]    = "Supervisor Dashboard";
-    ViewData["Subtitle"] = "Manage and evaluate student project ideas";
+    ViewData["Title"] = "Supervisor Dashboard";
+    ViewData["Subtitle"] = "Review student ideas, guide progress, and manage meetings.";
+
+    var totalIdeas = Model.AllIdeas.Count;
+
+    var pendingIdeas = Model.AllIdeas.Count(i => NormalizeStatus(i.Status) == "pending");
+    var revisionIdeas = Model.AllIdeas.Count(i => NormalizeStatus(i.Status) == "needs_revision");
+    var approvedIdeas = Model.AllIdeas.Count(i => NormalizeStatus(i.Status) == "approved");
+    var rejectedIdeas = Model.AllIdeas.Count(i => NormalizeStatus(i.Status) == "rejected");
+
+    var actionNeeded = pendingIdeas + revisionIdeas;
+    var atRiskProjects = revisionIdeas + rejectedIdeas;
+
+    var activeStudents = Model.AllIdeas
+        .Select(i => ValueOrStudent(i.StudentName))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Count();
+
+    var priorityIdeas = Model.AllIdeas
+        .Where(i => NormalizeStatus(i.Status) == "pending" || NormalizeStatus(i.Status) == "needs_revision")
+        .OrderByDescending(i => NormalizeStatus(i.Status) == "needs_revision")
+        .ThenBy(i => i.CreatedAt)
+        .Take(4)
+        .ToList();
+
+    var studentRows = Model.AllIdeas
+        .GroupBy(i => ValueOrStudent(i.StudentName), StringComparer.OrdinalIgnoreCase)
+        .Select(g => new
+        {
+            Name = g.Key,
+            Latest = g.OrderByDescending(x => x.CreatedAt).First(),
+            Ideas = g.Count(),
+            Pending = g.Count(x => NormalizeStatus(x.Status) == "pending"),
+            Revision = g.Count(x => NormalizeStatus(x.Status) == "needs_revision"),
+            Approved = g.Count(x => NormalizeStatus(x.Status) == "approved"),
+            Rejected = g.Count(x => NormalizeStatus(x.Status) == "rejected"),
+            LastActivity = g.Max(x => x.CreatedAt)
+        })
+        .OrderByDescending(x => x.Pending + x.Revision + x.Rejected)
+        .ThenByDescending(x => x.LastActivity)
+        .Take(5)
+        .ToList();
+
+    var followUpRows = studentRows
+        .Where(s => s.Pending + s.Revision + s.Rejected > 0)
+        .Take(3)
+        .ToList();
+
+    if (!followUpRows.Any())
+    {
+        followUpRows = studentRows.Take(3).ToList();
+    }
 }
 
-<!-- Stats -->
-<div class="row g-3 mb-4">
-    @foreach (var s in Model.Stats)
+<section class="sd-page">
+
+    <header class="sd-hero">
+        <div>
+            <span class="sd-eyebrow">Supervisor Dashboard</span>
+            <h1>Review, guide, and follow up with your assigned students.</h1>
+            <p>
+                A focused workspace for pending reviews, student follow-up, meetings,
+                and academic supervision decisions.
+            </p>
+
+            <div class="sd-hero-actions">
+                <a href="/Supervisor/IdeaReview" class="sd-hero-btn primary">
+                    <i class="bi bi-journal-check"></i>
+                    Review workspace
+                </a>
+
+                <a href="/Supervisor/Meetings" class="sd-hero-btn light">
+                    <i class="bi bi-calendar-plus"></i>
+                    Schedule meeting
+                </a>
+            </div>
+        </div>
+
+        <div class="sd-hero-focus">
+            <span>@actionNeeded</span>
+            <small>items need attention</small>
+        </div>
+    </header>
+
+    @if (!Model.AllIdeas.Any())
     {
-        <div class="col-sm-6 col-xl-3">
-            <div class="stat-card d-flex align-items-center gap-3">
-                <div class="stat-icon" style="background:@s.BgColor"><i class="bi bi-@s.Icon" style="color:@s.Color"></i></div>
-                <div><div class="stat-value">@s.Value</div><div class="stat-label">@s.Label</div></div>
+        <section class="sd-empty">
+            <div class="sd-empty-icon">
+                <i class="bi bi-inbox"></i>
             </div>
-        </div>
+
+            <h2>No assigned student ideas yet</h2>
+            <p>
+                Once your assigned students submit ideas, their reviews and follow-up
+                items will appear here.
+            </p>
+
+            <a href="/Supervisor/IdeaReview" class="sd-hero-btn primary">
+                Open review workspace
+            </a>
+        </section>
     }
-</div>
-
-<div class="row g-4">
-    <!-- Pending reviews -->
-    <div class="col-lg-8">
-        <div class="page-card p-4">
-            <div class="d-flex align-items-center justify-content-between mb-3">
-                <h6 class="fw-bold mb-0"><i class="bi bi-card-checklist me-2 text-warning"></i>Pending Idea Reviews</h6>
-                <a href="/Supervisor/IdeaReview" class="btn btn-sm btn-outline-primary">View All</a>
-            </div>
-            @if (!Model.PendingIdeas.Any())
-            {
-                <div class="text-center py-4 text-muted">
-                    <i class="bi bi-check-circle display-4 text-success"></i>
-                    <p class="mt-3">No pending reviews — all ideas have been evaluated.</p>
+    else
+    {
+        <section class="sd-stats">
+            <article class="sd-stat-card">
+                <div class="sd-stat-icon orange">
+                    <i class="bi bi-hourglass-split"></i>
                 </div>
-            }
-            else
-            {
-                <div class="table-responsive">
-                    <table class="table table-hover align-middle">
-                        <thead><tr><th>Student</th><th>Project Idea</th><th>Scores</th><th>Status</th><th></th></tr></thead>
-                        <tbody>
-                            @foreach (var item in Model.PendingIdeas)
-                            {
-                                <tr>
-                                    <td><div class="small fw-semibold">@item.StudentName</div></td>
-                                    <td>
-                                        <div class="small fw-semibold">@item.IdeaTitle</div>
-                                        <span class="badge bg-secondary-subtle text-secondary small">@item.Domain</span>
-                                    </td>
-                                    <td>
-                                        <div class="d-flex gap-1">
-                                            <span class="badge bg-primary-subtle text-primary">F:@item.Feasibility%</span>
-                                            <span class="badge bg-warning-subtle text-warning">I:@item.Innovation%</span>
-                                        </div>
-                                    </td>
-                                    <td><span class="badge bg-warning-subtle text-warning text-capitalize">@item.Status</span></td>
-                                    <td>
-                                        <a href="/Supervisor/IdeaReview?ideaId=@item.IdeaId" class="btn btn-sm btn-primary">Review</a>
-                                    </td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-            }
-        </div>
-    </div>
 
-    <!-- Recent evaluations -->
-    <div class="col-lg-4">
-        <div class="page-card p-4 mb-3">
-            <h6 class="fw-bold mb-3"><i class="bi bi-star-half me-2 text-success"></i>Recent Evaluations</h6>
-            @foreach (var ev in Model.RecentEvals)
-            {
-                <div class="d-flex align-items-start gap-2 mb-3 pb-3 border-bottom">
-                    <div class="avatar" style="background:#dcfce7;color:#16a34a">@(ev.StudentName.Length > 0 ? ev.StudentName[0].ToString() : "S")</div>
-                    <div class="flex-grow-1">
-                        <div class="small fw-semibold">@ev.StudentName</div>
-                        <div class="text-muted-sm">@ev.IdeaTitle.Substring(0, Math.Min(ev.IdeaTitle.Length, 30))…</div>
-                        <span class="badge mt-1 @(ev.Status == "approved" ? "bg-success" : ev.Status == "rejected" ? "bg-danger" : "bg-warning text-dark")">@ev.Status</span>
+                <div>
+                    <small>Pending Reviews</small>
+                    <strong>@pendingIdeas</strong>
+                    <span>Needs your attention</span>
+                </div>
+
+                <i class="bi bi-chevron-right sd-stat-arrow"></i>
+            </article>
+
+            <article class="sd-stat-card">
+                <div class="sd-stat-icon blue">
+                    <i class="bi bi-people"></i>
+                </div>
+
+                <div>
+                    <small>Students Assigned</small>
+                    <strong>@activeStudents</strong>
+                    <span>Under your supervision</span>
+                </div>
+
+                <i class="bi bi-chevron-right sd-stat-arrow"></i>
+            </article>
+
+            <article class="sd-stat-card">
+                <div class="sd-stat-icon green">
+                    <i class="bi bi-check2-circle"></i>
+                </div>
+
+                <div>
+                    <small>Approved Ideas</small>
+                    <strong>@approvedIdeas</strong>
+                    <span>Ready to progress</span>
+                </div>
+
+                <i class="bi bi-chevron-right sd-stat-arrow"></i>
+            </article>
+
+            <article class="sd-stat-card">
+                <div class="sd-stat-icon red">
+                    <i class="bi bi-exclamation-triangle"></i>
+                </div>
+
+                <div>
+                    <small>At-Risk Projects</small>
+                    <strong>@atRiskProjects</strong>
+                    <span>Requires follow-up</span>
+                </div>
+
+                <i class="bi bi-chevron-right sd-stat-arrow"></i>
+            </article>
+        </section>
+
+        <section class="sd-grid-top">
+
+            <article class="sd-panel">
+                <div class="sd-panel-head">
+                    <div>
+                        <span class="sd-eyebrow">Priority</span>
+                        <h2>Priority Review Queue</h2>
+                    </div>
+
+                    <a href="/Supervisor/IdeaReview">View all (@actionNeeded)</a>
+                </div>
+
+                @if (!priorityIdeas.Any())
+                {
+                    <div class="sd-soft-empty">
+                        <i class="bi bi-check2-circle"></i>
+                        <p>No pending reviews right now.</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="sd-review-list">
+                        @foreach (var idea in priorityIdeas)
+                        {
+                            var status = StatusMeta(idea.Status);
+
+                            <a href="/Supervisor/IdeaReview?ideaId=@idea.Id" class="sd-review-card">
+                                <div class="sd-avatar">@Initials(idea.StudentName)</div>
+
+                                <div class="sd-review-main">
+                                    <div class="sd-review-top">
+                                        <span>@ValueOrStudent(idea.StudentName)</span>
+                                        <small>Submitted @TimeAgo(idea.CreatedAt)</small>
+                                    </div>
+
+                                    <h3>@idea.Title</h3>
+
+                                    <div class="sd-chip-row">
+                                        <b class="@status.ClassName">@status.Label</b>
+                                        <span>@ValueOrDash(idea.Domain)</span>
+                                        <span>@ValueOrDash(idea.DifficultyLevel)</span>
+                                    </div>
+                                </div>
+
+                                <i class="bi bi-chevron-right sd-card-arrow"></i>
+                            </a>
+                        }
+                    </div>
+                }
+            </article>
+
+            <article class="sd-panel">
+                <div class="sd-panel-head">
+                    <div>
+                        <span class="sd-eyebrow">Quick Actions</span>
+                        <h2>Supervision Tools</h2>
                     </div>
                 </div>
+
+                <div class="sd-action-grid">
+                    <a href="/Supervisor/IdeaReview" class="sd-action-tile">
+                        <i class="bi bi-journal-check"></i>
+                        <div>
+                            <strong>Review Workspace</strong>
+                            <small>Approve, request changes, or provide feedback.</small>
+                        </div>
+                    </a>
+
+                    <a href="/Supervisor/Meetings" class="sd-action-tile">
+                        <i class="bi bi-calendar-plus"></i>
+                        <div>
+                            <strong>Schedule Meeting</strong>
+                            <small>Plan follow-up or review sessions.</small>
+                        </div>
+                    </a>
+
+                    <a href="/Supervisor/IdeaReview" class="sd-action-tile">
+                        <i class="bi bi-chat-dots"></i>
+                        <div>
+                            <strong>Message Students</strong>
+                            <small>Send academic guidance and feedback.</small>
+                        </div>
+                    </a>
+
+                    <a href="/Supervisor/ProgressTracking" class="sd-action-tile">
+                        <i class="bi bi-bar-chart-line"></i>
+                        <div>
+                            <strong>Track Progress</strong>
+                            <small>Check progress, risks, and next steps.</small>
+                        </div>
+                    </a>
+                </div>
+            </article>
+
+        </section>
+
+        <section class="sd-grid-bottom">
+
+            <article class="sd-panel">
+                <div class="sd-panel-head">
+                    <div>
+                        <span class="sd-eyebrow">Students</span>
+                        <h2>Student Follow-up Overview</h2>
+                    </div>
+
+                    <a href="/Supervisor/ProgressTracking">View progress</a>
+                </div>
+
+                @if (!studentRows.Any())
+                {
+                    <div class="sd-soft-empty">
+                        <p>No student activity yet.</p>
+                    </div>
+                }
+                else
+                {
+                    <div class="sd-student-list">
+                        @foreach (var student in studentRows)
+                        {
+                            var needsAction = student.Pending + student.Revision + student.Rejected;
+                            var studentStatus = StudentStatus(student.Pending, student.Revision, student.Rejected, student.Approved);
+
+                            <a href="/Supervisor/IdeaReview?ideaId=@student.Latest.Id" class="sd-student-row">
+                                <div class="sd-avatar small">@Initials(student.Name)</div>
+
+                                <div class="sd-student-info">
+                                    <strong>@student.Name</strong>
+                                    <small>@student.Ideas project@(student.Ideas == 1 ? "" : "s")</small>
+                                </div>
+
+                                <div class="sd-student-status">
+                                    <span class="@studentStatus.ClassName">@studentStatus.Label</span>
+                                </div>
+
+                                <div class="sd-next-action">
+                                    <i class="@studentStatus.Icon"></i>
+                                    <div>
+                                        <strong>@NextActionLabel(student.Pending, student.Revision, student.Rejected)</strong>
+                                        <small>@TimeAgo(student.LastActivity)</small>
+                                    </div>
+                                </div>
+
+                                <i class="bi bi-chevron-right sd-card-arrow"></i>
+                            </a>
+                        }
+                    </div>
+                }
+            </article>
+
+            <article class="sd-panel">
+                <div class="sd-panel-head">
+                    <div>
+                        <span class="sd-eyebrow">Follow-up</span>
+                        <h2>Upcoming Meetings</h2>
+                    </div>
+
+                    <a href="/Supervisor/Meetings">View calendar</a>
+                </div>
+
+                <div class="sd-meeting-list">
+                    @if (!followUpRows.Any())
+                    {
+                        <div class="sd-soft-empty compact">
+                            <i class="bi bi-calendar-check"></i>
+                            <p>No follow-up needed right now.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        var index = 0;
+
+                        @foreach (var student in followUpRows)
+                        {
+                            index++;
+                            var meetingStatus = StudentStatus(student.Pending, student.Revision, student.Rejected, student.Approved);
+
+                            <a href="/Supervisor/Meetings" class="sd-meeting-row">
+                                <div class="sd-date-box">
+                                    <span>Next</span>
+                                    <strong>@index.ToString("00")</strong>
+                                </div>
+
+                                <div class="sd-meeting-main">
+                                    <strong>@student.Name</strong>
+                                    <small>@MeetingPurpose(student.Pending, student.Revision, student.Rejected)</small>
+                                    <p>@NextMeetingHint(student.Pending, student.Revision, student.Rejected)</p>
+                                </div>
+
+                                <span class="@meetingStatus.ClassName">@meetingStatus.Label</span>
+
+                                <i class="bi bi-three-dots-vertical sd-dots"></i>
+                            </a>
+                        }
+                    }
+                </div>
+            </article>
+
+        </section>
+    }
+</section>
+
+@section Head {
+    <style>
+        :root {
+            --sd-navy: #28385E;
+            --sd-blue: #304163;
+            --sd-steel: #516C8D;
+            --sd-bg: #F7F8FA;
+            --sd-border: #E8ECF2;
+            --sd-text: #111827;
+            --sd-muted: #64748B;
+            --sd-soft: #F1F4F8;
+            --sd-orange: #C2410C;
+            --sd-yellow: #92400E;
+            --sd-green: #047857;
+            --sd-red: #B91C1C;
+            --sd-purple: #4F46E5;
+        }
+
+        .sd-page {
+            max-width: 1480px;
+            margin: 0 auto;
+            color: var(--sd-text);
+            padding-bottom: 1.5rem;
+        }
+
+        .sd-hero {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 220px;
+            gap: 1rem;
+            align-items: center;
+            margin-bottom: .95rem;
+            padding: 1.35rem;
+            border-radius: 28px;
+            color: #fff;
+            background: radial-gradient(circle at 18% 16%, rgba(255,255,255,.18), transparent 22%), radial-gradient(circle at 82% 10%, rgba(255,255,255,.10), transparent 20%), linear-gradient(135deg, #061C49 0%, var(--sd-navy) 58%, var(--sd-steel) 135%);
+            box-shadow: 0 18px 44px rgba(40,56,94,.16);
+        }
+
+        .sd-eyebrow {
+            display: block;
+            margin-bottom: .25rem;
+            color: var(--sd-steel);
+            font-size: .68rem;
+            font-weight: 500;
+            letter-spacing: .12em;
+            text-transform: uppercase;
+        }
+
+        .sd-hero .sd-eyebrow {
+            color: rgba(255,255,255,.75);
+        }
+
+        .sd-hero h1 {
+            max-width: 780px;
+            margin: 0;
+            font-size: clamp(1.7rem, 2.7vw, 2.45rem);
+            line-height: 1.05;
+            font-weight: 500;
+            letter-spacing: -.045em;
+        }
+
+        .sd-hero p {
+            max-width: 760px;
+            margin: .55rem 0 0;
+            color: rgba(255,255,255,.78);
+            line-height: 1.55;
+            font-size: .9rem;
+        }
+
+        .sd-hero-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .55rem;
+            margin-top: .9rem;
+        }
+
+        .sd-hero-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .42rem;
+            border-radius: 13px;
+            padding: .64rem .86rem;
+            text-decoration: none;
+            font-size: .78rem;
+            font-weight: 500;
+            transition: .15s ease;
+            border: 1px solid transparent;
+        }
+
+            .sd-hero-btn.primary {
+                color: #fff;
+                background: rgba(6,28,73,.62);
+                border-color: rgba(255,255,255,.10);
             }
-            @if (!Model.RecentEvals.Any())
-            {
-                <div class="text-muted small">No evaluations yet.</div>
+
+            .sd-hero-btn.light {
+                color: var(--sd-blue);
+                background: #fff;
             }
-            <a href="/Supervisor/Evaluations" class="btn btn-sm btn-outline-secondary w-100 mt-2">View All Evaluations</a>
-        </div>
-    </div>
-</div>
+
+            .sd-hero-btn:hover {
+                transform: translateY(-1px);
+            }
+
+            .sd-hero-btn.primary:hover {
+                color: #fff;
+                background: rgba(6,28,73,.78);
+            }
+
+            .sd-hero-btn.light:hover {
+                color: var(--sd-blue);
+            }
+
+        .sd-hero-focus {
+            min-height: 130px;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            text-align: center;
+            padding: 1rem;
+            border-radius: 24px;
+            background: rgba(255,255,255,.12);
+            border: 1px solid rgba(255,255,255,.18);
+            backdrop-filter: blur(8px);
+        }
+
+            .sd-hero-focus span {
+                display: block;
+                font-size: 2.55rem;
+                line-height: 1;
+                font-weight: 500;
+            }
+
+            .sd-hero-focus small {
+                margin-top: .45rem;
+                color: rgba(255,255,255,.76);
+                font-size: .78rem;
+            }
+
+        .sd-stats {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: .85rem;
+            margin-bottom: .85rem;
+        }
+
+        .sd-stat-card,
+        .sd-panel,
+        .sd-empty {
+            background: #fff;
+            border: 1px solid var(--sd-border);
+            box-shadow: 0 14px 34px rgba(15,23,42,.05);
+        }
+
+        .sd-stat-card {
+            min-height: 116px;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            gap: .85rem;
+            align-items: center;
+            padding: .95rem;
+            border-radius: 22px;
+        }
+
+        .sd-stat-icon {
+            width: 54px;
+            height: 54px;
+            display: grid;
+            place-items: center;
+            border-radius: 20px;
+            font-size: 1.28rem;
+            flex: none;
+        }
+
+            .sd-stat-icon.orange {
+                color: #C2410C;
+                background: #FFF7ED;
+            }
+
+            .sd-stat-icon.blue {
+                color: #2563EB;
+                background: #EFF6FF;
+            }
+
+            .sd-stat-icon.green {
+                color: var(--sd-green);
+                background: #ECFDF5;
+            }
+
+            .sd-stat-icon.red {
+                color: var(--sd-red);
+                background: #FEF2F2;
+            }
+
+        .sd-stat-card small {
+            display: block;
+            color: #52627A;
+            font-size: .75rem;
+            font-weight: 500;
+        }
+
+        .sd-stat-card strong {
+            display: block;
+            margin-top: .15rem;
+            color: var(--sd-text);
+            font-size: 1.7rem;
+            line-height: 1;
+            font-weight: 500;
+        }
+
+        .sd-stat-card span {
+            display: block;
+            margin-top: .42rem;
+            color: var(--sd-muted);
+            font-size: .72rem;
+        }
+
+        .sd-stat-arrow {
+            color: #94A3B8;
+            font-size: .9rem;
+        }
+
+        .sd-grid-top,
+        .sd-grid-bottom {
+            display: grid;
+            gap: .85rem;
+            margin-bottom: .85rem;
+        }
+
+        .sd-grid-top {
+            grid-template-columns: minmax(0, 1.25fr) minmax(350px, .85fr);
+        }
+
+        .sd-grid-bottom {
+            grid-template-columns: minmax(0, 1.1fr) minmax(390px, .9fr);
+        }
+
+        .sd-panel,
+        .sd-empty {
+            border-radius: 24px;
+            overflow: hidden;
+        }
+
+        .sd-panel-head {
+            min-height: 66px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .9rem;
+            padding: .9rem 1rem;
+            border-bottom: 1px solid var(--sd-border);
+        }
+
+            .sd-panel-head h2 {
+                margin: 0;
+                color: var(--sd-text);
+                font-size: 1rem;
+                font-weight: 500;
+                letter-spacing: -.02em;
+            }
+
+            .sd-panel-head a {
+                color: #3156B7;
+                font-size: .76rem;
+                font-weight: 500;
+                text-decoration: none;
+            }
+
+        .sd-review-list,
+        .sd-student-list,
+        .sd-meeting-list {
+            display: grid;
+            gap: .65rem;
+            padding: .85rem;
+        }
+
+        .sd-review-card,
+        .sd-student-row,
+        .sd-meeting-row {
+            color: inherit;
+            text-decoration: none;
+            border: 1px solid var(--sd-border);
+            border-radius: 18px;
+            background: #fff;
+            transition: .15s ease;
+        }
+
+            .sd-review-card:hover,
+            .sd-student-row:hover,
+            .sd-meeting-row:hover {
+                color: inherit;
+                border-color: #B8C8DD;
+                box-shadow: 0 10px 22px rgba(40,56,94,.07);
+                transform: translateY(-1px);
+            }
+
+        .sd-review-card {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: .75rem;
+            padding: .82rem;
+        }
+
+        .sd-avatar {
+            width: 44px;
+            height: 44px;
+            display: grid;
+            place-items: center;
+            border-radius: 16px;
+            color: var(--sd-blue);
+            background: #EEF2F6;
+            font-size: .76rem;
+            font-weight: 500;
+        }
+
+            .sd-avatar.small {
+                width: 38px;
+                height: 38px;
+                border-radius: 14px;
+                font-size: .7rem;
+            }
+
+        .sd-review-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .75rem;
+        }
+
+            .sd-review-top span {
+                color: #334155;
+                font-size: .78rem;
+                font-weight: 500;
+            }
+
+            .sd-review-top small {
+                color: var(--sd-muted);
+                font-size: .68rem;
+                white-space: nowrap;
+            }
+
+        .sd-review-card h3 {
+            margin: .24rem 0 .45rem;
+            color: var(--sd-text);
+            font-size: .93rem;
+            line-height: 1.35;
+            font-weight: 500;
+        }
+
+        .sd-chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .35rem;
+            align-items: center;
+        }
+
+            .sd-chip-row span {
+                display: inline-flex;
+                width: fit-content;
+                border-radius: 999px;
+                padding: .24rem .5rem;
+                color: #475569;
+                background: var(--sd-soft);
+                font-size: .67rem;
+                font-weight: 500;
+            }
+
+        .sd-status {
+            display: inline-flex;
+            width: fit-content;
+            border-radius: 999px;
+            padding: .24rem .5rem;
+            font-size: .67rem;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
+            .sd-status.pending {
+                color: #9A3412;
+                background: #FFF7ED;
+            }
+
+            .sd-status.revision {
+                color: #92400E;
+                background: #FEF3C7;
+            }
+
+            .sd-status.approved,
+            .sd-status.ontrack {
+                color: var(--sd-green);
+                background: #ECFDF5;
+            }
+
+            .sd-status.rejected,
+            .sd-status.risk {
+                color: var(--sd-red);
+                background: #FEF2F2;
+            }
+
+        .sd-card-arrow,
+        .sd-dots {
+            color: #94A3B8;
+        }
+
+        .sd-action-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: .7rem;
+            padding: .85rem;
+        }
+
+        .sd-action-tile {
+            min-height: 115px;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: .75rem;
+            align-items: start;
+            padding: .85rem;
+            border: 1px solid var(--sd-border);
+            border-radius: 18px;
+            color: inherit;
+            text-decoration: none;
+            background: #fff;
+            transition: .15s ease;
+        }
+
+            .sd-action-tile:hover {
+                color: inherit;
+                border-color: #B8C8DD;
+                box-shadow: 0 10px 22px rgba(40,56,94,.07);
+                transform: translateY(-1px);
+            }
+
+            .sd-action-tile i {
+                width: 38px;
+                height: 38px;
+                display: grid;
+                place-items: center;
+                border-radius: 14px;
+                color: #3156B7;
+                background: #EEF2FF;
+                font-size: 1rem;
+            }
+
+            .sd-action-tile strong {
+                display: block;
+                color: var(--sd-text);
+                font-size: .82rem;
+                font-weight: 500;
+            }
+
+            .sd-action-tile small {
+                display: block;
+                margin-top: .22rem;
+                color: var(--sd-muted);
+                font-size: .7rem;
+                line-height: 1.42;
+            }
+
+        .sd-student-row {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1.25fr) .8fr 1.15fr auto;
+            gap: .75rem;
+            align-items: center;
+            padding: .78rem;
+        }
+
+        .sd-student-info strong {
+            display: block;
+            color: var(--sd-text);
+            font-size: .82rem;
+            font-weight: 500;
+        }
+
+        .sd-student-info small {
+            display: block;
+            margin-top: .15rem;
+            color: var(--sd-muted);
+            font-size: .72rem;
+        }
+
+        .sd-next-action {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: .48rem;
+            align-items: center;
+        }
+
+            .sd-next-action i {
+                width: 34px;
+                height: 34px;
+                display: grid;
+                place-items: center;
+                color: #3156B7;
+                background: #EEF2FF;
+                border-radius: 13px;
+                font-size: .88rem;
+            }
+
+            .sd-next-action strong {
+                display: block;
+                color: #334155;
+                font-size: .75rem;
+                font-weight: 500;
+            }
+
+            .sd-next-action small {
+                color: var(--sd-muted);
+                font-size: .68rem;
+            }
+
+        .sd-meeting-row {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto auto;
+            gap: .75rem;
+            align-items: center;
+            padding: .82rem;
+        }
+
+        .sd-date-box {
+            width: 54px;
+            height: 58px;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            border-radius: 16px;
+            color: var(--sd-blue);
+            background: #F3F6FB;
+        }
+
+            .sd-date-box span {
+                color: var(--sd-steel);
+                font-size: .62rem;
+                font-weight: 500;
+                text-transform: uppercase;
+                letter-spacing: .06em;
+            }
+
+            .sd-date-box strong {
+                color: var(--sd-blue);
+                font-size: 1.28rem;
+                line-height: 1;
+                font-weight: 500;
+            }
+
+        .sd-meeting-main strong {
+            display: block;
+            color: var(--sd-text);
+            font-size: .84rem;
+            font-weight: 500;
+        }
+
+        .sd-meeting-main small {
+            display: block;
+            margin-top: .12rem;
+            color: var(--sd-muted);
+            font-size: .72rem;
+        }
+
+        .sd-meeting-main p {
+            margin: .18rem 0 0;
+            color: #475569;
+            font-size: .7rem;
+        }
+
+        .sd-soft-empty {
+            min-height: 150px;
+            margin: .85rem;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            text-align: center;
+            gap: .35rem;
+            padding: 1rem;
+            border: 1px dashed var(--sd-border);
+            border-radius: 18px;
+            color: var(--sd-muted);
+        }
+
+            .sd-soft-empty.compact {
+                min-height: 190px;
+            }
+
+            .sd-soft-empty i {
+                color: var(--sd-green);
+                font-size: 1.35rem;
+            }
+
+            .sd-soft-empty p {
+                margin: 0;
+                font-size: .82rem;
+            }
+
+        .sd-empty {
+            min-height: 460px;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            text-align: center;
+            gap: .65rem;
+            padding: 2rem;
+        }
+
+        .sd-empty-icon {
+            width: 76px;
+            height: 76px;
+            display: grid;
+            place-items: center;
+            color: var(--sd-steel);
+            background: #EEF2F6;
+            border-radius: 26px;
+            font-size: 1.95rem;
+        }
+
+        .sd-empty h2 {
+            margin: 0;
+            font-size: 1.3rem;
+            font-weight: 500;
+        }
+
+        .sd-empty p {
+            max-width: 560px;
+            margin: 0;
+            color: var(--sd-muted);
+            line-height: 1.6;
+        }
+
+        @@media (max-width: 1280px) {
+            .sd-hero,
+            .sd-grid-top,
+            .sd-grid-bottom {
+                grid-template-columns: 1fr;
+            }
+
+            .sd-stats {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @@media (max-width: 767px) {
+            .sd-stats,
+            .sd-action-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .sd-hero {
+                padding: 1rem;
+            }
+
+            .sd-hero-focus {
+                min-height: 105px;
+            }
+
+            .sd-review-card,
+            .sd-student-row,
+            .sd-meeting-row {
+                grid-template-columns: auto minmax(0, 1fr);
+            }
+
+            .sd-card-arrow,
+            .sd-dots,
+            .sd-student-status {
+                display: none;
+            }
+        }
+    </style>
+}
+
+@functions {
+    private static string NormalizeStatus(string? status)
+    {
+        return string.IsNullOrWhiteSpace(status)
+            ? "pending"
+            : status.Trim().ToLowerInvariant();
+    }
+
+    private static (string Label, string ClassName) StatusMeta(string? status)
+    {
+        return NormalizeStatus(status) switch
+        {
+            "approved" => ("Approved", "sd-status approved"),
+            "needs_revision" => ("Needs Revision", "sd-status revision"),
+            "rejected" => ("Rejected", "sd-status rejected"),
+            _ => ("Pending", "sd-status pending")
+        };
+    }
+
+    private static (string Label, string ClassName, string Icon) StudentStatus(
+        int pending,
+        int revision,
+        int rejected,
+        int approved)
+    {
+        if (rejected > 0)
+        {
+            return ("At Risk", "sd-status risk", "bi bi-exclamation-triangle");
+        }
+
+        if (revision > 0)
+        {
+            return ("Needs Revision", "sd-status revision", "bi bi-pencil-square");
+        }
+
+        if (pending > 0)
+        {
+            return ("Pending", "sd-status pending", "bi bi-hourglass-split");
+        }
+
+        return ("On Track", "sd-status ontrack", "bi bi-check2-circle");
+    }
+
+    private static string NextActionLabel(int pending, int revision, int rejected)
+    {
+        if (rejected > 0)
+        {
+            return "Follow up";
+        }
+
+        if (revision > 0)
+        {
+            return "Review feedback";
+        }
+
+        if (pending > 0)
+        {
+            return "Review idea";
+        }
+
+        return "Progress check";
+    }
+
+    private static string MeetingPurpose(int pending, int revision, int rejected)
+    {
+        if (rejected > 0)
+        {
+            return "Recovery discussion";
+        }
+
+        if (revision > 0)
+        {
+            return "Revision follow-up";
+        }
+
+        if (pending > 0)
+        {
+            return "Proposal review meeting";
+        }
+
+        return "Progress check-in";
+    }
+
+    private static string NextMeetingHint(int pending, int revision, int rejected)
+    {
+        if (rejected > 0)
+        {
+            return "Discuss a new project direction.";
+        }
+
+        if (revision > 0)
+        {
+            return "Clarify required changes.";
+        }
+
+        if (pending > 0)
+        {
+            return "Prepare review decision.";
+        }
+
+        return "Check milestones and next tasks.";
+    }
+
+    private static string Initials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "ST";
+        }
+
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).ToList();
+
+        return parts.Count == 0
+            ? "ST"
+            : string.Join("", parts.Select(part => part[0])).ToUpperInvariant();
+    }
+
+    private static string ValueOrStudent(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "Student" : value;
+    }
+
+    private static string ValueOrDash(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "Uncategorized" : value;
+    }
+
+    private static string TimeAgo(DateTime date)
+    {
+        var value = date.Kind == DateTimeKind.Utc
+            ? date
+            : DateTime.SpecifyKind(date, DateTimeKind.Utc);
+
+        var span = DateTime.UtcNow - value;
+
+        if (span.TotalDays >= 7)
+        {
+            return value.ToLocalTime().ToString("MMM d");
+        }
+
+        if (span.TotalDays >= 1)
+        {
+            var days = (int)Math.Floor(span.TotalDays);
+            return days == 1 ? "1 day ago" : $"{days} days ago";
+        }
+
+        if (span.TotalHours >= 1)
+        {
+            var hours = (int)Math.Floor(span.TotalHours);
+            return hours == 1 ? "1 hour ago" : $"{hours} hours ago";
+        }
+
+        if (span.TotalMinutes >= 1)
+        {
+            var minutes = (int)Math.Floor(span.TotalMinutes);
+            return minutes == 1 ? "1 min ago" : $"{minutes} mins ago";
+        }
+
+        return "Just now";
+    }
+}

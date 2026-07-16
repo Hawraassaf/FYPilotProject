@@ -1,5 +1,5 @@
-using System.Security.Claims;
 using System.Reflection;
+using System.Security.Claims;
 using FYPilot.Application.DTOs.Documentation;
 using FYPilot.Application.Interfaces;
 using FYPilot.Domain.Entities;
@@ -27,16 +27,26 @@ public class DocumentationGeneratorModel : PageModel
     }
 
     [BindProperty]
-    public GenerateDocumentationRequest Request { get; set; } = new();
+    public new GenerateDocumentationRequest Request { get; set; } = new();
 
     [BindProperty]
     public int SelectedProjectIdeaId { get; set; }
 
-    public List<SelectListItem> ProjectIdeaOptions { get; set; } = new();
+    public List<SelectListItem> ProjectIdeaOptions { get; private set; } = [];
 
-    public GeneratedDocumentationDto? GeneratedDocumentation { get; set; }
+    public List<ProjectIdea> ProjectIdeas { get; private set; } = [];
 
-    public string Message { get; set; } = string.Empty;
+    public ProjectIdea? SelectedIdea { get; private set; }
+
+    public GeneratedDocumentationDto? GeneratedDocumentation { get; private set; }
+
+    public string Message { get; private set; } = string.Empty;
+
+    public string? ErrorMessage { get; private set; }
+
+    public bool HasSelectedIdea => SelectedIdea != null;
+
+    public bool HasGeneratedDocumentation => GeneratedDocumentation != null;
 
     public async Task OnGetAsync(int? projectIdeaId)
     {
@@ -44,70 +54,74 @@ public class DocumentationGeneratorModel : PageModel
 
         await LoadProjectIdeasAsync(userId);
 
-        if (projectIdeaId.HasValue && projectIdeaId.Value > 0)
+        var ideaIdToLoad = projectIdeaId;
+
+        if (!ideaIdToLoad.HasValue || ideaIdToLoad.Value <= 0)
         {
-            SelectedProjectIdeaId = projectIdeaId.Value;
-            await LoadSelectedIdeaIntoFormAsync(projectIdeaId.Value);
-            return;
+            var selectedIdea = ProjectIdeas.FirstOrDefault(idea =>
+                GetBoolValue(idea, "IsSelected", "Selected"));
+
+            if (selectedIdea != null)
+            {
+                ideaIdToLoad = GetIntValue(selectedIdea, "Id");
+            }
         }
 
-        Request = new GenerateDocumentationRequest
+        if (ideaIdToLoad.HasValue && ideaIdToLoad.Value > 0)
         {
-            ProjectTitle = "AI Clinic Appointment and Triage System",
-            ProjectDescription = "A system that helps clinics manage appointments and prioritize patients using AI-based triage support.",
-            Domain = "Healthcare",
-            TechStack = "ASP.NET Core, PostgreSQL, Python AI",
-            ContainsAi = true
-        };
+            await LoadSelectedIdeaIntoFormAsync(ideaIdToLoad.Value, userId);
+        }
+        else
+        {
+            Request = new GenerateDocumentationRequest
+            {
+                UserId = userId
+            };
+        }
+
+        BuildProjectIdeaOptions();
     }
 
     public async Task<IActionResult> OnPostAsync()
+    {
+        return await OnPostGenerateAsync();
+    }
+
+    public async Task<IActionResult> OnPostGenerateAsync()
     {
         var userId = GetCurrentUserId();
 
         await LoadProjectIdeasAsync(userId);
 
+        if (SelectedProjectIdeaId <= 0 && Request.ProjectIdeaId > 0)
+        {
+            SelectedProjectIdeaId = Request.ProjectIdeaId;
+        }
+
+        if (SelectedProjectIdeaId <= 0)
+        {
+            ErrorMessage = "Please select a saved project idea before generating software documentation.";
+            ModelState.AddModelError(nameof(SelectedProjectIdeaId), ErrorMessage);
+            BuildProjectIdeaOptions();
+            return Page();
+        }
+
+        var idea = await GetUserProjectIdeaAsync(SelectedProjectIdeaId, userId);
+
+        if (idea == null)
+        {
+            ErrorMessage = "The selected project idea was not found or does not belong to your account.";
+            ModelState.AddModelError(nameof(SelectedProjectIdeaId), ErrorMessage);
+            BuildProjectIdeaOptions();
+            return Page();
+        }
+
+        SelectedIdea = idea;
+        Request = BuildRequestFromIdea(idea);
         Request.UserId = userId;
+        Request.ProjectIdeaId = SelectedProjectIdeaId;
 
-        if (SelectedProjectIdeaId > 0)
-        {
-            var idea = await _db.Set<ProjectIdea>()
-                .AsNoTracking()
-                .FirstOrDefaultAsync(x => x.Id == SelectedProjectIdeaId);
-
-            if (idea != null)
-            {
-                var ideaRequest = BuildRequestFromIdea(idea);
-
-                Request.ProjectIdeaId = SelectedProjectIdeaId;
-
-                if (!string.IsNullOrWhiteSpace(ideaRequest.ProjectTitle))
-                {
-                    Request.ProjectTitle = ideaRequest.ProjectTitle;
-                }
-
-                if (!string.IsNullOrWhiteSpace(ideaRequest.ProjectDescription))
-                {
-                    Request.ProjectDescription = ideaRequest.ProjectDescription;
-                }
-
-                if (!string.IsNullOrWhiteSpace(ideaRequest.Domain))
-                {
-                    Request.Domain = ideaRequest.Domain;
-                }
-
-                if (!string.IsNullOrWhiteSpace(ideaRequest.TechStack))
-                {
-                    Request.TechStack = ideaRequest.TechStack;
-                }
-
-                Request.ContainsAi = Request.ContainsAi || ideaRequest.ContainsAi;
-            }
-        }
-        else
-        {
-            Request.ProjectIdeaId = Request.ProjectIdeaId == 0 ? 1 : Request.ProjectIdeaId;
-        }
+        ModelState.Clear();
 
         if (string.IsNullOrWhiteSpace(Request.ProjectTitle))
         {
@@ -121,72 +135,99 @@ public class DocumentationGeneratorModel : PageModel
 
         if (!ModelState.IsValid)
         {
+            ErrorMessage = "The selected project idea does not contain enough information to generate documentation.";
+            BuildProjectIdeaOptions();
             return Page();
         }
 
-        GeneratedDocumentation = await _documentationGeneratorService.GenerateAsync(Request);
+        try
+        {
+            GeneratedDocumentation = await _documentationGeneratorService.GenerateAsync(Request);
 
-        Message = SelectedProjectIdeaId > 0
-            ? "Software engineering documentation generated successfully for the selected project idea."
-            : "Software engineering documentation generated successfully.";
+            Message = "AI software engineering documentation generated successfully for the selected project idea.";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Software documentation generation failed. Backend error: {ex.Message}";
+        }
+
+        BuildProjectIdeaOptions();
 
         return Page();
     }
 
     private async Task LoadProjectIdeasAsync(int userId)
     {
+        var allIdeas = await _db.Set<ProjectIdea>()
+            .AsNoTracking()
+            .ToListAsync();
+
+        ProjectIdeas = allIdeas
+            .Where(idea =>
+            {
+                var ideaUserId = GetIntValue(idea, "UserId", "StudentId", "CreatedByUserId", "OwnerId");
+                return ideaUserId.HasValue && ideaUserId.Value == userId;
+            })
+            .OrderByDescending(idea => GetDateTimeValue(idea, "CreatedAt", "CreatedOn", "DateCreated") ?? DateTime.MinValue)
+            .ToList();
+
+        BuildProjectIdeaOptions();
+    }
+
+    private void BuildProjectIdeaOptions()
+    {
         ProjectIdeaOptions = new List<SelectListItem>
         {
             new SelectListItem
             {
                 Value = "",
-                Text = "-- Select saved project idea --"
+                Text = "-- Select saved project idea --",
+                Selected = SelectedProjectIdeaId <= 0
             }
         };
 
-        var ideas = await _db.Set<ProjectIdea>()
-            .AsNoTracking()
-            .ToListAsync();
-
-        foreach (var idea in ideas)
+        foreach (var idea in ProjectIdeas)
         {
-            var ideaUserId = GetIntValue(idea, "UserId", "StudentId", "CreatedByUserId", "OwnerId");
-
-            if (ideaUserId.HasValue && ideaUserId.Value != userId)
-            {
-                continue;
-            }
+            var ideaId = GetIntValue(idea, "Id") ?? 0;
 
             var title = GetStringValue(idea, "Title", "ProjectTitle", "Name", "IdeaTitle");
 
             if (string.IsNullOrWhiteSpace(title))
             {
-                title = $"Project Idea #{GetIntValue(idea, "Id") ?? 0}";
+                title = $"Project Idea #{ideaId}";
             }
 
             ProjectIdeaOptions.Add(new SelectListItem
             {
-                Value = (GetIntValue(idea, "Id") ?? 0).ToString(),
-                Text = title
+                Value = ideaId.ToString(),
+                Text = title,
+                Selected = SelectedProjectIdeaId == ideaId
             });
         }
     }
 
-    private async Task LoadSelectedIdeaIntoFormAsync(int ideaId)
+    private async Task LoadSelectedIdeaIntoFormAsync(int ideaId, int userId)
     {
-        var idea = await _db.Set<ProjectIdea>()
-            .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == ideaId);
+        var idea = await GetUserProjectIdeaAsync(ideaId, userId);
 
         if (idea == null)
         {
+            ErrorMessage = "The selected project idea was not found.";
+            Request = new GenerateDocumentationRequest
+            {
+                UserId = userId
+            };
             return;
         }
 
+        SelectedIdea = idea;
+        SelectedProjectIdeaId = ideaId;
         Request = BuildRequestFromIdea(idea);
+        Request.UserId = userId;
+        Request.ProjectIdeaId = ideaId;
     }
 
-    private async Task LoadSelectedIdeaIntoRequestAsync(int ideaId)
+    private async Task<ProjectIdea?> GetUserProjectIdeaAsync(int ideaId, int userId)
     {
         var idea = await _db.Set<ProjectIdea>()
             .AsNoTracking()
@@ -194,22 +235,98 @@ public class DocumentationGeneratorModel : PageModel
 
         if (idea == null)
         {
-            return;
+            return null;
         }
 
-        Request = BuildRequestFromIdea(idea);
-        Request.UserId = GetCurrentUserId();
-        Request.ProjectIdeaId = ideaId;
+        var ideaUserId = GetIntValue(idea, "UserId", "StudentId", "CreatedByUserId", "OwnerId");
+
+        if (!ideaUserId.HasValue || ideaUserId.Value != userId)
+        {
+            return null;
+        }
+
+        return idea;
     }
 
     private GenerateDocumentationRequest BuildRequestFromIdea(ProjectIdea idea)
     {
-        var title = GetStringValue(idea, "Title", "ProjectTitle", "Name", "IdeaTitle");
-        var description = GetStringValue(idea, "Description", "ProjectDescription", "IdeaDescription", "Summary");
-        var domain = GetStringValue(idea, "Domain", "Category", "Sector");
-        var techStack = GetStringValue(idea, "TechStack", "Technologies", "SuggestedTechnologies", "TechnologyStack");
+        var title = GetStringValue(
+            idea,
+            "Title",
+            "ProjectTitle",
+            "Name",
+            "IdeaTitle"
+        );
 
-        var combinedText = $"{title} {description} {domain} {techStack}".ToLower();
+        var description = GetStringValue(
+            idea,
+            "ProjectDescription",
+            "Description",
+            "IdeaDescription",
+            "Summary",
+            "ProblemStatement",
+            "Problem"
+        );
+
+        var problemStatement = GetStringValue(
+            idea,
+            "ProblemStatement",
+            "Problem"
+        );
+
+        var targetUsers = GetStringValue(
+            idea,
+            "TargetUsers",
+            "Users"
+        );
+
+        var whyUseful = GetStringValue(
+            idea,
+            "WhyUseful",
+            "Usefulness",
+            "Value"
+        );
+
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            var descriptionParts = new List<string>();
+
+            if (!string.IsNullOrWhiteSpace(problemStatement))
+            {
+                descriptionParts.Add($"Problem: {problemStatement}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(targetUsers))
+            {
+                descriptionParts.Add($"Target users: {targetUsers}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(whyUseful))
+            {
+                descriptionParts.Add($"Usefulness: {whyUseful}");
+            }
+
+            description = string.Join("\n", descriptionParts);
+        }
+
+        var domain = GetStringValue(
+            idea,
+            "Domain",
+            "ProjectDomain",
+            "Category",
+            "Sector"
+        );
+
+        var techStack = GetStringValue(
+            idea,
+            "TechStack",
+            "Technologies",
+            "SuggestedTechnologies",
+            "TechnologyStack",
+            "RequiredTechnologies"
+        );
+
+        var combinedText = $"{title} {description} {domain} {techStack}".ToLowerInvariant();
 
         var containsAi =
             combinedText.Contains("ai") ||
@@ -219,7 +336,9 @@ public class DocumentationGeneratorModel : PageModel
             combinedText.Contains("prediction") ||
             combinedText.Contains("recommendation") ||
             combinedText.Contains("nlp") ||
-            combinedText.Contains("data science");
+            combinedText.Contains("data science") ||
+            combinedText.Contains("llm") ||
+            combinedText.Contains("chatbot");
 
         return new GenerateDocumentationRequest
         {
@@ -242,7 +361,7 @@ public class DocumentationGeneratorModel : PageModel
             return userId;
         }
 
-        return 1;
+        throw new InvalidOperationException("Unable to identify the current logged-in user.");
     }
 
     private static string GetStringValue(object source, params string[] propertyNames)
@@ -285,6 +404,64 @@ public class DocumentationGeneratorModel : PageModel
             }
 
             if (int.TryParse(value.ToString(), out var parsed))
+            {
+                return parsed;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool GetBoolValue(object source, params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            var property = source.GetType().GetProperty(
+                propertyName,
+                BindingFlags.IgnoreCase | BindingFlags.Public | BindingFlags.Instance);
+
+            var value = property?.GetValue(source);
+
+            if (value == null)
+            {
+                continue;
+            }
+
+            if (value is bool boolValue)
+            {
+                return boolValue;
+            }
+
+            if (bool.TryParse(value.ToString(), out var parsed))
+            {
+                return parsed;
+            }
+        }
+
+        return false;
+    }
+
+    private static DateTime? GetDateTimeValue(object source, params string[] propertyNames)
+    {
+        foreach (var propertyName in propertyNames)
+        {
+            var property = source.GetType().GetProperty(
+                propertyName,
+                BindingFlags.IgnoreCase | BindingFlags.Public | BindingFlags.Instance);
+
+            var value = property?.GetValue(source);
+
+            if (value == null)
+            {
+                continue;
+            }
+
+            if (value is DateTime dateTimeValue)
+            {
+                return dateTimeValue;
+            }
+
+            if (DateTime.TryParse(value.ToString(), out var parsed))
             {
                 return parsed;
             }

@@ -61,8 +61,13 @@ public class IdeasController(ApplicationDbContext db) : ControllerBase
         var domain = request.PreferredDomain ?? profile?.PreferredDomain ?? "Web Development";
         var difficulty = request.TargetDifficulty ?? profile?.TargetDifficulty ?? "intermediate";
         var stack = request.PreferredStack ?? profile?.PreferredStack ?? "Web";
-        var hours = request.AvailableHoursPerWeek ?? profile?.AvailableHoursPerWeek ?? 20;
-        var team = request.TeamMembers ?? profile?.TeamMembers ?? 1;
+        var hours = request.AvailableHoursPerWeek > 0
+    ? request.AvailableHoursPerWeek
+    : profile?.AvailableHoursPerWeek ?? 20;
+
+        var team = request.TeamMembers > 0
+            ? request.TeamMembers
+            : profile?.TeamMembers ?? 1;
 
         var skillNames = userSkills.Select(s => s.SkillName).ToList();
         if (request.Skills != null)

@@ -8,26 +8,38 @@ FYPilot.SystemTest = {
     setStatus: function (id, status, detail) {
         var card = document.getElementById('test-' + id);
         if (!card) return;
-        var dot    = card.querySelector('.status-dot');
-        var badge  = card.querySelector('.test-badge');
+        var dot = card.querySelector('.status-dot');
+        var badge = card.querySelector('.test-badge');
         var detDiv = card.querySelector('.test-detail');
         var map = {
-            'ok':      { dot:'bg-success',   badge:'bg-success',              text:'PASS'    },
-            'error':   { dot:'bg-danger',    badge:'bg-danger',               text:'FAIL'    },
-            'running': { dot:'bg-warning',   badge:'bg-warning text-dark',    text:'RUNNING' },
-            'pending': { dot:'bg-secondary', badge:'bg-secondary',             text:'PENDING' },
+            'ok': { dot: 'bg-success', badge: 'bg-success', text: 'PASS' },
+            'error': { dot: 'bg-danger', badge: 'bg-danger', text: 'FAIL' },
+            'running': { dot: 'bg-warning', badge: 'bg-warning text-dark', text: 'RUNNING' },
+            'pending': { dot: 'bg-secondary', badge: 'bg-secondary', text: 'PENDING' },
         };
         var cfg = map[status] || map['pending'];
-        dot.className     = 'status-dot ' + cfg.dot;
-        badge.className   = 'test-badge badge ' + cfg.badge;
+        dot.className = 'status-dot ' + cfg.dot;
+        badge.className = 'test-badge badge ' + cfg.badge;
         badge.textContent = cfg.text;
         if (detail) { detDiv.textContent = detail; detDiv.style.display = 'block'; }
-    },
 
+    },
     run: async function () {
         var btn = document.getElementById('run-btn');
         if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Running…'; }
-        ['database','ai-health','skill-analysis','feasibility','similarity'].forEach(function(id){ FYPilot.SystemTest.setStatus(id,'running',''); });
+        var testIds = [
+            'database',
+            'ai-health',
+            'skill-analysis',
+            'feasibility',
+            'similarity',
+            'market-match',
+            'risk-alarms'
+        ];
+
+        testIds.forEach(function (id) {
+            FYPilot.SystemTest.setStatus(id, 'running', '');
+        });
 
         var token   = document.querySelector('[name="__RequestVerificationToken"]');
         var headers = { 'Content-Type':'application/json' };
@@ -44,7 +56,9 @@ FYPilot.SystemTest = {
             summary.className = 'alert mt-3 ' + (passed === results.length ? 'alert-success' : 'alert-warning');
             summary.innerHTML = '<strong>' + passed + '/' + results.length + ' tests passed</strong>' + (passed < results.length ? ' — see failures above.' : ' — All systems operational!');
         } catch(err) {
-            ['database','ai-health','skill-analysis','feasibility','similarity'].forEach(function(id){ FYPilot.SystemTest.setStatus(id,'error',err.message); });
+            testIds.forEach(function (id) {
+                FYPilot.SystemTest.setStatus(id, 'error', err.message);
+            });
         } finally {
             if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-play-circle me-2"></i>Run Tests'; }
         }

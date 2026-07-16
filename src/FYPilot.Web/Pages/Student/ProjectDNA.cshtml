@@ -1,103 +1,407 @@
 @page
 @model FYPilot.Web.Pages.Student.ProjectDNAModel
 @{
-    ViewData["Title"]    = "Project DNA Analyzer";
-    ViewData["Subtitle"] = "Visualise the technical profile of your project idea";
+    ViewData["Title"] = "Project DNA Analyzer";
+    ViewData["Subtitle"] = "AI-based technical profile analysis of your selected project";
 }
 
-@if (Model.Idea == null)
-{
-    <div class="page-card p-5 text-center">
-        <i class="bi bi-diagram-3 display-3 text-muted"></i>
-        <h5 class="mt-3">No Idea Selected</h5>
-        <p class="text-muted">Please generate and select a project idea first.</p>
-        <a href="/Student/IdeaGenerator" class="btn btn-primary">
-            <i class="bi bi-stars me-2"></i>Go to Idea Generator
-        </a>
-    </div>
-}
-else
-{
-    <div class="row g-4">
-        <div class="col-lg-5">
-            <div class="page-card p-4 mb-3">
-                <h6 class="fw-bold mb-1">@Model.Idea.Title</h6>
-                <span class="badge bg-primary-subtle text-primary mb-3">@Model.Idea.Domain</span>
-                <p class="text-muted small">@Model.Idea.ProblemStatement</p>
-                <div class="row g-2 text-center">
-                    @foreach (var (label, val, color) in new[] {
-                        ("Innovation",   Model.Idea.InnovationScore,    "#3b82f6"),
-                        ("Feasibility",  Model.Idea.FeasibilityScore,   "#10b981"),
-                        ("Market",       Model.Idea.MarketDemandScore,  "#f59e0b"),
-                    })
+<div class="pdna-page">
+
+    @if (Model.Idea == null)
+    {
+        <section class="pdna-empty-card">
+            <div class="pdna-empty-icon">
+                <i class="bi bi-diagram-3"></i>
+            </div>
+
+            <h1>No project idea selected yet</h1>
+
+            <p>
+                Select one idea first, then return here to generate its AI Project DNA analysis.
+                The DNA report will stay empty until an idea is selected.
+            </p>
+
+            <div class="pdna-empty-actions">
+                <a href="/Student/IdeaComparison" class="btn pdna-primary-btn">
+                    <i class="bi bi-check2-circle me-1"></i>
+                    Choose an Idea
+                </a>
+
+                <a href="/Student/IdeaGenerator" class="btn pdna-outline-btn">
+                    <i class="bi bi-stars me-1"></i>
+                    Generate Ideas
+                </a>
+            </div>
+        </section>
+    }
+    else
+    {
+        @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+        {
+            <div class="alert alert-warning pdna-alert">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                @Model.ErrorMessage
+            </div>
+        }
+
+        <section class="pdna-shell">
+
+            <aside class="pdna-idea-card">
+                <div class="pdna-idea-top">
+                    <div class="pdna-idea-icon">
+                        <i class="bi bi-fingerprint"></i>
+                    </div>
+
+                    <div>
+                        <div class="pdna-kicker">Selected Idea</div>
+                        <h1>@Model.Idea.Title</h1>
+                    </div>
+                </div>
+
+                <div class="pdna-chip-row">
+                    <span>@Model.Idea.Domain</span>
+                    <span class="text-capitalize">@Model.Idea.DifficultyLevel</span>
+                    <span>@Model.Idea.ExpectedDurationWeeks weeks</span>
+
+                    @if (Model.Idea.IsSelected)
                     {
-                        <div class="col-4">
-                            <div class="score-ring mx-auto" style="color:@color;border-color:@color;width:60px;height:60px;font-size:0.9rem">@val%</div>
-                            <div class="small text-muted mt-1">@label</div>
-                        </div>
+                        <span class="pdna-selected-chip">
+                            <i class="bi bi-check-circle me-1"></i>
+                            Selected
+                        </span>
                     }
                 </div>
-            </div>
 
-            <div class="page-card p-4">
-                <h6 class="fw-bold mb-3">DNA Dimensions</h6>
-                @foreach (var (label, val, color) in Model.DnaDimensions)
+                <div class="pdna-summary-block">
+                    <label>Problem Statement</label>
+                    <p>@Model.Idea.ProblemStatement</p>
+                </div>
+
+                <div class="pdna-summary-grid">
+                    <div>
+                        <label>Target Users</label>
+                        <p>@Model.Idea.TargetUsers</p>
+                    </div>
+
+                    <div>
+                        <label>Technologies</label>
+                        <p>@Model.Idea.RequiredTechnologies</p>
+                    </div>
+                </div>
+
+                <form method="post" asp-page-handler="Analyze" id="pdnaAnalyzeForm" class="pdna-generate-form">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="ideaId" value="@Model.Idea.Id" />
+
+                    <button type="submit" class="btn pdna-primary-btn w-100">
+                        <i class="bi bi-cpu me-2"></i>
+                        Generate DNA AI Analysis
+                    </button>
+                </form>
+                <a href="/Student/ProjectDetails?ideaId=@Model.Idea.Id" class="btn pdna-outline-btn w-100 mt-2">
+                  <i class="bi bi-file-earmark-text me-2"></i>
+                        View Project Details
+                </a>
+                
+                @if (Model.Analysis == null)
                 {
-                    <div class="dna-row d-flex align-items-center gap-2">
-                        <div class="dna-label">@label</div>
-                        <div class="progress flex-grow-1" style="height:10px">
-                            <div class="progress-bar" style="width:@val%;background:@color"></div>
-                        </div>
-                        <div class="small text-muted" style="width:30px;text-align:right">@val</div>
+                    <div class="pdna-before-note">
+                        <i class="bi bi-info-circle"></i>
+                        <span>
+                            No DNA analysis is shown yet. Click the button to ask the Python AI agent to analyze this project.
+                        </span>
                     </div>
                 }
-            </div>
-        </div>
-
-        <div class="col-lg-7">
-            <div class="page-card p-4 mb-3">
-                <h6 class="fw-bold mb-3"><i class="bi bi-shield-exclamation me-2 text-warning"></i>Risk Profile</h6>
-                @foreach (var risk in Model.Risks)
+                else
                 {
-                    <div class="d-flex align-items-start gap-3 mb-3 p-3 rounded-2 risk-@risk.Level.ToLower()">
-                        <div>
-                            <div class="fw-semibold small">@risk.Category
-                                <span class="badge ms-1 @(risk.Level == "high" ? "bg-danger" : risk.Level == "medium" ? "bg-warning text-dark" : "bg-success")">@risk.Level</span>
+                    <div class="pdna-ready-note">
+                        <i class="bi bi-check-circle"></i>
+                        <span>
+                            AI DNA Analysis generated using @(Model.LlmUsed ? "Ollama / ProjectDNAAgent" : "fallback AI analysis").
+                        </span>
+                    </div>
+                }
+            </aside>
+
+            <main class="pdna-analysis-card">
+                @if (Model.Analysis == null)
+                {
+                    <div class="pdna-waiting-state">
+                        <div class="pdna-waiting-orb">
+                            <i class="bi bi-cpu"></i>
+                        </div>
+
+                        <h2>Ready to generate Project DNA</h2>
+
+                        <p>
+                            The report will appear here after the AI agent analyzes your selected idea,
+                            skill profile, project scope, risks, and feasibility.
+                        </p>
+
+                        <div class="pdna-preview-list">
+                            <div>
+                                <i class="bi bi-diagram-3"></i>
+                                Project identity and DNA type
                             </div>
-                            <div class="small mt-1">@risk.Description</div>
-                            <div class="small text-muted mt-1"><i class="bi bi-lightbulb me-1"></i>@risk.Mitigation</div>
+
+                            <div>
+                                <i class="bi bi-bar-chart-line"></i>
+                                Technical, skill, feasibility, and market scores
+                            </div>
+
+                            <div>
+                                <i class="bi bi-shield-exclamation"></i>
+                                Risks, skill gaps, and scope advice
+                            </div>
                         </div>
                     </div>
                 }
-            </div>
-
-            <div class="page-card p-4">
-                <h6 class="fw-bold mb-3"><i class="bi bi-check2-all me-2 text-success"></i>Required Skills vs Your Profile</h6>
-                @foreach (var skill in Model.Idea.RequiredSkills.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)))
+                else
                 {
-                    var match = Model.StudentSkills.FirstOrDefault(ss => ss.SkillName.Equals(skill, StringComparison.OrdinalIgnoreCase));
-                    <div class="d-flex align-items-center gap-2 mb-2">
-                        <i class="bi @(match != null ? "bi-check-circle-fill text-success" : "bi-x-circle text-danger")"></i>
-                        <span class="small">@skill</span>
-                        @if (match != null)
-                        {
-                            <span class="badge bg-success-subtle text-success ms-auto">Level @match.Rating/5</span>
-                        }
-                        else
-                        {
-                            <span class="badge bg-danger-subtle text-danger ms-auto">Missing</span>
-                        }
+                    <div class="pdna-analysis-head">
+                        <div>
+                            <div class="pdna-kicker">AI Project DNA Report</div>
+                            <h2>@Model.Analysis.ProjectDNAType</h2>
+                            <p>@Model.Analysis.Summary</p>
+                        </div>
+
+                        <div class="pdna-overall-score">
+                            <strong>@Model.Analysis.OverallScore%</strong>
+                            <span>Overall</span>
+                        </div>
+                    </div>
+
+                    <div class="pdna-meta-strip">
+                        <div>
+                            <span>Risk Level</span>
+                            <strong>@Model.Analysis.RiskLevel</strong>
+                        </div>
+
+                        <div>
+                            <span>Source</span>
+                            <strong>@(Model.LlmUsed ? "Ollama Agent" : "Fallback Engine")</strong>
+                        </div>
+
+                        <div>
+                            <span>Idea Domain</span>
+                            <strong>@Model.Idea.Domain</strong>
+                        </div>
+                    </div>
+
+                    <section class="pdna-section">
+                        <div class="pdna-section-title">
+                            <i class="bi bi-sliders"></i>
+                            DNA Dimensions
+                        </div>
+
+                        <div class="pdna-dimension-grid">
+                            @foreach (var (label, value, color) in Model.DnaDimensions)
+                            {
+                                <div class="pdna-dimension-card">
+                                    <div class="pdna-dimension-top">
+                                        <span>@label</span>
+                                        <strong>@value%</strong>
+                                    </div>
+
+                                    <div class="pdna-progress">
+                                        <div style="width:@value%; background:@color"></div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </section>
+
+                    <section class="pdna-section">
+                        <div class="pdna-section-title">
+                            <i class="bi bi-check2-circle"></i>
+                            Strengths and Weaknesses
+                        </div>
+
+                        <div class="pdna-two-column">
+                            <div class="pdna-list-card">
+                                <h3>Strengths</h3>
+
+                                @foreach (var strength in Model.Analysis.Strengths)
+                                {
+                                    <div class="pdna-list-item success">
+                                        <i class="bi bi-check-circle"></i>
+                                        <span>@strength</span>
+                                    </div>
+                                }
+                            </div>
+
+                            <div class="pdna-list-card">
+                                <h3>Weaknesses</h3>
+
+                                @foreach (var weakness in Model.Analysis.Weaknesses)
+                                {
+                                    <div class="pdna-list-item warning">
+                                        <i class="bi bi-exclamation-circle"></i>
+                                        <span>@weakness</span>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="pdna-section">
+                        <div class="pdna-section-title">
+                            <i class="bi bi-shield-exclamation"></i>
+                            Risk Profile
+                        </div>
+
+                        <div class="pdna-risk-grid">
+                            @foreach (var risk in Model.Risks)
+                            {
+                                var level = (risk.Level ?? "").Trim().ToLowerInvariant();
+                                var levelClass = level == "high" ? "high" : level == "medium" ? "medium" : "low";
+
+                                <div class="pdna-risk-card @levelClass">
+                                    <div class="pdna-risk-head">
+                                        <h3>@risk.Category</h3>
+                                        <span>@risk.Level</span>
+                                    </div>
+
+                                    <p>@risk.Description</p>
+
+                                    <div class="pdna-mitigation">
+                                        <i class="bi bi-lightbulb"></i>
+                                        @risk.Mitigation
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </section>
+
+                    <section class="pdna-section">
+                        <div class="pdna-section-title">
+                            <i class="bi bi-person-check"></i>
+                            Required Skills vs Your Profile
+                        </div>
+
+                        <div class="pdna-skills-list">
+                            @if (Model.RequiredSkillsAnalysis.Any())
+                            {
+                                @foreach (var skill in Model.RequiredSkillsAnalysis)
+                                {
+                                    var status = (skill.Status ?? "").Trim().ToLowerInvariant();
+                                    var statusClass = status == "matched" ? "matched" : status == "partial" ? "partial" : "missing";
+
+                                    <div class="pdna-skill-row @statusClass">
+                                        <div>
+                                            <strong>@skill.SkillName</strong>
+                                            <p>@skill.Explanation</p>
+                                        </div>
+
+                                        <span>@skill.Status</span>
+                                    </div>
+                                }
+                            }
+                            else
+                            {
+                                <div class="pdna-no-data">
+                                    The AI response did not return required skill analysis.
+                                </div>
+                            }
+                        </div>
+                    </section>
+
+                    <section class="pdna-section">
+                        <div class="pdna-section-title">
+                            <i class="bi bi-lightbulb"></i>
+                            Recommended Improvements
+                        </div>
+
+                        <div class="pdna-improvement-list">
+                            @foreach (var improvement in Model.Analysis.RecommendedImprovements)
+                            {
+                                <div>
+                                    <i class="bi bi-arrow-right-circle"></i>
+                                    <span>@improvement</span>
+                                </div>
+                            }
+                        </div>
+                    </section>
+
+                    <div class="pdna-next-actions">
+                        <a href="/Student/ProjectDetails?ideaId=@Model.Idea.Id" class="btn pdna-outline-btn">
+                            <i class="bi bi-file-earmark-text me-1"></i>
+                            View Project Details
+                        </a>
+                        <a href="/Student/Roadmap?ideaId=@Model.Idea.Id" class="btn pdna-primary-btn">
+                            <i class="bi bi-map me-1"></i>
+                            Continue to Roadmap
+                        </a>
+
+                        <a href="/Student/DefenseSimulator?ideaId=@Model.Idea.Id" class="btn pdna-outline-btn">
+                            <i class="bi bi-shield-check me-1"></i>
+                            Prepare Defense
+                        </a>
                     </div>
                 }
-                <div class="mt-3">
-                    <a href="/Student/ScopeOptimizer?ideaId=@Model.Idea.Id" class="btn btn-outline-warning btn-sm">
-                        <i class="bi bi-funnel me-1"></i>Optimize Scope
-                    </a>
-                    <a href="/Student/DefenseSimulator?ideaId=@Model.Idea.Id" class="btn btn-outline-danger btn-sm ms-2">
-                        <i class="bi bi-shield-check me-1"></i>Defense Prep
-                    </a>
+            </main>
+        </section>
+
+        <div class="pdna-loading-overlay d-none" id="pdnaLoadingOverlay">
+            <div class="pdna-loading-card">
+                <div class="pdna-loader-ring">
+                    <span></span>
+                </div>
+
+                <h2>Generating Project DNA</h2>
+
+                <p>
+                    Please wait while FYPilot sends your selected idea to the Python AI agent.
+                </p>
+
+                <div class="pdna-loading-steps">
+                    <div class="active">
+                        <i class="bi bi-check2-circle"></i>
+                        Reading selected idea
+                    </div>
+
+                    <div>
+                        <i class="bi bi-cpu"></i>
+                        Sending to ProjectDNAAgent
+                    </div>
+
+                    <div>
+                        <i class="bi bi-diagram-3"></i>
+                        Analyzing technical DNA
+                    </div>
+
+                    <div>
+                        <i class="bi bi-shield-exclamation"></i>
+                        Building risks and recommendations
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
+    }
+</div>
+
+@section Scripts {
+    <script>
+        const dnaForm = document.getElementById("pdnaAnalyzeForm");
+        const dnaOverlay = document.getElementById("pdnaLoadingOverlay");
+
+        if (dnaForm && dnaOverlay) {
+            dnaForm.addEventListener("submit", function () {
+                dnaOverlay.classList.remove("d-none");
+
+                const steps = dnaOverlay.querySelectorAll(".pdna-loading-steps div");
+                let currentStep = 0;
+
+                setInterval(function () {
+                    steps.forEach(step => step.classList.remove("active"));
+
+                    if (steps[currentStep]) {
+                        steps[currentStep].classList.add("active");
+                    }
+
+                    currentStep = (currentStep + 1) % steps.length;
+                }, 900);
+            });
+        }
+    </script>
 }

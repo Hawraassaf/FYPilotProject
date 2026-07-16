@@ -72,6 +72,35 @@ try:
 except Exception as e:
     logger.warning(f"Ideas router skipped: {e}")
 
+try:
+    from app.routers import dna
+    app.include_router(dna.router)
+    logger.info("Project DNA router loaded")
+except Exception as e:
+    logger.warning(f"Project DNA router skipped: {e}")
+    
+try:
+    from app.routers import roadmap
+    app.include_router(roadmap.router)
+    logger.info("Project Roadmap router loaded")
+except Exception as e:
+    logger.warning(f"Project Roadmap router skipped: {e}")
+
+try:
+    from app.routers import idea_comparison
+    app.include_router(idea_comparison.router)
+    logger.info("Idea Comparison router loaded")
+except Exception as e:
+    logger.warning(f"Idea Comparison router skipped: {e}")
+
+
+try:
+    from app.routers import fyp_chat
+    app.include_router(fyp_chat.router)
+    logger.info("FYP Mentor Chat router loaded")
+except Exception as e:
+    logger.warning(f"FYP Mentor Chat router skipped: {e}")
+    
 # Heavy ML routers — loaded only if dependencies are available
 try:
     from app.routers import analytics

@@ -21,7 +21,10 @@ public class RegisterModel(ApplicationDbContext db) : PageModel
     {
         [Required] public string FullName { get; set; } = "";
         [Required] [EmailAddress] public string Email { get; set; } = "";
-        [Required] [MinLength(6)] public string Password { get; set; } = "";
+        [Required]
+        [DataType(DataType.Password)]
+        [StringLength( 100, MinimumLength = 8, ErrorMessage ="Password must contain at least 8 characters.")]
+        public string Password { get; set; } = "";
         [Required] public string Role { get; set; } = "student";
     }
 
@@ -39,11 +42,22 @@ public class RegisterModel(ApplicationDbContext db) : PageModel
             return Page();
         }
 
-        var email = Input.Email.Trim().ToLowerInvariant();
-        var fullName = Input.FullName.Trim();
-        var role = Input.Role.Trim().ToLowerInvariant();
+        var email = Input.Email
+            .Trim()
+            .ToLowerInvariant();
 
-        var validRoles = new[] { "student", "supervisor" };
+        var fullName = Input.FullName.Trim();
+
+        var role = Input.Role
+            .Trim()
+            .ToLowerInvariant();
+
+        var validRoles = new[]
+        {
+        "student",
+        "supervisor"
+    };
+
         if (!validRoles.Contains(role))
         {
             ErrorMessage = "Invalid role.";
@@ -51,69 +65,131 @@ public class RegisterModel(ApplicationDbContext db) : PageModel
         }
 
         var emailExists = await db.Users
-            .AnyAsync(u => u.Email.ToLower() == email);
+            .AnyAsync(u =>
+                u.Email.ToLower() == email);
 
         if (emailExists)
         {
-            ErrorMessage = "An account with this email already exists.";
+            ErrorMessage =
+                "An account with this email already exists.";
+
             return Page();
         }
 
-        var user = new User
+        await using var transaction =
+            await db.Database.BeginTransactionAsync();
+
+        try
         {
-            Email = email,
-            FullName = fullName,
-            Role = role,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(Input.Password)
+            var user = new User
+            {
+                Email = email,
+                FullName = fullName,
+                Role = role,
+                PasswordHash =
+                    BCrypt.Net.BCrypt.HashPassword(
+                        Input.Password)
+            };
+
+            db.Users.Add(user);
+
+            // Save temporarily to generate the user ID.
+            // The transaction prevents this save from becoming
+            // permanent until the profile also saves.
+            await db.SaveChangesAsync();
+
+            if (role == "student")
+            {
+                db.StudentProfiles.Add(
+                    new StudentProfile
+                    {
+                        UserId = user.Id,
+                        Major = "Computer Science",
+                        Year = "3rd Year",
+                        ExperienceLevel = "beginner",
+                        AvailableHoursPerWeek = 20,
+                        TeamMembers = 1,
+                        TargetDifficulty = "intermediate"
+                    });
+            }
+            else
+            {
+                db.SupervisorProfiles.Add(
+                    new SupervisorProfile
+                    {
+                        UserId = user.Id,
+                        Department = "Computer Science",
+                        Specialization =
+                            "General Software Engineering",
+                        ResearchAreas =
+                            "Software Engineering, Web Development, AI/Data Science",
+                        AcademicTitle = "Supervisor",
+                        Faculty = "Computer Science",
+                        University = "",
+                        OfficeLocation = "",
+                        OfficeHours = "",
+                        PreferredMeetingMode = "Online",
+                        Bio = "",
+                        LinkedInUrl = "",
+                        WebsiteUrl = "",
+                        UpdatedAt = DateTime.UtcNow
+                    });
+            }
+
+            await db.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            var claims = new List<Claim>
+        {
+            new(
+                ClaimTypes.NameIdentifier,
+                user.Id.ToString()),
+
+            new(
+                ClaimTypes.Email,
+                user.Email),
+
+            new(
+                ClaimTypes.Name,
+                user.FullName),
+
+            new(
+                ClaimTypes.Role,
+                user.Role),
+
+            new(
+                "userId",
+                user.Id.ToString())
         };
 
-        db.Users.Add(user);
-        await db.SaveChangesAsync();
+            var identity = new ClaimsIdentity(
+                claims,
+                CookieAuthenticationDefaults
+                    .AuthenticationScheme);
 
-        if (role == "student")
-        {
-            db.StudentProfiles.Add(new StudentProfile
-            {
-                UserId = user.Id,
-                Major = "Computer Science",
-                Year = "3rd Year",
-                ExperienceLevel = "beginner",
-                AvailableHoursPerWeek = 20,
-                TeamMembers = 1,
-                TargetDifficulty = "intermediate"
-            });
+            await HttpContext.SignInAsync(
+                CookieAuthenticationDefaults
+                    .AuthenticationScheme,
+                new ClaimsPrincipal(identity));
+
+            TempData["Success"] =
+                $"Welcome to FYPilot, {user.FullName}!";
+
+            return user.Role == "supervisor"
+                ? RedirectToPage("/Supervisor/Dashboard")
+                : RedirectToPage("/Student/Dashboard");
         }
-        else if (role == "supervisor")
+        catch (DbUpdateException)
         {
-            db.SupervisorProfiles.Add(new SupervisorProfile
-            {
-                UserId = user.Id,
-                Department = "Computer Science"
-            });
+            await transaction.RollbackAsync();
+
+            db.ChangeTracker.Clear();
+
+            ErrorMessage =
+                "Registration could not be completed. " +
+                "The email may already be registered. Please try again.";
+
+            return Page();
         }
-
-        await db.SaveChangesAsync();
-
-        var claims = new List<Claim>
-    {
-        new(ClaimTypes.NameIdentifier, user.Id.ToString()),
-        new(ClaimTypes.Email, user.Email),
-        new(ClaimTypes.Name, user.FullName),
-        new(ClaimTypes.Role, user.Role),
-        new("userId", user.Id.ToString())
-    };
-
-        var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
-
-        await HttpContext.SignInAsync(
-            CookieAuthenticationDefaults.AuthenticationScheme,
-            new ClaimsPrincipal(identity)
-        );
-
-        TempData["Success"] = $"Welcome to FYPilot, {user.FullName}!";
-
-        return user.Role == "supervisor"
-            ? RedirectToPage("/Supervisor/Dashboard")
-            : RedirectToPage("/Student/Dashboard");
     }
 }

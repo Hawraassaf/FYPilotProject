@@ -1,115 +1,561 @@
 @page
 @model FYPilot.Web.Pages.Student.IdeaComparisonModel
+@using FYPilot.Domain.Entities
 @{
-    ViewData["Title"]    = "Idea Comparison";
-    ViewData["Subtitle"] = "Compare project ideas side-by-side across all dimensions";
+
+    ViewData["Title"] = "Idea Comparison";
+    ViewData["Subtitle"] = "Compare ideas clearly and choose the one that fits you best";
+
+    var ideas = Model.Ideas;
+
+    var metricDefinitions = new[]
+    {
+        new { Key = "feasibility", Label = "Feasibility", Icon = "bar-chart-line", Description = "Achievable with your time and resources." },
+        new { Key = "innovation", Label = "Innovation", Icon = "lightbulb", Description = "Originality and creativity of the idea." },
+        new { Key = "market", Label = "Market Value", Icon = "shop", Description = "Usefulness for real users or the Lebanese market." },
+        new { Key = "time", Label = "Time Fit", Icon = "clock", Description = "Realistic duration for a semester project." },
+        new { Key = "difficulty", Label = "Difficulty Fit", Icon = "speedometer2", Description = "Suitable challenge level for an FYP." }
+    };
+
+    var comparisonData = ideas.Select(idea => new
+    {
+        id = idea.Id,
+        title = idea.Title,
+        domain = idea.Domain,
+        difficulty = idea.DifficultyLevel,
+        selected = idea.IsSelected,
+        scores = new Dictionary<string, int>
+        {
+            ["feasibility"] = ClampScore(idea.FeasibilityScore),
+            ["innovation"] = ClampScore(idea.InnovationScore),
+            ["market"] = ClampScore(idea.MarketDemandScore),
+            ["time"] = TimeFitScore(idea.ExpectedDurationWeeks),
+            ["difficulty"] = DifficultyFitScore(idea.DifficultyLevel)
+        }
+    }).ToList();
 }
 
-@if (Model.Ideas.Count < 2)
+@if (!ideas.Any())
 {
-    <div class="page-card p-5 text-center">
-        <i class="bi bi-bar-chart-line display-3 text-muted"></i>
-        <h5 class="mt-3">No Ideas to Compare</h5>
-        <p class="text-muted">Generate at least two project ideas to compare them.</p>
-        <a href="/Student/IdeaGenerator" class="btn btn-primary"><i class="bi bi-stars me-2"></i>Generate Ideas</a>
+    <div class="empty-dna-layout">
+        <div class="empty-dna-card">
+            <div class="empty-dna-content">
+                <div class="empty-dna-icon">
+                    <i class="bi bi-grid"></i>
+                </div>
+
+                <h1>No ideas to compare yet</h1>
+
+                <p>
+                    Generate at least two project ideas first, then come back here to
+                    compare them clearly.
+                </p>
+
+                <div class="empty-dna-actions">
+                    <a class="btn btn-primary" asp-page="/Student/IdeaGenerator">
+                        <i class="bi bi-stars me-2"></i>
+                        Generate Ideas
+                    </a>
+                </div>
+            </div>
+        </div>
     </div>
 }
 else
 {
-    <!-- Score overview table -->
-    <div class="page-card p-4 mb-4">
-        <h6 class="fw-bold mb-3"><i class="bi bi-table me-2 text-primary"></i>Score Comparison</h6>
-        <div class="table-responsive">
-            <table class="table align-middle">
-                <thead>
-                    <tr>
-                        <th>Metric</th>
-                        @foreach (var idea in Model.Ideas) { <th class="text-center">@idea.Title.Substring(0, Math.Min(idea.Title.Length, 28))…</th> }
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var (metric, getter, color) in new (string, Func<FYPilot.Domain.Entities.ProjectIdea, int>, string)[] {
-                        ("Innovation",     i => i.InnovationScore,    "#3b82f6"),
-                        ("Feasibility",    i => i.FeasibilityScore,   "#10b981"),
-                        ("Market Demand",  i => i.MarketDemandScore,  "#f59e0b"),
-                    })
-                    {
-                        <tr>
-                            <td class="small fw-semibold">@metric</td>
-                            @foreach (var idea in Model.Ideas)
-                            {
-                                var val = getter(idea);
-                                <td class="text-center">
-                                    <div class="d-flex flex-column align-items-center gap-1">
-                                        <div class="fw-bold" style="color:@color">@val%</div>
-                                        <div class="progress w-100" style="height:5px">
-                                            <div class="progress-bar" style="width:@val%;background:@color"></div>
-                                        </div>
-                                    </div>
-                                </td>
-                            }
-                        </tr>
-                    }
-                    <tr>
-                        <td class="small fw-semibold">Difficulty</td>
-                        @foreach (var idea in Model.Ideas) { <td class="text-center"><span class="badge bg-warning-subtle text-warning text-capitalize">@idea.DifficultyLevel</span></td> }
-                    </tr>
-                    <tr>
-                        <td class="small fw-semibold">Duration</td>
-                        @foreach (var idea in Model.Ideas) { <td class="text-center text-muted small">@idea.ExpectedDurationWeeks weeks</td> }
-                    </tr>
-                    <tr>
-                        <td class="small fw-semibold">Domain</td>
-                        @foreach (var idea in Model.Ideas) { <td class="text-center"><span class="badge bg-primary-subtle text-primary">@idea.Domain</span></td> }
-                    </tr>
-                    <tr class="table-light fw-bold">
-                        <td class="fw-bold">Avg Score</td>
-                        @foreach (var idea in Model.Ideas)
-                        {
-                            var avg = (idea.InnovationScore + idea.FeasibilityScore + idea.MarketDemandScore) / 3;
-                            <td class="text-center">
-                                <span class="badge fs-6 @(avg >= 70 ? "bg-success" : avg >= 50 ? "bg-warning text-dark" : "bg-danger")">@avg%</span>
-                            </td>
-                        }
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
+    <section class="ic3-page">
 
-    <!-- Idea cards -->
-    <div class="row g-3">
-        @foreach (var idea in Model.Ideas)
-        {
-            var avg = (idea.InnovationScore + idea.FeasibilityScore + idea.MarketDemandScore) / 3;
-            <div class="col-md-6 col-xl-4">
-                <div class="page-card p-4 h-100">
-                    <div class="d-flex align-items-start justify-content-between mb-2">
-                        <h6 class="fw-bold small mb-0" style="max-width:180px">@idea.Title</h6>
-                        <div class="score-ring @(avg >= 70 ? "text-success" : "text-warning")" style="width:50px;height:50px;font-size:0.85rem">@avg%</div>
-                    </div>
-                    <p class="text-muted" style="font-size:0.8rem">@idea.ProblemStatement.Substring(0, Math.Min(idea.ProblemStatement.Length, 100))…</p>
-                    <div class="small text-muted mb-3">
-                        <i class="bi bi-tools me-1"></i>@idea.RequiredTechnologies.Substring(0, Math.Min(idea.RequiredTechnologies.Length, 60))
-                    </div>
-                    @if (idea.IsSelected)
+        <div class="ic3-hero">
+            <div>
+                <div class="ic3-kicker">Idea Comparison</div>
+                <h1>Compare all ideas in one clear view</h1>
+                <p>
+                    Select the metrics that matter to you. FYPilot will show the matching score under each selected metric.
+                </p>
+            </div>
+
+            <div class="ic3-hero-actions">
+                <form method="post" asp-page-handler="Compare" class="m-0">
+                    @Html.AntiForgeryToken()
+
+                    <button type="submit" class="btn ic3-soft-btn">
+                        <i class="bi bi-columns-gap me-1"></i>
+                        Compare My Ideas
+                    </button>
+                </form>
+
+                <a href="/Student/IdeaGenerator" class="btn ic3-outline-btn">
+                    <i class="bi bi-plus-circle me-1"></i>
+                    Add Ideas
+                </a>
+            </div>
+        </div>
+
+        <div class="ic3-card">
+
+            <div class="ic3-metric-header">
+                <div>
+                    <div class="ic3-kicker">Compare By</div>
+                    <h2>Choose one or more priorities</h2>
+                </div>
+
+                <button type="button" class="btn ic3-clear-btn" id="ic3ResetMetrics">
+                    Reset
+                </button>
+            </div>
+
+            <div class="ic3-metric-tabs" id="ic3MetricTabs">
+                @foreach (var metric in metricDefinitions)
+                {
+                    var active = metric.Key is "feasibility" or "time";
+
+                    <button type="button"
+                            class="ic3-metric-tab @(active ? "active" : "")"
+                            data-metric="@metric.Key"
+                            title="@metric.Description">
+                        <i class="bi bi-@metric.Icon"></i>
+                        <span>@metric.Label</span>
+                        <b><i class="bi bi-check"></i></b>
+                    </button>
+                }
+            </div>
+
+            <div class="ic3-selected-line" id="ic3SelectedSummary">
+                Showing: <strong>Feasibility</strong> and <strong>Time Fit</strong>
+            </div>
+
+            <div class="ic3-table-card">
+                <div class="ic3-table-head">
+                    <div class="ic3-col-idea">Idea</div>
+
+                    @foreach (var metric in metricDefinitions)
                     {
-                        <span class="badge bg-success w-100 py-2"><i class="bi bi-check-circle me-1"></i>Currently Selected</span>
+                        var visible = metric.Key is "feasibility" or "time";
+
+                        <div class="ic3-col-metric @(visible ? "" : "d-none")"
+                             data-metric-column="@metric.Key">
+                            <i class="bi bi-@metric.Icon"></i>
+                            <span>@metric.Label</span>
+                        </div>
                     }
-                    else
+
+                    <div class="ic3-col-action">Choose</div>
+                </div>
+
+                <div class="ic3-table-body">
+                    @for (var i = 0; i < ideas.Count; i++)
                     {
-                        <form method="post">
-                            @Html.AntiForgeryToken()
-                            <input type="hidden" name="ideaId" value="@idea.Id" />
-                            <button class="btn btn-sm btn-outline-primary w-100">Select This Idea</button>
-                        </form>
+                        var idea = ideas[i];
+                        var isSelected = idea.IsSelected;
+
+                        <div class="ic3-idea-row @(isSelected ? "selected" : "")"
+                             data-idea-row="@idea.Id">
+
+                            <div class="ic3-idea-main">
+                                <div class="ic3-idea-number">
+                                    @(i + 1)
+                                </div>
+
+                                <div class="ic3-idea-text">
+                                    <h3>@idea.Title</h3>
+
+                                    <div>
+                                        <span>@idea.Domain</span>
+                                        <span class="text-capitalize">@idea.DifficultyLevel</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            @foreach (var metric in metricDefinitions)
+                            {
+                                var visible = metric.Key is "feasibility" or "time";
+                                var score = ScoreForMetric(idea, metric.Key);
+
+                                <div class="ic3-score-cell @(visible ? "" : "d-none")"
+                                     data-metric-cell="@metric.Key"
+                                     data-score="@score">
+
+                                    <div class="ic3-score-top">
+                                        <strong>@score%</strong>
+                                        <span>@ScoreLabel(score)</span>
+                                    </div>
+
+                                    <div class="ic3-score-track">
+                                        <div style="width:@score%"></div>
+                                    </div>
+                                </div>
+                            }
+
+                            <div class="ic3-select-cell">
+                                <form method="post" asp-page-handler="Select">
+                                    @Html.AntiForgeryToken()
+                                    <input type="hidden" name="ideaId" value="@idea.Id" />
+
+                                    <button type="submit"
+                                            class="ic3-pick-btn @(isSelected ? "picked" : "")"
+                                            title="Select this idea">
+                                        @if (isSelected)
+                                        {
+                                            <i class="bi bi-check-circle-fill"></i>
+                                            <span>Selected</span>
+                                        }
+                                        else
+                                        {
+                                            <i class="bi bi-circle"></i>
+                                            <span>Select</span>
+                                        }
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
                     }
-                    <div class="d-flex gap-1 mt-2">
-                        <a href="/Student/ProjectDNA?ideaId=@idea.Id" class="btn btn-sm btn-light flex-grow-1">DNA</a>
-                        <a href="/Student/Roadmap?ideaId=@idea.Id"    class="btn btn-sm btn-light flex-grow-1">Roadmap</a>
-                    </div>
                 </div>
             </div>
+
+            <div class="ic3-recommendation-card">
+                <div class="ic3-recommendation-icon">
+                    <i class="bi bi-award"></i>
+                </div>
+
+                <div>
+                    <div class="ic3-kicker">Recommended Based On Selected Metrics</div>
+                    <h3 id="ic3RecommendedTitle">Best matching idea</h3>
+                    <p id="ic3RecommendedText">
+                        The recommendation updates when you choose comparison metrics.
+                    </p>
+                </div>
+
+                <form method="post" asp-page-handler="Select" class="ic3-recommendation-action">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="ideaId" id="ic3RecommendedIdeaId" value="@ideas.First().Id" />
+
+                    <button type="submit" class="btn ic3-primary-btn">
+                        <i class="bi bi-check2-circle me-1"></i>
+                        Select Recommended
+                    </button>
+                </form>
+            </div>
+        </div>
+    </section>
+}
+@section Head {
+    <style>
+        .empty-dna-layout {
+            min-height: calc(100vh - 170px);
+            display: grid;
+            place-items: center;
+            padding: 1.5rem;
         }
-    </div>
+
+        .empty-dna-card {
+            width: min(760px, 100%);
+            min-height: 670px;
+            display: grid;
+            place-items: center;
+            text-align: center;
+            background: #ffffff;
+            border: 1px solid #E8ECF2;
+            border-radius: 28px;
+            box-shadow: 0 24px 55px rgba(15, 23, 42, .08);
+            padding: 2.5rem;
+        }
+
+        .empty-dna-content {
+            max-width: 560px;
+            margin: 0 auto;
+        }
+
+        .empty-dna-icon {
+            width: 78px;
+            height: 78px;
+            display: grid;
+            place-items: center;
+            margin: 0 auto 1.35rem;
+            border-radius: 26px;
+            color: #516C8D;
+            background: #EEF2F6;
+            font-size: 2rem;
+        }
+
+        .empty-dna-content h1,
+        .empty-dna-content h2 {
+            margin: 0;
+            color: #111827;
+            font-size: clamp(1.9rem, 3vw, 2.55rem);
+            line-height: 1.12;
+            font-weight: 800;
+            letter-spacing: -0.05em;
+        }
+
+        .empty-dna-content p {
+            max-width: 540px;
+            margin: 0.9rem auto 0;
+            color: #64748B;
+            font-size: 1rem;
+            line-height: 1.65;
+        }
+
+        .empty-dna-actions {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: .65rem;
+            margin-top: 1.35rem;
+        }
+
+            .empty-dna-actions .btn,
+            .empty-dna-actions a {
+                border-radius: 14px;
+                padding: .72rem 1rem;
+                font-size: .82rem;
+                font-weight: 700;
+            }
+
+                .empty-dna-actions .btn-primary,
+                .empty-dna-actions a.btn-primary {
+                    color: #ffffff !important;
+                    background: #28385E !important;
+                    border-color: #28385E !important;
+                    box-shadow: none !important;
+                }
+
+                    .empty-dna-actions .btn-primary:hover,
+                    .empty-dna-actions a.btn-primary:hover {
+                        color: #ffffff !important;
+                        background: #304163 !important;
+                        border-color: #304163 !important;
+                    }
+
+                .empty-dna-actions .btn-outline-secondary,
+                .empty-dna-actions a.btn-outline-secondary {
+                    color: #28385E !important;
+                    background: #ffffff !important;
+                    border: 1px solid #E8ECF2 !important;
+                    box-shadow: none !important;
+                }
+
+                    .empty-dna-actions .btn-outline-secondary:hover,
+                    .empty-dna-actions a.btn-outline-secondary:hover {
+                        color: #28385E !important;
+                        background: #EEF2F6 !important;
+                        border-color: #D8DEE9 !important;
+                    }
+
+        @@media (max-width: 767px) {
+            .empty-dna-layout {
+                min-height: calc(100vh - 140px);
+                padding: 1rem;
+            }
+
+            .empty-dna-card {
+                min-height: 540px;
+                padding: 1.5rem;
+            }
+        }
+    </style>
+}
+@section Scripts {
+    <script>
+        const comparisonIdeas = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(comparisonData));
+
+        const metricLabels = {
+            feasibility: "Feasibility",
+            innovation: "Innovation",
+            market: "Market Value",
+            time: "Time Fit",
+            difficulty: "Difficulty Fit"
+        };
+
+        const metricTabs = document.querySelectorAll("[data-metric]");
+        const metricColumns = document.querySelectorAll("[data-metric-column]");
+        const metricCells = document.querySelectorAll("[data-metric-cell]");
+        const selectedSummary = document.getElementById("ic3SelectedSummary");
+        const recommendedTitle = document.getElementById("ic3RecommendedTitle");
+        const recommendedText = document.getElementById("ic3RecommendedText");
+        const recommendedIdeaId = document.getElementById("ic3RecommendedIdeaId");
+        const resetButton = document.getElementById("ic3ResetMetrics");
+
+        function getSelectedMetrics() {
+            return Array.from(metricTabs)
+                .filter(tab => tab.classList.contains("active"))
+                .map(tab => tab.dataset.metric);
+        }
+
+        function scoreIdea(idea, selectedMetrics) {
+            if (selectedMetrics.length === 0) {
+                return 0;
+            }
+
+            const total = selectedMetrics.reduce((sum, metric) => {
+                return sum + (idea.scores[metric] || 0);
+            }, 0);
+
+            return Math.round(total / selectedMetrics.length);
+        }
+
+        function updateMetricVisibility(selectedMetrics) {
+            metricColumns.forEach(column => {
+                column.classList.toggle("d-none", !selectedMetrics.includes(column.dataset.metricColumn));
+            });
+
+            metricCells.forEach(cell => {
+                cell.classList.toggle("d-none", !selectedMetrics.includes(cell.dataset.metricCell));
+            });
+        }
+
+        function updateTableHighlight(selectedMetrics) {
+            document.querySelectorAll("[data-idea-row]").forEach(row => {
+                row.classList.remove("best-match");
+            });
+
+            const ranked = comparisonIdeas
+                .map(idea => ({
+                    ...idea,
+                    finalScore: scoreIdea(idea, selectedMetrics)
+                }))
+                .sort((a, b) => b.finalScore - a.finalScore);
+
+            const best = ranked[0];
+
+            if (!best) {
+                return;
+            }
+
+            document.querySelector(`[data-idea-row="${best.id}"]`)?.classList.add("best-match");
+
+            recommendedTitle.textContent = best.title;
+            recommendedText.textContent =
+                `${best.title} is currently the strongest match based on your selected priorities with an average fit of ${best.finalScore}%.`;
+
+            recommendedIdeaId.value = best.id;
+        }
+
+        function updateComparison() {
+            let selectedMetrics = getSelectedMetrics();
+
+            if (selectedMetrics.length === 0) {
+                document.querySelector('[data-metric="feasibility"]')?.classList.add("active");
+                selectedMetrics = ["feasibility"];
+            }
+
+            updateMetricVisibility(selectedMetrics);
+
+            const selectedLabels = selectedMetrics.map(metric => metricLabels[metric]);
+
+            selectedSummary.innerHTML =
+                "Showing: " +
+                selectedLabels.map(label => `<strong>${label}</strong>`).join(", ");
+
+            updateTableHighlight(selectedMetrics);
+        }
+
+        metricTabs.forEach(tab => {
+            tab.addEventListener("click", function () {
+                this.classList.toggle("active");
+                updateComparison();
+            });
+        });
+
+        resetButton?.addEventListener("click", function () {
+            metricTabs.forEach(tab => tab.classList.remove("active"));
+
+            document.querySelector('[data-metric="feasibility"]')?.classList.add("active");
+            document.querySelector('[data-metric="time"]')?.classList.add("active");
+
+            updateComparison();
+        });
+
+        updateComparison();
+    </script>
+}
+
+@functions {
+    private static int ClampScore(int value)
+    {
+        return Math.Clamp(value, 0, 100);
+    }
+
+    private static int AverageScore(ProjectIdea idea)
+    {
+        return (ClampScore(idea.InnovationScore) + ClampScore(idea.FeasibilityScore) + ClampScore(idea.MarketDemandScore)) / 3;
+    }
+
+    private static int TimeFitScore(int weeks)
+    {
+        if (weeks <= 0)
+        {
+            return 70;
+        }
+
+        if (weeks <= 10)
+        {
+            return 95;
+        }
+
+        if (weeks <= 14)
+        {
+            return 88;
+        }
+
+        if (weeks <= 18)
+        {
+            return 74;
+        }
+
+        if (weeks <= 24)
+        {
+            return 58;
+        }
+
+        return 42;
+    }
+
+    private static int DifficultyFitScore(string? difficulty)
+    {
+        var value = (difficulty ?? "").Trim().ToLowerInvariant();
+
+        return value switch
+        {
+            "beginner" => 82,
+            "easy" => 82,
+            "intermediate" => 92,
+            "medium" => 92,
+            "advanced" => 68,
+            "hard" => 58,
+            _ => 75
+        };
+    }
+
+    private static int ScoreForMetric(ProjectIdea idea, string metric)
+    {
+        return metric switch
+        {
+            "feasibility" => ClampScore(idea.FeasibilityScore),
+            "innovation" => ClampScore(idea.InnovationScore),
+            "market" => ClampScore(idea.MarketDemandScore),
+            "time" => TimeFitScore(idea.ExpectedDurationWeeks),
+            "difficulty" => DifficultyFitScore(idea.DifficultyLevel),
+            _ => AverageScore(idea)
+        };
+    }
+
+    private static string ScoreLabel(int score)
+    {
+        if (score >= 85)
+        {
+            return "High";
+        }
+
+        if (score >= 65)
+        {
+            return "Good";
+        }
+
+        if (score >= 45)
+        {
+            return "Medium";
+        }
+
+        return "Low";
+    }
 }

@@ -1,93 +1,431 @@
 @page
 @model FYPilot.Web.Pages.Student.SkillAssessmentModel
 @{
-    ViewData["Title"]    = "Skill Assessment";
+    ViewData["Title"] = "Skill Assessment";
     ViewData["Subtitle"] = "Profile your technical capabilities";
+
+    var skillItems = Model.SkillCategories
+        .SelectMany(category => category.Value.Select(skill => new
+        {
+            Category = category.Key,
+            Skill = skill,
+            Existing = Model.ExistingSkills.FirstOrDefault(s => s.SkillName == skill)
+        }))
+        .ToList();
+
+    var totalSkills = skillItems.Count;
 }
 
-<div class="row g-4">
-    <div class="col-lg-7">
-        <div class="page-card p-4">
-            <h6 class="fw-bold mb-1"><i class="bi bi-lightning-charge me-2 text-primary"></i>Rate Your Skills</h6>
-            <p class="text-muted small mb-4">Select skills you know and rate your proficiency (1 = beginner, 5 = expert).</p>
-
-            <form method="post">
-                @Html.AntiForgeryToken()
-                <div class="row g-3">
-                    @foreach (var (cat, skills) in Model.SkillCategories)
-                    {
-                        <div class="col-12">
-                            <div class="fw-semibold small text-muted text-uppercase mb-2">@cat</div>
-                            @foreach (var skill in skills)
-                            {
-                                var existing = Model.ExistingSkills.FirstOrDefault(s => s.SkillName == skill);
-                                <div class="d-flex align-items-center gap-3 mb-2 p-2 rounded-2 bg-light">
-                                    <div class="form-check mb-0" style="min-width:160px">
-                                        <input class="form-check-input skill-check" type="checkbox"
-                                               name="SelectedSkills" value="@skill" id="sk-@skill.Replace(" ","_")"
-                                               @(existing != null ? "checked" : "") />
-                                        <label class="form-check-label small" for="sk-@skill.Replace(" ","_")">@skill</label>
-                                    </div>
-                                    <input type="range" class="form-range flex-grow-1" min="1" max="5" step="1"
-                                           name="Ratings[@skill]" value="@(existing?.Rating ?? 3)" />
-                                    <span class="badge bg-primary-subtle text-primary" style="min-width:24px">@(existing?.Rating ?? 3)</span>
-                                </div>
-                            }
-                        </div>
-                    }
-                </div>
-                <div class="mt-4">
-                    <button type="submit" class="btn btn-primary fw-semibold">
-                        <i class="bi bi-save me-2"></i>Save & Analyze Skills
-                    </button>
-                </div>
-            </form>
+<div class="skill-test-page">
+    @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
+    {
+        <div id="skillAssessmentMessage" class="alert alert-success skill-message-visible">
+            <i class="bi bi-check-circle me-2"></i>
+            @Model.SuccessMessage
         </div>
-    </div>
+    }
 
-    <div class="col-lg-5">
-        @if (Model.Result != null)
-        {
-            <div class="page-card p-4 mb-3">
-                <h6 class="fw-bold mb-3"><i class="bi bi-bar-chart me-2 text-success"></i>Your Skill Profile</h6>
-                <div class="text-center mb-3">
-                    <div class="score-ring text-success mx-auto">@Model.Result.SkillScore%</div>
-                    <div class="mt-2 fw-semibold">@Model.Result.RecommendedLevel level complexity</div>
-                    <div class="text-muted small">@Model.Result.Message</div>
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div id="skillAssessmentMessage" class="alert alert-danger skill-message-visible">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            @Model.ErrorMessage
+        </div>
+    }
+
+   
+    <form method="post" id="skillAssessmentForm">
+        @Html.AntiForgeryToken()
+
+        <section class="skill-test-shell">
+            <div class="skill-test-side">
+                <div class="skill-test-pattern"></div>
+
+                <div class="skill-test-side-content">
+                    <div class="skill-test-icon">
+                        <i class="bi bi-bar-chart-line"></i>
+                    </div>
+
+                    <div class="skill-test-kicker">Skill Assessment</div>
+
+                    <h1>Build your technical profile</h1>
+
+                    <p>
+                        Rate your skills one by one so FYPilot can understand your strengths,
+                        detect gaps, and recommend realistic project ideas.
+                    </p>
+
+                    <div class="skill-progress-card">
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <span>Assessment Progress</span>
+                            <strong id="progressText">1 / @totalSkills</strong>
+                        </div>
+
+                        <div class="skill-progress-track">
+                            <div class="skill-progress-fill" id="progressFill"></div>
+                        </div>
+                    </div>
+
+                    <div class="skill-test-mini-note">
+                        <i class="bi bi-info-circle"></i>
+                        Choose a rating from 1 to 5. If you do not know the skill, choose “Not familiar”.
+                    </div>
                 </div>
-                @foreach (var skill in Model.ExistingSkills.OrderByDescending(s => s.Rating).Take(5))
+            </div>
+
+            <div class="skill-test-main">
+
+                <div id="questionView">
+                    <div class="skill-question-top">
+                        <div>
+                            <div class="skill-question-count" id="questionCount">
+                                Skill 1 of @totalSkills
+                            </div>
+
+                            <h2 id="questionSkillTitle">Skill name</h2>
+
+                            <p id="questionCategory">
+                                Category
+                            </p>
+                        </div>
+
+                        <div class="skill-question-badge">
+                            <i class="bi bi-lightning-charge"></i>
+                            Guided test
+                        </div>
+                    </div>
+
+                    <div class="skill-question-card">
+                        <div class="skill-question-prompt">
+                            <span>Question</span>
+                            <h3>How confident are you using this skill in a real FYP project?</h3>
+                        </div>
+
+                        <div class="skill-rating-options">
+                            <button type="button" class="skill-rating-btn" data-rating="1">
+                                <strong>1</strong>
+                                <span>Beginner</span>
+                            </button>
+
+                            <button type="button" class="skill-rating-btn" data-rating="2">
+                                <strong>2</strong>
+                                <span>Basic</span>
+                            </button>
+
+                            <button type="button" class="skill-rating-btn" data-rating="3">
+                                <strong>3</strong>
+                                <span>Good</span>
+                            </button>
+
+                            <button type="button" class="skill-rating-btn" data-rating="4">
+                                <strong>4</strong>
+                                <span>Strong</span>
+                            </button>
+
+                            <button type="button" class="skill-rating-btn" data-rating="5">
+                                <strong>5</strong>
+                                <span>Expert</span>
+                            </button>
+                        </div>
+
+                        <button type="button" class="skill-skip-btn" id="skipSkillBtn">
+                            <i class="bi bi-x-circle me-1"></i>
+                            Not familiar with this skill
+                        </button>
+                    </div>
+
+                    <div class="skill-test-actions">
+                        <button type="button" class="btn btn-skill-outline" id="backBtn">
+                            <i class="bi bi-arrow-left me-1"></i>
+                            Back
+                        </button>
+
+                        <button type="button" class="btn btn-skill-primary" id="nextBtn">
+                            Next Skill
+                            <i class="bi bi-arrow-right ms-1"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="summaryView" class="d-none">
+                    <div class="skill-summary-head">
+                        <div class="skill-summary-icon">
+                            <i class="bi bi-check2-circle"></i>
+                        </div>
+
+                        <div>
+                            <div class="skill-question-count">Final Review</div>
+                            <h2>Review your skill profile</h2>
+                            <p>
+                                These selected skills will be saved and used by FYPilot for idea generation,
+                                feasibility scoring, and skill-gap detection.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="skill-summary-box">
+                        <div class="skill-summary-empty d-none" id="emptySummary">
+                            <i class="bi bi-lightbulb"></i>
+                            <h3>No skills selected yet</h3>
+                            <p>Go back and rate at least one skill before saving your assessment.</p>
+                        </div>
+
+                        <div id="summaryList" class="skill-summary-list"></div>
+                    </div>
+
+                    <div class="skill-test-actions">
+                        <button type="button" class="btn btn-skill-outline" id="summaryBackBtn">
+                            <i class="bi bi-arrow-left me-1"></i>
+                            Back to Skills
+                        </button>
+
+                        <button type="submit" class="btn btn-skill-primary" id="saveBtn">
+                            <i class="bi bi-save me-1"></i>
+                            Save & Analyze Skills
+                        </button>
+                    </div>
+                </div>
+
+                @for (var i = 0; i < skillItems.Count; i++)
                 {
-                    <div class="mb-2">
-                        <div class="d-flex justify-content-between small mb-1">
-                            <span>@skill.SkillName</span>
-                            <span class="text-muted">@skill.Rating/5</span>
-                        </div>
-                        <div class="progress" style="height:6px">
-                            <div class="progress-bar bg-primary" style="width:@(skill.Rating * 20)%"></div>
-                        </div>
+                    var item = skillItems[i];
+                    var isSelected = item.Existing != null;
+                    var rating = item.Existing?.Rating ?? 0;
+
+                    <input type="checkbox"
+                           class="skill-hidden-check"
+                           name="SelectedSkills"
+                           value="@item.Skill"
+                           data-index="@i"
+                           data-skill="@item.Skill"
+                           data-category="@item.Category"
+                           id="skill-check-@i"
+                    @(isSelected ? "checked" : "") />
+
+                    <input type="hidden"
+                           class="skill-hidden-rating"
+                           name="Ratings[@item.Skill]"
+                           value="@(isSelected ? rating : 3)"
+                           data-index="@i"
+                           id="skill-rating-@i" />
+                }
+            </div>
+        </section>
+    </form>
+
+    @if (Model.Result != null)
+    {
+        <section class="skill-result-panel mt-4">
+            <div class="skill-result-score">
+                <div class="score-ring">@Model.Result.SkillScore%</div>
+            </div>
+
+            <div>
+                <div class="skill-result-kicker">Analysis Result</div>
+                <h3>@Model.Result.RecommendedLevel level complexity</h3>
+                <p>@Model.Result.Message</p>
+            </div>
+
+            <div class="skill-result-top">
+                @foreach (var skill in Model.ExistingSkills.OrderByDescending(s => s.Rating).Take(4))
+                {
+                    <div class="skill-result-pill">
+                        <span>@skill.SkillName</span>
+                        <strong>@skill.Rating/5</strong>
                     </div>
                 }
             </div>
-        }
-
-        <div class="page-card p-4">
-            <h6 class="fw-bold mb-2"><i class="bi bi-info-circle me-2"></i>Why This Matters</h6>
-            <p class="text-muted small">Your skill profile is used to:</p>
-            <ul class="text-muted small mb-0">
-                <li>Generate personalised project ideas</li>
-                <li>Score feasibility of each idea</li>
-                <li>Detect skill gaps before you start</li>
-                <li>Recommend the right project complexity</li>
-            </ul>
-        </div>
-    </div>
+        </section>
+    }
 </div>
 
 @section Scripts {
-<script>
-document.querySelectorAll('input[type=range]').forEach(r => {
-    var badge = r.nextElementSibling;
-    r.addEventListener('input', () => badge.textContent = r.value);
-});
-</script>
+    <script>
+        const skills = Array.from(document.querySelectorAll(".skill-hidden-check")).map(check => {
+            const index = Number(check.dataset.index);
+            const ratingInput = document.getElementById(`skill-rating-${index}`);
+
+            return {
+                index,
+                skill: check.dataset.skill,
+                category: check.dataset.category,
+                check,
+                ratingInput
+            };
+        });
+
+        let currentIndex = 0;
+
+        const questionView = document.getElementById("questionView");
+        const summaryView = document.getElementById("summaryView");
+
+        const questionCount = document.getElementById("questionCount");
+        const questionSkillTitle = document.getElementById("questionSkillTitle");
+        const questionCategory = document.getElementById("questionCategory");
+
+        const progressText = document.getElementById("progressText");
+        const progressFill = document.getElementById("progressFill");
+
+        const ratingButtons = document.querySelectorAll(".skill-rating-btn");
+        const skipSkillBtn = document.getElementById("skipSkillBtn");
+
+        const backBtn = document.getElementById("backBtn");
+        const nextBtn = document.getElementById("nextBtn");
+        const summaryBackBtn = document.getElementById("summaryBackBtn");
+
+        const summaryList = document.getElementById("summaryList");
+        const emptySummary = document.getElementById("emptySummary");
+        const saveBtn = document.getElementById("saveBtn");
+
+        function ratingLabel(value) {
+            switch (Number(value)) {
+                case 1: return "Beginner";
+                case 2: return "Basic";
+                case 3: return "Good";
+                case 4: return "Strong";
+                case 5: return "Expert";
+                default: return "Not familiar";
+            }
+        }
+
+        function renderQuestion() {
+            const current = skills[currentIndex];
+
+            questionCount.textContent = `Skill ${currentIndex + 1} of ${skills.length}`;
+            questionSkillTitle.textContent = current.skill;
+            questionCategory.textContent = current.category;
+
+            progressText.textContent = `${currentIndex + 1} / ${skills.length}`;
+            progressFill.style.width = `${((currentIndex + 1) / skills.length) * 100}%`;
+
+            ratingButtons.forEach(button => {
+                button.classList.remove("active");
+
+                if (current.check.checked && button.dataset.rating === current.ratingInput.value) {
+                    button.classList.add("active");
+                }
+            });
+
+            skipSkillBtn.classList.toggle("active", !current.check.checked);
+
+                    backBtn.style.visibility = currentIndex === 0 ? "hidden" : "visible";
+        backBtn.disabled = currentIndex === 0;
+
+            if (currentIndex === skills.length - 1) {
+                nextBtn.innerHTML = `Review Skills <i class="bi bi-check2 ms-1"></i>`;
+            } else {
+                nextBtn.innerHTML = `Next Skill <i class="bi bi-arrow-right ms-1"></i>`;
+            }
+        }
+
+        function chooseRating(value) {
+            const current = skills[currentIndex];
+
+            current.check.checked = true;
+            current.ratingInput.value = value;
+
+            ratingButtons.forEach(button => {
+                button.classList.toggle("active", button.dataset.rating === String(value));
+            });
+
+            skipSkillBtn.classList.remove("active");
+        }
+
+        function skipSkill() {
+            const current = skills[currentIndex];
+
+            current.check.checked = false;
+            current.ratingInput.value = 3;
+
+            ratingButtons.forEach(button => button.classList.remove("active"));
+            skipSkillBtn.classList.add("active");
+        }
+
+        function renderSummary() {
+            const selectedSkills = skills.filter(item => item.check.checked);
+
+            summaryList.innerHTML = "";
+
+            if (selectedSkills.length === 0) {
+                emptySummary.classList.remove("d-none");
+                saveBtn.disabled = true;
+                return;
+            }
+
+            emptySummary.classList.add("d-none");
+            saveBtn.disabled = false;
+
+            selectedSkills.forEach(item => {
+                const rating = item.ratingInput.value;
+
+                const row = document.createElement("div");
+                row.className = "skill-summary-row";
+
+                row.innerHTML = `
+                    <div>
+                        <span>${item.category}</span>
+                        <strong>${item.skill}</strong>
+                    </div>
+
+                    <div class="skill-summary-rating">
+                        <b>${rating}/5</b>
+                        <small>${ratingLabel(rating)}</small>
+                    </div>
+                `;
+
+                summaryList.appendChild(row);
+            });
+        }
+
+        ratingButtons.forEach(button => {
+            button.addEventListener("click", function () {
+                chooseRating(this.dataset.rating);
+            });
+        });
+
+        skipSkillBtn.addEventListener("click", skipSkill);
+
+        backBtn.addEventListener("click", function () {
+            if (currentIndex > 0) {
+                currentIndex--;
+                renderQuestion();
+            }
+        });
+
+        nextBtn.addEventListener("click", function () {
+            if (currentIndex < skills.length - 1) {
+                currentIndex++;
+                renderQuestion();
+                return;
+            }
+
+            questionView.classList.add("d-none");
+            summaryView.classList.remove("d-none");
+            progressText.textContent = `${skills.length} / ${skills.length}`;
+            progressFill.style.width = "100%";
+            renderSummary();
+        });
+
+        summaryBackBtn.addEventListener("click", function () {
+            summaryView.classList.add("d-none");
+            questionView.classList.remove("d-none");
+            currentIndex = skills.length - 1;
+            renderQuestion();
+        });
+
+        renderQuestion();
+                setTimeout(function () {
+            const message = document.getElementById("skillAssessmentMessage");
+
+            if (message) {
+                message.style.transition = "opacity 0.35s ease, transform 0.35s ease";
+                message.style.opacity = "0";
+                message.style.transform = "translateY(-6px)";
+
+                setTimeout(function () {
+                    message.remove();
+                }, 350);
+            }
+        }, 2000);
+    </script>
 }

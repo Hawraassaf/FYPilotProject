@@ -1,129 +1,373 @@
+using FYPilot.Application.DTOs;
+using FYPilot.Domain.Entities;
+using FYPilot.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using FYPilot.Infrastructure.Data;
-using FYPilot.Application.DTOs;
-using FYPilot.Domain.Entities;
 
 namespace FYPilot.Api.Controllers;
 
 [ApiController]
 [Route("api/projects")]
-[Authorize]
-public class ProjectsController(ApplicationDbContext db) : ControllerBase
+[Authorize(Roles = "student,supervisor,admin")]
+public class ProjectsController(
+    ApplicationDbContext db) : ControllerBase
 {
-    private int UserId => int.Parse(User.FindFirst("userId")!.Value);
-    private string UserRole => User.FindFirst("userRole")!.Value;
+    private int UserId
+    {
+        get
+        {
+            var value = User.FindFirst("userId")?.Value;
 
-    private ProjectResponse MapProject(Project p) => new(
-        p.Id, p.Title, p.Description, p.Technologies, p.Status,
-        p.StartDate, p.EndDate, p.ProgressPercentage, p.StudentId,
-        p.SupervisorId, p.CreatedAt.ToString("o"),
-        p.Student?.FullName ?? "Unknown"
-    );
+            return int.TryParse(value, out var userId)
+                ? userId
+                : 0;
+        }
+    }
+
+    private IQueryable<Project> AccessibleProjects()
+    {
+        var query = db.Projects.AsQueryable();
+
+        if (User.IsInRole("admin"))
+        {
+            return query;
+        }
+
+        if (User.IsInRole("supervisor"))
+        {
+            return query.Where(project =>
+                project.SupervisorId == UserId);
+        }
+
+        return query.Where(project =>
+            project.StudentId == UserId);
+    }
+
+    private static ProjectResponse MapProject(Project project)
+    {
+        return new ProjectResponse(
+            project.Id,
+            project.Title,
+            project.Description,
+            project.Technologies,
+            project.Status,
+            project.StartDate,
+            project.EndDate,
+            project.ProgressPercentage,
+            project.StudentId,
+            project.SupervisorId,
+            project.CreatedAt.ToString("o"),
+            project.Student?.FullName ?? "Unknown");
+    }
 
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] string? status, [FromQuery] int? studentId)
+    public async Task<IActionResult> List(
+        [FromQuery] string? status,
+        [FromQuery] int? studentId)
     {
-        var query = db.Projects.Include(p => p.Student).AsQueryable();
+        IQueryable<Project> query = AccessibleProjects();
 
-        if (UserRole == "student")
-            query = query.Where(p => p.StudentId == UserId);
-
+        // This filter cannot escape the user's permitted projects
+        // because AccessibleProjects was applied first.
         if (studentId.HasValue)
-            query = query.Where(p => p.StudentId == studentId.Value);
+        {
+            query = query.Where(project =>
+                project.StudentId == studentId.Value);
+        }
 
-        if (!string.IsNullOrEmpty(status))
-            query = query.Where(p => p.Status == status);
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            var normalizedStatus =
+                status.Trim().ToLowerInvariant();
 
-        var projects = await query.OrderByDescending(p => p.CreatedAt).ToListAsync();
+            query = query.Where(project =>
+                project.Status.ToLower() ==
+                normalizedStatus);
+        }
+
+        var projects = await query
+    .Include(project => project.Student)
+    .AsNoTracking()
+    .OrderByDescending(project =>
+        project.CreatedAt)
+    .ToListAsync();
         return Ok(projects.Select(MapProject));
     }
 
-    [HttpGet("{id}")]
+    [HttpGet("{id:int}")]
     public async Task<IActionResult> Get(int id)
     {
-        var project = await db.Projects.Include(p => p.Student).FirstOrDefaultAsync(p => p.Id == id);
-        if (project == null) return NotFound(new { error = "Project not found" });
+        var project = await AccessibleProjects()
+            .AsNoTracking()
+            .Include(project => project.Student)
+            .FirstOrDefaultAsync(project =>
+                project.Id == id);
+
+        if (project == null)
+        {
+            return NotFound(new
+            {
+                error = "Project not found."
+            });
+        }
+
         return Ok(MapProject(project));
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] CreateProjectRequest request)
+    [Authorize(Roles = "student")]
+    public async Task<IActionResult> Create(
+        [FromBody] CreateProjectRequest request)
     {
         var project = new Project
         {
-            Title = request.Title,
-            Description = request.Description,
-            Technologies = request.Technologies,
+            Title = request.Title.Trim(),
+            Description =
+                request.Description?.Trim() ?? "",
+            Technologies =
+                request.Technologies?.Trim() ?? "",
             StartDate = request.StartDate,
             EndDate = request.EndDate,
-            SupervisorId = request.SupervisorId,
             StudentId = UserId,
-            Status = "planning",
+            Status = "planning"
         };
+
+        // A student cannot manually assign an arbitrary
+        // supervisor through the request.
+        if (request.SupervisorId.HasValue)
+        {
+            var hasActiveAssignment =
+                await db.SupervisorAssignments.AnyAsync(
+                    assignment =>
+                        assignment.StudentId == UserId &&
+                        assignment.SupervisorId ==
+                        request.SupervisorId.Value &&
+                        assignment.Status == "active");
+
+            if (!hasActiveAssignment)
+            {
+                return BadRequest(new
+                {
+                    error =
+                        "The selected supervisor is not actively assigned to this student."
+                });
+            }
+
+            project.SupervisorId =
+                request.SupervisorId.Value;
+        }
+
         db.Projects.Add(project);
         await db.SaveChangesAsync();
 
-        await db.Entry(project).Reference(p => p.Student).LoadAsync();
-        return StatusCode(201, MapProject(project));
+        await db.Entry(project)
+            .Reference(item => item.Student)
+            .LoadAsync();
+
+        return StatusCode(
+            StatusCodes.Status201Created,
+            MapProject(project));
     }
 
-    [HttpPut("{id}")]
-    public async Task<IActionResult> Update(int id, [FromBody] UpdateProjectRequest request)
+    [HttpPut("{id:int}")]
+    public async Task<IActionResult> Update(
+        int id,
+        [FromBody] UpdateProjectRequest request)
     {
-        var project = await db.Projects.Include(p => p.Student).FirstOrDefaultAsync(p => p.Id == id);
-        if (project == null) return NotFound(new { error = "Project not found" });
+        var project = await AccessibleProjects()
+            .Include(item => item.Student)
+            .FirstOrDefaultAsync(item =>
+                item.Id == id);
 
-        if (request.Title != null) project.Title = request.Title;
-        if (request.Description != null) project.Description = request.Description;
-        if (request.Technologies != null) project.Technologies = request.Technologies;
-        if (request.Status != null) project.Status = request.Status;
-        if (request.StartDate != null) project.StartDate = request.StartDate;
-        if (request.EndDate != null) project.EndDate = request.EndDate;
-        if (request.ProgressPercentage.HasValue) project.ProgressPercentage = request.ProgressPercentage.Value;
-        if (request.SupervisorId.HasValue) project.SupervisorId = request.SupervisorId.Value;
+        if (project == null)
+        {
+            return NotFound(new
+            {
+                error = "Project not found."
+            });
+        }
+
+        if (request.Title != null)
+        {
+            project.Title = request.Title.Trim();
+        }
+
+        if (request.Description != null)
+        {
+            project.Description =
+                request.Description.Trim();
+        }
+
+        if (request.Technologies != null)
+        {
+            project.Technologies =
+                request.Technologies.Trim();
+        }
+
+        if (request.Status != null)
+        {
+            project.Status =
+                request.Status.Trim()
+                    .ToLowerInvariant();
+        }
+
+        if (request.StartDate != null)
+        {
+            project.StartDate = request.StartDate;
+        }
+
+        if (request.EndDate != null)
+        {
+            project.EndDate = request.EndDate;
+        }
+
+        if (request.ProgressPercentage.HasValue)
+        {
+            if (request.ProgressPercentage.Value
+                is < 0 or > 100)
+            {
+                return BadRequest(new
+                {
+                    error =
+                        "Progress percentage must be between 0 and 100."
+                });
+            }
+
+            project.ProgressPercentage =
+                request.ProgressPercentage.Value;
+        }
+
+        // Only an administrator can directly reassign
+        // a legacy project through this endpoint.
+        if (request.SupervisorId.HasValue &&
+            User.IsInRole("admin"))
+        {
+            project.SupervisorId =
+                request.SupervisorId.Value;
+        }
+
         project.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync();
+
         return Ok(MapProject(project));
     }
 
-    [HttpDelete("{id}")]
+    [HttpDelete("{id:int}")]
+    [Authorize(Roles = "student,admin")]
     public async Task<IActionResult> Delete(int id)
     {
-        var project = await db.Projects.FindAsync(id);
-        if (project == null) return NotFound();
+        var project = await AccessibleProjects()
+            .FirstOrDefaultAsync(item =>
+                item.Id == id);
+
+        if (project == null)
+        {
+            return NotFound(new
+            {
+                error = "Project not found."
+            });
+        }
+
         db.Projects.Remove(project);
         await db.SaveChangesAsync();
+
         return NoContent();
     }
 
-    [HttpGet("{id}/roadmap")]
+    [HttpGet("{id:int}/roadmap")]
     public async Task<IActionResult> Roadmap(int id)
     {
-        var milestones = await db.Milestones.Where(m => m.ProjectId == id)
-            .OrderBy(m => m.DueDate).ToListAsync();
-        var tasks = await db.Tasks.Where(t => t.ProjectId == id).ToListAsync();
-        return Ok(new { milestones, tasks });
+        var projectExists =
+            await AccessibleProjects().AnyAsync(
+                project => project.Id == id);
+
+        if (!projectExists)
+        {
+            return NotFound(new
+            {
+                error = "Project not found."
+            });
+        }
+
+        var milestones = await db.Milestones
+            .AsNoTracking()
+            .Where(milestone =>
+                milestone.ProjectId == id)
+            .OrderBy(milestone =>
+                milestone.DueDate)
+            .ToListAsync();
+
+        var tasks = await db.Tasks
+            .AsNoTracking()
+            .Where(task =>
+                task.ProjectId == id)
+            .ToListAsync();
+
+        return Ok(new
+        {
+            milestones,
+            tasks
+        });
     }
 
-    [HttpGet("{id}/risks")]
+    [HttpGet("{id:int}/risks")]
     public async Task<IActionResult> Risks(int id)
     {
-        var project = await db.Projects.FindAsync(id);
-        if (project == null) return NotFound();
+        var project = await AccessibleProjects()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item =>
+                item.Id == id);
+
+        if (project == null)
+        {
+            return NotFound(new
+            {
+                error = "Project not found."
+            });
+        }
+
+        var tasks = await db.Tasks
+            .AsNoTracking()
+            .Where(task =>
+                task.ProjectId == id)
+            .ToListAsync();
 
         var risks = new List<object>();
-        var tasks = await db.Tasks.Where(t => t.ProjectId == id).ToListAsync();
-        var todoCount = tasks.Count(t => t.Status == "todo");
+
+        var todoCount = tasks.Count(task =>
+            task.Status == "todo");
 
         if (project.ProgressPercentage < 20)
-            risks.Add(new { level = "high", message = "Low overall progress. Consider reviewing your timeline." });
+        {
+            risks.Add(new
+            {
+                level = "high",
+                message =
+                    "Low overall progress. Consider reviewing your timeline."
+            });
+        }
+
         if (todoCount > 5)
-            risks.Add(new { level = "medium", message = $"{todoCount} tasks not yet started. Risk of falling behind." });
+        {
+            risks.Add(new
+            {
+                level = "medium",
+                message =
+                    $"{todoCount} tasks have not been started."
+            });
+        }
+
         if (tasks.Count == 0)
-            risks.Add(new { level = "low", message = "No tasks defined yet. Break your project into tasks." });
+        {
+            risks.Add(new
+            {
+                level = "low",
+                message =
+                    "No tasks are defined for this project."
+            });
+        }
 
         return Ok(risks);
     }

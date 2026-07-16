@@ -1,184 +1,368 @@
+@using Microsoft.EntityFrameworkCore
+@using FYPilot.Infrastructure.Data
+@inject ApplicationDbContext Db
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
     <title>@ViewData["Title"] — FYPilot</title>
+
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+
     @RenderSection("Head", required: false)
 </head>
-<body class="bg-light">
-@{
-    var role     = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-    var userName = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
-    var isAuth   = User.Identity?.IsAuthenticated == true;
-    var path     = Context.Request.Path.Value ?? "";
 
-    string NavLink(string href, string icon, string label) {
-        var active = path.Equals(href, StringComparison.OrdinalIgnoreCase) ||
-                     (href != "/" && path.StartsWith(href, StringComparison.OrdinalIgnoreCase));
-        return $"<a href=\"{href}\" class=\"nav-link{(active ? " active" : "")}\">" +
-               $"<i class=\"bi bi-{icon}\"></i> {label}</a>";
+<body>
+    @{
+        var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+        var userName = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "User";
+        var isAuth = User.Identity?.IsAuthenticated == true;
+
+        var userEmail =
+            User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? "";
+
+        var isMainAdmin = string.Equals(
+            userEmail,
+            "admin@fyp.com",
+            StringComparison.OrdinalIgnoreCase);
+
+        var path = Context.Request.Path.Value ?? "";
+
+        string? navProfileImagePath = null;
+        string? topbarProfileHref = null;
+
+        if (isAuth)
+        {
+            var userIdValue = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+            if (int.TryParse(userIdValue, out var navUserId))
+            {
+                var currentUserName = await Db.Users
+                    .AsNoTracking()
+                    .Where(u => u.Id == navUserId)
+                    .Select(u => u.FullName)
+                    .FirstOrDefaultAsync();
+
+                if (!string.IsNullOrWhiteSpace(currentUserName))
+                {
+                    userName = currentUserName;
+                }
+
+                if (role == "student")
+                {
+                    topbarProfileHref = "/Student/Profile";
+
+                    navProfileImagePath = await Db.StudentProfiles
+                        .AsNoTracking()
+                        .Where(p => p.UserId == navUserId)
+                        .Select(p => p.ProfileImagePath)
+                        .FirstOrDefaultAsync();
+                }
+                else if (role == "supervisor")
+                {
+                    topbarProfileHref = "/Supervisor/Profile";
+
+                    navProfileImagePath = await Db.SupervisorProfiles
+                        .AsNoTracking()
+                        .Where(p => p.UserId == navUserId)
+                        .Select(p => p.ProfileImagePath)
+                        .FirstOrDefaultAsync();
+                }
+            }
+        }
+
+        string NavLink(string href, string icon, string label)
+        {
+            var active = path.Equals(href, StringComparison.OrdinalIgnoreCase) ||
+                         (href != "/" && path.StartsWith(href, StringComparison.OrdinalIgnoreCase));
+
+            return $"<a href=\"{href}\" class=\"side-nav-link{(active ? " active" : "")}\">" +
+                   $"<i class=\"bi bi-{icon}\"></i><span>{label}</span></a>";
+        }
+
+        var initials = "U";
+
+        if (!string.IsNullOrWhiteSpace(userName))
+        {
+            var parts = userName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            if (parts.Length >= 2)
+            {
+                initials = $"{parts[0][0]}{parts[1][0]}".ToUpper();
+            }
+            else
+            {
+                initials = userName[0].ToString().ToUpper();
+            }
+        }
     }
-}
 
-@if (isAuth)
-{
-<div class="app-shell d-flex" style="min-height:100vh">
+    @if (isAuth)
+    {
+        <div class="app-shell d-flex">
 
-    <!-- ── Sidebar (offcanvas-lg: drawer on mobile, inline on desktop) ── -->
-    <div class="offcanvas-lg offcanvas-start sidebar d-flex flex-column flex-shrink-0"
-         tabindex="-1" id="appSidebar" style="width:240px">
+            <aside class="offcanvas-lg offcanvas-start app-sidebar d-flex flex-column flex-shrink-0"
+                   tabindex="-1"
+                   id="appSidebar">
 
-        <!-- Offcanvas close header — only visible on mobile -->
-        <div class="offcanvas-header d-lg-none px-3 py-2"
-             style="border-bottom:1px solid rgba(255,255,255,0.15)">
-            <div class="d-flex align-items-center gap-2">
-                <div class="sidebar-logo-icon">
-                    <i class="bi bi-mortarboard-fill text-white"></i>
+                <div class="offcanvas-header d-lg-none app-sidebar-mobile-header">
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="brand-icon">
+                            <img src="/image/FYPilot_logo.png" alt="FYPilot Logo" />
+                        </div>
+
+                        <div>
+                            <div class="brand-name">FYPilot</div>
+                            <div class="brand-subtitle">Academic Intelligence</div>
+                        </div>
+                    </div>
+
+                    <button type="button"
+                            class="btn-close btn-close-white"
+                            data-bs-dismiss="offcanvas"
+                            data-bs-target="#appSidebar"
+                            aria-label="Close">
+                    </button>
                 </div>
-                <span class="fw-bold fs-6 text-white">FYPilot</span>
-            </div>
-            <button type="button" class="btn-close btn-close-white"
-                    data-bs-dismiss="offcanvas" data-bs-target="#appSidebar"
-                    aria-label="Close"></button>
-        </div>
 
-        <!-- Logo — desktop only -->
-        <div class="p-3 d-none d-lg-block" style="border-bottom:1px solid rgba(255,255,255,0.15)">
-            <div class="d-flex align-items-center gap-2">
-                <div class="sidebar-logo-icon">
-                    <i class="bi bi-mortarboard-fill text-white"></i>
+                <div class="sidebar-brand d-none d-lg-flex">
+                    <div class="brand-icon">
+                        <img src="/image/FYPilot_logo.png" alt="FYPilot Logo" />
+                    </div>
+
+                    <div>
+                        <div class="brand-name">FYPilot</div>
+                        <div class="brand-subtitle">Academic Intelligence</div>
+                    </div>
                 </div>
-                <span class="fw-bold fs-5 text-white">FYPilot</span>
-            </div>
-            <div class="mt-1" style="font-size:0.7rem;color:rgba(255,255,255,0.5)">Academic Intelligence System</div>
-        </div>
 
-        <!-- Navigation -->
-        <div class="flex-grow-1 overflow-auto p-2">
-            <ul class="nav flex-column gap-1 list-unstyled">
+                <div class="sidebar-scroll flex-grow-1">
+                    <ul class="list-unstyled side-nav">
 
-            @if (role == "student")
-            {
-                <li><span class="nav-label">MY WORKSPACE</span></li>
-                <li>@Html.Raw(NavLink("/Student/Dashboard",       "speedometer2",      "Dashboard"))</li>
-                <li>@Html.Raw(NavLink("/Student/Profile", "person-circle", "Profile"))</li>
-                <li>@Html.Raw(NavLink("/Student/SkillAssessment", "lightning-charge",  "Skill Assessment"))</li>
-                <li><span class="nav-label">AI FEATURES</span></li>
-                <li>@Html.Raw(NavLink("/Student/IdeaGenerator",   "stars",             "Idea Generator"))</li>
-                <li>@Html.Raw(NavLink("/Student/IdeaComparison",  "bar-chart-line",    "Idea Comparison"))</li>
-                <li>@Html.Raw(NavLink("/Student/ProjectDNA",      "diagram-3",         "Project DNA"))</li>
-                <li>@Html.Raw(NavLink("/Student/Roadmap",         "map",               "Roadmap"))</li>
-                <li>@Html.Raw(NavLink("/Student/DocumentationGenerator", "file-earmark-text", "SE Documentation"))</li>
-                <li>@Html.Raw(NavLink("/Student/ScopeOptimizer",  "funnel",            "Scope Optimizer"))</li>
-                <li>@Html.Raw(NavLink("/Student/DefenseSimulator","shield-check",      "Defense Simulator"))</li>
-                <li><span class="nav-label">SUPPORT</span></li>
-                <li>@Html.Raw(NavLink("/Student/MentorChat",      "chat-dots",         "Mentor Chat"))</li>
-                <li>@Html.Raw(NavLink("/Student/ProjectDetails",  "folder2-open",      "My Project"))</li>
-                <li>@Html.Raw(NavLink("/Student/Feedback",        "chat-square-text",  "Supervisor Feedback"))</li>
-            }
-            @if (role == "supervisor")
-            {
-                <li><span class="nav-label">SUPERVISOR</span></li>
-                <li>@Html.Raw(NavLink("/Supervisor/Dashboard",   "speedometer2",  "Dashboard"))</li>
-                <li>@Html.Raw(NavLink("/Supervisor/IdeaReview",  "card-checklist","Idea Review"))</li>
-                <li>@Html.Raw(NavLink("/Supervisor/Evaluations", "star-half",     "Evaluations"))</li>
-            }
-            @if (role == "admin")
-            {
-                <li><span class="nav-label">ADMINISTRATION</span></li>
-                <li>@Html.Raw(NavLink("/Admin/Dashboard",    "speedometer2",   "Dashboard"))</li>
-                <li>@Html.Raw(NavLink("/Admin/Users",        "people",         "Users"))</li>
-                <li>@Html.Raw(NavLink("/Admin/Projects",     "folder",         "Projects"))</li>
-                <li>@Html.Raw(NavLink("/Admin/MarketNeeds",  "graph-up-arrow", "Market Needs"))</li>
-                <li>@Html.Raw(NavLink("/Admin/Analytics",    "bar-chart",      "Analytics"))</li>
-            }
-            <li style="margin-top:auto"><span class="nav-label">SYSTEM</span></li>
-            <li>@Html.Raw(NavLink("/SystemTest", "shield-check", "System Test"))</li>
-            </ul>
-        </div>
+                        @if (role == "student")
+                        {
+                            <li><span class="side-nav-label">My Workspace</span></li>
+                            <li>@Html.Raw(NavLink("/Student/Dashboard", "grid", "Dashboard"))</li>
+                            <li>@Html.Raw(NavLink("/Student/SkillAssessment", "bar-chart-line", "Skill Assessment"))</li>
 
-        <!-- User footer -->
-        <div class="p-3" style="border-top:1px solid rgba(255,255,255,0.15)">
-            <div class="d-flex align-items-center gap-2 mb-2">
-                <div class="avatar">@(userName?.Length > 0 ? userName[0].ToString().ToUpper() : "U")</div>
-                <div class="overflow-hidden">
-                    <div class="text-white small fw-semibold text-truncate">@userName</div>
-                    <div class="text-capitalize" style="font-size:0.7rem;color:rgba(255,255,255,0.5)">@role</div>
+                            <li><span class="side-nav-label">AI Planning</span></li>
+                            <li>@Html.Raw(NavLink("/Student/IdeaGenerator", "lightbulb", "Idea Generator"))</li>
+                            <li>@Html.Raw(NavLink("/Student/IdeaComparison", "columns-gap", "Idea Comparison"))</li>
+                            <li>@Html.Raw(NavLink("/Student/ProjectDNA", "diagram-3", "Project DNA"))</li>
+                            <li>@Html.Raw(NavLink("/Student/Roadmap", "map", "Roadmap"))</li>
+                            <li>@Html.Raw(NavLink("/Student/DocumentationGenerator", "journal-code", "SE Documentation"))</li>
+
+                            <li><span class="side-nav-label">Project Support</span></li>
+                            <li>@Html.Raw(NavLink("/Student/MentorChat", "chat-dots", "Mentor Chat"))</li>
+                            <li>@Html.Raw(NavLink("/Student/DefenseSimulator", "shield-check", "Defense Simulator"))</li>
+                            <li>@Html.Raw(NavLink("/Student/Feedback", "chat-square-text", "Supervisor Feedback"))</li>
+                        }
+
+                        @if (role == "supervisor")
+                        {
+                            <li><span class="side-nav-label">Supervisor</span></li>
+                            <li>@Html.Raw(NavLink("/Supervisor/Dashboard", "speedometer2", "Dashboard"))</li>
+                            <li>@Html.Raw(NavLink("/Supervisor/IdeaReview", "card-checklist", "Feedback Workspace"))</li>
+                            <li>@Html.Raw(NavLink("/Supervisor/Meetings", "calendar-event", "Meetings"))</li>
+                            <li>@Html.Raw(NavLink("/Supervisor/Evaluations", "star-half", "Evaluations"))</li>
+                            <li>@Html.Raw(NavLink("/Supervisor/ProgressTracking", "graph-up-arrow", "Progress Tracking"))</li>
+
+                        }
+                        @if (role == "admin")
+                        {
+                            <li><span class="side-nav-label">Administration</span></li>
+
+                            <li>
+                                @Html.Raw(
+                                    NavLink(
+                                        "/Admin/Dashboard",
+                                        "speedometer2",
+                                        "Dashboard"))
+                            </li>
+
+                            <li>
+                                @Html.Raw(
+                                    NavLink(
+                                        "/Admin/Users",
+                                        "people",
+                                        "Users"))
+                            </li>
+
+                            <li>
+                                @Html.Raw(
+                                    NavLink(
+                                        "/Admin/Analytics",
+                                        "bar-chart",
+                                        "Analytics"))
+                            </li>
+
+                            <li>
+                                @Html.Raw(
+                                    NavLink(
+                                        "/Admin/SupervisorAssignments",
+                                        "person-check",
+                                        "Supervisor Assignments"))
+                            </li>
+
+                            @if (isMainAdmin)
+                            {
+                                <li>
+                                    @Html.Raw(
+                                        NavLink(
+                                            "/Admin/AdminAccounts",
+                                            "person-gear",
+                                            "Manage Administrators"))
+                                </li>
+                            }
+
+                            <li><span class="side-nav-label">System</span></li>
+
+                            <li>
+                                @Html.Raw(
+                                    NavLink(
+                                        "/SystemTest",
+                                        "pc-display",
+                                        "System Status"))
+                            </li>
+                        }
+                    </ul>
                 </div>
-            </div>
-            <form method="post" asp-page="/Account/Logout">
-                <button type="submit" class="btn btn-sm btn-outline-light w-100">
-                    <i class="bi bi-box-arrow-right"></i> Sign Out
-                </button>
-            </form>
-        </div>
-    </div>
+            </aside>
 
-    <!-- ── Main content ──────────────────────────────────────────────── -->
-    <div class="flex-grow-1 d-flex flex-column overflow-hidden min-w-0">
+            <div class="app-main flex-grow-1 d-flex flex-column min-w-0">
 
-        <!-- Top header -->
-        <header class="top-header px-3 px-lg-4 py-2 d-flex align-items-center justify-content-between">
-            <div class="d-flex align-items-center gap-2 min-w-0">
-                <!-- Hamburger — mobile only -->
-                <button class="btn btn-sm btn-light border d-lg-none flex-shrink-0"
-                        type="button"
-                        data-bs-toggle="offcanvas"
-                        data-bs-target="#appSidebar"
-                        aria-controls="appSidebar"
-                        aria-label="Open menu">
-                    <i class="bi bi-list fs-5"></i>
-                </button>
-                <div class="min-w-0">
-                    <h6 class="mb-0 fw-semibold text-dark text-truncate">@(ViewData["Title"] ?? "Dashboard")</h6>
-                    @if (ViewData["Subtitle"] is string sub)
+                <header class="app-topbar">
+                    <div class="d-flex align-items-center gap-3 min-w-0">
+
+                        <button class="btn mobile-menu-btn d-lg-none"
+                                type="button"
+                                data-bs-toggle="offcanvas"
+                                data-bs-target="#appSidebar"
+                                aria-controls="appSidebar"
+                                aria-label="Open menu">
+                            <i class="bi bi-list"></i>
+                        </button>
+
+                        @if (role == "student" && path.Equals("/Student/Dashboard", StringComparison.OrdinalIgnoreCase))
+                        {
+                            <div class="page-heading dashboard-top-heading">
+                                <h6 class="mb-0">
+                                    Welcome, @userName!
+                                </h6>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="page-heading">
+                                <h6 class="mb-0">@ViewData["Title"]</h6>
+
+                                @if (ViewData["Subtitle"] is string sub)
+                                {
+                                    <div class="page-subtitle">@sub</div>
+                                }
+                            </div>
+                        }
+                    </div>
+
+                    <div class="topbar-actions">
+                        <form method="post" asp-page="/Account/Logout" class="d-none d-sm-block">
+                            <button type="submit" class="topbar-logout">
+                                <i class="bi bi-box-arrow-right me-1"></i>
+                                Logout
+                            </button>
+                        </form>
+
+                        @if (!string.IsNullOrWhiteSpace(topbarProfileHref))
+                        {
+                            <a href="@topbarProfileHref" class="topbar-user topbar-user-link" title="Open Profile">
+                                @if (!string.IsNullOrWhiteSpace(navProfileImagePath))
+                                {
+                                    <img src="@navProfileImagePath"
+                                         alt="@userName"
+                                         class="topbar-avatar-img" />
+                                }
+                                else
+                                {
+                                    <div class="topbar-avatar">@initials</div>
+                                }
+
+                                <div class="d-none d-xl-block">
+                                    <div class="topbar-user-name">@userName</div>
+                                    <div class="topbar-user-meta text-capitalize">@role</div>
+                                </div>
+
+                                <i class="bi bi-chevron-down topbar-user-arrow d-none d-xl-inline"></i>
+                            </a>
+                        }
+                        else
+                        {
+                            <div class="topbar-user">
+                                <div class="topbar-avatar">@initials</div>
+
+                                <div class="d-none d-xl-block">
+                                    <div class="topbar-user-name">@userName</div>
+                                    <div class="topbar-user-meta text-capitalize">@role</div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </header>
+
+                <main class="app-content flex-grow-1 overflow-auto">
+                    @if (TempData["Success"] is string sMsg)
                     {
-                        <div class="text-muted-sm d-none d-sm-block">@sub</div>
+                        <div class="alert alert-success alert-dismissible fade show app-alert auto-dismiss-alert" data-auto-dismiss="2000">
+                            <i class="bi bi-check-circle me-2"></i>
+                            @sMsg
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
                     }
-                </div>
+
+                    @if (TempData["Error"] is string eMsg)
+                    {
+                        <div class="alert alert-danger alert-dismissible fade show app-alert" data-auto-dismiss="5000">
+                            <i class="bi bi-exclamation-triangle me-2"></i>
+                            @eMsg
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    }
+
+                    @RenderBody()
+                </main>
             </div>
-            <div class="d-flex align-items-center gap-2 flex-shrink-0">
-                <span class="badge rounded-pill text-capitalize"
-                      style="background:@(role == "student" ? "#dbeafe" : role == "supervisor" ? "#dcfce7" : "#fef9c3");
-                             color:@(role == "student" ? "#1d4ed8" : role == "supervisor" ? "#15803d" : "#854d0e")">
-                    @role
-                </span>
-            </div>
-        </header>
+        </div>
+    }
+    else
+    {
+        @RenderBody()
+    }
 
-        <!-- Page body -->
-        <main class="flex-grow-1 p-3 p-lg-4 overflow-auto">
-            @if (TempData["Success"] is string sMsg)
-            {
-                <div class="alert alert-success alert-dismissible fade show" data-auto-dismiss="4000">
-                    <i class="bi bi-check-circle me-2"></i>@sMsg
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                </div>
-            }
-            @if (TempData["Error"] is string eMsg)
-            {
-                <div class="alert alert-danger alert-dismissible fade show" data-auto-dismiss="5000">
-                    <i class="bi bi-exclamation-triangle me-2"></i>@eMsg
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                </div>
-            }
-            @RenderBody()
-        </main>
-    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="~/js/site.js" asp-append-version="true"></script>
 
-</div>
-}
-else
-{
-    @RenderBody()
-}
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+        document.querySelectorAll(".auto-dismiss-alert").forEach(function (alertBox) {
+        const delay = parseInt(alertBox.getAttribute("data-auto-dismiss") || "2000", 10);
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-<script src="~/js/site.js" asp-append-version="true"></script>
-@await RenderSectionAsync("Scripts", required: false)
+        setTimeout(function () {
+        alertBox.style.transition = "opacity 0.35s ease, transform 0.35s ease";
+        alertBox.style.opacity = "0";
+        alertBox.style.transform = "translateY(-6px)";
+
+        setTimeout(function () {
+        alertBox.remove();
+        }, 350);
+        }, delay);
+        });
+        });
+    </script>
+
+    @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>

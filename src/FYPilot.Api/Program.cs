@@ -45,6 +45,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidIssuer               = "fypilot",
             ValidAudience             = "fypilot",
             IssuerSigningKey          = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
+            RoleClaimType             = "userRole",
+            NameClaimType             = "userId"
         };
     });
 
