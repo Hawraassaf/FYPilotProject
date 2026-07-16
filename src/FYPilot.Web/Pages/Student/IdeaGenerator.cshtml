@@ -137,7 +137,7 @@
                         @if (Model.AssessedSkills.Any())
                         {
                             <div class="idea2-skill-cloud">
-                                @foreach (var skill in Model.AssessedSkills.Take(12))
+                                @foreach (var skill in Model.AssessedSkills)
                                 {
                                     <span>
                                         @skill.SkillName
@@ -403,7 +403,48 @@
         </section>
     </div>
 </div>
+@section Head {
+    <style>
+        /* Fix assessed skills being cut when there are many skills */
+        .idea2-skills-panel {
+            height: auto !important;
+            max-height: none !important;
+            overflow: hidden !important;
+            padding-bottom: 1rem !important;
+        }
 
+        .idea2-skill-cloud {
+            display: flex !important;
+            flex-wrap: wrap !important;
+            align-content: flex-start !important;
+            gap: .45rem !important;
+            max-height: 118px !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            padding-right: .35rem !important;
+            padding-bottom: .35rem !important;
+        }
+
+            .idea2-skill-cloud span {
+                flex: 0 0 auto !important;
+                white-space: nowrap !important;
+            }
+
+            .idea2-skill-cloud::-webkit-scrollbar {
+                width: 6px;
+            }
+
+            .idea2-skill-cloud::-webkit-scrollbar-thumb {
+                background: rgba(255, 255, 255, .30);
+                border-radius: 999px;
+            }
+
+            .idea2-skill-cloud::-webkit-scrollbar-track {
+                background: rgba(255, 255, 255, .08);
+                border-radius: 999px;
+            }
+    </style>
+}
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />
 

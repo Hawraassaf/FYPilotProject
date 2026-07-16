@@ -3809,7 +3809,7 @@ body,
     flex-wrap: wrap;
     gap: 0.45rem;
 }
-
+000000000
     .idea2-skill-cloud span {
         display: inline-flex;
         align-items: center;
@@ -3824,7 +3824,31 @@ body,
     .idea2-skill-cloud b {
         color: #ffffff;
     }
+.idea2-skills-panel {
+    overflow: hidden;
+}
 
+.idea2-skill-cloud {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .45rem;
+    max-height: 115px;
+    overflow-y: auto;
+    padding-right: .35rem;
+}
+
+    .idea2-skill-cloud::-webkit-scrollbar {
+        width: 6px;
+    }
+
+    .idea2-skill-cloud::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, .28);
+        border-radius: 999px;
+    }
+
+    .idea2-skill-cloud::-webkit-scrollbar-track {
+        background: transparent;
+    }
 .idea2-empty-skills {
     color: rgba(255, 255, 255, 0.72);
     font-size: 0.8rem;

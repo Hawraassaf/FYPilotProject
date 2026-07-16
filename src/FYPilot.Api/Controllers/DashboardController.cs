@@ -70,6 +70,7 @@ public class DashboardController(ApplicationDbContext db) : ControllerBase
     }
 
     [HttpGet("supervisor")]
+    [Authorize(Roles = "supervisor")]
     public async Task<IActionResult> SupervisorDashboard()
     {
         var projects = await db.Projects.Include(p => p.Student)

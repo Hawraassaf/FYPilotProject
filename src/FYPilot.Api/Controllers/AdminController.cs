@@ -49,6 +49,7 @@ public class AdminController(ApplicationDbContext db) : ControllerBase
     }
 
     [HttpGet("market-needs")]
+    [Authorize(Roles = "admin")]
     public async Task<IActionResult> MarketNeeds()
     {
         var needs = await db.MarketNeeds.ToListAsync();

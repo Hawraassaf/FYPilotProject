@@ -9,12 +9,7 @@
 
 <div class="profile-page">
 
-    @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
-    {
-        <div id="profileMessage" class="alert alert-success profile-alert">
-            <i class="bi bi-check-circle me-2"></i>@Model.SuccessMessage
-        </div>
-    }
+  
 
     @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
     {

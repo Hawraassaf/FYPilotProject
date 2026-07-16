@@ -296,12 +296,24 @@ namespace FYPilot.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("EditedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("EvaluationId")
                         .HasColumnType("integer");
 
                     b.Property<string>("MessageText")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int?>("ReplyToMessageId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("SeenAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("SenderUserId")
                         .HasColumnType("integer");
@@ -311,6 +323,48 @@ namespace FYPilot.Infrastructure.Migrations
                     b.HasIndex("EvaluationId");
 
                     b.ToTable("FeedbackMessages");
+                });
+
+            modelBuilder.Entity("FYPilot.Domain.Entities.GoogleCalendarToken", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AccessToken")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("access_token");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTime>("Expiration")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expiration");
+
+                    b.Property<string>("RefreshToken")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("refresh_token");
+
+                    b.Property<int>("SupervisorId")
+                        .HasColumnType("integer")
+                        .HasColumnName("supervisor_id");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SupervisorId");
+
+                    b.ToTable("google_calendar_tokens");
                 });
 
             modelBuilder.Entity("FYPilot.Domain.Entities.MarketNeed", b =>
@@ -353,6 +407,102 @@ namespace FYPilot.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("market_needs");
+                });
+
+            modelBuilder.Entity("FYPilot.Domain.Entities.Meeting", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Agenda")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("agenda");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<int>("DurationMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("duration_minutes");
+
+                    b.Property<string>("GoogleCalendarEventId")
+                        .HasColumnType("text")
+                        .HasColumnName("google_calendar_event_id");
+
+                    b.Property<string>("GoogleCalendarEventLink")
+                        .HasColumnType("text")
+                        .HasColumnName("google_calendar_event_link");
+
+                    b.Property<string>("GoogleMeetLink")
+                        .HasColumnType("text")
+                        .HasColumnName("google_meet_link");
+
+                    b.Property<string>("GoogleSyncStatus")
+                        .HasColumnType("text")
+                        .HasColumnName("google_sync_status");
+
+                    b.Property<DateTime?>("LastGoogleSyncAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_google_sync_at");
+
+                    b.Property<string>("LocationOrLink")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("location_or_link");
+
+                    b.Property<string>("MeetingMode")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("meeting_mode");
+
+                    b.Property<string>("NotesToPrepare")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("notes_to_prepare");
+
+                    b.Property<DateTime?>("Reminder12HoursSentAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("reminder_12_hours_sent_at");
+
+                    b.Property<DateTime>("ScheduledAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("scheduled_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<int?>("StudentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("student_id");
+
+                    b.Property<int>("SupervisorId")
+                        .HasColumnType("integer")
+                        .HasColumnName("supervisor_id");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("title");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StudentId");
+
+                    b.HasIndex("SupervisorId");
+
+                    b.ToTable("meetings");
                 });
 
             modelBuilder.Entity("FYPilot.Domain.Entities.Milestone", b =>
@@ -399,6 +549,58 @@ namespace FYPilot.Infrastructure.Migrations
                     b.HasIndex("ProjectId");
 
                     b.ToTable("milestones");
+                });
+
+            modelBuilder.Entity("FYPilot.Domain.Entities.Notification", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsRead")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_read");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("message");
+
+                    b.Property<DateTime?>("ReadAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("read_at");
+
+                    b.Property<int>("RecipientUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("recipient_user_id");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("title");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("type");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("url");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RecipientUserId");
+
+                    b.ToTable("notifications");
                 });
 
             modelBuilder.Entity("FYPilot.Domain.Entities.PasswordResetToken", b =>
@@ -1015,6 +1217,69 @@ namespace FYPilot.Infrastructure.Migrations
                     b.ToTable("student_skills");
                 });
 
+            modelBuilder.Entity("FYPilot.Domain.Entities.SupervisorAssignment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AdminNote")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("admin_note");
+
+                    b.Property<DateTime?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("approved_at");
+
+                    b.Property<int?>("AssignedByAdminId")
+                        .HasColumnType("integer")
+                        .HasColumnName("assigned_by_admin_id");
+
+                    b.Property<DateTime?>("RejectedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("rejected_at");
+
+                    b.Property<DateTime>("RequestedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("requested_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<int>("StudentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("student_id");
+
+                    b.Property<string>("StudentMessage")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("student_message");
+
+                    b.Property<int>("SupervisorId")
+                        .HasColumnType("integer")
+                        .HasColumnName("supervisor_id");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssignedByAdminId");
+
+                    b.HasIndex("StudentId");
+
+                    b.HasIndex("SupervisorId");
+
+                    b.ToTable("supervisor_assignments");
+                });
+
             modelBuilder.Entity("FYPilot.Domain.Entities.SupervisorEvaluation", b =>
                 {
                     b.Property<int>("Id")
@@ -1072,6 +1337,88 @@ namespace FYPilot.Infrastructure.Migrations
                     b.ToTable("supervisor_evaluations");
                 });
 
+            modelBuilder.Entity("FYPilot.Domain.Entities.SupervisorPreference", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("BatchId")
+                        .HasColumnType("integer")
+                        .HasColumnName("batch_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("MatchReason")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("match_reason");
+
+                    b.Property<int>("MatchScore")
+                        .HasColumnType("integer")
+                        .HasColumnName("match_score");
+
+                    b.Property<int>("PreferenceRank")
+                        .HasColumnType("integer")
+                        .HasColumnName("preference_rank");
+
+                    b.Property<int>("StudentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("student_id");
+
+                    b.Property<int>("SupervisorId")
+                        .HasColumnType("integer")
+                        .HasColumnName("supervisor_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BatchId");
+
+                    b.HasIndex("StudentId");
+
+                    b.HasIndex("SupervisorId");
+
+                    b.ToTable("supervisor_preferences");
+                });
+
+            modelBuilder.Entity("FYPilot.Domain.Entities.SupervisorPreferenceBatch", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("AssignedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("assigned_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("status");
+
+                    b.Property<int>("StudentId")
+                        .HasColumnType("integer")
+                        .HasColumnName("student_id");
+
+                    b.Property<DateTime>("SubmittedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("submitted_at");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StudentId");
+
+                    b.ToTable("supervisor_preference_batches");
+                });
+
             modelBuilder.Entity("FYPilot.Domain.Entities.SupervisorProfile", b =>
                 {
                     b.Property<int>("Id")
@@ -1081,31 +1428,83 @@ namespace FYPilot.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("AcademicTitle")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("academic_title");
+
                     b.Property<string>("Bio")
-                        .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("bio");
 
                     b.Property<string>("Department")
-                        .IsRequired()
-                        .HasColumnType("text")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)")
                         .HasColumnName("department");
 
-                    b.Property<string>("Specialization")
-                        .IsRequired()
+                    b.Property<string>("Faculty")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)")
+                        .HasColumnName("faculty");
+
+                    b.Property<string>("LinkedInUrl")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("linkedin_url");
+
+                    b.Property<string>("OfficeHours")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)")
+                        .HasColumnName("office_hours");
+
+                    b.Property<string>("OfficeLocation")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)")
+                        .HasColumnName("office_location");
+
+                    b.Property<string>("PreferredMeetingMode")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("preferred_meeting_mode");
+
+                    b.Property<string>("ProfileImagePath")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("profile_image_path");
+
+                    b.Property<string>("ResearchAreas")
                         .HasColumnType("text")
+                        .HasColumnName("research_areas");
+
+                    b.Property<string>("Specialization")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
                         .HasColumnName("specialization");
+
+                    b.Property<string>("University")
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)")
+                        .HasColumnName("university");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
 
                     b.Property<int>("UserId")
                         .HasColumnType("integer")
                         .HasColumnName("user_id");
+
+                    b.Property<string>("WebsiteUrl")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)")
+                        .HasColumnName("website_url");
 
                     b.HasKey("Id");
 
                     b.HasIndex("UserId")
                         .IsUnique();
 
-                    b.ToTable("supervisor_profiles");
+                    b.ToTable("supervisor_profiles", (string)null);
                 });
 
             modelBuilder.Entity("FYPilot.Domain.Entities.User", b =>
@@ -1236,6 +1635,34 @@ namespace FYPilot.Infrastructure.Migrations
                     b.Navigation("Evaluation");
                 });
 
+            modelBuilder.Entity("FYPilot.Domain.Entities.GoogleCalendarToken", b =>
+                {
+                    b.HasOne("FYPilot.Domain.Entities.User", "Supervisor")
+                        .WithMany()
+                        .HasForeignKey("SupervisorId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Supervisor");
+                });
+
+            modelBuilder.Entity("FYPilot.Domain.Entities.Meeting", b =>
+                {
+                    b.HasOne("FYPilot.Domain.Entities.User", "Student")
+                        .WithMany()
+                        .HasForeignKey("StudentId");
+
+                    b.HasOne("FYPilot.Domain.Entities.User", "Supervisor")
+                        .WithMany()
+                        .HasForeignKey("SupervisorId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Student");
+
+                    b.Navigation("Supervisor");
+                });
+
             modelBuilder.Entity("FYPilot.Domain.Entities.Milestone", b =>
                 {
                     b.HasOne("FYPilot.Domain.Entities.Project", "Project")
@@ -1245,6 +1672,17 @@ namespace FYPilot.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("FYPilot.Domain.Entities.Notification", b =>
+                {
+                    b.HasOne("FYPilot.Domain.Entities.User", "RecipientUser")
+                        .WithMany()
+                        .HasForeignKey("RecipientUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("RecipientUser");
                 });
 
             modelBuilder.Entity("FYPilot.Domain.Entities.PasswordResetToken", b =>
@@ -1342,6 +1780,31 @@ namespace FYPilot.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("FYPilot.Domain.Entities.SupervisorAssignment", b =>
+                {
+                    b.HasOne("FYPilot.Domain.Entities.User", "AssignedByAdmin")
+                        .WithMany()
+                        .HasForeignKey("AssignedByAdminId");
+
+                    b.HasOne("FYPilot.Domain.Entities.User", "Student")
+                        .WithMany()
+                        .HasForeignKey("StudentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("FYPilot.Domain.Entities.User", "Supervisor")
+                        .WithMany()
+                        .HasForeignKey("SupervisorId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AssignedByAdmin");
+
+                    b.Navigation("Student");
+
+                    b.Navigation("Supervisor");
+                });
+
             modelBuilder.Entity("FYPilot.Domain.Entities.SupervisorEvaluation", b =>
                 {
                     b.HasOne("FYPilot.Domain.Entities.ProjectIdea", "Idea")
@@ -1359,6 +1822,44 @@ namespace FYPilot.Infrastructure.Migrations
                     b.Navigation("Idea");
 
                     b.Navigation("Supervisor");
+                });
+
+            modelBuilder.Entity("FYPilot.Domain.Entities.SupervisorPreference", b =>
+                {
+                    b.HasOne("FYPilot.Domain.Entities.SupervisorPreferenceBatch", "Batch")
+                        .WithMany("Preferences")
+                        .HasForeignKey("BatchId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("FYPilot.Domain.Entities.User", "Student")
+                        .WithMany()
+                        .HasForeignKey("StudentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("FYPilot.Domain.Entities.User", "Supervisor")
+                        .WithMany()
+                        .HasForeignKey("SupervisorId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Batch");
+
+                    b.Navigation("Student");
+
+                    b.Navigation("Supervisor");
+                });
+
+            modelBuilder.Entity("FYPilot.Domain.Entities.SupervisorPreferenceBatch", b =>
+                {
+                    b.HasOne("FYPilot.Domain.Entities.User", "Student")
+                        .WithMany()
+                        .HasForeignKey("StudentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Student");
                 });
 
             modelBuilder.Entity("FYPilot.Domain.Entities.SupervisorProfile", b =>
@@ -1389,6 +1890,11 @@ namespace FYPilot.Infrastructure.Migrations
             modelBuilder.Entity("FYPilot.Domain.Entities.ProjectRoadmap", b =>
                 {
                     b.Navigation("Phases");
+                });
+
+            modelBuilder.Entity("FYPilot.Domain.Entities.SupervisorPreferenceBatch", b =>
+                {
+                    b.Navigation("Preferences");
                 });
 
             modelBuilder.Entity("FYPilot.Domain.Entities.User", b =>

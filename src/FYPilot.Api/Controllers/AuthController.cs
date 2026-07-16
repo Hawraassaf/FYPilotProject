@@ -24,36 +24,88 @@ public class AuthController(ApplicationDbContext db, ITokenService tokenService)
     }
 
     [HttpPost("register")]
-    public async Task<IActionResult> Register([FromBody] RegisterRequest request)
+    public async Task<IActionResult> Register(
+       [FromBody] RegisterRequest request)
     {
-        if (await db.Users.AnyAsync(u => u.Email == request.Email))
-            return Conflict(new { error = "Email already in use" });
+        var email = request.Email.Trim().ToLowerInvariant();
+        var fullName = request.FullName.Trim();
+        var role = request.Role.Trim().ToLowerInvariant();
 
-        var validRoles = new[] { "student", "supervisor", "admin" };
-        if (!validRoles.Contains(request.Role))
-            return BadRequest(new { error = "Invalid role" });
+        var emailExists = await db.Users
+            .AnyAsync(u => u.Email.ToLower() == email);
 
+        if (emailExists)
+        {
+            return Conflict(new
+            {
+                error = "Email already in use"
+            });
+        }
+
+        // Public API registration can create only students or supervisors.
+        // Administrators are created only from the protected
+        // Manage Administrators page.
+        var validRoles = new[]
+        {
+        "student",
+        "supervisor"
+    };
+
+        if (!validRoles.Contains(role))
+        {
+            return BadRequest(new
+            {
+                error = "Invalid role"
+            });
+        }
+        if (string.IsNullOrWhiteSpace(request.Password) ||
+              request.Password.Length < 8)
+        {
+            return BadRequest(new
+            {
+                error = "Password must contain at least 8 characters."
+            });
+        }
         var user = new User
         {
-            Email = request.Email,
-            FullName = request.FullName,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
-            Role = request.Role,
+            Email = email,
+            FullName = fullName,
+            PasswordHash =
+                BCrypt.Net.BCrypt.HashPassword(request.Password),
+            Role = role
         };
+
         db.Users.Add(user);
         await db.SaveChangesAsync();
 
-        if (request.Role == "student")
-            db.StudentProfiles.Add(new StudentProfile { UserId = user.Id });
-        else if (request.Role == "supervisor")
-            db.SupervisorProfiles.Add(new SupervisorProfile { UserId = user.Id });
-        else if (request.Role == "admin")
-            db.CompanyProfiles.Add(new CompanyProfile { UserId = user.Id });
+        if (role == "student")
+        {
+            db.StudentProfiles.Add(new StudentProfile
+            {
+                UserId = user.Id
+            });
+        }
+        else
+        {
+            db.SupervisorProfiles.Add(new SupervisorProfile
+            {
+                UserId = user.Id
+            });
+        }
 
         await db.SaveChangesAsync();
 
         var token = tokenService.GenerateToken(user);
-        return StatusCode(201, new AuthResponse(token, new UserDto(user.Id, user.Email, user.FullName, user.Role)));
+
+        return StatusCode(
+            StatusCodes.Status201Created,
+            new AuthResponse(
+                token,
+                new UserDto(
+                    user.Id,
+                    user.Email,
+                    user.FullName,
+                    user.Role)));
     }
 
     [HttpGet("me")]

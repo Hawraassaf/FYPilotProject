@@ -1,89 +1,1353 @@
 @page
 @model FYPilot.Web.Pages.Admin.AnalyticsModel
 @{
-    ViewData["Title"]    = "Analytics";
-    ViewData["Subtitle"] = "Platform usage statistics and performance metrics";
+    ViewData["Title"] = "Analytics";
+    ViewData["Subtitle"] = "Platform insights and academic progress overview";
+
+    var supervisorPercent = Model.TotalStudents == 0
+        ? 0
+        : (int)Math.Round(Model.StudentsWithSupervisor * 100.0 / Model.TotalStudents);
+
+    var approvedIdeaPercent = Model.TotalStudents == 0
+        ? 0
+        : (int)Math.Round(Model.StudentsWithApprovedIdea * 100.0 / Model.TotalStudents);
+
+    var interventionPercent = Model.TotalStudents == 0
+        ? 0
+        : (int)Math.Round(Model.StudentsNeedingIntervention * 100.0 / Model.TotalStudents);
+
+    var highRiskPercent = Model.TotalStudents == 0
+        ? 0
+        : (int)Math.Round(Model.HighRiskStudents * 100.0 / Model.TotalStudents);
+
+    var mediumRiskPercent = Model.TotalStudents == 0
+        ? 0
+        : (int)Math.Round(Model.MediumRiskStudents * 100.0 / Model.TotalStudents);
+
+    var onTrackPercent = Model.TotalStudents == 0
+        ? 0
+        : (int)Math.Round(Model.OnTrackStudents * 100.0 / Model.TotalStudents);
+
+    var approvedIdeaStatusPercent = Model.TotalIdeas == 0
+        ? 0
+        : (int)Math.Round(Model.ApprovedIdeas * 100.0 / Model.TotalIdeas);
+
+    var pendingIdeaStatusPercent = Model.TotalIdeas == 0
+        ? 0
+        : (int)Math.Round(Model.PendingIdeas * 100.0 / Model.TotalIdeas);
+
+    var revisionIdeaStatusPercent = Model.TotalIdeas == 0
+        ? 0
+        : (int)Math.Round(Model.NeedsRevisionIdeas * 100.0 / Model.TotalIdeas);
+
+    var rejectedIdeaStatusPercent = Model.TotalIdeas == 0
+        ? 0
+        : (int)Math.Round(Model.RejectedIdeas * 100.0 / Model.TotalIdeas);
 }
 
-<!-- KPI cards -->
-<div class="row g-3 mb-4">
-    @foreach (var kpi in Model.KPIs)
+<section class="analytics-page">
+
+    <section class="analytics-kpis">
+        <article class="kpi-card blue">
+            <div class="kpi-icon">
+                <i class="bi bi-people"></i>
+            </div>
+
+            <div class="kpi-main">
+                <span>Students with Supervisor</span>
+                <strong>@Model.StudentsWithSupervisor <small>/ @Model.TotalStudents</small></strong>
+
+                <div class="kpi-progress">
+                    <i style="width:@supervisorPercent%"></i>
+                </div>
+            </div>
+
+            <b>@supervisorPercent%</b>
+        </article>
+
+        <article class="kpi-card teal">
+            <div class="kpi-icon">
+                <i class="bi bi-lightbulb"></i>
+            </div>
+
+            <div class="kpi-main">
+                <span>Students with Approved Idea</span>
+                <strong>@Model.StudentsWithApprovedIdea <small>/ @Model.TotalStudents</small></strong>
+
+                <div class="kpi-progress">
+                    <i style="width:@approvedIdeaPercent%"></i>
+                </div>
+            </div>
+
+            <b>@approvedIdeaPercent%</b>
+        </article>
+
+        <article class="kpi-card purple">
+            <div class="kpi-icon">
+                <i class="bi bi-graph-up-arrow"></i>
+            </div>
+
+            <div class="kpi-main">
+                <span>Review Completion Rate</span>
+                <strong>@Model.ReviewCompletionRate%</strong>
+
+                <div class="kpi-progress">
+                    <i style="width:@Model.ReviewCompletionRate%"></i>
+                </div>
+            </div>
+
+            <b>—</b>
+        </article>
+
+        <article class="kpi-card blue">
+            <div class="kpi-icon">
+                <i class="bi bi-person"></i>
+            </div>
+
+            <div class="kpi-main">
+                <span>Average Supervisor Load</span>
+                <strong>@Model.AverageSupervisorLoad <small>/ 4</small></strong>
+
+                <div class="kpi-progress">
+                    <i style="width:@Model.AverageSupervisorLoadPercent%"></i>
+                </div>
+            </div>
+
+            <b>@Model.AverageSupervisorLoadPercent%</b>
+        </article>
+    </section>
+
+    <section class="analytics-grid">
+
+        <article class="analytics-card progress-card">
+            <div class="card-title">
+                <div>
+                    <i class="bi bi-book"></i>
+                    <h2>Academic Progress Overview</h2>
+                </div>
+
+                <span class="info-dot">
+                    <i class="bi bi-info"></i>
+                </span>
+            </div>
+
+            <div class="progress-list">
+                <div class="progress-row blue">
+                    <div class="row-icon">
+                        <i class="bi bi-people"></i>
+                    </div>
+
+                    <div class="row-main">
+                        <div>
+                            <span>Students with Supervisor</span>
+                            <b>@Model.StudentsWithSupervisor / @Model.TotalStudents (@supervisorPercent%)</b>
+                        </div>
+
+                        <div class="wide-progress">
+                            <i style="width:@supervisorPercent%"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="progress-row teal">
+                    <div class="row-icon">
+                        <i class="bi bi-lightbulb"></i>
+                    </div>
+
+                    <div class="row-main">
+                        <div>
+                            <span>Students with approved idea</span>
+                            <b>@Model.StudentsWithApprovedIdea / @Model.TotalStudents (@approvedIdeaPercent%)</b>
+                        </div>
+
+                        <div class="wide-progress">
+                            <i style="width:@approvedIdeaPercent%"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="progress-row red">
+                    <div class="row-icon">
+                        <i class="bi bi-exclamation-triangle"></i>
+                    </div>
+
+                    <div class="row-main">
+                        <div>
+                            <span>Students needing intervention</span>
+                            <b>@Model.StudentsNeedingIntervention / @Model.TotalStudents (@interventionPercent%)</b>
+                        </div>
+
+                        <div class="wide-progress">
+                            <i style="width:@interventionPercent%"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </article>
+
+        <article class="analytics-card workload-card">
+            <div class="card-title">
+                <div>
+                    <i class="bi bi-people-fill"></i>
+                    <h2>Supervisor Workload</h2>
+                </div>
+
+                <span class="info-dot">
+                    <i class="bi bi-info"></i>
+                </span>
+            </div>
+
+            <div class="workload-body">
+                <div class="bar-chart">
+                    <div class="chart-axis">
+                        <span>15</span>
+                        <span>10</span>
+                        <span>5</span>
+                        <span>0</span>
+                    </div>
+
+                    <div class="chart-bars">
+                        <div class="chart-bar dark" style="height:@ChartHeight(Model.FullSupervisors)%">
+                            <strong>@Model.FullSupervisors</strong>
+                        </div>
+
+                        <div class="chart-bar blue" style="height:@ChartHeight(Model.AlmostFullSupervisors)%">
+                            <strong>@Model.AlmostFullSupervisors</strong>
+                        </div>
+
+                        <div class="chart-bar teal" style="height:@ChartHeight(Model.AvailableSupervisors)%">
+                            <strong>@Model.AvailableSupervisors</strong>
+                        </div>
+                    </div>
+
+                    <div class="chart-labels">
+                        <span>Full<br /><small>(4/4 students)</small></span>
+                        <span>Almost Full<br /><small>(3/4 students)</small></span>
+                        <span>Available<br /><small>(0–2 students)</small></span>
+                    </div>
+                </div>
+
+                <div class="most-loaded">
+                    <div>
+                        <i class="bi bi-person"></i>
+                    </div>
+
+                    <span>Most loaded</span>
+                    <strong>@Model.MostLoadedSupervisorName</strong>
+                    <small>@Model.MostLoadedSupervisorCount / 4 students</small>
+                </div>
+            </div>
+        </article>
+
+        <article class="analytics-card domain-card">
+            <div class="card-title">
+                <div>
+                    <i class="bi bi-pie-chart-fill"></i>
+                    <h2>Project Domain Distribution</h2>
+                </div>
+
+                <span class="info-dot">
+                    <i class="bi bi-info"></i>
+                </span>
+            </div>
+
+            <div class="domain-list">
+                @if (!Model.DomainDistribution.Any())
+                {
+                    <div class="empty-mini">No domains yet.</div>
+                }
+                else
+                {
+                    @foreach (var domain in Model.DomainDistribution)
+                    {
+                        <div class="domain-row">
+                            <span>@domain.Domain</span>
+
+                            <div class="domain-bar">
+                                <i style="width:@domain.Percentage%"></i>
+                            </div>
+
+                            <b>@domain.Count (@domain.Percentage%)</b>
+                        </div>
+                    }
+                }
+            </div>
+        </article>
+
+        <article class="analytics-card review-card">
+            <div class="card-title">
+                <div>
+                    <i class="bi bi-clipboard-check"></i>
+                    <h2>Idea Review Status</h2>
+                </div>
+
+                <span class="info-dot">
+                    <i class="bi bi-info"></i>
+                </span>
+            </div>
+
+            <div class="review-body">
+                <div class="donut-wrap">
+                    <div class="donut"
+                         style="--approved:@approvedIdeaStatusPercent; --pending:@pendingIdeaStatusPercent; --revision:@revisionIdeaStatusPercent; --rejected:@rejectedIdeaStatusPercent;">
+                        <div>
+                            <strong>@Model.TotalIdeas</strong>
+                            <span>Total Ideas</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="review-legend">
+                    <div>
+                        <span class="dot approved"></span>
+                        <p>Approved</p>
+                        <b>@Model.ApprovedIdeas (@approvedIdeaStatusPercent%)</b>
+                    </div>
+
+                    <div>
+                        <span class="dot pending"></span>
+                        <p>Pending</p>
+                        <b>@Model.PendingIdeas (@pendingIdeaStatusPercent%)</b>
+                    </div>
+
+                    <div>
+                        <span class="dot revision"></span>
+                        <p>Needs Revision</p>
+                        <b>@Model.NeedsRevisionIdeas (@revisionIdeaStatusPercent%)</b>
+                    </div>
+
+                    <div>
+                        <span class="dot rejected"></span>
+                        <p>Rejected</p>
+                        <b>@Model.RejectedIdeas (@rejectedIdeaStatusPercent%)</b>
+                    </div>
+                </div>
+            </div>
+        </article>
+
+        <article class="analytics-card risk-card">
+            <div class="card-title">
+                <div>
+                    <i class="bi bi-shield-fill-check"></i>
+                    <h2>Student Risk Overview</h2>
+                </div>
+
+                <span class="info-dot">
+                    <i class="bi bi-info"></i>
+                </span>
+            </div>
+
+            <div class="risk-boxes">
+                <div class="risk-box red">
+                    <i class="bi bi-shield-exclamation"></i>
+                    <div>
+                        <span>High Risk</span>
+                        <strong>@Model.HighRiskStudents <small>(@highRiskPercent%)</small></strong>
+                    </div>
+
+                    <div class="risk-progress">
+                        <i style="width:@highRiskPercent%"></i>
+                    </div>
+                </div>
+
+                <div class="risk-box orange">
+                    <i class="bi bi-exclamation-circle"></i>
+                    <div>
+                        <span>Medium Risk</span>
+                        <strong>@Model.MediumRiskStudents <small>(@mediumRiskPercent%)</small></strong>
+                    </div>
+
+                    <div class="risk-progress">
+                        <i style="width:@mediumRiskPercent%"></i>
+                    </div>
+                </div>
+
+                <div class="risk-box green">
+                    <i class="bi bi-shield-check"></i>
+                    <div>
+                        <span>On Track</span>
+                        <strong>@Model.OnTrackStudents <small>(@onTrackPercent%)</small></strong>
+                    </div>
+
+                    <div class="risk-progress">
+                        <i style="width:@onTrackPercent%"></i>
+                    </div>
+                </div>
+            </div>
+        </article>
+
+        <article class="analytics-card meetings-card">
+            <div class="card-title">
+                <div>
+                    <i class="bi bi-calendar-event"></i>
+                    <h2>Meeting Follow-up</h2>
+                </div>
+
+                <span class="info-dot">
+                    <i class="bi bi-info"></i>
+                </span>
+            </div>
+
+            <div class="meeting-boxes">
+                <div class="meeting-box blue">
+                    <i class="bi bi-calendar-check"></i>
+                    <div>
+                        <span>Upcoming Meetings</span>
+                        <strong>@Model.UpcomingMeetings</strong>
+                        <small>Scheduled</small>
+                    </div>
+                </div>
+
+                <div class="meeting-box teal">
+                    <i class="bi bi-calendar2-check"></i>
+                    <div>
+                        <span>Completed Meetings</span>
+                        <strong>@Model.CompletedMeetings</strong>
+                        <small>This Term</small>
+                    </div>
+                </div>
+
+                <div class="meeting-box red">
+                    <i class="bi bi-person-exclamation"></i>
+                    <div>
+                        <span>Students with No Meeting Yet</span>
+                        <strong>@Model.StudentsWithNoMeeting</strong>
+                        <small>Need Attention</small>
+                    </div>
+                </div>
+            </div>
+        </article>
+
+    </section>
+
+</section>
+
+@section Head {
+    <style>
+        :root {
+            --an-navy: #28385E;
+            --an-deep: #061C49;
+            --an-blue: #2563EB;
+            --an-dark-blue: #0F2C83;
+            --an-teal: #0F9F9A;
+            --an-purple: #6D44D9;
+            --an-red: #EF4444;
+            --an-orange: #F59E0B;
+            --an-green: #2FBF71;
+            --an-text: #111827;
+            --an-muted: #64748B;
+            --an-border: #E8ECF2;
+            --an-soft: #F7F8FA;
+        }
+
+        .analytics-page {
+            max-width: 1500px;
+            margin: 0 auto;
+            color: var(--an-text);
+            padding-bottom: 1.5rem;
+        }
+
+        .analytics-kpis {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .kpi-card,
+        .analytics-card {
+            background: white;
+            border: 1px solid var(--an-border);
+            border-radius: 20px;
+            box-shadow: 0 12px 28px rgba(15,23,42,.05);
+        }
+
+        .kpi-card {
+            min-height: 126px;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            gap: .85rem;
+            align-items: center;
+            padding: 1rem;
+        }
+
+        .kpi-icon {
+            width: 68px;
+            height: 68px;
+            display: grid;
+            place-items: center;
+            border-radius: 24px;
+            font-size: 1.65rem;
+        }
+
+        .kpi-card.blue .kpi-icon {
+            color: var(--an-blue);
+            background: #EAF2FF;
+        }
+
+        .kpi-card.teal .kpi-icon {
+            color: var(--an-teal);
+            background: #E6FAF8;
+        }
+
+        .kpi-card.purple .kpi-icon {
+            color: var(--an-purple);
+            background: #F1EAFF;
+        }
+
+        .kpi-main span {
+            display: block;
+            color: var(--an-text);
+            font-size: .82rem;
+            font-weight: 500;
+        }
+
+        .kpi-main strong {
+            display: block;
+            margin-top: .28rem;
+            color: var(--an-blue);
+            font-size: 2rem;
+            line-height: 1;
+            font-weight: 600;
+        }
+
+        .kpi-card.teal .kpi-main strong {
+            color: var(--an-teal);
+        }
+
+        .kpi-card.purple .kpi-main strong {
+            color: var(--an-purple);
+        }
+
+        .kpi-main small {
+            color: var(--an-text);
+            font-size: 1.25rem;
+            font-weight: 500;
+        }
+
+        .kpi-card > b {
+            align-self: end;
+            color: var(--an-blue);
+            font-size: .92rem;
+            font-weight: 600;
+        }
+
+        .kpi-progress {
+            height: 6px;
+            margin-top: 1rem;
+            overflow: hidden;
+            border-radius: 999px;
+            background: #E5EAF1;
+        }
+
+            .kpi-progress i {
+                display: block;
+                height: 100%;
+                border-radius: inherit;
+                background: var(--an-blue);
+            }
+
+        .kpi-card.teal .kpi-progress i {
+            background: var(--an-teal);
+        }
+
+        .kpi-card.purple .kpi-progress i {
+            background: var(--an-purple);
+        }
+
+        .analytics-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1rem;
+        }
+
+        .analytics-card {
+            padding: 1rem;
+            min-height: 250px;
+        }
+
+        .card-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+            .card-title > div {
+                display: flex;
+                align-items: center;
+                gap: .65rem;
+            }
+
+            .card-title div > i {
+                width: 34px;
+                height: 34px;
+                display: grid;
+                place-items: center;
+                color: white;
+                background: var(--an-dark-blue);
+                border-radius: 50%;
+                font-size: .95rem;
+            }
+
+            .card-title h2 {
+                margin: 0;
+                color: #111827;
+                font-size: 1rem;
+                font-weight: 600;
+            }
+
+        .info-dot {
+            width: 20px;
+            height: 20px;
+            display: grid;
+            place-items: center;
+            color: #8191B1;
+            border: 1px solid #9AA9C4;
+            border-radius: 50%;
+            font-size: .72rem;
+        }
+
+        .progress-list {
+            display: grid;
+            gap: 1rem;
+            padding-top: .6rem;
+        }
+
+        .progress-row {
+            display: grid;
+            grid-template-columns: 48px minmax(0, 1fr);
+            gap: .8rem;
+            align-items: center;
+        }
+
+        .row-icon {
+            width: 48px;
+            height: 48px;
+            display: grid;
+            place-items: center;
+            border-radius: 12px;
+            font-size: 1.2rem;
+        }
+
+        .progress-row.blue .row-icon {
+            color: var(--an-blue);
+            background: #EAF2FF;
+        }
+
+        .progress-row.teal .row-icon {
+            color: var(--an-teal);
+            background: #E6FAF8;
+        }
+
+        .progress-row.red .row-icon {
+            color: var(--an-red);
+            background: #FEECEC;
+        }
+
+        .row-main > div:first-child {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            color: var(--an-text);
+            font-size: .82rem;
+        }
+
+        .row-main b {
+            font-weight: 500;
+        }
+
+        .wide-progress {
+            height: 6px;
+            margin-top: .5rem;
+            overflow: hidden;
+            border-radius: 999px;
+            background: #E5EAF1;
+        }
+
+            .wide-progress i {
+                display: block;
+                height: 100%;
+                border-radius: inherit;
+            }
+
+        .progress-row.blue .wide-progress i {
+            background: var(--an-blue);
+        }
+
+        .progress-row.teal .wide-progress i {
+            background: var(--an-teal);
+        }
+
+        .progress-row.red .wide-progress i {
+            background: var(--an-red);
+        }
+
+        .workload-body {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 160px;
+            gap: 1rem;
+            align-items: stretch;
+        }
+
+        .bar-chart {
+            display: grid;
+            grid-template-columns: 40px minmax(0, 1fr);
+            grid-template-rows: 150px auto;
+            gap: .4rem;
+        }
+
+        .chart-axis {
+            display: grid;
+            justify-items: end;
+            color: #64748B;
+            font-size: .72rem;
+        }
+
+        .chart-bars {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            align-items: end;
+            gap: 1.2rem;
+            border-left: 1px solid #D8DEE9;
+            border-bottom: 1px solid #D8DEE9;
+            padding: 0 1rem;
+            background: repeating-linear-gradient( to bottom, transparent, transparent 36px, #E9EDF5 37px );
+        }
+
+        .chart-bar {
+            min-height: 8px;
+            border-radius: 8px 8px 0 0;
+            position: relative;
+            display: grid;
+            justify-items: center;
+            align-content: start;
+            color: #111827;
+        }
+
+            .chart-bar strong {
+                transform: translateY(-24px);
+                font-weight: 600;
+            }
+
+            .chart-bar.dark {
+                background: #092B94;
+            }
+
+            .chart-bar.blue {
+                background: #1E7AF0;
+            }
+
+            .chart-bar.teal {
+                background: #0F9F9A;
+            }
+
+        .chart-labels {
+            grid-column: 2;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            text-align: center;
+            color: #111827;
+            font-size: .78rem;
+            font-weight: 500;
+        }
+
+            .chart-labels small {
+                color: #64748B;
+                font-weight: 400;
+            }
+
+        .most-loaded {
+            display: grid;
+            place-items: center;
+            align-content: center;
+            text-align: center;
+            border-radius: 14px;
+            background: #EAF2FF;
+            padding: 1rem;
+        }
+
+            .most-loaded div {
+                width: 66px;
+                height: 66px;
+                display: grid;
+                place-items: center;
+                color: white;
+                background: var(--an-blue);
+                border-radius: 50%;
+                font-size: 1.8rem;
+                margin-bottom: .75rem;
+            }
+
+            .most-loaded span {
+                color: #111827;
+                font-size: .82rem;
+            }
+
+            .most-loaded strong {
+                margin-top: .35rem;
+                color: #0F2C83;
+                font-size: 1.05rem;
+                font-weight: 600;
+            }
+
+            .most-loaded small {
+                margin-top: .35rem;
+                color: #111827;
+                font-size: .78rem;
+            }
+
+        .domain-list {
+            display: grid;
+            gap: .8rem;
+        }
+
+        .domain-row {
+            display: grid;
+            grid-template-columns: 150px minmax(0, 1fr) 90px;
+            align-items: center;
+            gap: .8rem;
+        }
+
+            .domain-row span {
+                color: #111827;
+                font-size: .82rem;
+            }
+
+            .domain-row b {
+                text-align: right;
+                color: #111827;
+                font-size: .82rem;
+                font-weight: 500;
+            }
+
+        .domain-bar {
+            height: 7px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: #E5EAF1;
+        }
+
+            .domain-bar i {
+                display: block;
+                height: 100%;
+                border-radius: inherit;
+                background: var(--an-blue);
+            }
+
+        .review-body {
+            display: grid;
+            grid-template-columns: 260px minmax(0, 1fr);
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .donut-wrap {
+            display: grid;
+            place-items: center;
+        }
+
+        .donut {
+            width: 190px;
+            height: 190px;
+            display: grid;
+            place-items: center;
+            border-radius: 50%;
+            background: conic-gradient( var(--an-green) 0 calc(var(--approved) * 1%), var(--an-orange) calc(var(--approved) * 1%) calc((var(--approved) + var(--pending)) * 1%), #3B82F6 calc((var(--approved) + var(--pending)) * 1%) calc((var(--approved) + var(--pending) + var(--revision)) * 1%), var(--an-red) calc((var(--approved) + var(--pending) + var(--revision)) * 1%) 100% );
+        }
+
+            .donut > div {
+                width: 105px;
+                height: 105px;
+                display: grid;
+                place-items: center;
+                align-content: center;
+                border-radius: 50%;
+                background: white;
+                text-align: center;
+            }
+
+            .donut strong {
+                color: #111827;
+                font-size: 1.55rem;
+                line-height: 1;
+                font-weight: 600;
+            }
+
+            .donut span {
+                color: #64748B;
+                font-size: .75rem;
+            }
+
+        .review-legend {
+            display: grid;
+            gap: .75rem;
+        }
+
+            .review-legend div {
+                display: grid;
+                grid-template-columns: auto minmax(0, 1fr) auto;
+                align-items: center;
+                gap: .6rem;
+                border-bottom: 1px solid #E8ECF2;
+                padding-bottom: .55rem;
+            }
+
+            .review-legend p {
+                margin: 0;
+                color: #111827;
+                font-size: .82rem;
+            }
+
+            .review-legend b {
+                color: #111827;
+                font-size: .82rem;
+                font-weight: 500;
+            }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+            .dot.approved {
+                background: var(--an-green);
+            }
+
+            .dot.pending {
+                background: var(--an-orange);
+            }
+
+            .dot.revision {
+                background: #3B82F6;
+            }
+
+            .dot.rejected {
+                background: var(--an-red);
+            }
+
+        .risk-card,
+        .meetings-card {
+            min-height: 190px;
+        }
+
+        .risk-boxes,
+        .meeting-boxes {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: .85rem;
+        }
+
+        .risk-box,
+        .meeting-box {
+            min-height: 112px;
+            border-radius: 14px;
+            padding: 1rem;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: .85rem;
+            align-items: center;
+        }
+
+            .risk-box.red,
+            .meeting-box.red {
+                background: #FEECEC;
+            }
+
+            .risk-box.orange {
+                background: #FFF4DD;
+            }
+
+            .risk-box.green,
+            .meeting-box.teal {
+                background: #E6FAF8;
+            }
+
+            .meeting-box.blue {
+                background: #EAF2FF;
+            }
+
+            .risk-box > i,
+            .meeting-box > i {
+                font-size: 2rem;
+            }
+
+            .risk-box.red > i,
+            .meeting-box.red > i {
+                color: var(--an-red);
+            }
+
+            .risk-box.orange > i {
+                color: var(--an-orange);
+            }
+
+            .risk-box.green > i,
+            .meeting-box.teal > i {
+                color: var(--an-teal);
+            }
+
+            .meeting-box.blue > i {
+                color: var(--an-blue);
+            }
+
+            .risk-box span,
+            .meeting-box span {
+                display: block;
+                font-size: .78rem;
+                font-weight: 500;
+            }
+
+            .risk-box.red span,
+            .meeting-box.red span {
+                color: var(--an-red);
+            }
+
+            .risk-box.orange span {
+                color: var(--an-orange);
+            }
+
+            .risk-box.green span,
+            .meeting-box.teal span {
+                color: var(--an-teal);
+            }
+
+            .meeting-box.blue span {
+                color: var(--an-blue);
+            }
+
+            .risk-box strong,
+            .meeting-box strong {
+                display: block;
+                margin-top: .25rem;
+                color: #111827;
+                font-size: 1.45rem;
+                line-height: 1;
+                font-weight: 600;
+            }
+
+            .risk-box small,
+            .meeting-box small {
+                color: #475569;
+                font-size: .75rem;
+            }
+
+        .risk-progress {
+            grid-column: 1 / -1;
+            height: 5px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: rgba(255,255,255,.65);
+        }
+
+            .risk-progress i {
+                display: block;
+                height: 100%;
+                border-radius: inherit;
+            }
+
+        .risk-box.red .risk-progress i {
+            background: var(--an-red);
+        }
+
+        .risk-box.orange .risk-progress i {
+            background: var(--an-orange);
+        }
+
+        .risk-box.green .risk-progress i {
+            background: var(--an-teal);
+        }
+
+        .empty-mini {
+            min-height: 170px;
+            display: grid;
+            place-items: center;
+            color: var(--an-muted);
+            border: 1px dashed var(--an-border);
+            border-radius: 14px;
+        }
+
+        @@media (max-width: 1280px) {
+            .analytics-kpis,
+            .analytics-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .workload-body,
+            .review-body {
+                grid-template-columns: 1fr;
+            }
+
+            .risk-boxes,
+            .meeting-boxes {
+                grid-template-columns: 1fr;
+            }
+        }
+        /* ─────────────────────────────────────────────
+           FYPilot Professional Navy Analytics Theme
+           Navy palette, clear, academic, not colorful
+        ───────────────────────────────────────────── */
+
+        :root {
+            --an-navy-900: #061C49;
+            --an-navy-800: #1E2E55;
+            --an-navy-700: #28385E;
+            --an-navy-600: #304163;
+            --an-navy-500: #3E5275;
+            --an-navy-400: #516C8D;
+            --an-navy-300: #7890AE;
+            --an-navy-200: #B9C7D8;
+            --an-navy-100: #EEF2F6;
+            --an-navy-50: #F7F9FC;
+            --an-success: #2F7D5E;
+            --an-warning: #B7791F;
+            --an-danger: #B94A48;
+            --an-text: #111827;
+            --an-muted: #64748B;
+            --an-border: #E8ECF2;
+        }
+
+        /* Page and cards */
+        .analytics-page {
+            color: var(--an-text);
+        }
+
+        .kpi-card,
+        .analytics-card {
+            background: #FFFFFF;
+            border: 1px solid var(--an-border);
+            box-shadow: 0 14px 34px rgba(40, 56, 94, .055);
+        }
+
+            /* KPI icons: all navy family */
+            .kpi-card.blue .kpi-icon,
+            .kpi-card.teal .kpi-icon,
+            .kpi-card.purple .kpi-icon {
+                color: #FFFFFF;
+                background: linear-gradient(135deg, var(--an-navy-700), var(--an-navy-400));
+            }
+
+            /* KPI numbers */
+            .kpi-main strong,
+            .kpi-card.teal .kpi-main strong,
+            .kpi-card.purple .kpi-main strong,
+            .kpi-card > b {
+                color: var(--an-navy-700);
+            }
+
+        /* KPI labels */
+        .kpi-main span {
+            color: #1F2937;
+        }
+
+        /* Progress tracks */
+        .kpi-progress,
+        .wide-progress,
+        .domain-bar,
+        .risk-progress {
+            background: #E8ECF2;
+        }
+
+            /* Main progress fills: navy shades */
+            .kpi-progress i,
+            .kpi-card.teal .kpi-progress i,
+            .kpi-card.purple .kpi-progress i,
+            .progress-row.blue .wide-progress i,
+            .progress-row.teal .wide-progress i,
+            .domain-bar i {
+                background: linear-gradient(90deg, var(--an-navy-700), var(--an-navy-400));
+            }
+
+        /* Risk progress only */
+        .progress-row.red .wide-progress i {
+            background: linear-gradient(90deg, var(--an-danger), #D88A8A);
+        }
+
+        /* Card title icons */
+        .card-title div > i {
+            color: #FFFFFF;
+            background: linear-gradient(135deg, var(--an-navy-700), var(--an-navy-400));
+        }
+
+        /* Info dots */
+        .info-dot {
+            color: var(--an-navy-400);
+            border-color: #C7D1DF;
+            background: #FFFFFF;
+        }
+
+        /* Academic progress row icons */
+        .progress-row.blue .row-icon,
+        .progress-row.teal .row-icon {
+            color: var(--an-navy-700);
+            background: var(--an-navy-100);
+        }
+
+        .progress-row.red .row-icon {
+            color: var(--an-danger);
+            background: #FFF1F1;
+        }
+
+        /* Supervisor workload bars: navy gradient levels */
+        .chart-bar.dark {
+            background: linear-gradient(180deg, var(--an-navy-900), var(--an-navy-700));
+        }
+
+        .chart-bar.blue {
+            background: linear-gradient(180deg, var(--an-navy-700), var(--an-navy-500));
+        }
+
+        .chart-bar.teal {
+            background: linear-gradient(180deg, var(--an-navy-500), var(--an-navy-300));
+        }
+
+        .chart-bars {
+            border-left-color: #D8DEE9;
+            border-bottom-color: #D8DEE9;
+            background: repeating-linear-gradient( to bottom, transparent, transparent 36px, #EEF2F6 37px );
+        }
+
+        /* Most loaded card */
+        .most-loaded {
+            background: linear-gradient(180deg, var(--an-navy-100), #FFFFFF);
+            border: 1px solid #DDE5EF;
+        }
+
+            .most-loaded div {
+                background: linear-gradient(135deg, var(--an-navy-700), var(--an-navy-400));
+            }
+
+            .most-loaded strong {
+                color: var(--an-navy-700);
+            }
+
+        /* Domain bars */
+        .domain-row span,
+        .domain-row b {
+            color: #1F2937;
+        }
+
+        /* Donut chart:
+           Approved = navy dark
+           Pending = navy medium
+           Revision = steel
+           Rejected = muted red
+        */
+        .donut {
+            background: conic-gradient( var(--an-navy-700) 0 calc(var(--approved) * 1%), var(--an-navy-400) calc(var(--approved) * 1%) calc((var(--approved) + var(--pending)) * 1%), var(--an-navy-200) calc((var(--approved) + var(--pending)) * 1%) calc((var(--approved) + var(--pending) + var(--revision)) * 1%), var(--an-danger) calc((var(--approved) + var(--pending) + var(--revision)) * 1%) 100% );
+        }
+
+            .donut > div {
+                box-shadow: 0 8px 22px rgba(40,56,94,.08);
+            }
+
+        .dot.approved {
+            background: var(--an-navy-700);
+        }
+
+        .dot.pending {
+            background: var(--an-navy-400);
+        }
+
+        .dot.revision {
+            background: var(--an-navy-200);
+        }
+
+        .dot.rejected {
+            background: var(--an-danger);
+        }
+
+        /* Legend */
+        .review-legend p,
+        .review-legend b {
+            color: #1F2937;
+        }
+
+        /* Risk cards: calm and clear */
+        .risk-box.red,
+        .meeting-box.red {
+            background: linear-gradient(180deg, #FFF4F4 0%, #FFFFFF 100%);
+            border: 1px solid #F0CACA;
+        }
+
+        .risk-box.orange {
+            background: linear-gradient(180deg, #FFF8EA 0%, #FFFFFF 100%);
+            border: 1px solid #F0D8B7;
+        }
+
+        .risk-box.green,
+        .meeting-box.teal {
+            background: linear-gradient(180deg, #F1FAF6 0%, #FFFFFF 100%);
+            border: 1px solid #CFEADC;
+        }
+
+        .meeting-box.blue {
+            background: linear-gradient(180deg, var(--an-navy-100) 0%, #FFFFFF 100%);
+            border: 1px solid #DDE5EF;
+        }
+
+        /* Risk icons and text */
+        .risk-box.red > i,
+        .meeting-box.red > i,
+        .risk-box.red span,
+        .meeting-box.red span {
+            color: var(--an-danger);
+        }
+
+        .risk-box.orange > i,
+        .risk-box.orange span {
+            color: var(--an-warning);
+        }
+
+        .risk-box.green > i,
+        .meeting-box.teal > i,
+        .risk-box.green span,
+        .meeting-box.teal span {
+            color: var(--an-success);
+        }
+
+        .meeting-box.blue > i,
+        .meeting-box.blue span {
+            color: var(--an-navy-700);
+        }
+
+        /* Risk progress fills */
+        .risk-box.red .risk-progress i {
+            background: var(--an-danger);
+        }
+
+        .risk-box.orange .risk-progress i {
+            background: var(--an-warning);
+        }
+
+        .risk-box.green .risk-progress i {
+            background: var(--an-success);
+        }
+
+        /* Main text */
+        .card-title h2,
+        .meeting-box strong,
+        .risk-box strong {
+            color: #111827;
+        }
+
+        /* Soften risk cards */
+        .risk-box,
+        .meeting-box {
+            box-shadow: inset 0 1px 0 rgba(255,255,255,.75);
+        }
+    </style>
+}
+
+@functions {
+    private static int ChartHeight(int value)
     {
-        <div class="col-6 col-xl-3">
-            <div class="stat-card">
-                <div class="d-flex align-items-center justify-content-between mb-2">
-                    <div class="stat-icon" style="background:@kpi.BgColor"><i class="bi bi-@kpi.Icon" style="color:@kpi.Color"></i></div>
-                    <span class="badge @(kpi.Change >= 0 ? "bg-success-subtle text-success" : "bg-danger-subtle text-danger")">
-                        @(kpi.Change >= 0 ? "+" : "")@kpi.Change%
-                    </span>
-                </div>
-                <div class="stat-value">@kpi.Value</div>
-                <div class="stat-label">@kpi.Label</div>
-            </div>
-        </div>
+        if (value <= 0)
+        {
+            return 4;
+        }
+
+        return Math.Clamp(value * 10, 8, 100);
     }
-</div>
-
-<div class="row g-4">
-    <!-- Domain distribution -->
-    <div class="col-lg-6">
-        <div class="page-card p-4">
-            <h6 class="fw-bold mb-3"><i class="bi bi-pie-chart me-2 text-primary"></i>Ideas by Domain</h6>
-            @foreach (var (domain, count, pct) in Model.DomainDist)
-            {
-                <div class="mb-2">
-                    <div class="d-flex justify-content-between small mb-1">
-                        <span>@domain</span>
-                        <span class="text-muted">@count (@pct%)</span>
-                    </div>
-                    <div class="progress" style="height:8px">
-                        <div class="progress-bar" style="width:@pct%;background:#3b82f6"></div>
-                    </div>
-                </div>
-            }
-        </div>
-    </div>
-
-    <!-- Difficulty dist -->
-    <div class="col-lg-6">
-        <div class="page-card p-4">
-            <h6 class="fw-bold mb-3"><i class="bi bi-bar-chart-steps me-2 text-warning"></i>Difficulty Distribution</h6>
-            @foreach (var (level, count, color) in Model.DifficultyDist)
-            {
-                <div class="mb-3 p-3 rounded-2" style="background:@(color)25;border:1px solid @(color)60">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <span class="fw-semibold text-capitalize small">@level</span>
-                        <span class="fw-bold" style="color:@color;font-size:1.5rem">@count</span>
-                    </div>
-                    <div class="text-muted-sm">ideas at this difficulty level</div>
-                </div>
-            }
-        </div>
-    </div>
-
-    <!-- Top metrics -->
-    <div class="col-12">
-        <div class="page-card p-4">
-            <h6 class="fw-bold mb-3"><i class="bi bi-trophy me-2 text-warning"></i>Top Performing Ideas</h6>
-            <div class="table-responsive">
-                <table class="table table-hover align-middle small">
-                    <thead><tr><th>Title</th><th>Student</th><th>Domain</th><th>Innovation</th><th>Feasibility</th><th>Market</th><th>Avg Score</th></tr></thead>
-                    <tbody>
-                        @foreach (var idea in Model.TopIdeas)
-                        {
-                            <tr>
-                                <td class="fw-semibold" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">@idea.Title</td>
-                                <td class="text-muted">@idea.StudentName</td>
-                                <td><span class="badge bg-primary-subtle text-primary">@idea.Domain</span></td>
-                                <td>@idea.InnovationScore%</td>
-                                <td>@idea.FeasibilityScore%</td>
-                                <td>@idea.MarketDemandScore%</td>
-                                <td><span class="badge bg-success">@((idea.InnovationScore + idea.FeasibilityScore + idea.MarketDemandScore) / 3)%</span></td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-</div>
+}

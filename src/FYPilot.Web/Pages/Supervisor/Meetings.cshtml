@@ -65,10 +65,32 @@
             </div>
         </div>
 
-        <button type="button" class="meet-hero-action" id="openSchedulePanel">
-            <i class="bi bi-plus-lg"></i>
-            Schedule Meeting
-        </button>
+        <div class="meet-hero-buttons">
+            @if (Model.GoogleCalendarConnected)
+            {
+                <form method="post" asp-page-handler="DisconnectGoogle">
+                    @Html.AntiForgeryToken()
+                    <button type="submit" class="meet-google-btn connected">
+                        <i class="bi bi-google"></i>
+                        Calendar Connected
+                    </button>
+                </form>
+            }
+            else
+            {
+                <a asp-page="/Supervisor/Meetings"
+                   asp-page-handler="ConnectGoogleCalendar"
+                   class="meet-google-btn">
+                    <i class="bi bi-google"></i>
+                    Connect Google Calendar
+                </a>
+            }
+
+            <button type="button" class="meet-hero-action" id="openSchedulePanel">
+                <i class="bi bi-plus-lg"></i>
+                Schedule Meeting
+            </button>
+        </div>
     </header>
 
     <section class="meet-layout">
@@ -278,10 +300,9 @@
                         <i class="bi bi-clock"></i>
                         <span>@selectedStart.ToString("hh:mm tt") &ndash; @selectedEnd.ToString("hh:mm tt")</span>
                     </div>
-
                     <div>
-                        <i class="@ModeIcon(selected.MeetingMode)"></i>
-                        <span>@ModeLabel(selected.MeetingMode) Meeting</span>
+                        <i class="bi bi-camera-video"></i>
+                        <span>Online Google Meet</span>
                     </div>
                 </div>
 
@@ -329,32 +350,124 @@
                         <p class="meet-muted">No preparation notes added.</p>
                     }
                 </div>
-
                 <div class="meet-join-card">
                     <div class="meet-join-icon">
                         <i class="bi bi-camera-video"></i>
                     </div>
 
                     <div class="meet-join-copy">
-                        <span>Meeting Access</span>
-                        <h3>@(selected.LocationOrLink != null && selected.LocationOrLink.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? "Online meeting is ready" : "Meeting location")</h3>
-                        <p>@(string.IsNullOrWhiteSpace(selected.LocationOrLink) ? "No online link or room location was added yet." : selected.LocationOrLink)</p>
+                        <span>Google Meet</span>
+
+                        @if (!string.IsNullOrWhiteSpace(selected.GoogleMeetLink))
+                        {
+                            <h3>Online meeting is ready</h3>
+                            <p>@selected.GoogleMeetLink</p>
+                        }
+                        else if (selected.GoogleSyncStatus == "failed")
+                        {
+                            <h3>Google Meet creation failed</h3>
+                            <p>Edit and save the meeting to retry synchronization.</p>
+                        }
+                        else
+                        {
+                            <h3>Waiting for Google Meet</h3>
+                            <p>The meeting link has not been generated yet.</p>
+                        }
                     </div>
 
-                    @if (!string.IsNullOrWhiteSpace(selected.LocationOrLink) && selected.LocationOrLink.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                    @if (!string.IsNullOrWhiteSpace(selected.GoogleMeetLink))
                     {
-                        <a href="@selected.LocationOrLink" target="_blank" rel="noopener" class="meet-join-btn">
+                        <a href="@selected.GoogleMeetLink"
+                           target="_blank"
+                           rel="noopener noreferrer"
+                           class="meet-join-btn">
                             <i class="bi bi-box-arrow-up-right"></i>
                             Join Meet
                         </a>
                     }
                     else
                     {
-                        <span class="meet-join-disabled">No link</span>
+                        <span class="meet-join-disabled">
+                            No link
+                        </span>
+                    }
+                </div>
+
+                <div class="meet-google-card">
+                    <div class="meet-google-icon">
+                        <i class="bi bi-google"></i>
+                    </div>
+
+                    <div class="meet-google-copy">
+                        <span>Google Calendar</span>
+
+                        @if (!Model.GoogleCalendarConnected)
+                        {
+                            <h3>Calendar not connected</h3>
+                            <p>Connect Google Calendar to detect conflicts and synchronize this meeting.</p>
+                        }
+                        else
+                        {
+                            <h3>
+                                @(selected.GoogleSyncStatus == "synced"
+                                    ? "Meeting synchronized"
+                                    : selected.GoogleSyncStatus == "failed"
+                                        ? "Synchronization failed"
+                                        : "Waiting for synchronization")
+                            </h3>
+
+                            @if (selected.LastGoogleSyncAt.HasValue)
+                            {
+                                <p>
+                                    Last synced: @selected.LastGoogleSyncAt.Value.ToLocalTime().ToString("MMM d, yyyy • hh:mm tt")
+                                </p>
+                            }
+                        }
+                    </div>
+
+                    @if (!Model.GoogleCalendarConnected)
+                    {
+                        <a asp-page="/Supervisor/Meetings"
+                           asp-page-handler="ConnectGoogleCalendar"
+                           class="meet-google-open">
+                            Connect
+                        </a>
+                    }
+                    else if (!string.IsNullOrWhiteSpace(selected.GoogleCalendarEventLink))
+                    {
+                        <a href="@selected.GoogleCalendarEventLink"
+                           target="_blank"
+                           rel="noopener"
+                           class="meet-google-open">
+                            Open
+                        </a>
                     }
                 </div>
 
                 <div class="meet-detail-actions">
+                    <button type="button"
+                            class="meet-soft-btn js-edit-meeting"
+                            data-meeting-id="@selected.Id"
+                            data-title="@selected.Title"
+                            data-student-id="@selected.StudentId"
+                            data-scheduled-at="@selectedStart.ToString("yyyy-MM-ddTHH:mm")"
+                            data-duration="@selected.DurationMinutes"                          
+                            data-agenda="@selected.Agenda"
+                            data-notes="@selected.NotesToPrepare">
+                        <i class="bi bi-pencil-square me-1"></i>
+                        Edit
+                    </button>
+
+                    <form method="post"
+                          asp-page-handler="Delete">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="meetingId" value="@selected.Id" />
+                        <button type="submit" class="meet-danger-btn">
+                            <i class="bi bi-trash3 me-1"></i>
+                            Delete
+                        </button>
+                    </form>
+
                     @if (selected.Status == "scheduled")
                     {
                         <form method="post" asp-page-handler="Complete">
@@ -375,6 +488,7 @@
                             </button>
                         </form>
                     }
+
                 </div>
             }
         </aside>
@@ -449,7 +563,7 @@
         <div class="meet-panel-head">
             <div>
                 <span>Schedule</span>
-                <h2>Create Meeting</h2>
+                <h2 id="meetingPanelTitle">Create Meeting</h2>
             </div>
 
             <button type="button" id="closeSchedulePanel" aria-label="Close schedule form">
@@ -457,18 +571,19 @@
             </button>
         </div>
 
-        <form method="post" asp-page-handler="Schedule" class="meet-form">
+        <form method="post" asp-page-handler="Save" class="meet-form" id="meetingForm">
             @Html.AntiForgeryToken()
+            <input type="hidden" asp-for="Input.MeetingId" id="meetingIdInput" />
 
             <div class="meet-field">
                 <label asp-for="Input.Title">Meeting title</label>
-                <input asp-for="Input.Title" class="form-control" placeholder="Example: FYP progress meeting" />
+                <input asp-for="Input.Title" id="meetingTitleInput" class="form-control" placeholder="Example: FYP progress meeting" />
             </div>
 
             <div class="meet-form-grid">
                 <div class="meet-field">
                     <label asp-for="Input.StudentId">Student</label>
-                    <select asp-for="Input.StudentId" class="form-select">
+                    <select asp-for="Input.StudentId" id="meetingStudentInput" class="form-select">
                         <option value="">No student selected</option>
                         @foreach (var student in Model.Students)
                         {
@@ -479,53 +594,44 @@
 
                 <div class="meet-field">
                     <label asp-for="Input.ScheduledAt">Date and time</label>
-                    <input asp-for="Input.ScheduledAt" class="form-control" type="datetime-local" />
+                    <input asp-for="Input.ScheduledAt" id="meetingScheduledInput" class="form-control" type="datetime-local" />
                 </div>
             </div>
 
-            <div class="meet-form-grid three">
-                <div class="meet-field">
-                    <label asp-for="Input.DurationMinutes">Duration</label>
-                    <select asp-for="Input.DurationMinutes" class="form-select">
-                        <option value="30">30 min</option>
-                        <option value="45">45 min</option>
-                        <option value="60">60 min</option>
-                        <option value="90">90 min</option>
-                        <option value="120">120 min</option>
-                    </select>
-                </div>
+            <div class="meet-field">
+                <label asp-for="Input.DurationMinutes">Duration</label>
 
-                <div class="meet-field">
-                    <label asp-for="Input.MeetingMode">Mode</label>
-                    <select asp-for="Input.MeetingMode" class="form-select">
-                        <option value="online">Online</option>
-                        <option value="in_person">In-person</option>
-                        <option value="hybrid">Hybrid</option>
-                    </select>
-                </div>
-
-                <div class="meet-field">
-                    <label asp-for="Input.LocationOrLink">Location or link</label>
-                    <input asp-for="Input.LocationOrLink" class="form-control" placeholder="Meet link, Zoom, office..." />
-                </div>
+                <select asp-for="Input.DurationMinutes"
+                        id="meetingDurationInput"
+                        class="form-select">
+                    <option value="30">30 min</option>
+                    <option value="45">45 min</option>
+                    <option value="60">60 min</option>
+                    <option value="90">90 min</option>
+                    <option value="120">120 min</option>
+                </select>
             </div>
+
+            <input type="hidden"
+                   asp-for="Input.MeetingMode"
+                   value="online" />
 
             <div class="meet-form-grid">
                 <div class="meet-field">
                     <label asp-for="Input.Agenda">Agenda</label>
-                    <textarea asp-for="Input.Agenda" class="form-control" rows="4" placeholder="One agenda item per line..."></textarea>
+                    <textarea asp-for="Input.Agenda" id="meetingAgendaInput" class="form-control" rows="4" placeholder="One agenda item per line..."></textarea>
                 </div>
 
                 <div class="meet-field">
                     <label asp-for="Input.NotesToPrepare">Notes to prepare</label>
-                    <textarea asp-for="Input.NotesToPrepare" class="form-control" rows="4" placeholder="What should be prepared before the meeting?"></textarea>
+                    <textarea asp-for="Input.NotesToPrepare" id="meetingNotesInput" class="form-control" rows="4" placeholder="What should be prepared before the meeting?"></textarea>
                 </div>
             </div>
 
             <div class="meet-form-actions">
-                <button type="submit" class="btn meet-primary-btn">
+                <button type="submit" class="btn meet-primary-btn" id="meetingSubmitButton">
                     <i class="bi bi-calendar-plus me-1"></i>
-                    Save Meeting
+                    <span id="meetingSubmitText">Save Meeting</span>
                 </button>
             </div>
         </form>
@@ -1689,6 +1795,99 @@
             }
         }
 
+        .meet-hero-buttons {
+            z-index: 1;
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            flex-wrap: wrap;
+        }
+
+            .meet-hero-buttons form {
+                margin: 0;
+            }
+
+        .meet-google-btn {
+            border: 1px solid rgba(255,255,255,0.22);
+            color: #ffffff;
+            background: rgba(255,255,255,0.10);
+            border-radius: 13px;
+            padding: 0.7rem 1rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.45rem;
+            text-decoration: none;
+            font-size: 0.82rem;
+            font-weight: 650;
+            white-space: nowrap;
+        }
+
+            .meet-google-btn:hover,
+            .meet-google-btn.connected {
+                color: #ffffff;
+                background: rgba(255,255,255,0.18);
+            }
+
+        .meet-google-card {
+            margin: 0 1.25rem 1rem;
+            padding: 0.9rem;
+            border: 1px solid var(--meet-border);
+            border-radius: 16px;
+            background: #F8FAFC;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            gap: 0.7rem;
+            align-items: center;
+        }
+
+        .meet-google-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 13px;
+            color: #ffffff;
+            background: var(--meet-navy);
+            display: grid;
+            place-items: center;
+        }
+
+        .meet-google-copy span {
+            display: block;
+            color: var(--meet-muted);
+            font-size: 0.67rem;
+            font-weight: 750;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+        }
+
+        .meet-google-copy h3 {
+            margin: 0.12rem 0 0;
+            color: var(--meet-text);
+            font-size: 0.84rem;
+        }
+
+        .meet-google-copy p {
+            margin: 0.18rem 0 0;
+            color: var(--meet-muted);
+            font-size: 0.72rem;
+            line-height: 1.45;
+        }
+
+        .meet-google-open {
+            color: #ffffff;
+            background: var(--meet-navy);
+            border-radius: 10px;
+            padding: 0.48rem 0.7rem;
+            font-size: 0.73rem;
+            font-weight: 700;
+            text-decoration: none;
+        }
+
+            .meet-google-open:hover {
+                color: #ffffff;
+                background: var(--meet-blue);
+            }
+
         @@media (max-width: 767px) {
             .meet-hero {
                 flex-direction: column;
@@ -1730,6 +1929,59 @@
         openSchedulePanel?.addEventListener("click", openSchedule);
         closeSchedulePanel?.addEventListener("click", closeSchedule);
         scheduleOverlay?.addEventListener("click", closeSchedule);
+
+        const meetingForm = document.getElementById("meetingForm");
+        const meetingIdInput = document.getElementById("meetingIdInput");
+        const meetingTitleInput = document.getElementById("meetingTitleInput");
+        const meetingStudentInput = document.getElementById("meetingStudentInput");
+        const meetingScheduledInput = document.getElementById("meetingScheduledInput");
+        const meetingDurationInput = document.getElementById("meetingDurationInput");
+        const meetingAgendaInput = document.getElementById("meetingAgendaInput");
+        const meetingNotesInput = document.getElementById("meetingNotesInput");
+        const meetingPanelTitle = document.getElementById("meetingPanelTitle");
+        const meetingSubmitText = document.getElementById("meetingSubmitText");
+
+        function resetMeetingFormForCreate() {
+            meetingForm?.reset();
+
+            if (meetingIdInput) {
+                meetingIdInput.value = "0";
+            }
+
+            if (meetingPanelTitle) {
+                meetingPanelTitle.textContent = "Create Meeting";
+            }
+
+            if (meetingSubmitText) {
+                meetingSubmitText.textContent = "Save Meeting";
+            }
+        }
+
+        openSchedulePanel?.addEventListener("click", function () {
+            resetMeetingFormForCreate();
+        });
+
+        document.querySelectorAll(".js-edit-meeting").forEach(function (button) {
+            button.addEventListener("click", function () {
+                if (meetingIdInput) meetingIdInput.value = this.dataset.meetingId || "0";
+                if (meetingTitleInput) meetingTitleInput.value = this.dataset.title || "";
+                if (meetingStudentInput) meetingStudentInput.value = this.dataset.studentId || "";
+                if (meetingScheduledInput) meetingScheduledInput.value = this.dataset.scheduledAt || "";
+                if (meetingDurationInput) meetingDurationInput.value = this.dataset.duration || "60";
+                if (meetingAgendaInput) meetingAgendaInput.value = this.dataset.agenda || "";
+                if (meetingNotesInput) meetingNotesInput.value = this.dataset.notes || "";
+
+                if (meetingPanelTitle) {
+                    meetingPanelTitle.textContent = "Edit Meeting";
+                }
+
+                if (meetingSubmitText) {
+                    meetingSubmitText.textContent = "Update Meeting";
+                }
+
+                openSchedule();
+            });
+        });
 
         document.addEventListener("keydown", function (event) {
             if (event.key === "Escape") {

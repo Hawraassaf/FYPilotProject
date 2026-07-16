@@ -103,14 +103,29 @@ public class ProfileModel(ApplicationDbContext db, IWebHostEnvironment env) : Pa
     }
 
     public async Task<IActionResult> OnPostAsync()
+
     {
         var userId = GetCurrentUserId();
 
         var (user, profile) = await GetOrCreateProfileAsync(userId);
 
+       
+        ModelState.Remove("Input.Faculty");
+        ModelState.Remove("Input.University");
+        ModelState.Remove("Input.LinkedInUrl");
+        ModelState.Remove("Input.WebsiteUrl");
+
         if (!ModelState.IsValid)
         {
-            ErrorMessage = "Please correct the highlighted fields.";
+            var errors = ModelState
+                .Where(x => x.Value?.Errors.Count > 0)
+                .SelectMany(x => x.Value!.Errors.Select(e => $"{x.Key}: {e.ErrorMessage}"))
+                .ToList();
+
+            ErrorMessage = errors.Any()
+                ? string.Join(" | ", errors)
+                : "Please correct the highlighted fields.";
+
             LoadDisplayData(user, profile);
             return Page();
         }
@@ -129,15 +144,32 @@ public class ProfileModel(ApplicationDbContext db, IWebHostEnvironment env) : Pa
 
         user.FullName = Input.FullName.Trim();
 
-        profile.AcademicTitle = Clean(Input.AcademicTitle);
-        profile.Department = Clean(Input.Department);
+        profile.AcademicTitle = string.IsNullOrWhiteSpace(Input.AcademicTitle)
+     ? "Supervisor"
+     : Input.AcademicTitle.Trim();
+
+        profile.Department = string.IsNullOrWhiteSpace(Input.Department)
+            ? "Computer Science"
+            : Input.Department.Trim();
+
         profile.Faculty = Clean(Input.Faculty);
         profile.University = Clean(Input.University);
-        profile.Specialization = Clean(Input.Specialization);
-        profile.ResearchAreas = Clean(Input.ResearchAreas);
+
+        profile.Specialization = string.IsNullOrWhiteSpace(Input.Specialization)
+            ? "General Software Engineering"
+            : Input.Specialization.Trim();
+
+        profile.ResearchAreas = string.IsNullOrWhiteSpace(Input.ResearchAreas)
+            ? "Software Engineering"
+            : Input.ResearchAreas.Trim();
+
         profile.OfficeLocation = Clean(Input.OfficeLocation);
         profile.OfficeHours = Clean(Input.OfficeHours);
-        profile.PreferredMeetingMode = Clean(Input.PreferredMeetingMode);
+
+        profile.PreferredMeetingMode = string.IsNullOrWhiteSpace(Input.PreferredMeetingMode)
+            ? "Online"
+            : Input.PreferredMeetingMode.Trim();
+
         profile.Bio = Clean(Input.Bio);
         profile.LinkedInUrl = Clean(Input.LinkedInUrl);
         profile.WebsiteUrl = Clean(Input.WebsiteUrl);
@@ -145,7 +177,7 @@ public class ProfileModel(ApplicationDbContext db, IWebHostEnvironment env) : Pa
 
         await db.SaveChangesAsync();
 
-        TempData["Success"] = "Profile updated successfully.";
+        TempData["ProfileSuccess"] = "Profile updated successfully.";
         return RedirectToPage();
     }
 
@@ -162,7 +194,7 @@ public class ProfileModel(ApplicationDbContext db, IWebHostEnvironment env) : Pa
 
         await db.SaveChangesAsync();
 
-        TempData["Success"] = "Profile photo removed successfully.";
+        TempData["ProfileSuccess"] = "Profile photo removed successfully.";
         return RedirectToPage();
     }
 
@@ -183,8 +215,11 @@ public class ProfileModel(ApplicationDbContext db, IWebHostEnvironment env) : Pa
             profile = new SupervisorProfile
             {
                 UserId = userId,
-                Department = "",
-                Specialization = "",
+                AcademicTitle = "Supervisor",
+                Department = "Computer Science",
+                Specialization = "General Software Engineering",
+                ResearchAreas = "Software Engineering",
+                PreferredMeetingMode = "Online",
                 Bio = "",
                 UpdatedAt = DateTime.UtcNow
             };

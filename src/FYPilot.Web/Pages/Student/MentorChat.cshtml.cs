@@ -14,7 +14,8 @@ namespace FYPilot.Web.Pages.Student;
 [Authorize(Roles = "student")]
 public class MentorChatModel(
     ApplicationDbContext db,
-    IAiServiceClient aiService
+    IAiServiceClient aiService,
+    ILogger<MentorChatModel> logger
 ) : PageModel
 {
     public List<ChatMessage> Messages { get; private set; } = [];
@@ -295,44 +296,57 @@ public class MentorChatModel(
         );
     }
 
-    private async Task<List<MentorRoadmapPhaseDto>> LoadRoadmapAsync(int? ideaId)
+    private async Task<List<MentorRoadmapPhaseDto>>
+       LoadRoadmapAsync(int? ideaId)
     {
         if (!ideaId.HasValue)
         {
             return [];
         }
 
+        var userId = UserId();
+
         try
         {
-            var roadmap = await db.Set<ProjectRoadmap>()
-                .FirstOrDefaultAsync(r => EF.Property<int>(r, "ProjectIdeaId") == ideaId.Value);
+            // Load only the roadmap belonging to the
+            // logged-in student and selected idea.
+            var roadmap = await db.ProjectRoadmaps
+                .AsNoTracking()
+                .Include(r => r.Phases)
+                .Where(r =>
+                    r.IdeaId == ideaId.Value &&
+                    r.UserId == userId)
+                .OrderByDescending(r => r.CreatedAt)
+                .FirstOrDefaultAsync();
 
             if (roadmap == null)
             {
                 return [];
             }
 
-            var roadmapId = GetInt(roadmap, 0, "Id");
-
-            var phases = await db.Set<RoadmapPhase>()
-                .ToListAsync();
-
-            return phases
-                .Where(p => GetInt(p, 0, "ProjectRoadmapId", "RoadmapId") == roadmapId)
-                .OrderBy(p => GetInt(p, 0, "WeekNumber", "PhaseNumber", "Order"))
-                .Select((p, index) => new MentorRoadmapPhaseDto(
-                    PhaseNumber: GetInt(p, index + 1, "WeekNumber", "PhaseNumber", "Order"),
-                    Name: GetString(p, "PhaseTitle", "Title", "Name"),
-                    Objective: GetString(p, "MainGoal", "Objective", "Goal", "Description"),
-                    Tasks: GetStringList(p, "Tasks", "TasksJson"),
-                    ExpectedOutput: GetString(p, "ExpectedOutput", "Deliverable", "Deliverables"),
-                    SuccessCriteria: GetString(p, "Checkpoint", "SuccessCriteria", "Criteria"),
-                    IsCompleted: GetBool(p, "IsCompleted", "Completed")
+            return roadmap.Phases
+                .OrderBy(p => p.PhaseNumber)
+                .Select(p => new MentorRoadmapPhaseDto(
+                    PhaseNumber: p.PhaseNumber,
+                    Name: p.Name,
+                    Objective: p.Objective,
+                    Tasks: GetStringList(
+                        p,
+                        nameof(RoadmapPhase.TasksJson)),
+                    ExpectedOutput: p.ExpectedOutput,
+                    SuccessCriteria: p.SuccessCriteria,
+                    IsCompleted: p.IsCompleted
                 ))
                 .ToList();
         }
-        catch
+        catch (Exception ex)
         {
+            logger.LogError(
+                ex,
+                "Failed to load roadmap context for student {UserId} and idea {IdeaId}.",
+                userId,
+                ideaId.Value);
+
             return [];
         }
     }

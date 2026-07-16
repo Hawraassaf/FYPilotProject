@@ -308,7 +308,8 @@
 
             skipSkillBtn.classList.toggle("active", !current.check.checked);
 
-            backBtn.disabled = currentIndex === 0;
+                    backBtn.style.visibility = currentIndex === 0 ? "hidden" : "visible";
+        backBtn.disabled = currentIndex === 0;
 
             if (currentIndex === skills.length - 1) {
                 nextBtn.innerHTML = `Review Skills <i class="bi bi-check2 ms-1"></i>`;

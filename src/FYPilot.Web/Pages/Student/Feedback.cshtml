@@ -375,10 +375,10 @@
         }
 
         /*
-                           IMPORTANT:
-                           white-space: normal is what fixes the giant message cards.
-                           The old pre-wrap preserved Razor indentation/new lines and made bubbles huge.
-                        */
+                                   IMPORTANT:
+                                   white-space: normal is what fixes the giant message cards.
+                                   The old pre-wrap preserved Razor indentation/new lines and made bubbles huge.
+                                */
         .sf-bubble {
             display: inline-flex;
             flex-direction: column;
@@ -692,6 +692,265 @@
                 width: 100%;
             }
         }
+        /* Supervisor assignment gate */
+        .sf-gate {
+            position: relative;
+            min-height: 650px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            border-radius: 28px;
+            padding: 2rem;
+            background: linear-gradient(135deg, #28385E 0%, #304163 55%, #516C8D 120%);
+            box-shadow: 0 18px 46px rgba(40,56,94,0.18);
+        }
+
+            .sf-gate::before {
+                content: "";
+                position: absolute;
+                inset: 0;
+                background: radial-gradient(circle at 12% 18%, rgba(255,255,255,0.22), transparent 30%), radial-gradient(circle at 92% 82%, rgba(255,255,255,0.16), transparent 28%), rgba(15,23,42,0.18);
+                backdrop-filter: blur(8px);
+            }
+
+        .sf-gate-card {
+            position: relative;
+            z-index: 2;
+            width: min(1120px, 100%);
+            background: rgba(255,255,255,0.96);
+            border: 1px solid rgba(255,255,255,0.7);
+            border-radius: 28px;
+            padding: 1.6rem;
+            box-shadow: 0 28px 80px rgba(15,23,42,0.28);
+        }
+
+        .sf-gate-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: flex-start;
+            margin-bottom: 1.2rem;
+        }
+
+        .sf-gate-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            color: #516C8D;
+            background: #EEF2F6;
+            border: 1px solid #E8ECF2;
+            border-radius: 999px;
+            padding: 0.42rem 0.7rem;
+            font-size: 0.74rem;
+            font-weight: 800;
+            margin-bottom: 0.8rem;
+        }
+
+        .sf-gate-card h2 {
+            margin: 0;
+            color: #28385E;
+            font-size: clamp(1.45rem, 3vw, 2.25rem);
+            font-weight: 850;
+            letter-spacing: -0.05em;
+        }
+
+        .sf-gate-card p {
+            color: #64748B;
+            line-height: 1.65;
+            margin: 0.65rem 0 0;
+            max-width: 780px;
+        }
+
+        .sf-gate-state {
+            min-width: 150px;
+            text-align: center;
+            border-radius: 20px;
+            padding: 0.85rem;
+            background: #F7F8FA;
+            border: 1px solid #E8ECF2;
+            color: #28385E;
+            font-weight: 850;
+        }
+
+            .sf-gate-state span {
+                display: block;
+                color: #64748B;
+                font-size: 0.72rem;
+                font-weight: 750;
+                margin-top: 0.2rem;
+            }
+
+        .sf-requested-box,
+        .sf-admin-note,
+        .sf-gate-empty {
+            border-radius: 20px;
+            border: 1px solid #E8ECF2;
+            background: #F7F8FA;
+            padding: 1rem;
+            color: #28385E;
+            margin-top: 1rem;
+        }
+
+            .sf-requested-box span,
+            .sf-requested-box small {
+                display: block;
+                color: #64748B;
+            }
+
+            .sf-requested-box strong {
+                display: block;
+                font-size: 1.35rem;
+                color: #28385E;
+                margin: 0.25rem 0;
+            }
+
+        .sf-supervisor-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+            gap: 1rem;
+            margin-top: 1.2rem;
+        }
+
+        .sf-supervisor-card {
+            display: flex;
+            flex-direction: column;
+            gap: 0.8rem;
+            border: 1px solid #E8ECF2;
+            border-radius: 22px;
+            padding: 1rem;
+            background: #ffffff;
+            box-shadow: 0 14px 32px rgba(40,56,94,0.08);
+        }
+
+        .sf-supervisor-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 0.75rem;
+        }
+
+            .sf-supervisor-top h3 {
+                margin: 0;
+                color: #111827;
+                font-size: 1rem;
+                font-weight: 820;
+                line-height: 1.3;
+            }
+
+            .sf-supervisor-top span {
+                display: block;
+                color: #64748B;
+                font-size: 0.76rem;
+                margin-top: 0.2rem;
+            }
+
+        .sf-match-pill {
+            white-space: nowrap;
+            color: #166534;
+            background: #F0FDF4;
+            border: 1px solid #BBF7D0;
+            border-radius: 999px;
+            padding: 0.35rem 0.55rem;
+            font-size: 0.72rem;
+            font-weight: 850;
+        }
+
+        .sf-supervisor-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+        }
+
+            .sf-supervisor-tags span {
+                color: #304163;
+                background: #EEF2F6;
+                border: 1px solid #E8ECF2;
+                border-radius: 999px;
+                padding: 0.34rem 0.58rem;
+                font-size: 0.72rem;
+                font-weight: 760;
+            }
+
+        .sf-capacity-line {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            align-items: center;
+            color: #64748B;
+            font-size: 0.76rem;
+            font-weight: 750;
+        }
+
+        .sf-capacity-bar {
+            height: 7px;
+            border-radius: 999px;
+            background: #EEF2F6;
+            overflow: hidden;
+        }
+
+        .sf-capacity-fill {
+            height: 100%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #516C8D, #28385E);
+        }
+
+        .sf-supervisor-reason {
+            min-height: 42px;
+            color: #64748B;
+            font-size: 0.78rem;
+            line-height: 1.55;
+        }
+
+        .sf-supervisor-card textarea {
+            width: 100%;
+            min-height: 74px;
+            resize: vertical;
+            border: 1px solid #E8ECF2;
+            border-radius: 16px;
+            padding: 0.75rem;
+            color: #111827;
+            font-family: inherit;
+            font-size: 0.84rem;
+            outline: none;
+        }
+
+            .sf-supervisor-card textarea:focus {
+                border-color: #516C8D;
+                box-shadow: 0 0 0 0.2rem rgba(81,108,141,0.14);
+            }
+
+        .sf-request-btn {
+            border: 0;
+            border-radius: 16px;
+            padding: 0.75rem 0.9rem;
+            color: #ffffff;
+            background: linear-gradient(135deg, #304163, #516C8D);
+            font-size: 0.84rem;
+            font-weight: 820;
+        }
+
+            .sf-request-btn:hover {
+                background: linear-gradient(135deg, #28385E, #304163);
+            }
+
+        @@media (max-width: 767px) {
+            .sf-gate {
+                padding: 1rem;
+            }
+
+            .sf-gate-card {
+                padding: 1rem;
+            }
+
+            .sf-gate-header {
+                flex-direction: column;
+            }
+
+            .sf-gate-state {
+                width: 100%;
+            }
+        }
     </style>
 }
 
@@ -720,7 +979,179 @@
         </div>
     }
 
-    @if (!Model.Feedbacks.Any())
+    @if (!Model.CanAccessFeedback)
+    {
+        <section class="sf-gate">
+            <div class="sf-gate-card">
+
+                @if (Model.CurrentAssignment?.Status == "pending_admin")
+                {
+                    <div class="sf-gate-header">
+                        <div>
+                            <div class="sf-gate-kicker">
+                                <i class="bi bi-hourglass-split"></i>
+                                Assignment request submitted
+                            </div>
+
+                            <h2>Waiting for Admin Approval</h2>
+
+                            <p>
+                                You selected a supervisor. The admin must review and approve the assignment before
+                                you can access supervisor feedback and official discussion.
+                            </p>
+                        </div>
+
+                        <div class="sf-gate-state">
+                            Pending
+                            <span>Admin approval</span>
+                        </div>
+                    </div>
+
+                    <div class="sf-requested-box">
+                        <span>Requested supervisor</span>
+                        <strong>@Model.CurrentAssignment.Supervisor?.FullName</strong>
+                        <small>
+                            @Model.CurrentAssignment.Supervisor?.SupervisorProfile?.Specialization
+                            @if (!string.IsNullOrWhiteSpace(Model.CurrentAssignment.Supervisor?.SupervisorProfile?.Department))
+                            {
+                                <text> · @Model.CurrentAssignment.Supervisor?.SupervisorProfile?.Department</text>
+                            }
+                        </small>
+                    </div>
+                }
+                else
+                {
+                    <div class="sf-gate-header">
+                        <div>
+                            <div class="sf-gate-kicker">
+                                <i class="bi bi-person-check"></i>
+                                Supervisor assignment required
+                            </div>
+
+                            @if (Model.CurrentAssignment?.Status == "rejected")
+                            {
+                                <h2>Supervisor Request Not Approved</h2>
+                                <p>
+                                    The admin did not approve your previous supervisor request.
+                                    Please choose another available supervisor from the list below.
+                                </p>
+
+                                @if (!string.IsNullOrWhiteSpace(Model.CurrentAssignment.AdminNote))
+                                {
+                                    <div class="sf-admin-note">
+                                        <strong>Admin note:</strong>
+                                        @Model.CurrentAssignment.AdminNote
+                                    </div>
+                                }
+                            }
+                            else
+                            {
+                                <h2>Choose Your Supervisor</h2>
+                                <p>
+                                    Select one available supervisor that matches your major and profile.
+                                    Supervisors who already reached 4 active students are hidden from this list.
+                                </p>
+                            }
+                        </div>
+
+                        <div class="sf-gate-state">
+                            4 max
+                            <span>students per supervisor</span>
+                        </div>
+                    </div>
+
+                    @if (Model.AvailableSupervisors.Any())
+                    {
+                        <div class="sf-supervisor-grid">
+                            @foreach (var supervisor in Model.AvailableSupervisors)
+                            {
+                                var capacityPercent = supervisor.CapacityLimit == 0
+                                    ? 0
+                                    : Math.Clamp((supervisor.CapacityUsed * 100) / supervisor.CapacityLimit, 0, 100);
+
+                                <form method="post" asp-page-handler="RequestSupervisor" class="sf-supervisor-card">
+                                    @Html.AntiForgeryToken()
+
+                                    <input type="hidden" name="supervisorId" value="@supervisor.SupervisorId" />
+
+                                    <div class="sf-supervisor-top">
+                                        <div>
+                                            <h3>@supervisor.FullName</h3>
+                                            <span>
+                                                @supervisor.AcademicTitle
+                                                @if (!string.IsNullOrWhiteSpace(supervisor.Department))
+                                                {
+                                                    <text> · @supervisor.Department</text>
+                                                }
+                                            </span>
+                                        </div>
+
+                                        <div class="sf-match-pill">@supervisor.MatchScore% match</div>
+                                    </div>
+
+                                    <div class="sf-supervisor-tags">
+                                        @if (!string.IsNullOrWhiteSpace(supervisor.Specialization))
+                                        {
+                                            <span>@supervisor.Specialization</span>
+                                        }
+
+                                        @if (!string.IsNullOrWhiteSpace(supervisor.MeetingMode))
+                                        {
+                                            <span>@supervisor.MeetingMode</span>
+                                        }
+
+                                        @if (!string.IsNullOrWhiteSpace(supervisor.OfficeHours))
+                                        {
+                                            <span>@supervisor.OfficeHours</span>
+                                        }
+                                    </div>
+
+                                    <div class="sf-capacity-line">
+                                        <span>Capacity</span>
+                                        <strong>@supervisor.CapacityUsed / @supervisor.CapacityLimit</strong>
+                                    </div>
+
+                                    <div class="sf-capacity-bar">
+                                        <div class="sf-capacity-fill" style="width:@capacityPercent%"></div>
+                                    </div>
+
+                                    <div class="sf-supervisor-reason">
+                                        @if (!string.IsNullOrWhiteSpace(supervisor.MatchReason))
+                                        {
+                                            <span>Matched because @supervisor.MatchReason.</span>
+                                        }
+                                        else
+                                        {
+                                            <span>Available supervisor for your profile.</span>
+                                        }
+                                    </div>
+
+                                    <textarea name="studentMessage"
+                                              placeholder="Optional message to admin explaining why you selected this supervisor..."></textarea>
+
+                                    <button type="submit" class="sf-request-btn">
+                                        <i class="bi bi-send me-1"></i>
+                                        Request This Supervisor
+                                    </button>
+                                </form>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="sf-gate-empty">
+                            <strong>No available supervisors right now.</strong>
+                            <p>
+                                No supervisor matching your major is currently available, or all matching supervisors are full.
+                                Please contact the admin.
+                            </p>
+                        </div>
+                    }
+                }
+            </div>
+        </section>
+    }
+    else if (!Model.Feedbacks.Any())
     {
         <div class="sf-empty">
             <div>
@@ -988,6 +1419,7 @@
 
                                 <textarea asp-for="ReplyText"
                                           id="feedbackMessageInput"
+                                          maxlength="2000"
                                           class="form-control"
                                           placeholder="Write a reply to your supervisor..."></textarea>
 

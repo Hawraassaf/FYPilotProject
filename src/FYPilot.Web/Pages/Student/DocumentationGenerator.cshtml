@@ -768,6 +768,63 @@
                 grid-template-columns: 1fr;
             }
         }
+        /* Fix selected idea details layout in Documentation Setup */
+        .sdoc-selected-card {
+            overflow: hidden;
+        }
+
+        .sdoc-mini-grid {
+            display: grid;
+            gap: 0.75rem;
+        }
+
+        .sdoc-mini-item {
+            padding: 0.9rem 1rem !important;
+            border-radius: 16px;
+            background: #ffffff;
+            border: 1px solid #EEF2F7;
+        }
+
+            .sdoc-mini-item span {
+                display: block;
+                margin-bottom: 0.55rem !important;
+                color: #64748B;
+                font-size: 0.7rem;
+                font-weight: 800;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+            }
+
+            .sdoc-mini-item strong {
+                display: block;
+                width: 100%;
+                color: #111827;
+                font-size: 0.86rem !important;
+                font-weight: 700;
+                line-height: 1.55 !important;
+                text-align: left !important;
+                white-space: normal !important;
+                word-break: normal !important;
+                overflow-wrap: anywhere !important;
+            }
+
+                /* Make long tech stacks look cleaner */
+                .sdoc-mini-item strong br {
+                    display: none;
+                }
+
+        /* Better spacing for the selected idea title area */
+        .sdoc-selected-top {
+            align-items: flex-start;
+        }
+
+        .sdoc-selected-card h3 {
+            line-height: 1.35 !important;
+        }
+
+        .sdoc-selected-card p {
+            line-height: 1.5 !important;
+        }
     </style>
 }
 
