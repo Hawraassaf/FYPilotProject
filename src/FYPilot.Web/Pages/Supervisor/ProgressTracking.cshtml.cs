@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
+using FYPilot.Web.Services.Supervisors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
@@ -8,16 +9,25 @@ using Microsoft.EntityFrameworkCore;
 namespace FYPilot.Web.Pages.Supervisor;
 
 [Authorize(Roles = "supervisor")]
-public class ProgressTrackingModel(ApplicationDbContext db) : PageModel
+public class ProgressTrackingModel(
+    ApplicationDbContext db,
+    SupervisorAccessService supervisorAccess) : PageModel
 {
     public List<ProjectListItem> Projects { get; private set; } = [];
     public ProgressProject? SelectedProject { get; private set; }
 
     public async Task OnGetAsync(int? ideaId)
     {
+        var supervisorId = SupervisorId();
+
+        var assignedStudentIds = await supervisorAccess.GetAssignedStudentIdsAsync(supervisorId);
+
         var ideas = await db.ProjectIdeas
             .AsNoTracking()
             .Include(i => i.User)
+            .Where(i =>
+                i.IsSelected &&
+                assignedStudentIds.Contains(i.UserId))
             .OrderByDescending(i => i.CreatedAt)
             .ToListAsync();
 
@@ -25,7 +35,9 @@ public class ProgressTrackingModel(ApplicationDbContext db) : PageModel
 
         var evaluations = await db.SupervisorEvaluations
             .AsNoTracking()
-            .Where(e => ideaIds.Contains(e.IdeaId))
+            .Where(e =>
+                e.SupervisorId == supervisorId &&
+                ideaIds.Contains(e.IdeaId))
             .OrderByDescending(e => e.Id)
             .ToListAsync();
 
@@ -56,121 +68,230 @@ public class ProgressTrackingModel(ApplicationDbContext db) : PageModel
 
         if (selectedIdea == null)
         {
+            SelectedProject = null;
             return;
         }
 
-        evaluationByIdea.TryGetValue(selectedIdea.Id, out var selectedEvaluation);
+        evaluationByIdea.TryGetValue(
+    selectedIdea.Id,
+    out var selectedEvaluation);
 
-        SelectedProject = BuildProgressProject(selectedIdea, selectedEvaluation);
+        var selectedRoadmap = await db.ProjectRoadmaps
+            .AsNoTracking()
+            .Include(r => r.Phases)
+            .Where(r =>
+                r.IdeaId == selectedIdea.Id &&
+                r.UserId == selectedIdea.UserId)
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        var selectedPhases = selectedRoadmap?.Phases
+            .OrderBy(p => p.PhaseNumber)
+            .ToList() ?? [];
+
+        SelectedProject = BuildProgressProject(
+            selectedIdea,
+            selectedEvaluation,
+            selectedPhases);
     }
 
-    private ProgressProject BuildProgressProject(ProjectIdea idea, SupervisorEvaluation? evaluation)
+    private ProgressProject BuildProgressProject(
+        ProjectIdea idea,
+        SupervisorEvaluation? evaluation,
+        IReadOnlyList<RoadmapPhase> phases)
     {
         var status = NormalizeStatus(evaluation?.Status);
+
         var startDate = idea.CreatedAt.Date;
-        var durationWeeks = idea.ExpectedDurationWeeks > 0 ? idea.ExpectedDurationWeeks : 16;
-        var endDate = startDate.AddDays(durationWeeks * 7);
+
+        var orderedPhases = phases
+            .OrderBy(p => p.PhaseNumber)
+            .ToList();
+
+        var plannedWeeks = orderedPhases.Count > 0
+            ? orderedPhases.Sum(
+                phase => Math.Max(1, phase.EstimatedWeeks))
+            : idea.ExpectedDurationWeeks > 0
+                ? idea.ExpectedDurationWeeks
+                : 16;
+
+        var endDate =
+            startDate.AddDays(plannedWeeks * 7);
+
         var today = DateTime.UtcNow.Date;
 
-        var totalDays = Math.Max(1, (endDate - startDate).Days);
-        var daysElapsed = Math.Max(0, (today - startDate).Days);
-        var daysRemaining = Math.Max(0, (endDate - today).Days);
+        var totalDays = Math.Max(
+            1,
+            (endDate - startDate).Days);
 
-        var timeProgress = Math.Clamp((int)Math.Round(daysElapsed * 100.0 / totalDays), 0, 100);
-        var progress = status switch
-        {
-            "approved" => Math.Max(62, Math.Min(92, timeProgress)),
-            "needs_revision" => Math.Max(42, Math.Min(68, timeProgress)),
-            "rejected" => Math.Min(28, Math.Max(10, timeProgress)),
-            _ => Math.Max(22, Math.Min(50, timeProgress))
-        };
+        var daysElapsed = Math.Max(
+            0,
+            (today - startDate).Days);
 
-        var completedMilestones = progress switch
-        {
-            >= 86 => 6,
-            >= 70 => 5,
-            >= 54 => 4,
-            >= 38 => 3,
-            >= 24 => 2,
-            _ => 1
-        };
+        var daysRemaining = Math.Max(
+            0,
+            (endDate - today).Days);
 
-        var roadmap = BuildRoadmap(progress, startDate, durationWeeks);
+        var completedPhases = orderedPhases.Count(
+            phase => phase.IsCompleted);
 
-        var risks = BuildRisks(idea, evaluation, status);
-        var updates = BuildUpdates(idea, evaluation, status);
+        var totalPhases = orderedPhases.Count;
+
+        var progress = totalPhases == 0
+            ? 0
+            : (int)Math.Round(
+                completedPhases * 100.0 /
+                totalPhases);
+
+        var roadmap = BuildRoadmap(
+            orderedPhases,
+            startDate);
+
+        var nextStep = roadmap.FirstOrDefault(step =>
+            step.State == "current" ||
+            step.State == "upcoming");
+
+        var risks = BuildRisks(
+            idea,
+            evaluation,
+            status);
+
+        var updates = BuildUpdates(
+            idea,
+            evaluation,
+            status);
 
         return new ProgressProject
         {
             IdeaId = idea.Id,
-            StudentName = idea.User?.FullName ?? "Student",
-            StudentEmail = idea.User?.Email ?? "",
-            StudentInitials = Initials(idea.User?.FullName),
-            ProjectCode = $"FYP-{idea.Id:0000}",
+
+            StudentName =
+                idea.User?.FullName ?? "Student",
+
+            StudentEmail =
+                idea.User?.Email ?? "",
+
+            StudentInitials =
+                Initials(idea.User?.FullName),
+
+            ProjectCode =
+                $"FYP-{idea.Id:0000}",
+
             ProjectTitle = idea.Title,
-            Department = "Computer Science",
-            Domain = string.IsNullOrWhiteSpace(idea.Domain) ? "Uncategorized" : idea.Domain,
-            DifficultyLevel = string.IsNullOrWhiteSpace(idea.DifficultyLevel) ? "Not specified" : idea.DifficultyLevel,
-            SupervisorName = CurrentSupervisorName(),
+
+            Department =
+                "Computer Science",
+
+            Domain =
+                string.IsNullOrWhiteSpace(idea.Domain)
+                    ? "Uncategorized"
+                    : idea.Domain,
+
+            DifficultyLevel =
+                string.IsNullOrWhiteSpace(
+                    idea.DifficultyLevel)
+                    ? "Not specified"
+                    : idea.DifficultyLevel,
+
+            SupervisorName =
+                CurrentSupervisorName(),
+
             Status = status,
-            StatusLabel = ProjectStatusLabel(status),
-            StatusClass = ProjectStatusClass(status),
+
+            StatusLabel =
+                ProjectStatusLabel(status),
+
+            StatusClass =
+                ProjectStatusClass(status),
+
             StartDate = startDate,
             EndDate = endDate,
+
             OverallProgress = progress,
-            MilestonesCompleted = completedMilestones,
-            MilestonesTotal = 7,
-            DaysElapsed = Math.Min(daysElapsed, totalDays),
+
+            MilestonesCompleted =
+                completedPhases,
+
+            MilestonesTotal =
+                totalPhases,
+
+            DaysElapsed =
+                Math.Min(daysElapsed, totalDays),
+
             TotalDays = totalDays,
             DaysRemaining = daysRemaining,
-            DeliverablesSubmitted = Math.Max(0, completedMilestones - 1),
-            DeliverablesTotal = 6,
-            NextDue = roadmap.FirstOrDefault(r => r.State == "current" || r.State == "upcoming")?.Title ?? "Final Submission",
-            NextDueDate = roadmap.FirstOrDefault(r => r.State == "current" || r.State == "upcoming")?.Date ?? endDate,
+
+            DeliverablesSubmitted =
+                completedPhases,
+
+            DeliverablesTotal =
+                totalPhases,
+
+            NextDue = nextStep?.Title ??
+                (totalPhases == 0
+                    ? "Roadmap not generated"
+                    : "All phases completed"),
+
+            NextDueDate =
+                nextStep?.Date ?? endDate,
+
             Roadmap = roadmap,
             Risks = risks,
             Updates = updates,
-            OriginalityScore = evaluation?.OriginalityScore ?? 0,
-            SimilarityScore = evaluation?.SimilarityScore ?? 0
+
+            OriginalityScore =
+                evaluation?.OriginalityScore ?? 0,
+
+            SimilarityScore =
+                evaluation?.SimilarityScore ?? 0
         };
     }
 
-    private List<RoadmapStep> BuildRoadmap(int progress, DateTime startDate, int durationWeeks)
+    private List<RoadmapStep> BuildRoadmap(
+      IReadOnlyList<RoadmapPhase> phases,
+      DateTime startDate)
     {
-        var labels = new[]
-        {
-            "Idea Selection",
-            "Supervisor Review",
-            "Requirements Analysis",
-            "System Design",
-            "Implementation",
-            "Testing & Evaluation",
-            "Final Submission"
-        };
-
         var steps = new List<RoadmapStep>();
 
-        for (var i = 0; i < labels.Length; i++)
+        var phaseDate = startDate;
+        var currentPhaseAssigned = false;
+
+        foreach (var phase in phases
+                     .OrderBy(p => p.PhaseNumber))
         {
-            var threshold = (i + 1) * 100 / labels.Length;
-            var state = progress >= threshold
-                ? "completed"
-                : progress >= threshold - 14
-                    ? "current"
-                    : "upcoming";
+            string state;
+
+            if (phase.IsCompleted)
+            {
+                state = "completed";
+            }
+            else if (!currentPhaseAssigned)
+            {
+                state = "current";
+                currentPhaseAssigned = true;
+            }
+            else
+            {
+                state = "upcoming";
+            }
 
             steps.Add(new RoadmapStep
             {
-                Number = i + 1,
-                Title = labels[i],
-                Date = startDate.AddDays((durationWeeks * 7 / 7.0) * i),
+                Number = phase.PhaseNumber,
+
+                Title = string.IsNullOrWhiteSpace(
+                    phase.Name)
+                    ? $"Phase {phase.PhaseNumber}"
+                    : phase.Name,
+
+                Date = phaseDate,
                 State = state
             });
-        }
 
-        if (!steps.Any(s => s.State == "current") && steps.Any(s => s.State == "upcoming"))
-        {
-            steps.First(s => s.State == "upcoming").State = "current";
+            phaseDate = phaseDate.AddDays(
+                Math.Max(
+                    1,
+                    phase.EstimatedWeeks) * 7);
         }
 
         return steps;
@@ -262,7 +383,7 @@ public class ProgressTrackingModel(ApplicationDbContext db) : PageModel
                 Subtitle = string.IsNullOrWhiteSpace(evaluation.Comment)
                     ? "Evaluation status updated."
                     : evaluation.Comment,
-                Date = DateTime.UtcNow,
+                Date = evaluation.UpdatedAt == default ? evaluation.CreatedAt : evaluation.UpdatedAt,
                 Type = "Evaluation",
                 By = CurrentSupervisorName(),
                 Icon = status switch
@@ -290,9 +411,17 @@ public class ProgressTrackingModel(ApplicationDbContext db) : PageModel
 
     private static string NormalizeStatus(string? status)
     {
-        return string.IsNullOrWhiteSpace(status)
+        var normalized = string.IsNullOrWhiteSpace(status)
             ? "pending"
             : status.Trim().ToLowerInvariant();
+
+        return normalized switch
+        {
+            "approved" => "approved",
+            "needs_revision" => "needs_revision",
+            "rejected" => "rejected",
+            _ => "pending"
+        };
     }
 
     private static string ProjectStatusLabel(string status)
@@ -332,6 +461,11 @@ public class ProgressTrackingModel(ApplicationDbContext db) : PageModel
         return parts.Count == 0
             ? "ST"
             : string.Join("", parts.Select(p => p[0])).ToUpperInvariant();
+    }
+
+    private int SupervisorId()
+    {
+        return int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
     }
 
     public sealed class ProjectListItem

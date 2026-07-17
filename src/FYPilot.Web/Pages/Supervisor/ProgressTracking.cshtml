@@ -5,6 +5,19 @@
     ViewData["Subtitle"] = "Monitor student project progress, milestones, risks, and updates.";
 
     var project = Model.SelectedProject;
+    var milestonePercent =
+    project is not null &&
+    project.MilestonesTotal > 0
+        ? project.MilestonesCompleted * 100 /
+          project.MilestonesTotal
+        : 0;
+
+    var deliverablePercent =
+        project is not null &&
+        project.DeliverablesTotal > 0
+            ? project.DeliverablesSubmitted * 100 /
+              project.DeliverablesTotal
+            : 0;
 }
 
 <section class="pt-page">
@@ -110,9 +123,9 @@
                     <span>Milestones Completed</span>
                     <strong>@project.MilestonesCompleted / @project.MilestonesTotal</strong>
                     <div class="pt-progress-bar">
-                        <i style="width:@((project.MilestonesCompleted * 100) / project.MilestonesTotal)%"></i>
+                        <i style="width:@milestonePercent / project.MilestonesTotal)%"></i>
                     </div>
-                    <small>@((project.MilestonesCompleted * 100) / project.MilestonesTotal)% completed</small>
+                    <small>@milestonePercent / project.MilestonesTotal)% completed</small>
                 </div>
             </article>
 
@@ -134,7 +147,7 @@
                     <span>Deliverables Submitted</span>
                     <strong>@project.DeliverablesSubmitted / @project.DeliverablesTotal</strong>
                     <div class="pt-progress-bar">
-                        <i style="width:@((project.DeliverablesSubmitted * 100) / project.DeliverablesTotal)%"></i>
+                        <i style="width:@deliverablePercent/ project.DeliverablesTotal)%"></i>
                     </div>
                     <small>Next due: @project.NextDue (@project.NextDueDate.ToString("MMM d"))</small>
                 </div>

@@ -49,24 +49,56 @@ public class ProjectDetailsModel(ApplicationDbContext db) : PageModel
         var userId = UserId();
 
         var ideaExists = await db.ProjectIdeas
-            .AnyAsync(i => i.Id == ideaId && i.UserId == userId);
+            .AnyAsync(i =>
+                i.Id == ideaId &&
+                i.UserId == userId);
 
         if (!ideaExists)
         {
-            TempData["Error"] = "The selected idea was not found or does not belong to your account.";
+            TempData["Error"] =
+                "The selected idea was not found or does not belong to your account.";
+
             return RedirectToPage();
         }
 
+        await using var transaction =
+            await db.Database.BeginTransactionAsync();
+
         await db.ProjectIdeas
             .Where(i => i.UserId == userId)
-            .ExecuteUpdateAsync(s => s.SetProperty(i => i.IsSelected, false));
+            .ExecuteUpdateAsync(update =>
+                update.SetProperty(
+                    idea => idea.IsSelected,
+                    false));
 
-        await db.ProjectIdeas
-            .Where(i => i.Id == ideaId && i.UserId == userId)
-            .ExecuteUpdateAsync(s => s.SetProperty(i => i.IsSelected, true));
+        var updatedRows = await db.ProjectIdeas
+            .Where(i =>
+                i.Id == ideaId &&
+                i.UserId == userId)
+            .ExecuteUpdateAsync(update =>
+                update.SetProperty(
+                    idea => idea.IsSelected,
+                    true));
 
-        TempData["Success"] = "Project idea selected successfully.";
-        return RedirectToPage(new { id = ideaId });
+        if (updatedRows != 1)
+        {
+            await transaction.RollbackAsync();
+
+            TempData["Error"] =
+                "The project idea could not be selected. Please try again.";
+
+            return RedirectToPage();
+        }
+
+        await transaction.CommitAsync();
+
+        TempData["Success"] =
+            "Project idea selected successfully.";
+
+        return RedirectToPage(new
+        {
+            id = ideaId
+        });
     }
 
     private async Task LoadStudentSkillsAsync(int userId)

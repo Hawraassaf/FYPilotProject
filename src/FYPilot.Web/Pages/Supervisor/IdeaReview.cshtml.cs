@@ -1,15 +1,21 @@
-using System.Security.Claims;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
+using FYPilot.Web.Services.Supervisors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
+using FYPilot.Web.Services.Notifications;
 
 namespace FYPilot.Web.Pages.Supervisor;
 
 [Authorize(Roles = "supervisor")]
-public class IdeaReviewModel(ApplicationDbContext db) : PageModel
+public class IdeaReviewModel(
+    ApplicationDbContext db,
+    SupervisorAccessService supervisorAccess,
+    INotificationService notificationService,
+    ILogger<IdeaReviewModel> logger) : PageModel
 {
     public List<IdeaListItem> AllIdeas { get; private set; } = [];
     public ProjectIdea? SelectedIdea { get; private set; }
@@ -88,28 +94,134 @@ public class IdeaReviewModel(ApplicationDbContext db) : PageModel
         var supervisorId = SupervisorId();
 
         var idea = await db.ProjectIdeas
-            .AsNoTracking()
-            .FirstOrDefaultAsync(i => i.Id == EvaluationInput.IdeaId);
+      .AsNoTracking()
+      .FirstOrDefaultAsync(i =>
+          i.Id == EvaluationInput.IdeaId &&
+          i.IsSelected);
 
         if (idea == null)
         {
-            TempData["Error"] = "The selected idea was not found.";
+            TempData["Error"] = "This idea is no longer the student's selected idea.";
+            return RedirectToPage();
+        }
+
+        var canAccessStudent = await supervisorAccess.CanAccessStudentAsync(
+            supervisorId,
+            idea.UserId);
+
+        if (!canAccessStudent)
+        {
+            TempData["Error"] = "You can only review ideas for students assigned to you.";
             return RedirectToPage();
         }
 
         var status = NormalizeStatus(EvaluationInput.Status);
 
-        var originalityScore = EvaluationInput.OriginalityScore.HasValue
-            ? Math.Clamp(EvaluationInput.OriginalityScore.Value, 0, 100)
-            : 0;
+        var comment =
+            EvaluationInput.Comment?.Trim() ?? "";
 
-        var similarityScore = EvaluationInput.SimilarityScore.HasValue
-            ? Math.Clamp(EvaluationInput.SimilarityScore.Value, 0, 100)
-            : 0;
+        var suggestions =
+            EvaluationInput.ImprovementSuggestions?.Trim() ?? "";
+
+        if (EvaluationInput.OriginalityScore.HasValue &&
+            (EvaluationInput.OriginalityScore.Value < 0 ||
+             EvaluationInput.OriginalityScore.Value > 100))
+        {
+            TempData["Error"] =
+                "Originality score must be between 0 and 100.";
+
+            return RedirectToPage(new
+            {
+                ideaId = EvaluationInput.IdeaId
+            });
+        }
+
+        if (EvaluationInput.SimilarityScore.HasValue &&
+            (EvaluationInput.SimilarityScore.Value < 0 ||
+             EvaluationInput.SimilarityScore.Value > 100))
+        {
+            TempData["Error"] =
+                "Similarity score must be between 0 and 100.";
+
+            return RedirectToPage(new
+            {
+                ideaId = EvaluationInput.IdeaId
+            });
+        }
+
+        // Final decisions must include both scores.
+        if (status != "pending" &&
+            (!EvaluationInput.OriginalityScore.HasValue ||
+             !EvaluationInput.SimilarityScore.HasValue))
+        {
+            TempData["Error"] =
+                "Enter both originality and similarity scores before saving a final decision.";
+
+            return RedirectToPage(new
+            {
+                ideaId = EvaluationInput.IdeaId
+            });
+        }
+
+        if (status == "approved" &&
+            string.IsNullOrWhiteSpace(comment))
+        {
+            TempData["Error"] =
+                "Write a supervisor comment explaining why the idea was approved.";
+
+            return RedirectToPage(new
+            {
+                ideaId = EvaluationInput.IdeaId
+            });
+        }
+
+        if (status == "needs_revision" &&
+            string.IsNullOrWhiteSpace(comment))
+        {
+            TempData["Error"] =
+                "Write a comment explaining what needs revision.";
+
+            return RedirectToPage(new
+            {
+                ideaId = EvaluationInput.IdeaId
+            });
+        }
+
+        if (status == "needs_revision" &&
+            string.IsNullOrWhiteSpace(suggestions))
+        {
+            TempData["Error"] =
+                "Write improvement suggestions for the student.";
+
+            return RedirectToPage(new
+            {
+                ideaId = EvaluationInput.IdeaId
+            });
+        }
+
+        if (status == "rejected" &&
+            string.IsNullOrWhiteSpace(comment))
+        {
+            TempData["Error"] =
+                "Write a clear reason before rejecting the idea.";
+
+            return RedirectToPage(new
+            {
+                ideaId = EvaluationInput.IdeaId
+            });
+        }
+
+        var originalityScore =
+            EvaluationInput.OriginalityScore ?? 0;
+
+        var similarityScore =
+            EvaluationInput.SimilarityScore ?? 0;
 
         var evaluation = await db.SupervisorEvaluations
             .FirstOrDefaultAsync(e => e.IdeaId == EvaluationInput.IdeaId && e.SupervisorId == supervisorId);
-
+        var previousStatus = evaluation == null
+    ? null
+    : NormalizeStatus(evaluation.Status);
         if (evaluation == null)
         {
             evaluation = new SupervisorEvaluation
@@ -123,13 +235,64 @@ public class IdeaReviewModel(ApplicationDbContext db) : PageModel
         }
 
         evaluation.Status = status;
-        evaluation.Comment = EvaluationInput.Comment?.Trim() ?? "";
-        evaluation.ImprovementSuggestions = EvaluationInput.ImprovementSuggestions?.Trim() ?? "";
+        evaluation.Comment = comment;
+        evaluation.ImprovementSuggestions = suggestions;
         evaluation.OriginalityScore = originalityScore;
         evaluation.SimilarityScore = similarityScore;
         evaluation.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync();
+
+        // Notify only when a real decision changes.
+        // Saving the same status again does not create duplicate notifications.
+        if (status != "pending" &&
+            !string.Equals(
+                previousStatus,
+                status,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            var notificationTitle = status switch
+            {
+                "approved" => "Project Idea Approved",
+                "needs_revision" => "Project Idea Needs Revision",
+                "rejected" => "Project Idea Rejected",
+                _ => "Project Evaluation Updated"
+            };
+
+            var notificationMessage = status switch
+            {
+                "approved" =>
+                    $"Your project idea \"{idea.Title}\" was approved by your supervisor.",
+
+                "needs_revision" =>
+                    $"Your project idea \"{idea.Title}\" needs revision. Open the feedback page to review the supervisor's suggestions.",
+
+                "rejected" =>
+                    $"Your project idea \"{idea.Title}\" was not approved. Open the feedback page to review the supervisor's comments.",
+
+                _ =>
+                    $"The evaluation for \"{idea.Title}\" was updated."
+            };
+
+            try
+            {
+                await notificationService.NotifyUserAsync(
+                    idea.UserId,
+                    notificationTitle,
+                    notificationMessage,
+                    "evaluation_updated",
+                    $"/Student/Feedback?ideaId={idea.Id}");
+            }
+            catch (Exception ex)
+            {
+                // Evaluation remains saved even when notification delivery fails.
+                logger.LogError(
+                    ex,
+                    "Failed to notify student {StudentId} about evaluation for idea {IdeaId}.",
+                    idea.UserId,
+                    idea.Id);
+            }
+        }
 
         TempData["Success"] = "Evaluation saved successfully.";
         return RedirectToPage(new { ideaId = EvaluationInput.IdeaId });
@@ -151,12 +314,25 @@ public class IdeaReviewModel(ApplicationDbContext db) : PageModel
             return RedirectToPage(new { ideaId = MessageInput.IdeaId });
         }
 
-        var ideaExists = await db.ProjectIdeas
-            .AnyAsync(i => i.Id == MessageInput.IdeaId);
+        var idea = await db.ProjectIdeas
+     .AsNoTracking()
+     .FirstOrDefaultAsync(i =>
+         i.Id == MessageInput.IdeaId &&
+         i.IsSelected);
 
-        if (!ideaExists)
+        if (idea == null)
         {
-            TempData["Error"] = "The selected idea was not found.";
+            TempData["Error"] = "This idea is no longer the student's selected idea.";
+            return RedirectToPage();
+        }
+
+        var canAccessStudent = await supervisorAccess.CanAccessStudentAsync(
+            supervisorId,
+            idea.UserId);
+
+        if (!canAccessStudent)
+        {
+            TempData["Error"] = "You can only message students assigned to you.";
             return RedirectToPage();
         }
 
@@ -180,15 +356,23 @@ public class IdeaReviewModel(ApplicationDbContext db) : PageModel
     {
         var supervisorId = SupervisorId();
 
+        var assignedStudentIds = await supervisorAccess.GetAssignedStudentIdsAsync(supervisorId);
+
         var ideas = await db.ProjectIdeas
-            .AsNoTracking()
-            .Include(i => i.User)
-            .OrderByDescending(i => i.CreatedAt)
-            .ToListAsync();
+      .AsNoTracking()
+      .Include(i => i.User)
+      .Where(i => assignedStudentIds.Contains(i.UserId))
+      .Where(i => i.IsSelected)
+      .OrderByDescending(i => i.CreatedAt)
+      .ToListAsync();
+
+        var ideaIds = ideas.Select(i => i.Id).ToList();
 
         var evaluations = await db.SupervisorEvaluations
             .AsNoTracking()
-            .Where(e => e.SupervisorId == supervisorId)
+            .Where(e =>
+                e.SupervisorId == supervisorId &&
+                ideaIds.Contains(e.IdeaId))
             .ToListAsync();
 
         var evaluationByIdea = evaluations
@@ -209,7 +393,15 @@ public class IdeaReviewModel(ApplicationDbContext db) : PageModel
             evaluationByIdea.TryGetValue(idea.Id, out var evaluation) &&
             evaluation.Status == "needs_revision");
 
-        var selectedIdeaId = ideaId ?? ideas.FirstOrDefault()?.Id;
+        var selectedIdeaId =
+            ideaId.HasValue && ideas.Any(i => i.Id == ideaId.Value)
+                ? ideaId.Value
+                : ideas.FirstOrDefault()?.Id;
+
+        if (ideaId.HasValue && selectedIdeaId != ideaId.Value)
+        {
+            ErrorMessage ??= "You can only view ideas submitted by students assigned to you.";
+        }
 
         AllIdeas = ideas
             .Select(idea =>
@@ -233,16 +425,32 @@ public class IdeaReviewModel(ApplicationDbContext db) : PageModel
 
         if (!selectedIdeaId.HasValue)
         {
+            SelectedIdea = null;
+            Evaluation = null;
+            Messages = [];
+
+            EvaluationInput = new EvaluationInputModel();
+            MessageInput = new MessageInputModel();
+
             return;
         }
 
         SelectedIdea = await db.ProjectIdeas
-            .AsNoTracking()
-            .Include(i => i.User)
-            .FirstOrDefaultAsync(i => i.Id == selectedIdeaId.Value);
+    .AsNoTracking()
+    .Include(i => i.User)
+    .FirstOrDefaultAsync(i =>
+        i.Id == selectedIdeaId.Value &&
+        i.IsSelected &&
+        assignedStudentIds.Contains(i.UserId));
 
         if (SelectedIdea == null)
         {
+            Evaluation = null;
+            Messages = [];
+
+            EvaluationInput = new EvaluationInputModel();
+            MessageInput = new MessageInputModel();
+
             return;
         }
 
@@ -343,7 +551,11 @@ public class IdeaReviewModel(ApplicationDbContext db) : PageModel
 
     private static string NormalizeStatus(string? status)
     {
-        return status switch
+        var normalized = string.IsNullOrWhiteSpace(status)
+            ? "pending"
+            : status.Trim().ToLowerInvariant();
+
+        return normalized switch
         {
             "approved" => "approved",
             "needs_revision" => "needs_revision",

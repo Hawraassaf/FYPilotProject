@@ -1,109 +1,875 @@
 @page
+@using System
+@using System.Linq
 @model FYPilot.Web.Pages.Admin.DashboardModel
 @{
-    ViewData["Title"]    = "Admin Dashboard";
-    ViewData["Subtitle"] = "Platform overview and system administration";
+    ViewData["Title"] = "Admin Dashboard";
+    ViewData["Subtitle"] = "Academic mission control";
+
+    var totalActions = Model.AttentionCards.Sum(card =>
+        int.TryParse(card.Count, out var value) ? value : 0);
+
+    var pendingRequests = Model.AttentionCards.FirstOrDefault(x => x.Title.Contains("Pending", StringComparison.OrdinalIgnoreCase));
+    var noSupervisor = Model.AttentionCards.FirstOrDefault(x => x.Title.Contains("Without Supervisor", StringComparison.OrdinalIgnoreCase));
+    var noApprovedIdea = Model.AttentionCards.FirstOrDefault(x => x.Title.Contains("Without Approved", StringComparison.OrdinalIgnoreCase));
+    var fullSupervisors = Model.AttentionCards.FirstOrDefault(x => x.Title.Contains("Capacity", StringComparison.OrdinalIgnoreCase));
+    var revisionProjects = Model.AttentionCards.FirstOrDefault(x => x.Title.Contains("Revision", StringComparison.OrdinalIgnoreCase));
+
+    var topAttention = Model.AttentionCards
+        .OrderByDescending(card => int.TryParse(card.Count, out var value) ? value : 0)
+        .Take(5)
+        .ToList();
+
+    var supervisors = Model.SupervisorWorkload
+        .OrderByDescending(x => x.AssignedStudents)
+        .Take(5)
+        .ToList();
+
+    var risks = Model.ProjectRisks
+        .Take(5)
+        .ToList();
 }
 
-<!-- Stats row -->
-<div class="row g-3 mb-4">
-    @foreach (var s in Model.Stats)
-    {
-        <div class="col-6 col-xl-3">
-            <div class="stat-card d-flex align-items-center gap-3">
-                <div class="stat-icon" style="background:@s.BgColor"><i class="bi bi-@s.Icon" style="color:@s.Color"></i></div>
-                <div><div class="stat-value">@s.Value</div><div class="stat-label">@s.Label</div></div>
-            </div>
-        </div>
-    }
-</div>
+<section class="mission-page">
 
-<div class="row g-4">
-    <!-- Recent users -->
-    <div class="col-lg-6">
-        <div class="page-card p-4">
-            <div class="d-flex align-items-center justify-content-between mb-3">
-                <h6 class="fw-bold mb-0"><i class="bi bi-people me-2 text-primary"></i>Recent Users</h6>
-                <a href="/Admin/Users" class="btn btn-sm btn-outline-primary">All Users</a>
-            </div>
-            <div class="table-responsive">
-                <table class="table table-hover align-middle small">
-                    <thead><tr><th>Name</th><th>Role</th><th>Joined</th></tr></thead>
-                    <tbody>
-                        @foreach (var u in Model.RecentUsers)
-                        {
-                            <tr>
-                                <td>
-                                    <div class="d-flex align-items-center gap-2">
-                                        <div class="avatar" style="width:28px;height:28px;font-size:0.7rem;background:#e0e7ff;color:#4338ca">@(u.Name.Length > 0 ? u.Name[0].ToString() : "?")</div>
-                                        <span class="fw-semibold">@u.Name</span>
-                                    </div>
-                                </td>
-                                <td>
-                                    <span class="badge text-capitalize @(u.Role == "student" ? "bg-primary-subtle text-primary" : u.Role == "supervisor" ? "bg-success-subtle text-success" : "bg-danger-subtle text-danger")">@u.Role</span>
-                                </td>
-                                <td class="text-muted">@u.CreatedAt.ToString("dd MMM")</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
+    <header class="mission-top-panel">
+        <div class="top-panel-content">
+            <span>FYPilot Admin</span>
+            <h1>Mission Control</h1>
+            <p>
+                Academic operations, supervision balance, project risk intervention,
+                and workflow decisions from one focused dashboard.
+            </p>
         </div>
-    </div>
 
-    <!-- Recent ideas -->
-    <div class="col-lg-6">
-        <div class="page-card p-4">
-            <div class="d-flex align-items-center justify-content-between mb-3">
-                <h6 class="fw-bold mb-0"><i class="bi bi-stars me-2 text-warning"></i>Recent Project Ideas</h6>
-                <a href="/Admin/Projects" class="btn btn-sm btn-outline-primary">All Projects</a>
-            </div>
-            <div class="table-responsive">
-                <table class="table table-hover align-middle small">
-                    <thead><tr><th>Title</th><th>Domain</th><th>Score</th></tr></thead>
-                    <tbody>
-                        @foreach (var idea in Model.RecentIdeas)
-                        {
-                            <tr>
-                                <td class="fw-semibold" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">@idea.Title</td>
-                                <td><span class="badge bg-secondary-subtle text-secondary">@idea.Domain</span></td>
-                                <td>
-                                    <span class="badge @(idea.FeasibilityScore >= 70 ? "bg-success" : idea.FeasibilityScore >= 50 ? "bg-warning text-dark" : "bg-danger")">@idea.FeasibilityScore%</span>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
+        <div class="top-panel-load">
+            <small>Today’s admin load</small>
+            <strong>@totalActions</strong>
+            <span>items require attention</span>
         </div>
-    </div>
 
-    <!-- System links -->
-    <div class="col-12">
-        <div class="page-card p-4">
-            <h6 class="fw-bold mb-3"><i class="bi bi-tools me-2"></i>Quick Administration</h6>
-            <div class="row g-2">
-                @foreach (var (href, icon, label, desc, color) in new[] {
-                    ("/Admin/Users",       "people",         "Manage Users",       "View, search, and manage all platform users",              "#3b82f6"),
-                    ("/Admin/Projects",    "folder",         "All Projects",       "Browse all student project ideas across all accounts",      "#8b5cf6"),
-                    ("/Admin/MarketNeeds", "graph-up-arrow", "Market Needs",       "Manage industry problem dataset for AI matching",           "#10b981"),
-                    ("/Admin/Analytics",   "bar-chart",      "Analytics",          "Platform usage statistics and performance metrics",        "#f59e0b"),
-                    ("/SystemTest",        "shield-check",   "System Test",        "Verify database, API, and AI service connections",         "#ef4444"),
-                })
+        <div class="top-panel-actions">
+            <a href="/Admin/SupervisorAssignments">
+                <i class="bi bi-person-lines-fill"></i>
+                Supervisor Requests
+            </a>
+
+            <a href="/Admin/Analytics">
+                <i class="bi bi-shield-exclamation"></i>
+                Project Risks
+            </a>
+
+            <a href="/Admin/Users">
+                <i class="bi bi-people"></i>
+                Manage Users
+            </a>
+        </div>
+    </header>
+
+    <section class="mission-header">
+        <div>
+            <span class="mini-label">Academic Workflow</span>
+            <h2>What needs admin decision?</h2>
+        </div>
+
+        <div class="header-actions">
+            <a href="/Admin/SupervisorAssignments">Open assignments</a>
+            <a href="/Admin/Analytics">Open projects</a>
+        </div>
+    </section>
+
+    <section class="mission-board">
+
+        <article class="mission-column action-column">
+            <div class="column-head danger">
+                <i class="bi bi-lightning-charge"></i>
+                <div>
+                    <h3>Action Queue</h3>
+                    <span>Highest priority items</span>
+                </div>
+            </div>
+
+            <div class="queue-list">
+                @if (!topAttention.Any())
                 {
-                    <div class="col-sm-6 col-xl-4">
-                        <a href="@href" class="d-flex align-items-center gap-3 p-3 rounded-2 bg-light text-decoration-none">
-                            <div class="stat-icon" style="background:@(color)20;width:40px;height:40px">
-                                <i class="bi bi-@icon" style="color:@color"></i>
-                            </div>
-                            <div>
-                                <div class="fw-semibold small">@label</div>
-                                <div class="text-muted-sm">@desc</div>
-                            </div>
-                        </a>
+                    <div class="empty-mission">
+                        <i class="bi bi-check2-circle"></i>
+                        <p>No admin action needed.</p>
                     </div>
                 }
+                else
+                {
+                    @foreach (var item in topAttention)
+                    {
+                        <a href="@item.ActionUrl" class="queue-ticket @item.ColorClass">
+                            <div class="ticket-signal">
+                                <i class="bi bi-@item.Icon"></i>
+                            </div>
+
+                            <div class="ticket-content">
+                                <strong>@item.Title</strong>
+                                <span>@item.Description</span>
+                            </div>
+
+                            <div class="ticket-count">
+                                <b>@item.Count</b>
+                                <small>@item.ActionText</small>
+                            </div>
+                        </a>
+                    }
+                }
             </div>
-        </div>
-    </div>
-</div>
+        </article>
+
+        <article class="mission-column pipeline-column">
+            <div class="column-head blue">
+                <i class="bi bi-diagram-3"></i>
+                <div>
+                    <h3>Workflow Pipeline</h3>
+                    <span>Student journey health</span>
+                </div>
+            </div>
+
+            <div class="pipeline">
+                <a href="/Admin/SupervisorAssignments" class="pipeline-step">
+                    <div class="step-index">01</div>
+                    <div class="step-line"></div>
+                    <div class="step-content">
+                        <strong>Supervisor Request</strong>
+                        <span>@CountOrZero(pendingRequests) requests waiting</span>
+                    </div>
+                </a>
+
+                <a href="/Admin/SupervisorAssignments" class="pipeline-step">
+                    <div class="step-index">02</div>
+                    <div class="step-line"></div>
+                    <div class="step-content">
+                        <strong>Supervisor Assignment</strong>
+                        <span>@CountOrZero(noSupervisor) students without supervisor</span>
+                    </div>
+                </a>
+
+                <a href="/Admin/Analytics" class="pipeline-step">
+                    <div class="step-index">03</div>
+                    <div class="step-line"></div>
+                    <div class="step-content">
+                        <strong>Idea Approval</strong>
+                        <span>@CountOrZero(noApprovedIdea) students without approved idea</span>
+                    </div>
+                </a>
+
+                <a href="/Admin/Analytics" class="pipeline-step">
+                    <div class="step-index">04</div>
+                    <div class="step-line"></div>
+                    <div class="step-content">
+                        <strong>Project Quality</strong>
+                        <span>@CountOrZero(revisionProjects) projects need revision</span>
+                    </div>
+                </a>
+
+                <a href="/Admin/Analytics" class="pipeline-step last">
+                    <div class="step-index">05</div>
+                    <div class="step-content">
+                        <strong>Academic Progress</strong>
+                        <span>Monitor platform performance</span>
+                    </div>
+                </a>
+            </div>
+        </article>
+
+        <article class="mission-column monitor-column">
+            <div class="column-head green">
+                <i class="bi bi-activity"></i>
+                <div>
+                    <h3>Live Monitor</h3>
+                    <span>Capacity and quality signals</span>
+                </div>
+            </div>
+
+            <div class="monitor-stack">
+
+                <div class="monitor-box">
+                    <div class="monitor-title">
+                        <span>Supervisor Capacity</span>
+                        <b>@CountOrZero(fullSupervisors) full</b>
+                    </div>
+
+                    @if (!supervisors.Any())
+                    {
+                        <div class="small-empty">No supervisors found.</div>
+                    }
+                    else
+                    {
+                        @foreach (var supervisor in supervisors)
+                        {
+                            var percent = supervisor.Capacity == 0
+                                ? 0
+                                : Math.Clamp((int)Math.Round(supervisor.AssignedStudents * 100.0 / supervisor.Capacity), 0, 100);
+
+                            <div class="capacity-mini">
+                                <div class="cap-top">
+                                    <strong>@supervisor.SupervisorName</strong>
+                                    <span>@supervisor.AssignedStudents/@supervisor.Capacity</span>
+                                </div>
+
+                                <div class="cap-track">
+                                    <i style="width:@percent%"></i>
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+
+                <div class="monitor-box">
+                    <div class="monitor-title">
+                        <span>Project Risk Radar</span>
+                        <b>@Model.ProjectRisks.Count risks</b>
+                    </div>
+
+                    @if (!risks.Any())
+                    {
+                        <div class="small-empty success">
+                            <i class="bi bi-check2-circle"></i>
+                            No risks detected.
+                        </div>
+                    }
+                    else
+                    {
+                        @foreach (var risk in risks)
+                        {
+                            <a href="/Admin/Analytics" class="risk-mini @risk.RiskClass">
+                                <div>
+                                    <strong>@risk.Title</strong>
+                                    <span>@risk.StudentName · @risk.RiskReason</span>
+                                </div>
+
+                                <b>@risk.FeasibilityScore%</b>
+                            </a>
+                        }
+                    }
+                </div>
+
+            </div>
+        </article>
+
+    </section>
+
+</section>
+
+@section Head {
+    <style>
+        :root {
+            --mc-navy: #28385E;
+            --mc-deep: #061C49;
+            --mc-blue: #304163;
+            --mc-steel: #516C8D;
+            --mc-bg: #F7F8FA;
+            --mc-border: #E8ECF2;
+            --mc-text: #111827;
+            --mc-muted: #64748B;
+            --mc-soft: #F1F4F8;
+            --mc-green: #047857;
+            --mc-red: #B91C1C;
+            --mc-orange: #C2410C;
+            --mc-yellow: #92400E;
+        }
+
+        .mission-page {
+            max-width: 1500px;
+            margin: 0 auto;
+            padding-bottom: 1.5rem;
+            color: var(--mc-text);
+        }
+
+        .mission-top-panel {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 230px 270px;
+            gap: 1rem;
+            align-items: stretch;
+            margin-bottom: 1rem;
+            padding: 1rem;
+            border-radius: 32px;
+            color: white;
+            background: radial-gradient(circle at 15% 8%, rgba(255,255,255,.18), transparent 22%), radial-gradient(circle at 88% 15%, rgba(255,255,255,.10), transparent 18%), linear-gradient(135deg, var(--mc-deep), var(--mc-navy) 58%, var(--mc-steel) 135%);
+            box-shadow: 0 22px 48px rgba(40,56,94,.18);
+            overflow: hidden;
+        }
+
+        .top-panel-content {
+            padding: .65rem;
+            display: grid;
+            align-content: center;
+        }
+
+            .top-panel-content span {
+                display: block;
+                color: rgba(255,255,255,.65);
+                font-size: .68rem;
+                letter-spacing: .12em;
+                text-transform: uppercase;
+                font-weight: 600;
+            }
+
+            .top-panel-content h1 {
+                margin: .35rem 0 0;
+                color: white;
+                font-size: clamp(2rem, 3.5vw, 3.2rem);
+                line-height: 1;
+                letter-spacing: -.045em;
+                font-weight: 600;
+            }
+
+            .top-panel-content p {
+                max-width: 760px;
+                margin: .65rem 0 0;
+                color: rgba(255,255,255,.74);
+                font-size: .9rem;
+                line-height: 1.6;
+            }
+
+        .top-panel-load {
+            display: grid;
+            align-content: center;
+            justify-items: center;
+            text-align: center;
+            padding: 1rem;
+            border-radius: 26px;
+            background: rgba(255,255,255,.12);
+            border: 1px solid rgba(255,255,255,.18);
+        }
+
+            .top-panel-load small {
+                display: block;
+                color: rgba(255,255,255,.65);
+                font-size: .68rem;
+                letter-spacing: .08em;
+                text-transform: uppercase;
+            }
+
+            .top-panel-load strong {
+                display: block;
+                margin-top: .35rem;
+                color: white;
+                font-size: 3.7rem;
+                line-height: 1;
+                font-weight: 600;
+            }
+
+            .top-panel-load span {
+                display: block;
+                margin-top: .35rem;
+                color: rgba(255,255,255,.74);
+                font-size: .76rem;
+            }
+
+        .top-panel-actions {
+            display: grid;
+            gap: .55rem;
+            align-content: center;
+        }
+
+            .top-panel-actions a {
+                display: flex;
+                align-items: center;
+                gap: .65rem;
+                padding: .72rem;
+                color: rgba(255,255,255,.84);
+                text-decoration: none;
+                border-radius: 16px;
+                background: rgba(255,255,255,.09);
+                border: 1px solid rgba(255,255,255,.10);
+                font-size: .8rem;
+                font-weight: 500;
+                transition: .15s ease;
+            }
+
+                .top-panel-actions a:hover {
+                    color: white;
+                    background: rgba(255,255,255,.15);
+                    transform: translateY(-1px);
+                }
+
+            .top-panel-actions i {
+                width: 30px;
+                height: 30px;
+                display: grid;
+                place-items: center;
+                border-radius: 12px;
+                background: rgba(255,255,255,.13);
+            }
+
+        .mission-header {
+            min-height: 115px;
+            border-radius: 28px;
+            padding: 1rem 1.15rem;
+            background: white;
+            border: 1px solid var(--mc-border);
+            box-shadow: 0 14px 34px rgba(15,23,42,.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .mini-label {
+            display: block;
+            color: var(--mc-steel);
+            margin-bottom: .3rem;
+            font-size: .68rem;
+            letter-spacing: .12em;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .mission-header h2 {
+            margin: 0;
+            color: var(--mc-text);
+            font-size: clamp(1.45rem, 2.5vw, 2.2rem);
+            line-height: 1.05;
+            letter-spacing: -.04em;
+            font-weight: 600;
+        }
+
+        .header-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .5rem;
+            justify-content: flex-end;
+        }
+
+            .header-actions a {
+                color: var(--mc-blue);
+                background: #EEF2F6;
+                text-decoration: none;
+                padding: .65rem .8rem;
+                border-radius: 14px;
+                font-size: .76rem;
+                font-weight: 600;
+            }
+
+        .mission-board {
+            display: grid;
+            grid-template-columns: minmax(280px, .9fr) minmax(330px, 1.1fr) minmax(300px, .9fr);
+            gap: 1rem;
+            align-items: stretch;
+        }
+
+        .mission-column {
+            background: white;
+            border: 1px solid var(--mc-border);
+            border-radius: 28px;
+            box-shadow: 0 14px 34px rgba(15,23,42,.05);
+            overflow: hidden;
+            min-height: 500px;
+        }
+
+        .column-head {
+            min-height: 82px;
+            padding: 1rem;
+            display: flex;
+            align-items: center;
+            gap: .75rem;
+            border-bottom: 1px solid var(--mc-border);
+        }
+
+            .column-head > i {
+                width: 46px;
+                height: 46px;
+                display: grid;
+                place-items: center;
+                border-radius: 17px;
+                font-size: 1.1rem;
+            }
+
+            .column-head.danger > i {
+                color: var(--mc-red);
+                background: #FEF2F2;
+            }
+
+            .column-head.blue > i {
+                color: #2563EB;
+                background: #EFF6FF;
+            }
+
+            .column-head.green > i {
+                color: var(--mc-green);
+                background: #ECFDF5;
+            }
+
+            .column-head h3 {
+                margin: 0;
+                color: var(--mc-text);
+                font-size: .98rem;
+                font-weight: 600;
+            }
+
+            .column-head span {
+                display: block;
+                margin-top: .15rem;
+                color: var(--mc-muted);
+                font-size: .72rem;
+            }
+
+        .queue-list {
+            display: grid;
+            gap: .65rem;
+            padding: .85rem;
+        }
+
+        .queue-ticket {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            gap: .65rem;
+            align-items: center;
+            padding: .78rem;
+            border: 1px solid var(--mc-border);
+            border-radius: 18px;
+            color: inherit;
+            text-decoration: none;
+            background: #fff;
+            transition: .15s ease;
+        }
+
+            .queue-ticket:hover {
+                color: inherit;
+                transform: translateY(-1px);
+                border-color: #B8C8DD;
+                box-shadow: 0 10px 22px rgba(40,56,94,.07);
+            }
+
+        .ticket-signal {
+            width: 38px;
+            height: 38px;
+            display: grid;
+            place-items: center;
+            border-radius: 14px;
+            font-size: .95rem;
+        }
+
+        .queue-ticket.red .ticket-signal {
+            color: var(--mc-red);
+            background: #FEF2F2;
+        }
+
+        .queue-ticket.orange .ticket-signal {
+            color: var(--mc-orange);
+            background: #FFF7ED;
+        }
+
+        .queue-ticket.green .ticket-signal {
+            color: var(--mc-green);
+            background: #ECFDF5;
+        }
+
+        .queue-ticket.blue .ticket-signal {
+            color: #2563EB;
+            background: #EFF6FF;
+        }
+
+        .ticket-content {
+            min-width: 0;
+        }
+
+            .ticket-content strong {
+                display: block;
+                color: var(--mc-text);
+                font-size: .8rem;
+                font-weight: 600;
+            }
+
+            .ticket-content span {
+                display: block;
+                margin-top: .18rem;
+                color: var(--mc-muted);
+                font-size: .68rem;
+                line-height: 1.35;
+            }
+
+        .ticket-count {
+            display: grid;
+            justify-items: end;
+            gap: .1rem;
+        }
+
+            .ticket-count b {
+                color: var(--mc-text);
+                font-size: 1.25rem;
+                line-height: 1;
+                font-weight: 600;
+            }
+
+            .ticket-count small {
+                color: var(--mc-blue);
+                font-size: .64rem;
+                font-weight: 600;
+                white-space: nowrap;
+            }
+
+        .pipeline {
+            padding: 1rem;
+        }
+
+        .pipeline-step {
+            display: grid;
+            grid-template-columns: 48px minmax(0, 1fr);
+            gap: .7rem;
+            color: inherit;
+            text-decoration: none;
+            position: relative;
+            padding-bottom: 1.1rem;
+        }
+
+            .pipeline-step:hover {
+                color: inherit;
+            }
+
+        .step-index {
+            width: 48px;
+            height: 48px;
+            display: grid;
+            place-items: center;
+            border-radius: 18px;
+            color: var(--mc-blue);
+            background: #EEF2F6;
+            font-size: .8rem;
+            font-weight: 600;
+            position: relative;
+            z-index: 2;
+        }
+
+        .step-line {
+            position: absolute;
+            left: 23px;
+            top: 48px;
+            bottom: 0;
+            width: 2px;
+            background: var(--mc-border);
+        }
+
+        .step-content {
+            padding: .2rem 0 .8rem;
+            border-bottom: 1px solid var(--mc-border);
+        }
+
+        .pipeline-step.last {
+            padding-bottom: 0;
+        }
+
+            .pipeline-step.last .step-content {
+                border-bottom: 0;
+            }
+
+        .step-content strong {
+            display: block;
+            color: var(--mc-text);
+            font-size: .88rem;
+            font-weight: 600;
+        }
+
+        .step-content span {
+            display: block;
+            margin-top: .24rem;
+            color: var(--mc-muted);
+            font-size: .72rem;
+        }
+
+        .monitor-stack {
+            display: grid;
+            gap: .85rem;
+            padding: .85rem;
+        }
+
+        .monitor-box {
+            border: 1px solid var(--mc-border);
+            border-radius: 20px;
+            padding: .85rem;
+        }
+
+        .monitor-title {
+            display: flex;
+            justify-content: space-between;
+            gap: .75rem;
+            align-items: center;
+            margin-bottom: .7rem;
+        }
+
+            .monitor-title span {
+                color: var(--mc-text);
+                font-size: .84rem;
+                font-weight: 600;
+            }
+
+            .monitor-title b {
+                color: var(--mc-blue);
+                background: #EEF2F6;
+                border-radius: 999px;
+                padding: .24rem .52rem;
+                font-size: .66rem;
+                font-weight: 600;
+            }
+
+        .capacity-mini {
+            margin-top: .58rem;
+        }
+
+        .cap-top {
+            display: flex;
+            justify-content: space-between;
+            gap: .7rem;
+            align-items: center;
+            margin-bottom: .28rem;
+        }
+
+            .cap-top strong {
+                color: var(--mc-text);
+                font-size: .74rem;
+                font-weight: 600;
+            }
+
+            .cap-top span {
+                color: var(--mc-muted);
+                font-size: .68rem;
+            }
+
+        .cap-track {
+            height: 6px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: #E8ECF2;
+        }
+
+            .cap-track i {
+                display: block;
+                height: 100%;
+                border-radius: inherit;
+                background: linear-gradient(90deg, var(--mc-steel), var(--mc-blue));
+            }
+
+        .risk-mini {
+            display: flex;
+            justify-content: space-between;
+            gap: .7rem;
+            align-items: center;
+            padding: .65rem 0;
+            color: inherit;
+            text-decoration: none;
+            border-bottom: 1px solid var(--mc-border);
+        }
+
+            .risk-mini:last-child {
+                border-bottom: 0;
+            }
+
+            .risk-mini:hover {
+                color: inherit;
+            }
+
+            .risk-mini strong {
+                display: block;
+                max-width: 220px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                color: var(--mc-text);
+                font-size: .75rem;
+                font-weight: 600;
+            }
+
+            .risk-mini span {
+                display: block;
+                margin-top: .16rem;
+                color: var(--mc-muted);
+                font-size: .66rem;
+            }
+
+            .risk-mini b {
+                font-size: .72rem;
+                font-weight: 600;
+                color: var(--mc-red);
+            }
+
+            .risk-mini.warning b {
+                color: var(--mc-yellow);
+            }
+
+            .risk-mini.safe b {
+                color: var(--mc-green);
+            }
+
+        .empty-mission,
+        .small-empty {
+            min-height: 130px;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            gap: .4rem;
+            padding: 1rem;
+            text-align: center;
+            color: var(--mc-muted);
+            border: 1px dashed var(--mc-border);
+            border-radius: 18px;
+            font-size: .8rem;
+        }
+
+        .small-empty {
+            min-height: 90px;
+        }
+
+            .small-empty.success i,
+            .empty-mission i {
+                color: var(--mc-green);
+                font-size: 1.3rem;
+            }
+
+            .empty-mission p,
+            .small-empty p {
+                margin: 0;
+            }
+
+        @@media (max-width: 1400px) {
+            .mission-top-panel {
+                grid-template-columns: 1fr;
+            }
+
+            .top-panel-actions {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+
+            .mission-board {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @@media (max-width: 767px) {
+            .mission-header {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .header-actions {
+                justify-content: flex-start;
+            }
+
+            .top-panel-actions {
+                grid-template-columns: 1fr;
+            }
+
+            .queue-ticket {
+                grid-template-columns: auto minmax(0, 1fr);
+            }
+
+            .ticket-count {
+                justify-items: start;
+                grid-column: 2;
+            }
+        }
+    </style>
+}
+
+@functions {
+    private static string CountOrZero(FYPilot.Web.Pages.Admin.DashboardModel.AttentionCard? card)
+    {
+        return card is null ? "0" : card.Count;
+    }
+}

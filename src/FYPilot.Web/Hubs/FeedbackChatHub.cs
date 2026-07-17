@@ -4,12 +4,16 @@ using FYPilot.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using FYPilot.Web.Services.Supervisors;
 
 namespace FYPilot.Web.Hubs;
 
 [Authorize]
-public class FeedbackChatHub(ApplicationDbContext db) : Hub
+public class FeedbackChatHub(
+    ApplicationDbContext db,
+    SupervisorAccessService supervisorAccess) : Hub
 {
+    private const int MaximumMessageLength = 2000;
     public async Task JoinFeedbackRoom(int ideaId, int evaluationId)
     {
         var userId = CurrentUserId();
@@ -27,13 +31,28 @@ public class FeedbackChatHub(ApplicationDbContext db) : Hub
         }
     }
 
-    public async Task SendFeedbackMessage(int evaluationId, int ideaId, string messageText, int? replyToMessageId = null)
+    public async Task SendFeedbackMessage(
+        int evaluationId,
+        int ideaId,
+        string messageText,
+        int? replyToMessageId = null)
     {
         var userId = CurrentUserId();
 
-        if (ideaId <= 0 || string.IsNullOrWhiteSpace(messageText))
+        if (ideaId <= 0 ||
+            string.IsNullOrWhiteSpace(messageText))
         {
-            return;
+            throw new HubException(
+                "Write a message before sending.");
+        }
+
+        var cleanMessageText = messageText.Trim();
+
+        if (cleanMessageText.Length >
+            MaximumMessageLength)
+        {
+            throw new HubException(
+                $"Message cannot exceed {MaximumMessageLength} characters.");
         }
 
         if (!await CanAccessIdeaAsync(ideaId, userId))
@@ -71,7 +90,7 @@ public class FeedbackChatHub(ApplicationDbContext db) : Hub
         {
             EvaluationId = evaluation.Id,
             SenderUserId = userId,
-            MessageText = messageText.Trim(),
+            MessageText = cleanMessageText,
             ReplyToMessageId = replyMessage?.Id,
             CreatedAt = DateTime.UtcNow
         };
@@ -99,13 +118,26 @@ public class FeedbackChatHub(ApplicationDbContext db) : Hub
         });
     }
 
-    public async Task EditFeedbackMessage(int messageId, string newText)
+    public async Task EditFeedbackMessage(
+     int messageId,
+     string newText)
     {
         var userId = CurrentUserId();
 
-        if (messageId <= 0 || string.IsNullOrWhiteSpace(newText))
+        if (messageId <= 0 ||
+            string.IsNullOrWhiteSpace(newText))
         {
-            return;
+            throw new HubException(
+                "Edited message cannot be empty.");
+        }
+
+        var cleanText = newText.Trim();
+
+        if (cleanText.Length >
+            MaximumMessageLength)
+        {
+            throw new HubException(
+                $"Message cannot exceed {MaximumMessageLength} characters.");
         }
 
         var message = await db.FeedbackMessages
@@ -127,7 +159,7 @@ public class FeedbackChatHub(ApplicationDbContext db) : Hub
             return;
         }
 
-        message.MessageText = newText.Trim();
+        message.MessageText = cleanText;
         message.EditedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync();
@@ -408,9 +440,18 @@ public class FeedbackChatHub(ApplicationDbContext db) : Hub
             return false;
         }
 
-        if (role.Equals("supervisor", StringComparison.OrdinalIgnoreCase))
+        if (role.Equals(
+               "supervisor",
+               StringComparison.OrdinalIgnoreCase))
         {
-            return evaluation.SupervisorId == userId;
+            if (evaluation.SupervisorId != userId)
+            {
+                return false;
+            }
+
+            return await supervisorAccess.CanAccessStudentAsync(
+                userId,
+                evaluation.Idea.UserId);
         }
 
         if (role.Equals("student", StringComparison.OrdinalIgnoreCase))
@@ -421,7 +462,9 @@ public class FeedbackChatHub(ApplicationDbContext db) : Hub
         return false;
     }
 
-    private async Task<bool> CanAccessIdeaAsync(int ideaId, int userId)
+    private async Task<bool> CanAccessIdeaAsync(
+     int ideaId,
+     int userId)
     {
         var role = RoleName();
 
@@ -434,13 +477,22 @@ public class FeedbackChatHub(ApplicationDbContext db) : Hub
             return false;
         }
 
-        if (role.Equals("supervisor", StringComparison.OrdinalIgnoreCase))
+        if (role.Equals(
+                "supervisor",
+                StringComparison.OrdinalIgnoreCase))
         {
-            return true;
+            // A supervisor can access the idea only when the
+            // idea owner is actively assigned to that supervisor.
+            return await supervisorAccess.CanAccessStudentAsync(
+                userId,
+                idea.UserId);
         }
 
-        if (role.Equals("student", StringComparison.OrdinalIgnoreCase))
+        if (role.Equals(
+                "student",
+                StringComparison.OrdinalIgnoreCase))
         {
+            // A student can access only their own idea.
             return idea.UserId == userId;
         }
 

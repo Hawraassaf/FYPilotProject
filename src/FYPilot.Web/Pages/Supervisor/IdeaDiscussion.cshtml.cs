@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
+using FYPilot.Web.Services.Supervisors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -9,7 +10,9 @@ using Microsoft.EntityFrameworkCore;
 namespace FYPilot.Web.Pages.Supervisor;
 
 [Authorize(Roles = "supervisor")]
-public class IdeaDiscussionModel(ApplicationDbContext db) : PageModel
+public class IdeaDiscussionModel(
+    ApplicationDbContext db,
+    SupervisorAccessService supervisorAccess) : PageModel
 {
     public ProjectIdea? Idea { get; private set; }
     public SupervisorEvaluation? Evaluation { get; private set; }
@@ -52,7 +55,7 @@ public class IdeaDiscussionModel(ApplicationDbContext db) : PageModel
 
         if (Idea == null)
         {
-            TempData["Error"] = "The selected idea was not found.";
+            TempData["Error"] = "The selected idea was not found or it does not belong to one of your assigned students.";
             return RedirectToPage("/Supervisor/IdeaReview");
         }
 
@@ -75,12 +78,25 @@ public class IdeaDiscussionModel(ApplicationDbContext db) : PageModel
             return RedirectToPage(new { ideaId = MessageInput.IdeaId });
         }
 
-        var ideaExists = await db.ProjectIdeas
-            .AnyAsync(i => i.Id == MessageInput.IdeaId);
+        var idea = await db.ProjectIdeas
+        .AsNoTracking()
+        .FirstOrDefaultAsync(i =>
+            i.Id == MessageInput.IdeaId &&
+            i.IsSelected);
 
-        if (!ideaExists)
+        if (idea == null)
         {
             TempData["Error"] = "The selected idea was not found.";
+            return RedirectToPage("/Supervisor/IdeaReview");
+        }
+
+        var canAccessStudent = await supervisorAccess.CanAccessStudentAsync(
+            supervisorId,
+            idea.UserId);
+
+        if (!canAccessStudent)
+        {
+            TempData["Error"] = "You can only discuss ideas submitted by students assigned to you.";
             return RedirectToPage("/Supervisor/IdeaReview");
         }
 
@@ -104,26 +120,60 @@ public class IdeaDiscussionModel(ApplicationDbContext db) : PageModel
     {
         var supervisorId = SupervisorId();
 
-        Idea = await db.ProjectIdeas
-            .AsNoTracking()
-            .Include(i => i.User)
-            .FirstOrDefaultAsync(i => i.Id == ideaId);
+        var idea = await db.ProjectIdeas
+           .AsNoTracking()
+           .Include(i => i.User)
+           .FirstOrDefaultAsync(i =>
+               i.Id == ideaId &&
+               i.IsSelected);
 
-        if (Idea == null)
+        if (idea == null)
         {
+            Idea = null;
+            Evaluation = null;
+            Messages = [];
             return;
         }
 
-        Evaluation = await GetOrCreateEvaluationAsync(ideaId, supervisorId);
+        var canAccessStudent = await supervisorAccess.CanAccessStudentAsync(
+            supervisorId,
+            idea.UserId);
+
+        if (!canAccessStudent)
+        {
+            Idea = null;
+            Evaluation = null;
+            Messages = [];
+            return;
+        }
+
+        Idea = idea;
+
+        // Opening the page must not create a new evaluation.
+        // Only load an evaluation when one already exists.
+        var existingEvaluation = await db.SupervisorEvaluations
+            .AsNoTracking()
+            .FirstOrDefaultAsync(e =>
+                e.IdeaId == ideaId &&
+                e.SupervisorId == supervisorId);
+
+        Evaluation = existingEvaluation;
 
         MessageInput = new MessageInputModel
         {
             IdeaId = ideaId
         };
 
+        if (existingEvaluation == null)
+        {
+            Messages = [];
+            return;
+        }
+
         var rawMessages = await db.FeedbackMessages
             .AsNoTracking()
-            .Where(m => m.EvaluationId == Evaluation.Id)
+            .Where(m =>
+                m.EvaluationId == existingEvaluation.Id)
             .OrderBy(m => m.CreatedAt)
             .ToListAsync();
 

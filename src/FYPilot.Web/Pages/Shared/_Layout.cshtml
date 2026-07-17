@@ -22,6 +22,15 @@
         var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
         var userName = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "User";
         var isAuth = User.Identity?.IsAuthenticated == true;
+
+        var userEmail =
+            User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? "";
+
+        var isMainAdmin = string.Equals(
+            userEmail,
+            "admin@fyp.com",
+            StringComparison.OrdinalIgnoreCase);
+
         var path = Context.Request.Path.Value ?? "";
 
         string? navProfileImagePath = null;
@@ -164,18 +173,62 @@
                             <li>@Html.Raw(NavLink("/Supervisor/ProgressTracking", "graph-up-arrow", "Progress Tracking"))</li>
 
                         }
-
                         @if (role == "admin")
                         {
                             <li><span class="side-nav-label">Administration</span></li>
-                            <li>@Html.Raw(NavLink("/Admin/Dashboard", "speedometer2", "Dashboard"))</li>
-                            <li>@Html.Raw(NavLink("/Admin/Users", "people", "Users"))</li>
-                            <li>@Html.Raw(NavLink("/Admin/Projects", "folder", "Projects"))</li>
-                            <li>@Html.Raw(NavLink("/Admin/MarketNeeds", "graph-up-arrow", "Market Needs"))</li>
-                            <li>@Html.Raw(NavLink("/Admin/Analytics", "bar-chart", "Analytics"))</li>
+
+                            <li>
+                                @Html.Raw(
+                                    NavLink(
+                                        "/Admin/Dashboard",
+                                        "speedometer2",
+                                        "Dashboard"))
+                            </li>
+
+                            <li>
+                                @Html.Raw(
+                                    NavLink(
+                                        "/Admin/Users",
+                                        "people",
+                                        "Users"))
+                            </li>
+
+                            <li>
+                                @Html.Raw(
+                                    NavLink(
+                                        "/Admin/Analytics",
+                                        "bar-chart",
+                                        "Analytics"))
+                            </li>
+
+                            <li>
+                                @Html.Raw(
+                                    NavLink(
+                                        "/Admin/SupervisorAssignments",
+                                        "person-check",
+                                        "Supervisor Assignments"))
+                            </li>
+
+                            @if (isMainAdmin)
+                            {
+                                <li>
+                                    @Html.Raw(
+                                        NavLink(
+                                            "/Admin/AdminAccounts",
+                                            "person-gear",
+                                            "Manage Administrators"))
+                                </li>
+                            }
 
                             <li><span class="side-nav-label">System</span></li>
-                            <li>@Html.Raw(NavLink("/SystemTest", "pc-display", "System Status"))</li>
+
+                            <li>
+                                @Html.Raw(
+                                    NavLink(
+                                        "/SystemTest",
+                                        "pc-display",
+                                        "System Status"))
+                            </li>
                         }
                     </ul>
                 </div>

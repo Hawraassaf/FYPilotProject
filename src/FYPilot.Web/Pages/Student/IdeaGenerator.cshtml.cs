@@ -196,23 +196,52 @@ public class IdeaGeneratorModel(ApplicationDbContext db, IAiServiceClient aiServ
         var userId = UserId();
 
         var ideaExists = await db.ProjectIdeas
-            .AnyAsync(i => i.Id == ideaId && i.UserId == userId);
+            .AnyAsync(i =>
+                i.Id == ideaId &&
+                i.UserId == userId);
 
         if (!ideaExists)
         {
-            TempData["Error"] = "The selected idea was not found or does not belong to your account.";
+            TempData["Error"] =
+                "The selected idea was not found or does not belong to your account.";
+
             return RedirectToPage();
         }
 
+        await using var transaction =
+            await db.Database.BeginTransactionAsync();
+
         await db.ProjectIdeas
             .Where(i => i.UserId == userId)
-            .ExecuteUpdateAsync(s => s.SetProperty(p => p.IsSelected, false));
+            .ExecuteUpdateAsync(update =>
+                update.SetProperty(
+                    idea => idea.IsSelected,
+                    false));
 
-        await db.ProjectIdeas
-            .Where(i => i.Id == ideaId && i.UserId == userId)
-            .ExecuteUpdateAsync(s => s.SetProperty(p => p.IsSelected, true));
+        var updatedRows = await db.ProjectIdeas
+            .Where(i =>
+                i.Id == ideaId &&
+                i.UserId == userId)
+            .ExecuteUpdateAsync(update =>
+                update.SetProperty(
+                    idea => idea.IsSelected,
+                    true));
 
-        TempData["Success"] = "Project idea selected successfully.";
+        if (updatedRows != 1)
+        {
+            await transaction.RollbackAsync();
+
+            TempData["Error"] =
+                "The project idea could not be selected. Please try again.";
+
+            return RedirectToPage();
+        }
+
+        await transaction.CommitAsync();
+
+        TempData["Success"] =
+            "Project idea selected successfully.";
+
         return RedirectToPage();
     }
 

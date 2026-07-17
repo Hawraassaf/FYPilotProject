@@ -85,14 +85,41 @@ public class RoadmapModel(ApplicationDbContext db, IAiServiceClient aiService) :
         return RedirectToPage(new { ideaId });
     }
 
-    public async Task<IActionResult> OnPostCompleteAsync(int phaseId)
+    public async Task<IActionResult> OnPostCompleteAsync(
+       int phaseId,
+       int ideaId)
     {
-        await db.RoadmapPhases
-            .Where(p => p.Id == phaseId)
-            .ExecuteUpdateAsync(s => s.SetProperty(p => p.IsCompleted, true));
+        var userId = UserId();
 
-        TempData["Success"] = "Phase marked as completed.";
-        return RedirectToPage();
+        var updatedRows = await db.RoadmapPhases
+            .Where(p =>
+                p.Id == phaseId &&
+                p.Roadmap != null &&
+                p.Roadmap.UserId == userId &&
+                p.Roadmap.IdeaId == ideaId)
+            .ExecuteUpdateAsync(updates => updates
+                .SetProperty(
+                    p => p.IsCompleted,
+                    true));
+
+        if (updatedRows == 0)
+        {
+            TempData["Error"] =
+                "This roadmap phase was not found or does not belong to your account.";
+
+            return RedirectToPage(new
+            {
+                ideaId
+            });
+        }
+
+        TempData["Success"] =
+            "Phase marked as completed.";
+
+        return RedirectToPage(new
+        {
+            ideaId
+        });
     }
 
     private async Task LoadPageDataAsync(int userId, int? ideaId)

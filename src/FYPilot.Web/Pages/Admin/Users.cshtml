@@ -1,70 +1,894 @@
 @page
+@using System
+@using System.Linq
 @model FYPilot.Web.Pages.Admin.UsersModel
 @{
-    ViewData["Title"]    = "User Management";
-    ViewData["Subtitle"] = "All registered platform users";
+    ViewData["Title"] = "Users Directory";
+    ViewData["Subtitle"] = "Students and supervisors management overview";
+
+    var assignedStudents = Model.TotalStudents - Model.StudentsWithoutSupervisor;
+    var avgLoad = Model.Supervisors.Any()
+        ? (int)Math.Round(Model.Supervisors.Average(s => s.Capacity == 0 ? 0 : Math.Min(100.0, s.AssignedStudentsCount * 100.0 / s.Capacity)))
+        : 0;
 }
 
-<div class="page-card p-4">
-    <div class="d-flex align-items-center justify-content-between mb-3">
-        <div class="d-flex gap-2">
-            <span class="badge bg-primary-subtle text-primary">@Model.Users.Count(u => u.Role == "student") Students</span>
-            <span class="badge bg-success-subtle text-success">@Model.Users.Count(u => u.Role == "supervisor") Supervisors</span>
-            <span class="badge bg-danger-subtle text-danger">@Model.Users.Count(u => u.Role == "admin") Admins</span>
-        </div>
-        <div class="d-flex gap-2">
-            <input type="text" id="searchInput" class="form-control form-control-sm" placeholder="Search users…" style="width:200px" />
-        </div>
-    </div>
+<section class="users-page">
 
-    <div class="table-responsive">
-        <table class="table table-hover align-middle" id="usersTable">
-            <thead>
-                <tr>
-                    <th>#</th>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Role</th>
-                    <th>Ideas</th>
-                    <th>Joined</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var user in Model.Users.OrderByDescending(u => u.CreatedAt))
+    <header class="users-hero">
+        <div>
+            <span class="users-eyebrow">Admin Directory</span>
+            <h1>Students and supervisors workspace.</h1>
+            <p>
+                A clear role-based view of student assignment status, supervisor capacity,
+                and active supervision relationships.
+            </p>
+        </div>
+
+        <div class="users-hero-stats">
+            <div>
+                <span>Unassigned</span>
+                <strong>@Model.StudentsWithoutSupervisor</strong>
+            </div>
+
+            <div>
+                <span>Full Supervisors</span>
+                <strong>@Model.FullSupervisors</strong>
+            </div>
+
+            <div>
+                <span>Assigned</span>
+                <strong>@assignedStudents</strong>
+            </div>
+
+            <div>
+                <span>Avg Load</span>
+                <strong>@avgLoad%</strong>
+            </div>
+        </div>
+    </header>
+
+    <section class="users-workspace">
+
+        <article class="directory-panel students-panel">
+            <div class="panel-head">
+                <div>
+                    <span class="users-eyebrow">Students</span>
+                    <h2>Student Accounts</h2>
+                </div>
+
+                <span class="panel-count">@Model.TotalStudents</span>
+            </div>
+
+            <div class="panel-toolbar">
+                <p class="panel-subtitle">Assignment status, supervisor link, and submitted ideas.</p>
+
+                <label class="search-box">
+                    <i class="bi bi-search"></i>
+                    <input type="text" id="studentSearch" placeholder="Search students..." autocomplete="off" />
+                </label>
+            </div>
+
+            <div class="cards-scroll" id="studentsList">
+                @if (!Model.Students.Any())
                 {
-                    <tr>
-                        <td class="text-muted small">@user.Id</td>
-                        <td>
-                            <div class="d-flex align-items-center gap-2">
-                                <div class="avatar" style="width:30px;height:30px;font-size:0.75rem;background:@(user.Role == "student" ? "#dbeafe" : user.Role == "supervisor" ? "#dcfce7" : "#fef2f2");color:@(user.Role == "student" ? "#1d4ed8" : user.Role == "supervisor" ? "#15803d" : "#dc2626")">
-                                    @(user.FullName.Length > 0 ? user.FullName[0].ToString() : "?")
-                                </div>
-                                <span class="fw-semibold small">@user.FullName</span>
-                            </div>
-                        </td>
-                        <td class="small text-muted">@user.Email</td>
-                        <td>
-                            <span class="badge text-capitalize @(user.Role == "student" ? "bg-primary-subtle text-primary" : user.Role == "supervisor" ? "bg-success-subtle text-success" : "bg-danger-subtle text-danger")">
-                                @user.Role
-                            </span>
-                        </td>
-                        <td class="small">@user.IdeaCount</td>
-                        <td class="small text-muted">@user.CreatedAt.ToString("dd MMM yyyy")</td>
-                    </tr>
+                    <div class="empty-state">
+                        <i class="bi bi-person"></i>
+                        <p>No students found.</p>
+                    </div>
                 }
-            </tbody>
-        </table>
-    </div>
-    <div class="text-muted small mt-2">Total: @Model.Users.Count users</div>
-</div>
+                else
+                {
+                    @foreach (var student in Model.Students)
+                    {
+                        var searchTerm = $"{student.Name} {student.Email} {student.AssignedSupervisor} {student.AssignmentStatus}".ToLowerInvariant();
+
+                        <div class="entity-card student-card" data-search="@searchTerm">
+                            <div class="entity-left">
+                                <div class="avatar student-avatar">@Initials(student.Name)</div>
+
+                                <div class="entity-info">
+                                    <strong>@student.Name</strong>
+                                    <small>@student.Email</small>
+                                </div>
+                            </div>
+
+                            <div class="entity-right">
+                                <div class="meta-chip">
+                                    <i class="bi bi-person-check"></i>
+                                    <span>@student.AssignedSupervisor</span>
+                                </div>
+
+                                <b class="ideas-pill">
+                                    @student.IdeasCount idea@(student.IdeasCount == 1 ? "" : "s")
+                                </b>
+
+                                <b class="status-pill @StatusClass(student.AssignmentStatus)">
+                                    @student.AssignmentStatus
+                                </b>
+                            </div>
+                        </div>
+                    }
+
+                    <div class="empty-state search-empty" id="studentsEmpty">
+                        <i class="bi bi-search"></i>
+                        <p>No students match your search.</p>
+                    </div>
+                }
+            </div>
+        </article>
+
+        <article class="directory-panel supervisors-panel">
+            <div class="panel-head">
+                <div>
+                    <span class="users-eyebrow">Supervisors</span>
+                    <h2>Supervisor Workload</h2>
+                </div>
+
+                <span class="panel-count">@Model.TotalSupervisors</span>
+            </div>
+
+            <div class="panel-toolbar">
+                <p class="panel-subtitle">Capacity status and students assigned to each supervisor.</p>
+
+                <label class="search-box">
+                    <i class="bi bi-search"></i>
+                    <input type="text" id="supervisorSearch" placeholder="Search supervisors..." autocomplete="off" />
+                </label>
+            </div>
+
+            <div class="cards-scroll" id="supervisorsList">
+                @if (!Model.Supervisors.Any())
+                {
+                    <div class="empty-state">
+                        <i class="bi bi-person-check"></i>
+                        <p>No supervisors found.</p>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var supervisor in Model.Supervisors)
+                    {
+                        var percent = supervisor.Capacity == 0
+                            ? 0
+                            : Math.Clamp((int)Math.Round(supervisor.AssignedStudentsCount * 100.0 / supervisor.Capacity), 0, 100);
+
+                        double ringCircumference = 2 * Math.PI * 26;
+                        double ringLength = ringCircumference * percent / 100.0;
+                        var ringColor = RingColor(supervisor.CapacityClass);
+                        var searchTerm = $"{supervisor.Name} {supervisor.Email}".ToLowerInvariant();
+
+                        <div class="entity-card supervisor-card" data-search="@searchTerm">
+                            <div class="supervisor-card-top">
+                                <div class="entity-left">
+                                    <div class="ring-avatar">
+                                        <svg viewBox="0 0 64 64">
+                                            <circle cx="32" cy="32" r="26" fill="none" stroke="#EEF2F6" stroke-width="6" />
+                                            @if (percent > 0)
+                                            {
+                                                <circle cx="32" cy="32" r="26" fill="none"
+                                                        stroke="@ringColor" stroke-width="6" stroke-linecap="round"
+                                                        stroke-dasharray="@(ringLength.ToString("0.##")) @((ringCircumference - ringLength).ToString("0.##"))"
+                                                        transform="rotate(-90 32 32)" />
+                                            }
+                                        </svg>
+                                        <div class="ring-avatar-label">@Initials(supervisor.Name)</div>
+                                    </div>
+
+                                    <div class="entity-info">
+                                        <strong>@supervisor.Name</strong>
+                                        <small>@supervisor.Email</small>
+                                    </div>
+                                </div>
+
+                                <div class="capacity-info">
+                                    <span>@supervisor.AssignedStudentsCount/@supervisor.Capacity</span>
+                                    <b class="status-pill @supervisor.CapacityClass">@supervisor.CapacityStatus</b>
+                                </div>
+                            </div>
+
+                            <div class="assigned-row">
+                                @if (!supervisor.AssignedStudents.Any())
+                                {
+                                    <span class="no-assigned">No assigned students</span>
+                                }
+                                else
+                                {
+                                    <div class="assigned-list">
+                                        @foreach (var student in supervisor.AssignedStudents)
+                                        {
+                                            <div class="assigned-chip">
+                                                <i>@Initials(student.Name)</i>
+                                                <div>
+                                                    <strong>@student.Name</strong>
+                                                    <small>@student.Email</small>
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                    <div class="empty-state search-empty" id="supervisorsEmpty">
+                        <i class="bi bi-search"></i>
+                        <p>No supervisors match your search.</p>
+                    </div>
+                }
+            </div>
+        </article>
+
+    </section>
+
+</section>
+
+@section Head {
+    <style>
+        :root {
+            --users-navy: #28385E;
+            --users-deep: #061C49;
+            --users-blue: #304163;
+            --users-steel: #516C8D;
+            --users-border: #E8ECF2;
+            --users-text: #111827;
+            --users-muted: #64748B;
+            --users-soft: #F1F4F8;
+            --users-green: #047857;
+            --users-red: #B91C1C;
+            --users-orange: #C2410C;
+            --users-yellow: #92400E;
+        }
+
+        .users-page {
+            max-width: 1500px;
+            margin: 0 auto;
+            color: var(--users-text);
+            padding-bottom: 1.5rem;
+        }
+
+        .users-hero {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 460px;
+            gap: 1rem;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding: 1.15rem;
+            border-radius: 30px;
+            color: white;
+            background: radial-gradient(circle at 15% 12%, rgba(255,255,255,.18), transparent 22%), radial-gradient(circle at 88% 20%, rgba(255,255,255,.10), transparent 20%), linear-gradient(135deg, var(--users-deep), var(--users-navy) 58%, var(--users-steel) 135%);
+            box-shadow: 0 22px 48px rgba(40,56,94,.16);
+        }
+
+        .users-eyebrow {
+            display: block;
+            margin-bottom: .28rem;
+            color: var(--users-steel);
+            font-size: .68rem;
+            font-weight: 600;
+            letter-spacing: .12em;
+            text-transform: uppercase;
+        }
+
+        .users-hero .users-eyebrow {
+            color: rgba(255,255,255,.72);
+        }
+
+        .users-hero h1 {
+            max-width: 850px;
+            margin: 0;
+            font-size: clamp(1.7rem, 3vw, 2.65rem);
+            line-height: 1.05;
+            letter-spacing: -.04em;
+            font-weight: 600;
+        }
+
+        .users-hero p {
+            max-width: 780px;
+            margin: .65rem 0 0;
+            color: rgba(255,255,255,.76);
+            font-size: .9rem;
+            line-height: 1.6;
+        }
+
+        .users-hero-stats {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: .65rem;
+        }
+
+            .users-hero-stats div {
+                min-height: 82px;
+                display: grid;
+                align-content: center;
+                padding: .8rem;
+                border-radius: 20px;
+                background: rgba(255,255,255,.12);
+                border: 1px solid rgba(255,255,255,.16);
+            }
+
+            .users-hero-stats span {
+                color: rgba(255,255,255,.72);
+                font-size: .7rem;
+            }
+
+            .users-hero-stats strong {
+                display: block;
+                margin-top: .22rem;
+                color: white;
+                font-size: 1.55rem;
+                line-height: 1;
+                font-weight: 600;
+            }
+
+        .users-workspace {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+            gap: 1rem;
+            align-items: start;
+        }
+
+        .directory-panel {
+            background: white;
+            border: 1px solid var(--users-border);
+            border-radius: 28px;
+            box-shadow: 0 14px 34px rgba(15,23,42,.05);
+            overflow: hidden;
+        }
+
+        .panel-head {
+            min-height: 68px;
+            padding: .95rem 1rem .3rem;
+            display: flex;
+            align-items: start;
+            justify-content: space-between;
+            gap: .8rem;
+        }
+
+            .panel-head h2 {
+                margin: 0;
+                color: var(--users-text);
+                font-size: 1.05rem;
+                font-weight: 600;
+                letter-spacing: -.02em;
+            }
+
+        .panel-count {
+            width: 42px;
+            height: 42px;
+            display: grid;
+            place-items: center;
+            color: white;
+            background: linear-gradient(135deg, var(--users-deep), var(--users-blue));
+            border-radius: 16px;
+            font-size: 1rem;
+            font-weight: 600;
+            box-shadow: 0 10px 22px rgba(40,56,94,.16);
+        }
+
+        .panel-toolbar {
+            padding: 0 1rem .9rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .8rem;
+            border-bottom: 1px solid var(--users-border);
+            padding-bottom: .9rem;
+        }
+
+        .panel-subtitle {
+            margin: 0;
+            color: var(--users-muted);
+            font-size: .74rem;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .search-box {
+            display: flex;
+            align-items: center;
+            gap: .4rem;
+            padding: .5rem .75rem;
+            border-radius: 14px;
+            background: var(--users-soft);
+            border: 1px solid var(--users-border);
+            flex: none;
+            width: 200px;
+            transition: .16s ease;
+        }
+
+            .search-box:focus-within {
+                border-color: #B8C8DD;
+                background: white;
+                box-shadow: 0 0 0 3px rgba(81,108,141,.12);
+            }
+
+            .search-box i {
+                color: var(--users-steel);
+                font-size: .78rem;
+            }
+
+            .search-box input {
+                border: 0;
+                background: transparent;
+                outline: none;
+                font-size: .78rem;
+                width: 100%;
+                color: var(--users-text);
+            }
+
+                .search-box input::placeholder {
+                    color: #9AA9BC;
+                }
+
+        .cards-scroll {
+            max-height: 620px;
+            overflow: auto;
+            padding: .85rem;
+            display: grid;
+            gap: .6rem;
+        }
+
+        .entity-card {
+            border: 1px solid var(--users-border);
+            border-radius: 20px;
+            background: #FFFFFF;
+            padding: .85rem .95rem;
+            transition: .18s ease;
+        }
+
+            .entity-card:hover {
+                border-color: #B8C8DD;
+                box-shadow: 0 14px 28px rgba(40,56,94,.08);
+                transform: translateY(-2px);
+            }
+
+        .student-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .75rem;
+            flex-wrap: wrap;
+        }
+
+        .entity-left {
+            display: flex;
+            align-items: center;
+            gap: .7rem;
+            min-width: 0;
+        }
+
+        .entity-info strong {
+            display: block;
+            color: var(--users-text);
+            font-size: .84rem;
+            font-weight: 600;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 220px;
+        }
+
+        .entity-info small {
+            display: block;
+            margin-top: .1rem;
+            color: var(--users-muted);
+            font-size: .68rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 220px;
+        }
+
+        .entity-card:hover .entity-info strong {
+            color: var(--users-blue);
+        }
+
+        .avatar {
+            width: 42px;
+            height: 42px;
+            display: grid;
+            place-items: center;
+            border-radius: 15px;
+            font-size: .72rem;
+            font-weight: 600;
+            flex: none;
+            transition: .18s ease;
+        }
+
+        .student-avatar {
+            color: var(--users-blue);
+            background: #EEF2F6;
+        }
+
+        .entity-card:hover .student-avatar {
+            color: white;
+            background: linear-gradient(135deg, var(--users-deep), var(--users-blue));
+        }
+
+        .entity-right {
+            display: flex;
+            align-items: center;
+            gap: .5rem;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .meta-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: .34rem;
+            max-width: 160px;
+            padding: .32rem .55rem;
+            border-radius: 999px;
+            background: var(--users-soft);
+            color: #475569;
+            font-size: .68rem;
+            font-weight: 500;
+        }
+
+            .meta-chip i {
+                color: var(--users-steel);
+                font-size: .68rem;
+            }
+
+            .meta-chip span {
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+        .ideas-pill,
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            width: fit-content;
+            border-radius: 999px;
+            padding: .28rem .58rem;
+            font-size: .66rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .ideas-pill {
+            color: var(--users-blue);
+            background: #EEF2F6;
+        }
+
+        .status-pill {
+            gap: .34rem;
+        }
+
+            .status-pill::before {
+                content: "";
+                width: 7px;
+                height: 7px;
+                border-radius: 50%;
+                background: currentColor;
+                box-shadow: 0 0 0 4px rgba(48,65,99,.08);
+            }
+
+            .status-pill.success {
+                color: var(--users-green);
+                background: #ECFDF5;
+            }
+
+            .status-pill.warning {
+                color: var(--users-yellow);
+                background: #FEF3C7;
+            }
+
+            .status-pill.danger {
+                color: var(--users-red);
+                background: #FEF2F2;
+            }
+
+            .status-pill.neutral {
+                color: var(--users-blue);
+                background: #EEF2F6;
+            }
+
+        /* Supervisor cards */
+        .supervisor-card-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .8rem;
+            flex-wrap: wrap;
+        }
+
+        .ring-avatar {
+            position: relative;
+            width: 52px;
+            height: 52px;
+            flex: none;
+        }
+
+            .ring-avatar svg {
+                width: 100%;
+                height: 100%;
+            }
+
+                .ring-avatar svg circle {
+                    transition: stroke-dasharray .4s ease;
+                }
+
+        .ring-avatar-label {
+            position: absolute;
+            inset: 0;
+            display: grid;
+            place-items: center;
+            color: var(--users-blue);
+            font-size: .68rem;
+            font-weight: 650;
+        }
+
+        .capacity-info {
+            display: grid;
+            justify-items: end;
+            gap: .32rem;
+        }
+
+            .capacity-info span {
+                color: #475569;
+                font-size: .74rem;
+                font-weight: 600;
+                white-space: nowrap;
+            }
+
+        .assigned-row {
+            margin-top: .75rem;
+            padding-top: .7rem;
+            border-top: 1px solid var(--users-border);
+        }
+
+        .assigned-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .42rem;
+        }
+
+        .assigned-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: .42rem;
+            max-width: 210px;
+            padding: .36rem .46rem;
+            border-radius: 14px;
+            background: #F8FAFC;
+            border: 1px solid var(--users-border);
+            transition: .18s ease;
+        }
+
+            .assigned-chip:hover {
+                transform: translateY(-2px);
+                border-color: #B8C8DD;
+                background: white;
+                box-shadow: 0 10px 22px rgba(40,56,94,.08);
+            }
+
+            .assigned-chip i {
+                width: 27px;
+                height: 27px;
+                display: grid;
+                place-items: center;
+                border-radius: 11px;
+                color: var(--users-blue);
+                background: #EEF2F6;
+                font-style: normal;
+                font-size: .6rem;
+                font-weight: 600;
+                flex: none;
+                transition: .18s ease;
+            }
+
+            .assigned-chip:hover i {
+                color: white;
+                background: var(--users-blue);
+            }
+
+            .assigned-chip strong {
+                display: block;
+                max-width: 130px;
+                color: var(--users-text);
+                font-size: .7rem;
+                font-weight: 600;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .assigned-chip small {
+                display: block;
+                max-width: 130px;
+                color: var(--users-muted);
+                font-size: .6rem;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+        .no-assigned {
+            display: inline-flex;
+            width: fit-content;
+            color: var(--users-muted);
+            background: #F8FAFC;
+            border: 1px dashed var(--users-border);
+            border-radius: 999px;
+            padding: .32rem .6rem;
+            font-size: .7rem;
+        }
+
+        .empty-state {
+            min-height: 260px;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            gap: .45rem;
+            color: var(--users-muted);
+            text-align: center;
+            padding: 2rem;
+        }
+
+            .empty-state i {
+                color: var(--users-steel);
+                font-size: 1.8rem;
+            }
+
+            .empty-state p {
+                margin: 0;
+                font-size: .86rem;
+            }
+
+        .search-empty {
+            display: none;
+            min-height: 140px;
+        }
+
+        .cards-scroll::-webkit-scrollbar {
+            width: 9px;
+        }
+
+        .cards-scroll::-webkit-scrollbar-track {
+            background: #F1F5F9;
+            border-radius: 999px;
+        }
+
+        .cards-scroll::-webkit-scrollbar-thumb {
+            background: #CBD5E1;
+            border-radius: 999px;
+        }
+
+            .cards-scroll::-webkit-scrollbar-thumb:hover {
+                background: #94A3B8;
+            }
+
+        @@media (max-width: 1350px) {
+            .users-workspace {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @@media (max-width: 1280px) {
+            .users-hero {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @@media (max-width: 767px) {
+            .users-hero-stats {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .panel-toolbar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .search-box {
+                width: 100%;
+            }
+
+            .student-card {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .entity-right {
+                justify-content: flex-start;
+            }
+
+            .supervisor-card-top {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .capacity-info {
+                justify-items: start;
+            }
+        }
+    </style>
+}
 
 @section Scripts {
-<script>
-document.getElementById('searchInput').addEventListener('input', function() {
-    var q = this.value.toLowerCase();
-    document.querySelectorAll('#usersTable tbody tr').forEach(function(row) {
-        row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
-    });
-});
-</script>
+    <script>
+        (function () {
+            function wireSearch(inputId, listId, emptyId) {
+                var input = document.getElementById(inputId);
+                var list = document.getElementById(listId);
+                var emptyState = document.getElementById(emptyId);
+                if (!input || !list) return;
+
+                input.addEventListener('input', function () {
+                    var term = this.value.trim().toLowerCase();
+                    var cards = list.querySelectorAll('.entity-card');
+                    var visibleCount = 0;
+
+                    cards.forEach(function (card) {
+                        var haystack = (card.getAttribute('data-search') || '').toLowerCase();
+                        var matches = haystack.indexOf(term) !== -1;
+                        card.style.display = matches ? '' : 'none';
+                        if (matches) visibleCount++;
+                    });
+
+                    if (emptyState) {
+                        emptyState.style.display = (term.length > 0 && visibleCount === 0) ? 'grid' : 'none';
+                    }
+                });
+            }
+
+            wireSearch('studentSearch', 'studentsList', 'studentsEmpty');
+            wireSearch('supervisorSearch', 'supervisorsList', 'supervisorsEmpty');
+        })();
+    </script>
+}
+
+@functions {
+    private static string Initials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "?";
+        }
+
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Take(2)
+            .ToList();
+
+        return parts.Count == 0
+            ? "?"
+            : string.Join("", parts.Select(part => part[0])).ToUpperInvariant();
+    }
+
+    private static string StatusClass(string status)
+    {
+        return status switch
+        {
+            "Assigned" => "success",
+            "Pending Approval" => "warning",
+            "Rejected" => "danger",
+            _ => "neutral"
+        };
+    }
+
+    private static string RingColor(string? capacityClass)
+    {
+        var value = (capacityClass ?? "").ToLowerInvariant();
+
+        if (value.Contains("danger"))
+        {
+            return "#EF4444";
+        }
+
+        if (value.Contains("warning"))
+        {
+            return "#F59E0B";
+        }
+
+        if (value.Contains("success"))
+        {
+            return "#22C55E";
+        }
+
+        return "#516C8D";
+    }
 }

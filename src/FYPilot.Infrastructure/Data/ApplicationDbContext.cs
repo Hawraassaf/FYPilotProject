@@ -33,7 +33,12 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<ProjectDocumentation> ProjectDocumentations => Set<ProjectDocumentation>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
    public DbSet<FeedbackMessage> FeedbackMessages => Set<FeedbackMessage>();
+    public DbSet<SupervisorPreferenceBatch> SupervisorPreferenceBatches { get; set; }
+    public DbSet<SupervisorPreference> SupervisorPreferences { get; set; }
+    public DbSet<SupervisorAssignment> SupervisorAssignments { get; set; }
+    public DbSet<Notification> Notifications { get; set; }
 
+    public DbSet<GoogleCalendarToken> GoogleCalendarTokens => Set<GoogleCalendarToken>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);

@@ -18,7 +18,7 @@ public class ProfileModel(ApplicationDbContext db, IWebHostEnvironment env) : Pa
     [BindProperty]
     public IFormFile? ProfilePhoto { get; set; }
 
-    public string? SuccessMessage { get; set; }
+   
     public string? ErrorMessage { get; set; }
 
     public string Initials { get; private set; } = "U";
@@ -69,10 +69,7 @@ public class ProfileModel(ApplicationDbContext db, IWebHostEnvironment env) : Pa
 
     public async Task<IActionResult> OnGetAsync()
     {
-        TempData.Remove("Success");
-        TempData.Remove("Error");
-
-        SuccessMessage = TempData["ProfileSuccess"] as string;
+        ErrorMessage = TempData["Error"] as string;
 
         var userId = GetCurrentUserId();
 
