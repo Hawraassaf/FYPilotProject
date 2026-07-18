@@ -1,11 +1,22 @@
 """
 ProjectRoadmapAgent — LLM-based customized project roadmap generation for FYPilot.
 
-Design:
-- Ollama generates a customized roadmap for the selected project idea.
-- Python controls the number of weeks and validates the output.
-- No dataset or trained ML model is required.
-- If Ollama fails, a safe fallback roadmap is returned.
+Design (v2):
+- The LLM designs 4-7 PHASES tailored to the specific idea, each with a
+  flexible duration (1-4 weeks) and concrete, idea-specific tasks.
+- Python then does everything structural deterministically:
+    * normalizes phase durations so they sum exactly to expectedDurationWeeks
+      (largest-remainder scaling, minimum 1 week per phase)
+    * expands phases into week entries (3-5 tasks per week)
+    * derives per-member responsibilities FROM that week's actual tasks,
+      guaranteeing exactly teamSize items, specific and non-repeating
+    * places deliverables and supervisor checkpoints on phase-final weeks
+    * front-loads missing skills as learning items in the first weeks
+- The public request/response contract is UNCHANGED: .NET still sends
+  ProjectRoadmapRequest and receives week-based ProjectRoadmapResponse.
+- One small LLM call (~1300 output tokens) instead of one giant week-by-week
+  generation: no truncation, faster on CPU-only Ollama.
+- If Ollama fails, the previous safe fallback roadmap is returned.
 """
 
 import json
@@ -17,6 +28,11 @@ import requests
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger("fypilot-roadmap-agent")
+
+
+# =============================================================================
+# Public contract (UNCHANGED — .NET depends on these shapes)
+# =============================================================================
 
 
 class ProjectRoadmapRequest(BaseModel):
@@ -57,16 +73,43 @@ class ProjectRoadmapResponse(BaseModel):
     finalAdvice: str
 
 
+# =============================================================================
+# Internal phase-plan models (what the LLM actually generates)
+# =============================================================================
+
+
+class _PhasePlan(BaseModel):
+    name: str
+    weeks: int = 1
+    goal: str = ""
+    tasks: list[str] = Field(default_factory=list)
+    deliverables: list[str] = Field(default_factory=list)
+    skillsToLearn: list[str] = Field(default_factory=list)
+    riskWarning: str = ""
+    checkpoint: str = ""
+
+
+class _RoadmapPlan(BaseModel):
+    roadmapTitle: str = ""
+    teamStrategy: str = ""
+    finalAdvice: str = ""
+    phases: list[_PhasePlan] = Field(default_factory=list)
+
+
+# =============================================================================
+# Agent
+# =============================================================================
+
+
 class ProjectRoadmapAgent:
     """
     AI-based Project Roadmap Generator.
 
-    Code controls structure.
-    Ollama customizes the roadmap.
-    Python validates the response.
+    The LLM customizes phase design; Python owns structure, durations,
+    weekly expansion, and team responsibility derivation.
     """
 
-    def __init__(self, model: str = "phi3"):
+    def __init__(self, model: str = "qwen2.5-coder:7b"):
         self.model = model
         self.ollama_url = "http://localhost:11434/api/generate"
 
@@ -76,7 +119,8 @@ class ProjectRoadmapAgent:
 
         self.blocked_terms = [
             "react",
-            "node",
+            "node.js",
+            "nodejs",
             "vue",
             "angular",
             "flutter",
@@ -95,6 +139,20 @@ class ProjectRoadmapAgent:
             "figma",
         ]
 
+        self.generic_task_phrases = [
+            "develop core features",
+            "work on the project",
+            "continue development",
+            "implement features",
+            "do the tasks",
+            "complete the phase",
+            "work on the planned",
+        ]
+
+    # =========================================================================
+    # Main entry point
+    # =========================================================================
+
     def generate(self, request: ProjectRoadmapRequest) -> ProjectRoadmapResponse:
         self.last_llm_used = False
         self.last_error = None
@@ -102,28 +160,109 @@ class ProjectRoadmapAgent:
 
         total_weeks = self._normalize_weeks(request.expectedDurationWeeks)
 
-        prompt = self._build_prompt(request, total_weeks)
+        plan = self._try_generate_phase_plan(request, total_weeks)
+
+        if plan is not None and plan.phases:
+            self.last_llm_used = True
+            return self._expand_plan_to_weeks(request, plan, total_weeks)
+
+        self.last_llm_used = False
+
+        if self.last_error is None:
+            self.last_error = (
+                "Ollama did not return a valid roadmap phase plan. "
+                "Used fallback roadmap."
+            )
+
+        raw = self._fallback_raw_roadmap(request, total_weeks)
+        return self._complete_and_validate(request, raw, total_weeks)
+
+    # =========================================================================
+    # LLM phase-plan generation
+    # =========================================================================
+
+    def _try_generate_phase_plan(
+        self,
+        request: ProjectRoadmapRequest,
+        total_weeks: int,
+    ) -> Optional[_RoadmapPlan]:
+        prompt = self._build_phase_prompt(request, total_weeks)
         llm_text = self._call_ollama(prompt)
 
-        raw = None
+        if not llm_text:
+            return None
 
-        if llm_text:
-            raw = self._parse_llm_json(llm_text)
+        raw = self._parse_llm_json(llm_text)
 
-        if raw:
-            self.last_llm_used = True
-        else:
-            self.last_llm_used = False
+        if not raw:
+            return None
 
-            if self.last_error is None:
-                self.last_error = (
-                    "Ollama did not return valid roadmap JSON. "
-                    "Used fallback roadmap."
-                )
+        try:
+            plan = _RoadmapPlan.model_validate(raw)
+        except Exception as ex:
+            self.last_error = f"Roadmap plan failed validation: {str(ex)}"
+            return None
 
-            raw = self._fallback_raw_roadmap(request, total_weeks)
+        plan.phases = self._sanitize_phases(plan.phases, total_weeks)
 
-        return self._complete_and_validate(request, raw, total_weeks)
+        if len(plan.phases) < 3:
+            self.last_error = (
+                "Roadmap plan contained fewer than 3 usable phases. "
+                "Used fallback roadmap."
+            )
+            return None
+
+        return plan
+
+    def _sanitize_phases(
+        self,
+        phases: list[_PhasePlan],
+        total_weeks: int,
+    ) -> list[_PhasePlan]:
+        """Drop empty/generic phases, clean blocked terms and generic tasks."""
+        cleaned: list[_PhasePlan] = []
+
+        for phase in phases[:8]:
+            name = phase.name.strip()
+
+            if not name:
+                continue
+
+            tasks = [
+                task.strip()
+                for task in phase.tasks
+                if task.strip()
+                and not self._is_generic_task(task)
+                and not self._contains_blocked_term(task)
+            ]
+
+            if len(tasks) < 2:
+                continue
+
+            phase.name = name[:120]
+            phase.weeks = max(1, min(int(phase.weeks or 1), 4))
+            phase.goal = phase.goal.strip()[:400]
+            phase.tasks = tasks[:10]
+            phase.deliverables = [
+                item.strip() for item in phase.deliverables if item.strip()
+            ][:4]
+            phase.skillsToLearn = [
+                item.strip() for item in phase.skillsToLearn if item.strip()
+            ][:4]
+            phase.riskWarning = phase.riskWarning.strip()[:250]
+            phase.checkpoint = phase.checkpoint.strip()[:250]
+
+            cleaned.append(phase)
+
+        return cleaned[: max(3, min(len(cleaned), total_weeks))]
+
+    def _is_generic_task(self, task: str) -> bool:
+        lowered = task.lower()
+        return any(phrase in lowered for phrase in self.generic_task_phrases)
+
+    def _contains_blocked_term(self, text: str) -> bool:
+        lowered = text.lower()
+        return any(term in lowered for term in self.blocked_terms)
 
     def _call_ollama(self, prompt: str) -> Optional[str]:
         try:
@@ -134,12 +273,14 @@ class ProjectRoadmapAgent:
                     "prompt": prompt,
                     "stream": False,
                     "format": "json",
+                    "keep_alive": "30m",
                     "options": {
-                        "temperature": 0.2,
-                        "num_predict": 2400,
+                        "temperature": 0.25,
+                        "num_predict": 1600,
+                        "num_ctx": 4096,
                     },
                 },
-                timeout=600,
+                timeout=(15, 480),
             )
 
             if not response.ok:
@@ -163,7 +304,11 @@ class ProjectRoadmapAgent:
             logger.warning("Ollama unavailable. Falling back. Error: %s", ex)
             return None
 
-    def _build_prompt(self, request: ProjectRoadmapRequest, total_weeks: int) -> str:
+    def _build_phase_prompt(
+        self,
+        request: ProjectRoadmapRequest,
+        total_weeks: int,
+    ) -> str:
         skills_text = (
             ", ".join(request.studentSkills)
             if request.studentSkills
@@ -179,12 +324,30 @@ class ProjectRoadmapAgent:
             else "No ratings provided"
         )
 
-        fixed_structure = self._base_week_structure(total_weeks)
+        missing = self._split_items(request.missingSkills)
+        missing_text = ", ".join(missing) if missing else "None"
+
+        weekly_capacity = request.teamSize * request.availableHoursPerWeek
+
+        if weekly_capacity <= 12:
+            capacity_note = (
+                "Capacity is LOW. Keep phases lean, prefer fewer parallel tasks, "
+                "and give implementation-heavy phases more weeks."
+            )
+        elif weekly_capacity <= 30:
+            capacity_note = (
+                "Capacity is MODERATE. Balance learning and implementation."
+            )
+        else:
+            capacity_note = (
+                "Capacity is HIGH. Implementation phases can be compressed and "
+                "parallel workstreams are possible."
+            )
 
         return f"""
 You are ProjectRoadmapAgent inside FYPilot, an Academic Intelligence System for Final Year Project planning.
 
-Generate a customized weekly implementation roadmap for the selected final year project.
+Design the PHASE PLAN for implementing this specific final year project. You design phases; the platform will expand them into a weekly schedule.
 
 Project idea:
 - Title: {request.ideaTitle}
@@ -192,76 +355,346 @@ Project idea:
 - Domain: {request.domain}
 - Required technologies: {request.requiredTechnologies}
 - Required skills: {request.requiredSkills}
-- Missing skills: {request.missingSkills}
+- Missing skills (must be learned): {missing_text}
 - Difficulty level: {request.difficultyLevel}
 - Final deliverables: {request.finalDeliverables}
 
 Student/team:
 - Team size: {request.teamSize}
-- Available hours per week: {request.availableHoursPerWeek}
-- Student skills: {skills_text}
+- Available hours per week per member: {request.availableHoursPerWeek}
+- Total weekly capacity: about {weekly_capacity} hours
+- Existing skills: {skills_text}
 - Skill ratings: {ratings_text}
+- {capacity_note}
 
-Use this fixed week structure:
-{fixed_structure}
+Timeline:
+- Total project duration: {total_weeks} weeks.
+- Design 4 to 7 phases. Each phase lasts 1 to 4 weeks ("weeks" field).
+- Phase durations should roughly add up to {total_weeks} weeks (the platform will adjust exact numbers).
+- Give MORE weeks to the phases that are hardest FOR THIS SPECIFIC PROJECT AND TEAM: complex core features, AI/data work, and areas where skills are missing. Give FEWER weeks to easy or routine phases.
 
-Strict rules:
-- Return only valid JSON.
-- Do not use markdown.
-- Do not add explanation outside JSON.
-- Do not wrap JSON in code fences.
-- Generate exactly {total_weeks} weeks.
-- Do not skip week numbers.
-- Do not change the week numbers.
-- Each week must be customized to the selected project.
-- Keep tasks realistic for the team size and available hours.
-- If team size is 1, teamResponsibilities should mention "Student".
-- If team size is more than 1, split responsibilities between members.
-- Use "Member 1", "Member 2", etc. Do not use "Student 1" or "Student 2".
-- teamResponsibilities must contain exactly one item per team member.
-- Each team responsibility must be specific to that week’s phase.
-- Do not repeat the same responsibility sentence across weeks.
-- Mention missing skills in early weeks as learning tasks.
-- Do not suggest React, Node.js, Flutter, AWS, Azure, Kubernetes, blockchain, Web3, Flask, Balsamiq, or Figma.
-- Prefer ASP.NET Core Razor Pages, Python FastAPI, PostgreSQL, Bootstrap, JavaScript.
-- Never mention Flask. Use Python FastAPI only.
-- Never mention external design tools unless they are provided in the input.
-- For UI weeks, assign UI/design/documentation tasks.
-- For database weeks, assign schema/database tasks.
-- For AI/API weeks, assign FastAPI/Ollama/API integration tasks.
-- For testing weeks, assign testing/debugging tasks.
-- For documentation weeks, assign report/user-guide/presentation tasks.
-- Do not mix too many fallback-style tasks with AI-customized tasks.
-- Avoid repeating the same task in multiple weeks.
-- Each week must include 3 to 5 tasks.
-- Each week must include 1 to 3 deliverables.
-- Each week must include 1 to 4 skillsToLearn.
-- riskWarning must be one short sentence.
-- checkpoint must be one short sentence.
+Phase design rules:
+- The phase structure must fit THIS project. A data/AI-heavy project needs dataset/model/evaluation phases. A workflow web app needs core-workflow phases named after its real features. Do NOT use a generic template.
+- Phase names must mention the project's actual features or components, not generic labels like "Core Feature Development".
+- Every task must be concrete and name a real feature, screen, entity, endpoint, or technology from this project. 
+  BAD: "Implement main features". 
+  GOOD: "Implement the medicine reminder scheduling form and store reminders in PostgreSQL".
+- The FIRST phase must include learning tasks for each missing skill: {missing_text}.
+- 4 to 10 tasks per phase, 2 to 4 deliverables per phase, 0 to 4 skillsToLearn per phase.
+- riskWarning: one short sentence about the biggest risk of that phase for this team.
+- checkpoint: one short sentence describing what the supervisor should verify at the end of the phase.
+- Technology constraints: use ASP.NET Core Razor Pages, Python FastAPI, PostgreSQL, Bootstrap, JavaScript, and Ollama where relevant. Do not suggest React, Node.js, Flutter, AWS, Azure, Kubernetes, blockchain, Flask, Balsamiq, or Figma.
+- Return only valid JSON. No markdown, no explanations, no code fences.
 
 Return exactly this JSON structure:
 
 {{
-  "roadmapTitle": "",
-  "totalWeeks": {total_weeks},
-  "difficultyLevel": "",
-  "teamStrategy": "",
-  "weeks": [
+  "roadmapTitle": "string",
+  "teamStrategy": "1-2 sentences on how this specific team should divide and pace the work",
+  "finalAdvice": "1-2 sentences of project-specific advice",
+  "phases": [
     {{
-      "weekNumber": 1,
-      "phaseTitle": "",
-      "mainGoal": "",
-      "tasks": [],
-      "deliverables": [],
-      "teamResponsibilities": [],
-      "skillsToLearn": [],
-      "riskWarning": "",
-      "checkpoint": ""
+      "name": "string",
+      "weeks": 2,
+      "goal": "string",
+      "tasks": ["string"],
+      "deliverables": ["string"],
+      "skillsToLearn": ["string"],
+      "riskWarning": "string",
+      "checkpoint": "string"
     }}
-  ],
-  "finalAdvice": ""
+  ]
 }}
 """
+
+    # =========================================================================
+    # Deterministic expansion: phases -> weeks
+    # =========================================================================
+
+    def _expand_plan_to_weeks(
+        self,
+        request: ProjectRoadmapRequest,
+        plan: _RoadmapPlan,
+        total_weeks: int,
+    ) -> ProjectRoadmapResponse:
+        phases = plan.phases
+        durations = self._normalize_phase_durations(
+            proposed=[phase.weeks for phase in phases],
+            total_weeks=total_weeks,
+        )
+
+        missing_skills = self._split_items(request.missingSkills)
+
+        weeks: list[RoadmapWeek] = []
+        week_number = 1
+
+        for phase, duration in zip(phases, durations):
+            task_chunks = self._chunk_tasks(phase.tasks, duration)
+
+            for week_in_phase in range(1, duration + 1):
+                is_last_week = week_in_phase == duration
+                week_tasks = self._ensure_task_count(
+                    tasks=task_chunks[week_in_phase - 1],
+                    phase=phase,
+                )
+
+                weeks.append(
+                    RoadmapWeek(
+                        weekNumber=week_number,
+                        phaseTitle=phase.name,
+                        mainGoal=self._week_goal(phase, week_in_phase, duration),
+                        tasks=week_tasks,
+                        deliverables=self._week_deliverables(
+                            phase, is_last_week
+                        ),
+                        teamResponsibilities=self._derive_responsibilities(
+                            request, week_tasks, phase
+                        ),
+                        skillsToLearn=self._week_skills(
+                            phase, missing_skills, week_number
+                        ),
+                        riskWarning=(
+                            phase.riskWarning
+                            or "Avoid expanding the scope beyond this phase's goal."
+                        ),
+                        checkpoint=self._week_checkpoint(
+                            phase, is_last_week
+                        ),
+                    )
+                )
+
+                week_number += 1
+
+        return ProjectRoadmapResponse(
+            roadmapTitle=self._clean_text(
+                plan.roadmapTitle,
+                f"Implementation Roadmap for {request.ideaTitle}",
+            ),
+            totalWeeks=total_weeks,
+            difficultyLevel=request.difficultyLevel,
+            teamStrategy=self._clean_text(
+                plan.teamStrategy,
+                self._default_team_strategy(request),
+            ),
+            weeks=weeks,
+            finalAdvice=self._clean_text(
+                plan.finalAdvice,
+                (
+                    "Start with the MVP, review progress weekly, and avoid adding "
+                    "advanced features before the core workflow is stable."
+                ),
+            ),
+        )
+
+    def _normalize_phase_durations(
+        self,
+        proposed: list[int],
+        total_weeks: int,
+    ) -> list[int]:
+        """
+        Scale the LLM-proposed phase durations so they sum EXACTLY to
+        total_weeks, preserving their relative weights (largest-remainder
+        method), with a minimum of 1 week per phase.
+        """
+        count = len(proposed)
+
+        if count == 0:
+            return []
+
+        if count >= total_weeks:
+            # One week per phase for the first total_weeks phases.
+            return [1] * total_weeks + [0] * 0 if count == total_weeks else [1] * count
+
+        cleaned = [max(1, int(value or 1)) for value in proposed]
+        proposed_total = sum(cleaned)
+
+        # Ideal (fractional) durations preserving relative weights.
+        ideal = [value * total_weeks / proposed_total for value in cleaned]
+
+        # Floor with minimum 1, then distribute the remainder by largest
+        # fractional part.
+        floors = [max(1, int(value)) for value in ideal]
+        remainder = total_weeks - sum(floors)
+
+        if remainder > 0:
+            fractional = sorted(
+                range(count),
+                key=lambda i: ideal[i] - int(ideal[i]),
+                reverse=True,
+            )
+            for i in range(remainder):
+                floors[fractional[i % count]] += 1
+        elif remainder < 0:
+            # Took too much because of the min-1 rule: shrink the largest
+            # phases first, never below 1.
+            for _ in range(-remainder):
+                largest = max(range(count), key=lambda i: floors[i])
+                if floors[largest] > 1:
+                    floors[largest] -= 1
+
+        return floors
+
+    def _chunk_tasks(self, tasks: list[str], duration: int) -> list[list[str]]:
+        """Split a phase's tasks across its weeks in order (contiguous
+        chunks), so early-phase tasks land in early weeks."""
+        if duration <= 1:
+            return [list(tasks)]
+
+        chunks: list[list[str]] = [[] for _ in range(duration)]
+
+        for index, task in enumerate(tasks):
+            chunks[min(index * duration // max(1, len(tasks)), duration - 1)].append(task)
+
+        return chunks
+
+    def _ensure_task_count(
+        self,
+        tasks: list[str],
+        phase: _PhasePlan,
+    ) -> list[str]:
+        """Guarantee 3-5 tasks per week without inventing content: pad with
+        review/refinement variants of the phase's own tasks."""
+        result = list(tasks)
+
+        pad_sources = [task for task in phase.tasks if task not in result]
+        pad_templates = [
+            "Review and refine: {task}",
+            "Test and verify: {task}",
+        ]
+
+        template_index = 0
+        source_index = 0
+
+        while len(result) < 3:
+            if pad_sources:
+                source = pad_sources[source_index % len(pad_sources)]
+                source_index += 1
+            elif phase.tasks:
+                source = phase.tasks[source_index % len(phase.tasks)]
+                source_index += 1
+            else:
+                result.append(f"Progress the {phase.name} work and record blockers.")
+                continue
+
+            candidate = pad_templates[template_index % len(pad_templates)].format(
+                task=self._lower_first(source)
+            )
+            template_index += 1
+
+            if candidate not in result:
+                result.append(candidate)
+
+        return result[:5]
+
+    def _week_goal(self, phase: _PhasePlan, week_in_phase: int, duration: int) -> str:
+        goal = phase.goal or f"Advance the {phase.name} phase."
+
+        if duration == 1:
+            return goal
+
+        if week_in_phase == 1:
+            return f"Start: {goal}"
+
+        if week_in_phase == duration:
+            return f"Complete: {goal}"
+
+        return f"Continue (week {week_in_phase} of {duration}): {goal}"
+
+    def _week_deliverables(
+        self,
+        phase: _PhasePlan,
+        is_last_week: bool,
+    ) -> list[str]:
+        if is_last_week and phase.deliverables:
+            return phase.deliverables[:3]
+
+        if phase.deliverables:
+            return [f"Progress update: {phase.deliverables[0]}"]
+
+        return [f"Progress update on {phase.name}"]
+
+    def _week_checkpoint(self, phase: _PhasePlan, is_last_week: bool) -> str:
+        if is_last_week:
+            return (
+                phase.checkpoint
+                or f"Supervisor reviews the completed {phase.name} phase."
+            )
+
+        return f"Internal team review of {phase.name} progress."
+
+    def _week_skills(
+        self,
+        phase: _PhasePlan,
+        missing_skills: list[str],
+        week_number: int,
+    ) -> list[str]:
+        skills = list(phase.skillsToLearn)
+
+        # Front-load missing skills in the first two weeks of the roadmap.
+        if week_number <= 2:
+            for skill in missing_skills:
+                if skill not in skills:
+                    skills.insert(0, skill)
+
+        if not skills:
+            return ["progress tracking"]
+
+        return skills[:4]
+
+    def _derive_responsibilities(
+        self,
+        request: ProjectRoadmapRequest,
+        week_tasks: list[str],
+        phase: _PhasePlan,
+    ) -> list[str]:
+        """
+        Responsibilities are DERIVED from the week's actual tasks — one per
+        member, guaranteed count, specific to this week, never a canned
+        sentence repeated across weeks.
+        """
+        team_count = max(1, min(request.teamSize, 5))
+
+        if team_count == 1:
+            first_task = (
+                self._lower_first(week_tasks[0])
+                if week_tasks
+                else f"progress the {phase.name} work"
+            )
+            return [f"Student: lead this week's work, starting with {first_task}"]
+
+        responsibilities: list[str] = []
+
+        for member_index in range(team_count):
+            if week_tasks:
+                task = week_tasks[member_index % len(week_tasks)]
+                text = self._lower_first(task)
+
+                if member_index >= len(week_tasks):
+                    responsibilities.append(
+                        f"Member {member_index + 1}: support and verify {text}"
+                    )
+                else:
+                    responsibilities.append(
+                        f"Member {member_index + 1}: own {text}"
+                    )
+            else:
+                responsibilities.append(
+                    f"Member {member_index + 1}: progress the {phase.name} work."
+                )
+
+        return responsibilities
+
+    def _lower_first(self, text: str) -> str:
+        clean = text.strip().rstrip(".")
+
+        if not clean:
+            return clean
+
+        return clean[0].lower() + clean[1:]
+
+    # =========================================================================
+    # Ollama JSON parsing
+    # =========================================================================
 
     def _parse_llm_json(self, text: str) -> Optional[dict[str, Any]]:
         try:
@@ -287,6 +720,10 @@ Return exactly this JSON structure:
         except Exception as ex:
             self.last_error = f"Could not parse Ollama JSON: {str(ex)}"
             return None
+
+    # =========================================================================
+    # Fallback path (unchanged behavior from v1, used only when the LLM fails)
+    # =========================================================================
 
     def _complete_and_validate(
         self,
@@ -437,14 +874,6 @@ Return exactly this JSON structure:
             value = 10
 
         return max(6, min(value, 12))
-
-    def _base_week_structure(self, total_weeks: int) -> str:
-        phases = self._phase_names(total_weeks)
-
-        return "\n".join(
-            f"Week {index + 1}: {phase}"
-            for index, phase in enumerate(phases)
-        )
 
     def _phase_names(self, total_weeks: int) -> list[str]:
         base = [
@@ -769,9 +1198,7 @@ Return exactly this JSON structure:
         if not text:
             return fallback
 
-        lowered = text.lower()
-
-        if any(blocked in lowered for blocked in self.blocked_terms):
+        if self._contains_blocked_term(text):
             return fallback
 
         return text

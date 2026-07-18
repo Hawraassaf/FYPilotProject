@@ -9,8 +9,10 @@ The agent:
   database design, API integration, testing, documentation, defense,
   and team planning.
 - Uses Ollama as the reasoning engine.
-- Uses qwen2.5:7b for normal mentor answers.
-- Uses qwen2.5-coder:7b only for code generation.
+- Uses ONE model (qwen2.5-coder:7b) for both mentoring and code generation.
+  Rationale: the host runs Ollama 100% on CPU with limited RAM, so
+  alternating between two 7B models forces a ~5.5GB model reload on every
+  switch. One always-warm model removes that penalty and a failure mode.
 - Validates AI responses and returns safe fallback answers.
 """
 
@@ -141,16 +143,13 @@ class FypMentorAgent:
     """
     Context-aware AI mentor for final year projects.
 
-    Normal mentoring model:
-        qwen2.5:7b
-
-    Coding model:
+    Single model for all requests (see module docstring for rationale):
         qwen2.5-coder:7b
     """
 
     def __init__(
         self,
-        model: str = "qwen2.5:7b",
+        model: str = "qwen2.5-coder:7b",
         code_model: Optional[str] = "qwen2.5-coder:7b",
     ):
         self.model = model
@@ -273,7 +272,15 @@ class FypMentorAgent:
         messages = self._build_messages(request)
 
         selected_model = self.code_model if code_requested else self.model
-        num_predict = 4200 if code_requested else 1800
+
+        # Latency control for CPU-only inference (~4-8 tokens/sec):
+        # - Normal mentor answers: 800 tokens (~1.5-3 min worst case, usually
+        #   ~60-100s), paired with the "2-4 short paragraphs" system rule so
+        #   the model plans a short answer instead of getting truncated.
+        # - Code generation: 2600 tokens. Code responses are longer by nature,
+        #   but 4200 was ~14 minutes of CPU time and would exceed any sane
+        #   HTTP timeout. Code generation is not part of the live demo.
+        num_predict = 2600 if code_requested else 800
 
         llm_text = self._call_ollama_chat(
             messages=messages,
@@ -389,6 +396,7 @@ DEFENSE-HELP RULES:
 OUTPUT RULES:
 - Return only valid JSON.
 - Do not use markdown outside JSON.
+- reply must be 2 to 4 short paragraphs, maximum 200 words. Be concise and direct.
 - intent must be exactly one of:
   general_fyp_help,
   idea_explanation,
@@ -447,13 +455,7 @@ Return exactly this JSON structure:
                 if request.dnaSummary is not None
                 else None
             ),
-            "roadmap": [
-                phase.model_dump()
-                for phase in sorted(
-                    request.roadmap,
-                    key=lambda item: item.phaseNumber,
-                )[:12]
-            ],
+            "roadmap": self._slim_roadmap_context(request),
             "codeContext": (
                 self._safe_code_context(request.codeContext)
                 if request.codeContext is not None
@@ -468,14 +470,18 @@ Return exactly this JSON structure:
             }
         ]
 
-        for history_item in request.recentMessages[-8:]:
+        # Context budget control: system prompt (~1400 tokens) + history +
+        # context JSON + question must fit in num_ctx=8192, otherwise Ollama
+        # silently truncates from the START (dropping the system prompt).
+        # 6 messages x 1000 chars keeps history under ~1500 tokens.
+        for history_item in request.recentMessages[-6:]:
             content = history_item.content.strip()
 
             if content:
                 messages.append(
                     {
                         "role": history_item.role,
-                        "content": content[:1800],
+                        "content": content[:1000],
                     }
                 )
 
@@ -492,6 +498,43 @@ Return exactly this JSON structure:
         )
 
         return messages
+
+    def _slim_roadmap_context(
+        self,
+        request: FypMentorRequest,
+    ) -> list[dict[str, Any]]:
+        """
+        Token-budget-aware roadmap context.
+
+        All phases are listed with phaseNumber, name, objective, isCompleted
+        so the mentor sees the overall plan and progress. Full details
+        (tasks, expectedOutput, successCriteria) are included ONLY for the
+        next incomplete phase — the only phase the roadmap-help rules use.
+        Dumping every task of every phase previously cost 1500-2500 tokens
+        and risked overflowing num_ctx.
+        """
+        next_phase = self._next_incomplete_phase(request)
+        next_phase_number = next_phase.phaseNumber if next_phase else None
+
+        slim: list[dict[str, Any]] = []
+
+        for phase in sorted(request.roadmap, key=lambda item: item.phaseNumber)[:12]:
+            entry: dict[str, Any] = {
+                "phaseNumber": phase.phaseNumber,
+                "name": phase.name,
+                "objective": phase.objective,
+                "isCompleted": phase.isCompleted,
+            }
+
+            if phase.phaseNumber == next_phase_number:
+                entry["isNextPhase"] = True
+                entry["tasks"] = phase.tasks
+                entry["expectedOutput"] = phase.expectedOutput
+                entry["successCriteria"] = phase.successCriteria
+
+            slim.append(entry)
+
+        return slim
 
     def _safe_code_context(
         self,
@@ -523,14 +566,14 @@ Return exactly this JSON structure:
                     "messages": messages,
                     "stream": False,
                     "format": "json",
-                    "keep_alive": "10m",
+                    "keep_alive": "30m",
                     "options": {
                         "temperature": 0.12,
                         "num_predict": num_predict,
                         "num_ctx": 8192,
                     },
                 },
-                timeout=600,
+                timeout=(15, 600),
             )
 
             if not response.ok:
@@ -591,7 +634,7 @@ Return exactly this JSON structure:
 
         return self._call_ollama_chat(
             messages=repair_messages,
-            num_predict=3200,
+            num_predict=1600,
             model=model,
         )
 
@@ -1166,7 +1209,6 @@ Return exactly this JSON structure:
                 "weather",
                 "football",
                 "song",
-                "game",
                 "perfume",
                 "celebrity",
                 "horoscope",
@@ -1308,6 +1350,18 @@ Return exactly this JSON structure:
         message: str,
         code_context: MentorCodeContext | None = None,
     ) -> bool:
+        """
+        True only for EXPLICIT code requests.
+
+        Two signals count:
+        1. The .NET side sent codeContext (the student used a code-help flow).
+        2. The message explicitly asks for code to be produced or fixed.
+
+        Deliberately NOT triggered by code vocabulary alone ("bug", "class",
+        "endpoint", "dto", ...). A student asking "what entity classes do I
+        need?" wants mentoring, not a refusal for missing codeContext. Those
+        questions route to implementation/database/testing help instead.
+        """
         if code_context is not None:
             if (
                 code_context.targetFile.strip()
@@ -1320,42 +1374,28 @@ Return exactly this JSON structure:
 
         code_terms = [
             "generate code",
+            "generate the code",
             "write code",
+            "write the code",
             "give me code",
+            "give me the code",
             "full code",
-            "code for",
+            "complete code",
+            "code for this",
             "fix this code",
             "fix my code",
-            "refactor",
-            "compile",
-            "compilation",
-            "build error",
-            "runtime error",
-            "bug",
-            "method",
-            "class",
-            "dto",
-            "interface",
-            "service",
-            "controller",
-            "handler",
-            "endpoint",
-            "router",
-            "page model",
-            "razor page",
-            "cshtml",
-            "cshtml.cs",
-            "c#",
-            "python code",
-            "fastapi code",
-            "sql code",
-            "javascript code",
-            "create a class",
-            "create a function",
-            "create a method",
-            "create a handler",
-            "create an endpoint",
-            "create a table",
+            "refactor this",
+            "refactor my",
+            "paste-ready",
+            "paste ready",
+            "implement this method",
+            "implement this class",
+            "implement this function",
+            "write a function",
+            "write a method",
+            "write a class",
+            "write a query",
+            "write sql",
         ]
 
         return any(term in text for term in code_terms)
