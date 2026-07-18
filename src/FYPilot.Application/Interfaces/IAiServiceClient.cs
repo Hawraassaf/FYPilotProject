@@ -13,7 +13,11 @@ public interface IAiServiceClient
 
     /// <summary>POST /defense-simulator/generate-questions — Generate defense simulator questions.</summary>
     Task<DefenseGenerateQuestionsResponse?> GenerateDefenseQuestionsAsync(
-        DefenseGenerateQuestionsRequest request
+    DefenseGenerateQuestionsRequest request
+);
+
+    Task<DefenseEvaluateAnswerResponse?> EvaluateDefenseAnswerAsync(
+        DefenseEvaluateAnswerRequest request
     );
 
     /// <summary>POST /analyze-skills — Score a student's skill set.</summary>

@@ -20,6 +20,12 @@ public class MentorChatModel(
 {
     public List<ChatMessage> Messages { get; private set; } = [];
 
+    public List<MentorChatSession> ChatSessions { get; private set; } = [];
+
+    public MentorChatSession? CurrentChat { get; private set; }
+
+    public int? CurrentChatId => CurrentChat?.Id;
+
     public List<ProjectIdea> Ideas { get; private set; } = [];
 
     public ProjectIdea? SelectedIdea { get; private set; }
@@ -34,7 +40,8 @@ public class MentorChatModel(
 
     public FypMentorAnswerDto? MentorAnswer => MentorResponse?.Answer;
 
-    public string? ErrorMessage { get; private set; }
+    [TempData]
+    public string? ErrorMessage { get; set; }
 
     [BindProperty]
     public string MessageText { get; set; } = "";
@@ -54,24 +61,103 @@ public class MentorChatModel(
     [BindProperty]
     public string ConstraintsText { get; set; } = "";
 
-    public async Task OnGetAsync(int? ideaId)
+    public async Task OnGetAsync(int? ideaId, int? chatId)
     {
-        await LoadAsync(ideaId);
+        await LoadAsync(ideaId, chatId, ensureChatExists: true);
     }
 
-    public async Task<IActionResult> OnPostAsync(string? message, int? ideaId)
+    public async Task<IActionResult> OnPostAsync(
+        string? message,
+        int? ideaId,
+        int? chatId)
     {
-        return await HandleSendAsync(message, ideaId);
+        return await HandleSendAsync(message, ideaId, chatId);
     }
 
-    public async Task<IActionResult> OnPostSendAsync(string? message, int? ideaId)
+    public async Task<IActionResult> OnPostSendAsync(
+        string? message,
+        int? ideaId,
+        int? chatId)
     {
-        return await HandleSendAsync(message, ideaId);
+        return await HandleSendAsync(message, ideaId, chatId);
     }
 
-    private async Task<IActionResult> HandleSendAsync(string? message, int? ideaId)
+    public async Task<IActionResult> OnPostNewChatAsync(int? ideaId)
     {
-        await LoadAsync(ideaId);
+        await LoadAsync(ideaId, chatId: null, ensureChatExists: false);
+
+        var userId = UserId();
+
+        var chat = new MentorChatSession
+        {
+            UserId = userId,
+            IdeaId = SelectedIdeaId,
+            Title = "New chat",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        db.MentorChatSessions.Add(chat);
+        await db.SaveChangesAsync();
+
+        return RedirectToPage(new
+        {
+            ideaId = SelectedIdeaId,
+            chatId = chat.Id
+        });
+    }
+
+    public async Task<IActionResult> OnPostDeleteChatAsync(
+        int chatId,
+        int? ideaId)
+    {
+        var userId = UserId();
+
+        var chat = await db.MentorChatSessions
+            .FirstOrDefaultAsync(s =>
+                s.Id == chatId &&
+                s.UserId == userId &&
+                s.DeletedAt == null);
+
+        if (chat == null)
+        {
+            ErrorMessage = "The selected conversation could not be found.";
+
+            return RedirectToPage(new
+            {
+                ideaId
+            });
+        }
+
+        // Soft-delete keeps the history safely in the database.
+        chat.DeletedAt = DateTime.UtcNow;
+        chat.UpdatedAt = DateTime.UtcNow;
+
+        await db.SaveChangesAsync();
+
+        var nextChatId = await db.MentorChatSessions
+            .AsNoTracking()
+            .Where(s =>
+                s.UserId == userId &&
+                s.IdeaId == chat.IdeaId &&
+                s.DeletedAt == null)
+            .OrderByDescending(s => s.UpdatedAt)
+            .Select(s => (int?)s.Id)
+            .FirstOrDefaultAsync();
+
+        return RedirectToPage(new
+        {
+            ideaId = chat.IdeaId ?? ideaId,
+            chatId = nextChatId
+        });
+    }
+
+    private async Task<IActionResult> HandleSendAsync(
+        string? message,
+        int? ideaId,
+        int? chatId)
+    {
+        await LoadAsync(ideaId, chatId, ensureChatExists: true);
 
         var finalMessage = !string.IsNullOrWhiteSpace(MessageText)
             ? MessageText.Trim()
@@ -81,17 +167,32 @@ public class MentorChatModel(
         {
             ErrorMessage = "Please write a message before sending.";
 
-            ClearMessageInput();
+            return RedirectToPage(new
+            {
+                ideaId = SelectedIdeaId,
+                chatId = CurrentChatId
+            });
+        }
 
-            return Page();
+        if (CurrentChat == null)
+        {
+            ErrorMessage = "A chat session could not be created.";
+
+            return RedirectToPage(new
+            {
+                ideaId = SelectedIdeaId
+            });
         }
 
         var userId = UserId();
 
         var recentMessages = Messages
+            .Where(m =>
+                (m.Role == "user" || m.Role == "assistant") &&
+                !string.IsNullOrWhiteSpace(m.Content))
             .OrderBy(m => m.CreatedAt)
+            .ThenBy(m => m.Id)
             .TakeLast(8)
-            .Where(m => m.Role == "user" || m.Role == "assistant")
             .Select(m => new MentorRecentMessageDto(
                 Role: m.Role,
                 Content: m.Content
@@ -102,9 +203,24 @@ public class MentorChatModel(
         {
             UserId = userId,
             IdeaId = SelectedIdeaId,
+            MentorChatSessionId = CurrentChat.Id,
             Role = "user",
-            Content = finalMessage
+            Content = finalMessage,
+            CreatedAt = DateTime.UtcNow
         });
+
+        if (string.Equals(
+                CurrentChat.Title,
+                "New chat",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            CurrentChat.Title = BuildChatTitle(finalMessage);
+        }
+
+        CurrentChat.UpdatedAt = DateTime.UtcNow;
+
+        // Save the student's message before calling Python so it is never lost.
+        await db.SaveChangesAsync();
 
         var request = new FypMentorRequest(
             Message: finalMessage,
@@ -122,80 +238,200 @@ public class MentorChatModel(
         }
         catch (Exception ex)
         {
+            logger.LogError(
+                ex,
+                "Mentor chat failed for user {UserId}, idea {IdeaId}, chat {ChatId}.",
+                userId,
+                SelectedIdeaId,
+                CurrentChat.Id);
+
             MentorResponse = null;
-            ErrorMessage = $"The FYP Mentor Chat could not respond. Backend error: {ex.Message}";
+            ErrorMessage =
+                "The FYP Mentor could not respond. Make sure the Python AI service is running and the internal API key matches.";
         }
+
+        string assistantContent;
 
         if (MentorResponse == null)
         {
-            ErrorMessage ??= "The FYP Mentor Chat could not respond. Make sure the Python AI service is running and the /fyp-chat request body is valid.";
-
-            db.ChatMessages.Add(new ChatMessage
-            {
-                UserId = userId,
-                IdeaId = SelectedIdeaId,
-                Role = "assistant",
-                Content = ErrorMessage
-            });
-
-            await db.SaveChangesAsync();
-            await LoadAsync(SelectedIdeaId);
-
-            ClearMessageInput();
-
-            return Page();
+            assistantContent =
+                ErrorMessage ??
+                "The FYP Mentor could not respond at the moment.";
         }
-
-        var assistantContent = BuildAssistantMessageContent(MentorResponse.Answer);
+        else
+        {
+            assistantContent =
+                BuildAssistantMessageContent(MentorResponse.Answer);
+        }
 
         db.ChatMessages.Add(new ChatMessage
         {
             UserId = userId,
             IdeaId = SelectedIdeaId,
+            MentorChatSessionId = CurrentChat.Id,
             Role = "assistant",
-            Content = assistantContent
+            Content = assistantContent,
+            CreatedAt = DateTime.UtcNow
         });
 
+        CurrentChat.UpdatedAt = DateTime.UtcNow;
+
         await db.SaveChangesAsync();
-        await LoadAsync(SelectedIdeaId);
 
         ClearMessageInput();
 
-        return Page();
+        // Post/Redirect/Get prevents duplicate messages after browser refresh.
+        return RedirectToPage(new
+        {
+            ideaId = SelectedIdeaId,
+            chatId = CurrentChat.Id
+        });
     }
 
-    private async Task LoadAsync(int? ideaId)
+    private async Task LoadAsync(
+        int? ideaId,
+        int? chatId,
+        bool ensureChatExists)
     {
         var userId = UserId();
 
         Profile = await db.StudentProfiles
+            .AsNoTracking()
             .FirstOrDefaultAsync(p => p.UserId == userId);
 
         Skills = await db.StudentSkills
+            .AsNoTracking()
             .Where(s => s.UserId == userId)
             .ToListAsync();
 
         Ideas = await db.ProjectIdeas
+            .AsNoTracking()
             .Where(i => i.UserId == userId)
             .OrderByDescending(i => i.CreatedAt)
             .Take(12)
             .ToListAsync();
 
         SelectedIdea = ideaId.HasValue
-            ? await db.ProjectIdeas.FirstOrDefaultAsync(i => i.Id == ideaId.Value && i.UserId == userId)
-            : await db.ProjectIdeas.FirstOrDefaultAsync(i => i.UserId == userId && i.IsSelected)
+            ? await db.ProjectIdeas
+                .AsNoTracking()
+                .FirstOrDefaultAsync(i =>
+                    i.Id == ideaId.Value &&
+                    i.UserId == userId)
+            : await db.ProjectIdeas
+                .AsNoTracking()
+                .FirstOrDefaultAsync(i =>
+                    i.UserId == userId &&
+                    i.IsSelected)
               ?? await db.ProjectIdeas
+                  .AsNoTracking()
                   .Where(i => i.UserId == userId)
                   .OrderByDescending(i => i.CreatedAt)
                   .FirstOrDefaultAsync();
 
         SelectedIdeaId = SelectedIdea?.Id;
 
-        Messages = await db.ChatMessages
-            .Where(m => m.UserId == userId && m.IdeaId == SelectedIdeaId)
-            .OrderBy(m => m.CreatedAt)
+        ChatSessions = await db.MentorChatSessions
+            .AsNoTracking()
+            .Where(s =>
+                s.UserId == userId &&
+                s.IdeaId == SelectedIdeaId &&
+                s.DeletedAt == null)
+            .OrderByDescending(s => s.UpdatedAt)
+            .ThenByDescending(s => s.Id)
+            .Take(30)
+            .ToListAsync();
+
+        CurrentChat = chatId.HasValue
+            ? ChatSessions.FirstOrDefault(s => s.Id == chatId.Value)
+            : ChatSessions.FirstOrDefault();
+
+        if (CurrentChat == null && ensureChatExists)
+        {
+            var hadNoSessions = ChatSessions.Count == 0;
+
+            var newChat = new MentorChatSession
+            {
+                UserId = userId,
+                IdeaId = SelectedIdeaId,
+                Title = "New chat",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            db.MentorChatSessions.Add(newChat);
+            await db.SaveChangesAsync();
+
+            // Preserve messages created before chat sessions were introduced.
+            if (hadNoSessions)
+            {
+                var legacyMessages = await db.ChatMessages
+                    .Where(m =>
+                        m.UserId == userId &&
+                        m.IdeaId == SelectedIdeaId &&
+                        m.MentorChatSessionId == null)
+                    .OrderBy(m => m.CreatedAt)
+                    .ThenBy(m => m.Id)
+                    .ToListAsync();
+
+                if (legacyMessages.Count > 0)
+                {
+                    foreach (var legacyMessage in legacyMessages)
+                    {
+                        legacyMessage.MentorChatSessionId = newChat.Id;
+                    }
+
+                    var firstUserMessage = legacyMessages
+                        .FirstOrDefault(m =>
+                            m.Role == "user" &&
+                            !string.IsNullOrWhiteSpace(m.Content));
+
+                    if (firstUserMessage != null)
+                    {
+                        newChat.Title =
+                            BuildChatTitle(firstUserMessage.Content);
+                    }
+
+                    newChat.UpdatedAt =
+                        legacyMessages.Max(m => m.CreatedAt);
+
+                    await db.SaveChangesAsync();
+                }
+            }
+
+            CurrentChat = newChat;
+
+            ChatSessions = await db.MentorChatSessions
+                .AsNoTracking()
+                .Where(s =>
+                    s.UserId == userId &&
+                    s.IdeaId == SelectedIdeaId &&
+                    s.DeletedAt == null)
+                .OrderByDescending(s => s.UpdatedAt)
+                .ThenByDescending(s => s.Id)
+                .Take(30)
+                .ToListAsync();
+        }
+
+        if (CurrentChat == null)
+        {
+            Messages = [];
+            return;
+        }
+
+        var newestMessages = await db.ChatMessages
+            .AsNoTracking()
+            .Where(m =>
+                m.UserId == userId &&
+                m.MentorChatSessionId == CurrentChat.Id)
+            .OrderByDescending(m => m.CreatedAt)
+            .ThenByDescending(m => m.Id)
             .Take(50)
             .ToListAsync();
+
+        Messages = newestMessages
+            .OrderBy(m => m.CreatedAt)
+            .ThenBy(m => m.Id)
+            .ToList();
     }
 
     private MentorStudentProfileDto BuildStudentProfileDto()
@@ -210,19 +446,31 @@ public class MentorChatModel(
 
         foreach (var skill in Skills)
         {
-            var skillName = GetString(skill, "SkillName", "Name", "Title");
+            var skillName = GetString(
+                skill,
+                "SkillName",
+                "Name",
+                "Title");
 
             if (string.IsNullOrWhiteSpace(skillName))
             {
                 continue;
             }
 
-            var rating = GetInt(skill, 3, "Rating", "Level", "SkillLevel", "Score");
+            var rating = GetInt(
+                skill,
+                3,
+                "Rating",
+                "Level",
+                "SkillLevel",
+                "Score");
+
             skillRatings[skillName] = rating;
         }
 
         var major = GetString(Profile, "Major");
-        var experienceLevel = GetString(Profile, "ExperienceLevel");
+        var experienceLevel =
+            GetString(Profile, "ExperienceLevel");
 
         if (string.IsNullOrWhiteSpace(major))
         {
@@ -237,8 +485,15 @@ public class MentorChatModel(
         return new MentorStudentProfileDto(
             Major: major,
             ExperienceLevel: experienceLevel,
-            TeamSize: GetInt(Profile, 1, "TeamMembers", "TeamSize"),
-            AvailableHoursPerWeek: GetInt(Profile, 10, "AvailableHoursPerWeek"),
+            TeamSize: GetInt(
+                Profile,
+                1,
+                "TeamMembers",
+                "TeamSize"),
+            AvailableHoursPerWeek: GetInt(
+                Profile,
+                10,
+                "AvailableHoursPerWeek"),
             Skills: studentSkills,
             SkillRatings: skillRatings
         );
@@ -253,17 +508,53 @@ public class MentorChatModel(
 
         return new MentorSelectedIdeaDto(
             Id: SelectedIdea.Id,
-            Title: GetString(SelectedIdea, "Title", "IdeaTitle", "Name"),
-            ProblemStatement: GetString(SelectedIdea, "ProblemStatement", "Problem", "Description"),
-            TargetUsers: GetString(SelectedIdea, "TargetUsers", "Users"),
-            WhyUseful: GetString(SelectedIdea, "WhyUseful", "Usefulness", "Value"),
-            RequiredTechnologies: GetString(SelectedIdea, "RequiredTechnologies", "Technologies", "TechStack"),
-            RequiredSkills: GetString(SelectedIdea, "RequiredSkills"),
-            MissingSkills: GetString(SelectedIdea, "MissingSkills"),
-            DifficultyLevel: GetString(SelectedIdea, "DifficultyLevel", "Difficulty"),
-            ExpectedDurationWeeks: GetInt(SelectedIdea, 10, "ExpectedDurationWeeks", "DurationWeeks"),
-            Domain: GetString(SelectedIdea, "Domain", "ProjectDomain"),
-            FinalDeliverables: GetString(SelectedIdea, "FinalDeliverables", "Deliverables")
+            Title: GetString(
+                SelectedIdea,
+                "Title",
+                "IdeaTitle",
+                "Name"),
+            ProblemStatement: GetString(
+                SelectedIdea,
+                "ProblemStatement",
+                "Problem",
+                "Description"),
+            TargetUsers: GetString(
+                SelectedIdea,
+                "TargetUsers",
+                "Users"),
+            WhyUseful: GetString(
+                SelectedIdea,
+                "WhyUseful",
+                "Usefulness",
+                "Value"),
+            RequiredTechnologies: GetString(
+                SelectedIdea,
+                "RequiredTechnologies",
+                "Technologies",
+                "TechStack"),
+            RequiredSkills: GetString(
+                SelectedIdea,
+                "RequiredSkills"),
+            MissingSkills: GetString(
+                SelectedIdea,
+                "MissingSkills"),
+            DifficultyLevel: GetString(
+                SelectedIdea,
+                "DifficultyLevel",
+                "Difficulty"),
+            ExpectedDurationWeeks: GetInt(
+                SelectedIdea,
+                10,
+                "ExpectedDurationWeeks",
+                "DurationWeeks"),
+            Domain: GetString(
+                SelectedIdea,
+                "Domain",
+                "ProjectDomain"),
+            FinalDeliverables: GetString(
+                SelectedIdea,
+                "FinalDeliverables",
+                "Deliverables")
         );
     }
 
@@ -282,14 +573,19 @@ public class MentorChatModel(
         }
 
         var constraints = ConstraintsText
-            .Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries)
+            .Split(
+                ["\r\n", "\n"],
+                StringSplitOptions.RemoveEmptyEntries)
             .Select(x => x.Trim())
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .ToList();
 
         return new MentorCodeContextDto(
             TargetFile: TargetFile.Trim(),
-            Language: string.IsNullOrWhiteSpace(CodeLanguage) ? "csharp" : CodeLanguage.Trim(),
+            Language:
+                string.IsNullOrWhiteSpace(CodeLanguage)
+                    ? "csharp"
+                    : CodeLanguage.Trim(),
             ExistingCode: ExistingCode,
             RequestedChange: RequestedChange.Trim(),
             Constraints: constraints
@@ -297,7 +593,7 @@ public class MentorChatModel(
     }
 
     private async Task<List<MentorRoadmapPhaseDto>>
-       LoadRoadmapAsync(int? ideaId)
+        LoadRoadmapAsync(int? ideaId)
     {
         if (!ideaId.HasValue)
         {
@@ -308,8 +604,6 @@ public class MentorChatModel(
 
         try
         {
-            // Load only the roadmap belonging to the
-            // logged-in student and selected idea.
             var roadmap = await db.ProjectRoadmaps
                 .AsNoTracking()
                 .Include(r => r.Phases)
@@ -351,19 +645,24 @@ public class MentorChatModel(
         }
     }
 
-    private static string BuildAssistantMessageContent(FypMentorAnswerDto answer)
+    private static string BuildAssistantMessageContent(
+        FypMentorAnswerDto answer)
     {
         var content = answer.Reply;
 
         if (answer.SuggestedNextActions.Any())
         {
             content += "\n\nSuggested next actions:\n";
-            content += string.Join("\n", answer.SuggestedNextActions.Select(a => $"- {a}"));
+            content += string.Join(
+                "\n",
+                answer.SuggestedNextActions
+                    .Select(a => $"- {a}"));
         }
 
         if (!string.IsNullOrWhiteSpace(answer.Warning))
         {
-            content += $"\n\nWarning: {answer.Warning}";
+            content +=
+                $"\n\nWarning: {answer.Warning}";
         }
 
         if (answer.CodeBlocks.Any())
@@ -372,12 +671,33 @@ public class MentorChatModel(
 
             foreach (var block in answer.CodeBlocks)
             {
-                content += $"\nTarget file: {block.TargetFile}\n";
+                content +=
+                    $"\nTarget file: {block.TargetFile}\n";
+
                 content += $"{block.Content}\n";
             }
         }
 
         return content;
+    }
+
+    private static string BuildChatTitle(string message)
+    {
+        var clean = string.Join(
+            " ",
+            message
+                .Split(
+                    [' ', '\r', '\n', '\t'],
+                    StringSplitOptions.RemoveEmptyEntries));
+
+        if (string.IsNullOrWhiteSpace(clean))
+        {
+            return "New chat";
+        }
+
+        return clean.Length <= 45
+            ? clean
+            : clean[..45].TrimEnd() + "...";
     }
 
     private void ClearMessageInput()
@@ -387,9 +707,12 @@ public class MentorChatModel(
     }
 
     private int UserId()
-        => int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        => int.Parse(
+            User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
 
-    private static string GetString(object? obj, params string[] propertyNames)
+    private static string GetString(
+        object? obj,
+        params string[] propertyNames)
     {
         if (obj == null)
         {
@@ -398,7 +721,8 @@ public class MentorChatModel(
 
         foreach (var propertyName in propertyNames)
         {
-            var property = obj.GetType().GetProperty(propertyName);
+            var property =
+                obj.GetType().GetProperty(propertyName);
 
             if (property == null)
             {
@@ -418,7 +742,10 @@ public class MentorChatModel(
         return "";
     }
 
-    private static int GetInt(object? obj, int defaultValue, params string[] propertyNames)
+    private static int GetInt(
+        object? obj,
+        int defaultValue,
+        params string[] propertyNames)
     {
         if (obj == null)
         {
@@ -427,7 +754,8 @@ public class MentorChatModel(
 
         foreach (var propertyName in propertyNames)
         {
-            var property = obj.GetType().GetProperty(propertyName);
+            var property =
+                obj.GetType().GetProperty(propertyName);
 
             if (property == null)
             {
@@ -456,7 +784,9 @@ public class MentorChatModel(
                 return Convert.ToInt32(decimalValue);
             }
 
-            if (int.TryParse(value.ToString(), out var parsed))
+            if (int.TryParse(
+                    value.ToString(),
+                    out var parsed))
             {
                 return parsed;
             }
@@ -465,44 +795,9 @@ public class MentorChatModel(
         return defaultValue;
     }
 
-    private static bool GetBool(object? obj, params string[] propertyNames)
-    {
-        if (obj == null)
-        {
-            return false;
-        }
-
-        foreach (var propertyName in propertyNames)
-        {
-            var property = obj.GetType().GetProperty(propertyName);
-
-            if (property == null)
-            {
-                continue;
-            }
-
-            var value = property.GetValue(obj);
-
-            if (value == null)
-            {
-                continue;
-            }
-
-            if (value is bool boolValue)
-            {
-                return boolValue;
-            }
-
-            if (bool.TryParse(value.ToString(), out var parsed))
-            {
-                return parsed;
-            }
-        }
-
-        return false;
-    }
-
-    private static List<string> GetStringList(object? obj, params string[] propertyNames)
+    private static List<string> GetStringList(
+        object? obj,
+        params string[] propertyNames)
     {
         var value = GetString(obj, propertyNames);
 
@@ -513,11 +808,13 @@ public class MentorChatModel(
 
         value = value.Trim();
 
-        if (value.StartsWith("[") && value.EndsWith("]"))
+        if (value.StartsWith("[") &&
+            value.EndsWith("]"))
         {
             try
             {
-                var list = JsonSerializer.Deserialize<List<string>>(value);
+                var list =
+                    JsonSerializer.Deserialize<List<string>>(value);
 
                 if (list != null)
                 {
@@ -526,12 +823,14 @@ public class MentorChatModel(
             }
             catch
             {
-                // If JSON parsing fails, fall back to text splitting.
+                // Fall back to normal text splitting.
             }
         }
 
         return value
-            .Split(["\r\n", "\n", ";", "|"], StringSplitOptions.RemoveEmptyEntries)
+            .Split(
+                ["\r\n", "\n", ";", "|"],
+                StringSplitOptions.RemoveEmptyEntries)
             .Select(x => x.Trim())
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .ToList();

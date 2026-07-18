@@ -2,939 +2,2351 @@
 @model FYPilot.Web.Pages.Student.DefenseSimulatorModel
 @{
     ViewData["Title"] = "Defense Simulator";
-    ViewData["Subtitle"] = "AI-generated professor-style questions for your FYP defense.";
+    ViewData["Subtitle"] = "Project-aware AI practice with answer evaluation.";
 
-    var questionCount = Model.QnA?.Count ?? 0;
+    var hasQuestions = Model.State.Questions.Count > 0;
+    var totalQuestions = Model.State.Questions.Count;
+    var selectedFocusSet = Model.FocusAreas.ToHashSet(StringComparer.OrdinalIgnoreCase);
 }
 
-<section class="ds-page">
+<section class="defense-page">
+    <header class="defense-hero">
+        <div class="defense-hero__content">
+            <div class="defense-hero__eyebrow">
+                <span class="defense-live-dot"></span>
+                AI Defense Simulator
+            </div>
 
-    <header class="ds-hero">
-        <div class="ds-hero-content">
-            <span class="ds-eyebrow">AI Defense Simulator</span>
-            <h1>Practice AI-generated professor questions before your FYP defense.</h1>
+            <h1>Train for your FYP defense with questions built around your real project.</h1>
 
             <p>
-                The simulator uses your selected project idea, technologies, domain, skills, and roadmap context
-                to generate realistic defense questions using the AI backend.
+                Choose the technical areas you want to practice, answer before seeing the reference response,
+                and receive AI feedback on coverage, clarity, missing points, and confidence.
             </p>
 
-            <div class="ds-hero-actions">
-                <a href="/Student/DefenseSimulator" class="ds-btn ds-btn-light">
-                    <i class="bi bi-stars"></i>
-                    Generate AI Questions
+            <div class="defense-hero__actions">
+                <a href="#practice-config" class="defense-button defense-button--light">
+                    <i class="bi bi-play-circle"></i>
+                    Start practice
                 </a>
 
-                <a href="/Student/IdeaGenerator" class="ds-btn ds-btn-ghost">
+                <a asp-page="/Student/IdeaGenerator" class="defense-button defense-button--ghost">
                     <i class="bi bi-lightbulb"></i>
                     Change idea
                 </a>
 
-                <a href="/Student/Dashboard" class="ds-btn ds-btn-ghost">
+                <a asp-page="/Student/Dashboard" class="defense-button defense-button--ghost">
                     <i class="bi bi-grid"></i>
                     Dashboard
                 </a>
             </div>
         </div>
 
-        <div class="ds-hero-panel">
-            <div class="ds-hero-icon">
-                <i class="bi bi-robot"></i>
-            </div>
+        <div class="defense-hero__stats">
+            <article>
+                <span>@totalQuestions</span>
+                <small>Questions</small>
+            </article>
 
-            <div>
-                <span>@questionCount</span>
-                <small>AI-generated questions</small>
-            </div>
+            <article>
+                <span>@Model.EvaluatedCount</span>
+                <small>Evaluated</small>
+            </article>
+
+            <article>
+                <span>@Model.CompletionPercent%</span>
+                <small>Progress</small>
+            </article>
         </div>
     </header>
 
-    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
-    {
-        <div class="alert alert-warning ds-alert">
-            <i class="bi bi-exclamation-triangle me-2"></i>
-            @Model.ErrorMessage
-        </div>
-    }
+    <div class="defense-toast-stack"
+         id="defense-toast-stack"
+         aria-live="polite"
+         aria-atomic="true">
+
+        @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+        {
+            <div class="defense-toast defense-toast--error is-visible"
+                 role="alert"
+                 data-defense-toast
+                 data-auto-dismiss="5200">
+
+                <span class="defense-toast__icon">
+                    <i class="bi bi-exclamation-circle"></i>
+                </span>
+
+                <div class="defense-toast__content">
+                    <strong>Unable to continue</strong>
+                    <span>@Model.ErrorMessage</span>
+                </div>
+
+                <button type="button"
+                        class="defense-toast__close"
+                        data-toast-close
+                        aria-label="Dismiss message">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+
+                <span class="defense-toast__timer"></span>
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
+        {
+            <div class="defense-toast defense-toast--info is-visible"
+                 role="status"
+                 data-defense-toast
+                 data-auto-dismiss="4200">
+
+                <span class="defense-toast__icon">
+                    <i class="bi bi-check2-circle"></i>
+                </span>
+
+                <div class="defense-toast__content">
+                    <strong>Completed</strong>
+                    <span>@Model.SuccessMessage</span>
+                </div>
+
+                <button type="button"
+                        class="defense-toast__close"
+                        data-toast-close
+                        aria-label="Dismiss message">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+
+                <span class="defense-toast__timer"></span>
+            </div>
+        }
+    </div>
 
     @if (Model.Idea == null)
     {
-        <section class="ds-empty">
-            <div class="ds-empty-icon">
-                <i class="bi bi-shield"></i>
+        <section class="defense-empty">
+            <div class="defense-empty__icon">
+                <i class="bi bi-shield-exclamation"></i>
             </div>
 
-            <h2>No project idea selected yet</h2>
-
+            <span class="defense-kicker">Project required</span>
+            <h2>Select a project before starting a defense session.</h2>
             <p>
-                Generate or select a project idea first, then return here so the AI can generate
-                defense questions based on that specific project.
+                The simulator needs your idea, technologies, target users, roadmap, and skills
+                to produce realistic professor-style questions.
             </p>
 
-            <a href="/Student/IdeaGenerator" class="ds-btn ds-btn-primary">
+            <a asp-page="/Student/IdeaGenerator" class="defense-button defense-button--primary">
                 <i class="bi bi-lightbulb"></i>
-                Generate project idea
+                Select a project idea
             </a>
         </section>
     }
     else
     {
-        <section class="ds-project-strip">
-            <div>
-                <span class="ds-eyebrow">Current project context sent to AI</span>
+        <section class="defense-context">
+            <div class="defense-context__main">
+                <span class="defense-kicker">Active project context</span>
                 <h2>@Model.Idea.Title</h2>
+                <p>
+                    @(
+                        string.IsNullOrWhiteSpace(Model.Idea.ProblemStatement)
+                            ? "No problem statement is available."
+                            : Model.Idea.ProblemStatement
+                    )
+                </p>
             </div>
 
-            <div class="ds-project-tags">
+            <div class="defense-context__tags">
                 <span>
                     <i class="bi bi-folder2-open"></i>
-                    @(string.IsNullOrWhiteSpace(Model.Idea.Domain) ? "Project domain" : Model.Idea.Domain)
+                    @(string.IsNullOrWhiteSpace(Model.Idea.Domain) ? "General domain" : Model.Idea.Domain)
                 </span>
 
                 <span>
                     <i class="bi bi-cpu"></i>
-                    @(string.IsNullOrWhiteSpace(Model.Idea.RequiredTechnologies) ? "Technologies" : Model.Idea.RequiredTechnologies)
+                    @(string.IsNullOrWhiteSpace(Model.Idea.RequiredTechnologies) ? "Technology stack" : Model.Idea.RequiredTechnologies)
                 </span>
 
                 <span>
-                    <i class="bi bi-stars"></i>
-                    Ollama AI generated
+                    <i class="bi bi-shield-check"></i>
+                    Answers stay hidden until evaluation
                 </span>
             </div>
         </section>
 
-        <section class="ds-layout">
-
-            <main class="ds-main-card">
-                <div class="ds-card-head">
-                    <div>
-                        <span class="ds-eyebrow">AI practice room</span>
-                        <h2>Professor-style Q&A</h2>
-                    </div>
-
-                    <span class="ds-soft-pill">
-                        <i class="bi bi-robot"></i>
-                        @questionCount AI questions
-                    </span>
-                </div>
-
-                @if (Model.QnA == null || !Model.QnA.Any())
-                {
-                    <div class="ds-empty-small">
-                        <div class="ds-empty-icon">
-                            <i class="bi bi-hourglass-split"></i>
+        <div class="defense-grid">
+            <main class="defense-main">
+                <section class="defense-panel" id="practice-config">
+                    <div class="defense-panel__header">
+                        <div>
+                            <span class="defense-kicker">Practice setup</span>
+                            <h2>Build your question set</h2>
+                            <p>Choose 1–5 questions and at least one defense field.</p>
                         </div>
 
-                        <h2>No AI questions generated yet</h2>
-
-                        <p>
-                            Click Generate AI Questions to request customized questions from the Defense Simulator backend.
-                        </p>
-
-                        <a href="/Student/DefenseSimulator" class="ds-btn ds-btn-primary">
-                            <i class="bi bi-stars"></i>
-                            Generate AI Questions
-                        </a>
+                        <div class="defense-step-badge">
+                            <i class="bi bi-sliders"></i>
+                            Session setup
+                        </div>
                     </div>
+
+                    <form method="post"
+                          asp-page-handler="Generate"
+                          id="defense-config-form"
+                          class="defense-config-form">
+
+                        <fieldset class="defense-fieldset">
+                            <legend>
+                                <span>01</span>
+                                Number of questions
+                            </legend>
+
+                            <div class="defense-count-picker" role="radiogroup" aria-label="Number of questions">
+                                @for (var number = 1; number <= 5; number++)
+                                {
+                                    var id = $"question-count-{number}";
+
+                                    <label for="@id">
+                                        @if (Model.NumberOfQuestions == number)
+                                        {
+                                            <input id="@id"
+                                                   type="radio"
+                                                   name="NumberOfQuestions"
+                                                   value="@number"
+                                                   checked />
+                                        }
+                                        else
+                                        {
+                                            <input id="@id"
+                                                   type="radio"
+                                                   name="NumberOfQuestions"
+                                                   value="@number" />
+                                        }
+
+                                        <span>@number</span>
+                                    </label>
+                                }
+                            </div>
+                        </fieldset>
+
+                        <fieldset class="defense-fieldset">
+                            <legend>
+                                <span>02</span>
+                                Defense fields
+                            </legend>
+
+                            <div class="defense-area-grid" id="defense-area-grid">
+                                @foreach (var area in Model.AvailableFocusAreas)
+                                {
+                                    var id = $"focus-{area.Value.GetHashCode():X}";
+
+                                    <label class="defense-area-card" for="@id">
+                                        @if (selectedFocusSet.Contains(area.Value))
+                                        {
+                                            <input id="@id"
+                                                   type="checkbox"
+                                                   name="FocusAreas"
+                                                   value="@area.Value"
+                                                   checked />
+                                        }
+                                        else
+                                        {
+                                            <input id="@id"
+                                                   type="checkbox"
+                                                   name="FocusAreas"
+                                                   value="@area.Value" />
+                                        }
+
+                                        <span class="defense-area-card__icon">
+                                            <i class="bi @area.Icon"></i>
+                                        </span>
+
+                                        <span class="defense-area-card__copy">
+                                            <strong>@area.Title</strong>
+                                            <small>@area.Description</small>
+                                        </span>
+
+                                        <span class="defense-area-card__check">
+                                            <i class="bi bi-check-lg"></i>
+                                        </span>
+                                    </label>
+                                }
+                            </div>
+                        </fieldset>
+
+                        <div class="defense-config-footer">
+                            <div class="defense-config-note">
+                                <i class="bi bi-lock"></i>
+                                Reference points are not shown before the student submits an answer.
+                            </div>
+
+                            <button type="submit" class="defense-button defense-button--primary defense-button--large">
+                                <i class="bi bi-stars"></i>
+                                Generate questions
+                            </button>
+                        </div>
+                    </form>
+                </section>
+
+                @if (hasQuestions)
+                {
+                    <section class="defense-panel defense-session">
+                        <div class="defense-panel__header defense-panel__header--session">
+                            <div>
+                                <span class="defense-kicker">Active practice session</span>
+                                <h2>Professor-style questions</h2>
+
+                                <div class="defense-session__meta">
+                                    <span>
+                                        <i class="bi bi-stars"></i>
+                                        Project-aware questions
+                                    </span>
+
+                                    <span>
+                                        <i class="bi bi-clock-history"></i>
+                                        @Model.State.GeneratedAt.ToLocalTime().ToString("dd MMM, HH:mm")
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div class="defense-session__actions">
+                                <form method="post" asp-page-handler="Regenerate">
+                                    <button type="submit" class="defense-button defense-button--secondary">
+                                        <i class="bi bi-arrow-repeat"></i>
+                                        Regenerate same fields
+                                    </button>
+                                </form>
+
+                                <form method="post" asp-page-handler="Reset">
+                                    <button type="submit" class="defense-button defense-button--quiet">
+                                        <i class="bi bi-sliders"></i>
+                                        Choose different fields
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+
+                        <div class="defense-progress-card">
+                            <div>
+                                <strong>@Model.EvaluatedCount of @totalQuestions evaluated</strong>
+                                <span>Complete every answer to finish this practice round.</span>
+                            </div>
+
+                            <b>@Model.CompletionPercent%</b>
+
+                            <div class="defense-progress-track" aria-label="Session completion">
+                                <span style="width:@Model.CompletionPercent%"></span>
+                            </div>
+                        </div>
+
+                        <div class="defense-selected-areas">
+                            @foreach (var area in Model.State.FocusAreas)
+                            {
+                                <span>
+                                    <i class="bi bi-check2-circle"></i>
+                                    @area
+                                </span>
+                            }
+                        </div>
+
+                        <div class="defense-question-list">
+                            @for (var index = 0; index < Model.State.Questions.Count; index++)
+                            {
+                                var item = Model.State.Questions[index];
+                                var question = item.Question;
+                                var evaluation = item.Evaluation;
+                                var answerId = $"student-answer-{index}";
+
+                                <article class="defense-question-card @(evaluation != null ? "is-evaluated" : "")">
+                                    <header class="defense-question-card__header">
+                                        <div class="defense-question-number">
+                                            @((index + 1).ToString("00"))
+                                        </div>
+
+                                        <div class="defense-question-title">
+                                            <div class="defense-question-tags">
+                                                <span>
+                                                    <i class="bi bi-tag"></i>
+                                                    @(string.IsNullOrWhiteSpace(question.Category) ? "General" : question.Category)
+                                                </span>
+
+                                                <span>
+                                                    <i class="bi bi-bar-chart"></i>
+                                                    @(string.IsNullOrWhiteSpace(question.Difficulty) ? "Medium" : question.Difficulty)
+                                                </span>
+
+                                                @if (evaluation != null)
+                                                {
+                                                    <span class="is-complete">
+                                                        <i class="bi bi-check-circle-fill"></i>
+                                                        Evaluated
+                                                    </span>
+                                                }
+                                            </div>
+
+                                            <h3>@question.Question</h3>
+                                        </div>
+                                    </header>
+
+                                    <div class="defense-question-card__body">
+                                        <form method="post"
+                                              asp-page-handler="Evaluate"
+                                              class="defense-answer-form"
+                                              data-answer-form>
+
+                                            <input type="hidden" name="QuestionIndex" value="@index" />
+
+                                            <label for="@answerId">
+                                                Your answer
+                                                <small>
+                                                    Explain your reasoning in your own words. Exact wording is not required.
+                                                </small>
+                                            </label>
+
+                                            <textarea id="@answerId"
+                                                      name="StudentAnswer"
+                                                      rows="6"
+                                                      maxlength="4000"
+                                                      data-answer-textarea
+                                                      placeholder="Write your defense answer here...">@item.StudentAnswer</textarea>
+
+                                            <div class="defense-answer-form__footer">
+                                                <span data-word-count>0 words</span>
+
+                                                <button type="submit" class="defense-button defense-button--primary">
+                                                    <i class="bi bi-clipboard-check"></i>
+                                                    @(evaluation == null ? "Check my answer" : "Re-check answer")
+                                                </button>
+                                            </div>
+                                        </form>
+
+                                        @if (evaluation == null)
+                                        {
+                                            <div class="defense-locked">
+                                                <i class="bi bi-lock"></i>
+                                                <div>
+                                                    <strong>Reference answer locked</strong>
+                                                    <span>Submit your answer first to reveal feedback and the suggested response.</span>
+                                                </div>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <section class="defense-evaluation">
+                                                <div class="defense-evaluation__heading">
+                                                    <div>
+                                                        <span class="defense-kicker">AI evaluation</span>
+                                                        <h4>@evaluation.Level</h4>
+                                                    </div>
+
+                                                    <div class="defense-score-ring"
+                                                         style="--score:@evaluation.Score">
+                                                        <strong>@evaluation.Score</strong>
+                                                        <small>/100</small>
+                                                    </div>
+                                                </div>
+
+                                                <div class="defense-score-grid">
+                                                    <article>
+                                                        <span>Overall score</span>
+                                                        <strong>@evaluation.Score%</strong>
+                                                        <div><i style="width:@evaluation.Score%"></i></div>
+                                                    </article>
+
+                                                    @if (evaluation.SimilarityScore.HasValue)
+                                                    {
+                                                        <article>
+                                                            <span>Semantic coverage</span>
+                                                            <strong>@evaluation.SimilarityScore.Value%</strong>
+                                                            <div><i style="width:@evaluation.SimilarityScore.Value%"></i></div>
+                                                        </article>
+                                                    }
+
+                                                    @if (evaluation.ConfidenceScore.HasValue)
+                                                    {
+                                                        <article>
+                                                            <span>AI confidence</span>
+                                                            <strong>@evaluation.ConfidenceScore.Value%</strong>
+                                                            <div><i style="width:@evaluation.ConfidenceScore.Value%"></i></div>
+                                                        </article>
+                                                    }
+                                                </div>
+
+                                                @if (!string.IsNullOrWhiteSpace(evaluation.FeedbackSummary))
+                                                {
+                                                    <div class="defense-feedback-summary">
+                                                        <i class="bi bi-chat-square-quote"></i>
+                                                        <p>@evaluation.FeedbackSummary</p>
+                                                    </div>
+                                                }
+
+                                                <div class="defense-feedback-grid">
+                                                    <article class="defense-feedback-card defense-feedback-card--positive">
+                                                        <header>
+                                                            <i class="bi bi-check-circle"></i>
+                                                            Strengths
+                                                        </header>
+
+                                                        @if (evaluation.Strengths.Count == 0)
+                                                        {
+                                                            <p>No specific strengths were returned.</p>
+                                                        }
+                                                        else
+                                                        {
+                                                            <ul>
+                                                                @foreach (var strength in evaluation.Strengths)
+                                                                {
+                                                                    <li>@strength</li>
+                                                                }
+                                                            </ul>
+                                                        }
+                                                    </article>
+
+                                                    <article class="defense-feedback-card defense-feedback-card--warning">
+                                                        <header>
+                                                            <i class="bi bi-exclamation-circle"></i>
+                                                            Missing points
+                                                        </header>
+
+                                                        @if (evaluation.MissingPoints.Count == 0)
+                                                        {
+                                                            <p>No major missing points were identified.</p>
+                                                        }
+                                                        else
+                                                        {
+                                                            <ul>
+                                                                @foreach (var point in evaluation.MissingPoints)
+                                                                {
+                                                                    <li>@point</li>
+                                                                }
+                                                            </ul>
+                                                        }
+                                                    </article>
+                                                </div>
+
+                                                <details class="defense-reference">
+                                                    <summary>
+                                                        <span>
+                                                            <i class="bi bi-stars"></i>
+                                                            View suggested answer
+                                                        </span>
+
+                                                        <i class="bi bi-chevron-down"></i>
+                                                    </summary>
+
+                                                    <div class="defense-reference__body">
+                                                        @if (!string.IsNullOrWhiteSpace(evaluation.ImprovedAnswer))
+                                                        {
+                                                            <div>
+                                                                <span class="defense-reference__label">Improved answer</span>
+                                                                <p>@evaluation.ImprovedAnswer</p>
+                                                            </div>
+                                                        }
+
+                                                        @if (question.ExpectedPoints?.Count > 0)
+                                                        {
+                                                            <div>
+                                                                <span class="defense-reference__label">Expected coverage</span>
+                                                                <ul>
+                                                                    @foreach (var point in question.ExpectedPoints)
+                                                                    {
+                                                                        <li>@point</li>
+                                                                    }
+                                                                </ul>
+                                                            </div>
+                                                        }
+                                                    </div>
+                                                </details>
+
+                                                @if (!string.IsNullOrWhiteSpace(evaluation.FollowUpQuestion))
+                                                {
+                                                    <div class="defense-follow-up">
+                                                        <i class="bi bi-arrow-return-right"></i>
+                                                        <div>
+                                                            <span>Professor follow-up</span>
+                                                            <strong>@evaluation.FollowUpQuestion</strong>
+                                                        </div>
+                                                    </div>
+                                                }
+                                            </section>
+                                        }
+                                    </div>
+                                </article>
+                            }
+                        </div>
+                    </section>
                 }
                 else
                 {
-                    <div class="ds-ai-note">
-                        <i class="bi bi-info-circle"></i>
-                        These questions are generated dynamically by the AI backend using your selected project context.
-                    </div>
+                    <section class="defense-placeholder">
+                        <div class="defense-placeholder__visual">
+                            <i class="bi bi-mortarboard"></i>
+                        </div>
 
-                    <div class="ds-qa-list">
-                        @{
-                            var questionNumber = 0;
-                        }
-
-                        @foreach (var (q, a, category) in Model.QnA)
-                        {
-                            questionNumber++;
-
-                            <details class="ds-qa-card" @(questionNumber == 1 ? "open" : "")>
-                                <summary>
-                                    <div class="ds-question-index">
-                                        @questionNumber.ToString("00")
-                                    </div>
-
-                                    <div class="ds-question-content">
-                                        <div class="ds-question-top">
-                                            <span>
-                                                <i class="bi bi-person-badge"></i>
-                                                AI-generated professor question
-                                            </span>
-
-                                            <b>@(string.IsNullOrWhiteSpace(category) ? "General" : category)</b>
-                                        </div>
-
-                                        <h3>@q</h3>
-                                    </div>
-
-                                    <i class="bi bi-chevron-down ds-chevron"></i>
-                                </summary>
-
-                                <div class="ds-answer-box">
-                                    <div class="ds-answer-label">
-                                        <i class="bi bi-stars"></i>
-                                        AI suggested answer structure
-                                    </div>
-
-                                    <p>@a</p>
-
-                                    <div class="ds-answer-note">
-                                        <i class="bi bi-info-circle"></i>
-                                        Do not memorize word-for-word. Use this structure to understand what a strong answer should cover.
-                                    </div>
-                                </div>
-                            </details>
-                        }
-                    </div>
+                        <span class="defense-kicker">Ready when you are</span>
+                        <h2>Your questions will appear here.</h2>
+                        <p>
+                            Select the number of questions and the defense fields above,
+                            then generate a focused practice session.
+                        </p>
+                    </section>
                 }
             </main>
 
-            <aside class="ds-side">
+            <aside class="defense-sidebar">
+                <article class="defense-side-card defense-side-card--guide">
+                    <header>
+                        <span class="defense-kicker">Answer clearly</span>
+                        <h3>A simple structure for every response</h3>
+                        <p>Keep your explanation direct and connected to your own project.</p>
+                    </header>
 
-                <article class="ds-side-card">
-                    <div class="ds-card-head compact">
+                    <div class="defense-answer-guide">
                         <div>
-                            <span class="ds-eyebrow">AI context</span>
-                            <h2>What is sent to the backend?</h2>
-                        </div>
-                    </div>
-
-                    <div class="ds-focus-list">
-                        <div>
-                            <i class="bi bi-lightbulb"></i>
+                            <span>1</span>
                             <div>
-                                <strong>Selected idea</strong>
-                                <small>The AI uses your current FYP idea title, problem, target users, and domain.</small>
+                                <h4>State your decision</h4>
+                                <p>Begin with the main answer in one clear sentence.</p>
                             </div>
                         </div>
 
                         <div>
-                            <i class="bi bi-cpu"></i>
+                            <span>2</span>
                             <div>
-                                <strong>Technologies</strong>
-                                <small>The AI asks technical questions based on your project stack and implementation choices.</small>
+                                <h4>Explain your reason</h4>
+                                <p>Connect the choice to your users, architecture, data, or requirements.</p>
                             </div>
                         </div>
 
                         <div>
-                            <i class="bi bi-map"></i>
+                            <span>3</span>
                             <div>
-                                <strong>Roadmap phases</strong>
-                                <small>If a roadmap exists, the AI can ask about planning, milestones, and implementation order.</small>
-                            </div>
-                        </div>
-
-                        <div>
-                            <i class="bi bi-person-check"></i>
-                            <div>
-                                <strong>Student skills</strong>
-                                <small>The AI can generate realistic questions based on your skills and missing skills.</small>
+                                <h4>Mention a trade-off</h4>
+                                <p>Show that you understand one limitation and how you would handle it.</p>
                             </div>
                         </div>
                     </div>
                 </article>
 
-                <article class="ds-side-card">
-                    <div class="ds-card-head compact">
-                        <div>
-                            <span class="ds-eyebrow">Defense focus</span>
-                            <h2>What professors usually test</h2>
-                        </div>
-                    </div>
+                <article class="defense-side-card defense-side-card--check">
+                    <header>
+                        <span class="defense-kicker">Before you submit</span>
+                        <h3>Quick answer check</h3>
+                        <p>Use these points to make your answer easier to evaluate.</p>
+                    </header>
 
-                    <div class="ds-focus-list">
-                        <div>
-                            <i class="bi bi-bullseye"></i>
-                            <div>
-                                <strong>Problem clarity</strong>
-                                <small>Can you explain why this project matters?</small>
-                            </div>
-                        </div>
+                    <ul class="defense-checklist">
+                        <li>
+                            <i class="bi bi-check2"></i>
+                            <span>Did I answer the exact question first?</span>
+                        </li>
+                        <li>
+                            <i class="bi bi-check2"></i>
+                            <span>Did I connect the explanation to my project?</span>
+                        </li>
+                        <li>
+                            <i class="bi bi-check2"></i>
+                            <span>Did I explain why this choice is suitable?</span>
+                        </li>
+                        <li>
+                            <i class="bi bi-check2"></i>
+                            <span>Did I mention evidence, testing, or one limitation?</span>
+                        </li>
+                    </ul>
 
-                        <div>
-                            <i class="bi bi-cpu"></i>
-                            <div>
-                                <strong>Technical choices</strong>
-                                <small>Can you justify your tools, model, or architecture?</small>
-                            </div>
-                        </div>
-
-                        <div>
-                            <i class="bi bi-graph-up-arrow"></i>
-                            <div>
-                                <strong>Evaluation plan</strong>
-                                <small>Can you prove your solution works?</small>
-                            </div>
-                        </div>
-
-                        <div>
-                            <i class="bi bi-exclamation-triangle"></i>
-                            <div>
-                                <strong>Limitations</strong>
-                                <small>Can you honestly explain risks and future work?</small>
-                            </div>
-                        </div>
+                    <div class="defense-side-note">
+                        <i class="bi bi-info-circle"></i>
+                        <span>Natural wording is accepted. The evaluator checks meaning, not memorized sentences.</span>
                     </div>
                 </article>
-
-                <article class="ds-side-card">
-                    <div class="ds-card-head compact">
-                        <div>
-                            <span class="ds-eyebrow">Quick checklist</span>
-                            <h2>Before entering the defense</h2>
-                        </div>
-                    </div>
-
-                    <div class="ds-checklist">
-                        @foreach (var tip in new[] {
-                            "Prepare a clear 2-minute project pitch.",
-                            "Know your problem, not only your solution.",
-                            "Explain your dataset or data source.",
-                            "Justify every technology choice.",
-                            "Define measurable success criteria.",
-                            "Mention limitations and future improvements."
-                        })
-                        {
-                            <div>
-                                <i class="bi bi-check-circle-fill"></i>
-                                <span>@tip</span>
-                            </div>
-                        }
-                    </div>
-                </article>
-
-                <article class="ds-side-card">
-                    <div class="ds-card-head compact">
-                        <div>
-                            <span class="ds-eyebrow">Rubric</span>
-                            <h2>Defense scoring guide</h2>
-                        </div>
-                    </div>
-
-                    <div class="ds-rubric">
-                        @foreach (var (criterion, weight) in new[] {
-                            ("Problem clarity", 20),
-                            ("Solution novelty", 20),
-                            ("Technical feasibility", 25),
-                            ("Methodology", 20),
-                            ("Presentation quality", 15),
-                        })
-                        {
-                            <div class="ds-rubric-item">
-                                <div>
-                                    <span>@criterion</span>
-                                    <b>@weight%</b>
-                                </div>
-
-                                <div class="ds-progress">
-                                    <span style="width:@weight%"></span>
-                                </div>
-                            </div>
-                        }
-                    </div>
-                </article>
-
             </aside>
-        </section>
+        </div>
     }
 </section>
+
+<div class="defense-busy" id="defense-busy" hidden>
+    <div>
+        <span class="defense-spinner"></span>
+        <strong>Working with the AI service…</strong>
+        <small>This may take a few seconds.</small>
+    </div>
+</div>
 
 @section Head {
     <style>
         :root {
-            --ds-navy: #28385E;
-            --ds-blue: #304163;
-            --ds-steel: #516C8D;
-            --ds-bg: #F7F8FA;
-            --ds-border: #E8ECF2;
-            --ds-text: #111827;
-            --ds-muted: #64748B;
-            --ds-soft: #F1F4F8;
-            --ds-green: #047857;
-            --ds-orange: #C2410C;
+            --defense-ink: #0f172a;
+            --defense-muted: #64748b;
+            --defense-border: #e2e8f0;
+            --defense-soft: #f8fafc;
+            --defense-navy: #071d49;
+            --defense-blue: #304163;
+            --defense-steel: #516c8d;
+            --defense-accent: #516c8d;
+            --defense-amber: #b45309;
+            --defense-red: #b91c1c;
+            --defense-shadow: 0 12px 30px rgba(15, 23, 42, .055);
         }
 
-        .ds-page {
-            max-width: 1480px;
+        .defense-page {
+            max-width: 1500px;
             margin: 0 auto;
-            color: var(--ds-text);
-            padding-bottom: 1.5rem;
+            padding-bottom: 2rem;
+            color: var(--defense-ink);
         }
 
-        .ds-alert {
-            margin-bottom: 1rem;
-            border-radius: 18px;
-            border: 1px solid #FDE68A;
-            background: #FFFBEB;
-            color: #92400E;
-            font-size: .9rem;
-        }
-
-        .ds-hero {
+        .defense-hero {
+            position: relative;
             display: grid;
-            grid-template-columns: minmax(0, 1fr) 230px;
-            gap: 1rem;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 1.5rem;
             align-items: center;
             margin-bottom: 1rem;
-            padding: 1.45rem;
-            border-radius: 30px;
-            color: #fff;
-            background: radial-gradient(circle at 18% 16%, rgba(255,255,255,.18), transparent 22%), radial-gradient(circle at 84% 10%, rgba(255,255,255,.12), transparent 20%), linear-gradient(135deg, #061C49 0%, var(--ds-navy) 56%, var(--ds-steel) 128%);
-            box-shadow: 0 18px 44px rgba(40,56,94,.16);
+            padding: clamp(1.35rem, 3vw, 2.2rem);
             overflow: hidden;
+            border-radius: 26px;
+            color: #fff;
+            background: radial-gradient(circle at 8% 0%, rgba(255,255,255,.17), transparent 28%), radial-gradient(circle at 94% 12%, rgba(255,255,255,.11), transparent 22%), linear-gradient(135deg, #061a43 0%, #233759 55%, #516c8d 130%);
+            box-shadow: 0 18px 42px rgba(7, 29, 73, .14);
         }
 
-        .ds-eyebrow {
-            display: block;
-            margin-bottom: .3rem;
-            color: var(--ds-steel);
+            .defense-hero::after {
+                content: "";
+                position: absolute;
+                right: -80px;
+                bottom: -120px;
+                width: 310px;
+                height: 310px;
+                border: 1px solid rgba(255,255,255,.12);
+                border-radius: 50%;
+                box-shadow: 0 0 0 35px rgba(255,255,255,.035), 0 0 0 70px rgba(255,255,255,.025);
+            }
+
+        .defense-hero__content,
+        .defense-hero__stats {
+            position: relative;
+            z-index: 1;
+        }
+
+        .defense-hero__eyebrow,
+        .defense-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: .45rem;
+            color: var(--defense-steel);
             font-size: .72rem;
-            font-weight: 800;
-            letter-spacing: .12em;
+            font-weight: 650;
+            letter-spacing: .11em;
             text-transform: uppercase;
         }
 
-        .ds-hero .ds-eyebrow {
-            color: rgba(255,255,255,.72);
-        }
-
-        .ds-hero h1 {
-            max-width: 820px;
-            margin: 0;
-            font-size: clamp(1.75rem, 3vw, 2.7rem);
-            line-height: 1.05;
-            font-weight: 780;
-            letter-spacing: -.045em;
-        }
-
-        .ds-hero p {
-            max-width: 760px;
-            margin: .65rem 0 0;
+        .defense-hero__eyebrow {
             color: rgba(255,255,255,.78);
-            font-size: .95rem;
-            line-height: 1.65;
         }
 
-        .ds-hero-actions {
+        .defense-live-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #bfdbfe;
+            box-shadow: 0 0 0 6px rgba(191, 219, 254, .16);
+        }
+
+        .defense-hero h1 {
+            max-width: 900px;
+            margin: .55rem 0 0;
+            font-size: clamp(1.85rem, 3vw, 2.75rem);
+            font-weight: 660;
+            line-height: 1.12;
+            letter-spacing: -.035em;
+        }
+
+        .defense-hero p {
+            max-width: 820px;
+            margin: .9rem 0 0;
+            color: rgba(255,255,255,.78);
+            font-size: .98rem;
+            line-height: 1.72;
+        }
+
+        .defense-hero__actions {
             display: flex;
             flex-wrap: wrap;
             gap: .65rem;
-            margin-top: 1rem;
+            margin-top: 1.2rem;
         }
 
-        .ds-hero-panel {
-            min-height: 160px;
+        .defense-hero__stats {
             display: grid;
-            place-items: center;
-            align-content: center;
-            text-align: center;
-            gap: .7rem;
-            padding: 1rem;
-            border-radius: 26px;
-            background: rgba(255,255,255,.12);
-            border: 1px solid rgba(255,255,255,.16);
-            backdrop-filter: blur(8px);
+            grid-template-columns: repeat(3, minmax(95px, 1fr));
+            gap: .65rem;
+            min-width: 330px;
         }
 
-        .ds-hero-icon {
-            width: 54px;
-            height: 54px;
-            display: grid;
-            place-items: center;
-            border-radius: 20px;
-            color: var(--ds-navy);
-            background: #fff;
-            font-size: 1.45rem;
-        }
+            .defense-hero__stats article {
+                padding: 1rem .8rem;
+                text-align: center;
+                border: 1px solid rgba(255,255,255,.14);
+                border-radius: 22px;
+                background: rgba(255,255,255,.1);
+                backdrop-filter: blur(10px);
+            }
 
-        .ds-hero-panel span {
-            display: block;
-            color: #fff;
-            font-size: 2.4rem;
-            font-weight: 800;
-            line-height: 1;
-        }
+            .defense-hero__stats span {
+                display: block;
+                font-size: 1.8rem;
+                font-weight: 680;
+                line-height: 1;
+            }
 
-        .ds-hero-panel small {
-            color: rgba(255,255,255,.75);
-            font-size: .8rem;
-        }
+            .defense-hero__stats small {
+                display: block;
+                margin-top: .4rem;
+                color: rgba(255,255,255,.68);
+                font-size: .72rem;
+            }
 
-        .ds-btn {
+        .defense-button {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: .45rem;
+            gap: .48rem;
+            min-height: 42px;
+            padding: .72rem 1rem;
+            border: 1px solid transparent;
             border-radius: 14px;
-            padding: .7rem .95rem;
             text-decoration: none;
             font-size: .84rem;
-            font-weight: 750;
-            border: 1px solid transparent;
-            transition: .15s ease;
+            font-weight: 640;
+            cursor: pointer;
+            transition: transform .16s ease, box-shadow .16s ease, background .16s ease;
         }
 
-        .ds-btn-primary {
-            color: #fff;
-            background: linear-gradient(135deg, #061C49, var(--ds-blue));
-        }
-
-            .ds-btn-primary:hover {
-                color: #fff;
-                transform: translateY(-1px);
-                box-shadow: 0 12px 22px rgba(40,56,94,.18);
-            }
-
-        .ds-btn-light {
-            color: var(--ds-blue);
-            background: #fff;
-        }
-
-            .ds-btn-light:hover {
-                color: var(--ds-blue);
+            .defense-button:hover {
                 transform: translateY(-1px);
             }
 
-        .ds-btn-ghost {
+        .defense-button--primary {
             color: #fff;
-            background: rgba(255,255,255,.12);
-            border-color: rgba(255,255,255,.2);
+            background: linear-gradient(135deg, var(--defense-navy), var(--defense-blue));
+            box-shadow: 0 12px 24px rgba(48, 65, 99, .18);
         }
 
-            .ds-btn-ghost:hover {
+            .defense-button--primary:hover {
                 color: #fff;
-                background: rgba(255,255,255,.18);
+                box-shadow: 0 16px 30px rgba(48, 65, 99, .24);
             }
 
-        .ds-project-strip,
-        .ds-main-card,
-        .ds-side-card,
-        .ds-empty,
-        .ds-empty-small {
+        .defense-button--secondary {
+            color: var(--defense-blue);
+            background: #eef2f7;
+            border-color: #d8e0ea;
+        }
+
+        .defense-button--quiet {
+            color: #475569;
             background: #fff;
-            border: 1px solid var(--ds-border);
-            box-shadow: 0 14px 34px rgba(15,23,42,.05);
+            border-color: var(--defense-border);
         }
 
-        .ds-project-strip {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 1rem;
-            margin-bottom: 1rem;
-            padding: 1rem 1.15rem;
-            border-radius: 24px;
+        .defense-button--light {
+            color: var(--defense-blue);
+            background: #fff;
         }
 
-            .ds-project-strip h2 {
-                margin: 0;
-                color: var(--ds-text);
-                font-size: 1.05rem;
-                font-weight: 760;
+        .defense-button--ghost {
+            color: #fff;
+            background: rgba(255,255,255,.1);
+            border-color: rgba(255,255,255,.18);
+        }
+
+        .defense-button--large {
+            min-height: 50px;
+            padding-inline: 1.25rem;
+        }
+
+        .defense-toast-stack {
+            position: fixed;
+            top: 1.15rem;
+            right: 1.15rem;
+            z-index: 10020;
+            width: min(390px, calc(100vw - 2rem));
+            display: grid;
+            gap: .65rem;
+            pointer-events: none;
+        }
+
+        .defense-toast {
+            position: relative;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            gap: .75rem;
+            align-items: flex-start;
+            overflow: hidden;
+            padding: .9rem .95rem 1rem;
+            border: 1px solid;
+            border-radius: 18px;
+            background: #fff;
+            box-shadow: 0 20px 50px rgba(15, 23, 42, .16);
+            opacity: 0;
+            transform: translateY(-12px) scale(.98);
+            transition: opacity .24s ease, transform .24s ease;
+            pointer-events: auto;
+        }
+
+            .defense-toast.is-visible {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+
+            .defense-toast.is-leaving {
+                opacity: 0;
+                transform: translateY(-8px) scale(.98);
+            }
+
+        .defense-toast--error {
+            color: #7f1d1d;
+            border-color: #fecaca;
+            background: #fffafa;
+        }
+
+        .defense-toast--info {
+            color: #304163;
+            border-color: #cbd5e1;
+            background: #fbfdff;
+        }
+
+        .defense-toast__icon {
+            width: 36px;
+            height: 36px;
+            display: grid;
+            place-items: center;
+            border-radius: 12px;
+            font-size: 1rem;
+        }
+
+        .defense-toast--error .defense-toast__icon {
+            color: #991b1b;
+            background: #fee2e2;
+        }
+
+        .defense-toast--info .defense-toast__icon {
+            color: var(--defense-blue);
+            background: #e8eef5;
+        }
+
+        .defense-toast__content {
+            min-width: 0;
+            padding-top: .05rem;
+        }
+
+            .defense-toast__content strong,
+            .defense-toast__content span {
+                display: block;
+            }
+
+            .defense-toast__content strong {
+                font-size: .8rem;
+                font-weight: 600;
                 line-height: 1.35;
             }
 
-        .ds-project-tags {
+            .defense-toast__content span {
+                margin-top: .2rem;
+                color: #52647f;
+                font-size: .73rem;
+                line-height: 1.5;
+            }
+
+        .defense-toast--error .defense-toast__content span {
+            color: #7f1d1d;
+        }
+
+        .defense-toast__close {
+            width: 30px;
+            height: 30px;
+            display: grid;
+            place-items: center;
+            margin: -.1rem -.15rem 0 0;
+            padding: 0;
+            border: 0;
+            border-radius: 9px;
+            color: #64748b;
+            background: transparent;
+            cursor: pointer;
+            transition: background .15s ease, color .15s ease;
+        }
+
+            .defense-toast__close:hover {
+                color: var(--defense-ink);
+                background: rgba(148, 163, 184, .14);
+            }
+
+        .defense-toast__timer {
+            position: absolute;
+            right: 0;
+            bottom: 0;
+            left: 0;
+            height: 3px;
+            transform-origin: left;
+            background: #94a3b8;
+            animation: defense-toast-timer var(--toast-duration, 5200ms) linear forwards;
+        }
+
+        .defense-toast--error .defense-toast__timer {
+            background: #dc2626;
+        }
+
+        .defense-toast--info .defense-toast__timer {
+            background: var(--defense-blue);
+        }
+
+        .defense-area-grid.has-validation-error {
+            padding: .65rem;
+            border: 1px solid #f0b4b4;
+            border-radius: 20px;
+            background: #fffafa;
+            animation: defense-validation-shake .28s ease;
+        }
+
+        @@keyframes defense-toast-timer {
+            from {
+                transform: scaleX(1);
+            }
+
+            to {
+                transform: scaleX(0);
+            }
+        }
+
+        @@keyframes defense-validation-shake {
+            0%, 100% {
+                transform: translateX(0);
+            }
+
+            35% {
+                transform: translateX(-4px);
+            }
+
+            70% {
+                transform: translateX(4px);
+            }
+        }
+
+
+        .defense-context,
+        .defense-panel,
+        .defense-side-card,
+        .defense-placeholder,
+        .defense-empty {
+            border: 1px solid var(--defense-border);
+            background: #fff;
+            box-shadow: var(--defense-shadow);
+        }
+
+        .defense-context {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding: 1.15rem 1.25rem;
+            border-radius: 24px;
+        }
+
+        .defense-context__main {
+            min-width: 0;
+        }
+
+        .defense-context h2 {
+            margin: .22rem 0 0;
+            font-size: 1.12rem;
+            font-weight: 660;
+            line-height: 1.35;
+        }
+
+        .defense-context p {
+            max-width: 820px;
+            margin: .35rem 0 0;
+            color: var(--defense-muted);
+            font-size: .82rem;
+            line-height: 1.55;
+        }
+
+        .defense-context__tags,
+        .defense-selected-areas,
+        .defense-session__meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .45rem;
+        }
+
+        .defense-context__tags {
+            justify-content: flex-end;
+        }
+
+            .defense-context__tags span,
+            .defense-selected-areas span,
+            .defense-session__meta span {
+                display: inline-flex;
+                align-items: center;
+                gap: .35rem;
+                padding: .42rem .65rem;
+                border-radius: 999px;
+                color: #415574;
+                background: #f1f5f9;
+                font-size: .72rem;
+                font-weight: 600;
+            }
+
+        .defense-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 305px;
+            gap: 1.15rem;
+            align-items: start;
+        }
+
+        .defense-main,
+        .defense-sidebar {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .defense-panel,
+        .defense-side-card,
+        .defense-placeholder {
+            overflow: hidden;
+            border-radius: 26px;
+        }
+
+        .defense-panel__header {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: flex-start;
+            padding: 1.15rem 1.2rem;
+            border-bottom: 1px solid var(--defense-border);
+        }
+
+            .defense-panel__header h2,
+            .defense-side-card h3,
+            .defense-placeholder h2,
+            .defense-empty h2 {
+                margin: .2rem 0 0;
+                font-weight: 660;
+                letter-spacing: -.025em;
+            }
+
+            .defense-panel__header h2 {
+                font-size: 1.12rem;
+            }
+
+            .defense-panel__header p {
+                margin: .35rem 0 0;
+                color: var(--defense-muted);
+                font-size: .8rem;
+            }
+
+        .defense-step-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: .4rem;
+            padding: .45rem .7rem;
+            border-radius: 999px;
+            color: var(--defense-blue);
+            background: #eef2f7;
+            font-size: .74rem;
+            font-weight: 640;
+            white-space: nowrap;
+        }
+
+        .defense-config-form {
+            padding: 1.2rem;
+        }
+
+        .defense-fieldset {
+            margin: 0 0 1.25rem;
+            padding: 0;
+            border: 0;
+        }
+
+            .defense-fieldset legend {
+                display: flex;
+                align-items: center;
+                gap: .55rem;
+                width: 100%;
+                margin-bottom: .75rem;
+                color: var(--defense-ink);
+                font-size: .88rem;
+                font-weight: 650;
+            }
+
+                .defense-fieldset legend span {
+                    width: 30px;
+                    height: 30px;
+                    display: grid;
+                    place-items: center;
+                    border-radius: 10px;
+                    color: #fff;
+                    background: var(--defense-blue);
+                    font-size: .68rem;
+                }
+
+        .defense-count-picker {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(58px, 1fr));
+            gap: .55rem;
+            max-width: 500px;
+        }
+
+            .defense-count-picker label {
+                cursor: pointer;
+            }
+
+            .defense-count-picker input {
+                position: absolute;
+                opacity: 0;
+                pointer-events: none;
+            }
+
+            .defense-count-picker span {
+                min-height: 50px;
+                display: grid;
+                place-items: center;
+                border: 1px solid var(--defense-border);
+                border-radius: 15px;
+                color: #475569;
+                background: #fff;
+                font-size: 1rem;
+                font-weight: 660;
+                transition: .15s ease;
+            }
+
+            .defense-count-picker input:checked + span {
+                color: #fff;
+                border-color: var(--defense-blue);
+                background: linear-gradient(135deg, var(--defense-navy), var(--defense-blue));
+                box-shadow: 0 10px 22px rgba(48, 65, 99, .2);
+            }
+
+        .defense-area-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: .8rem;
+        }
+
+        .defense-area-card {
+            position: relative;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            gap: .7rem;
+            align-items: center;
+            min-height: 94px;
+            padding: .8rem;
+            cursor: pointer;
+            border: 1px solid var(--defense-border);
+            border-radius: 18px;
+            background: #fff;
+            transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+        }
+
+            .defense-area-card:hover {
+                transform: translateY(-1px);
+                border-color: #c4d0df;
+                box-shadow: 0 12px 24px rgba(15,23,42,.06);
+            }
+
+            .defense-area-card input {
+                position: absolute;
+                opacity: 0;
+                pointer-events: none;
+            }
+
+            .defense-area-card:has(input:checked) {
+                border-color: #9fb1c8;
+                background: #f8fbff;
+                box-shadow: inset 0 0 0 1px rgba(48,65,99,.08);
+            }
+
+        .defense-area-card__icon {
+            width: 42px;
+            height: 42px;
+            display: grid;
+            place-items: center;
+            border-radius: 14px;
+            color: #fff;
+            background: linear-gradient(135deg, var(--defense-navy), var(--defense-blue));
+        }
+
+        .defense-area-card__copy strong,
+        .defense-area-card__copy small {
+            display: block;
+        }
+
+        .defense-area-card__copy strong {
+            font-size: .8rem;
+        }
+
+        .defense-area-card__copy small {
+            margin-top: .18rem;
+            color: var(--defense-muted);
+            font-size: .68rem;
+            line-height: 1.35;
+        }
+
+        .defense-area-card__check {
+            width: 24px;
+            height: 24px;
+            display: grid;
+            place-items: center;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            color: transparent;
+            background: #fff;
+            font-size: .72rem;
+        }
+
+        .defense-area-card:has(input:checked) .defense-area-card__check {
+            color: #fff;
+            border-color: var(--defense-accent);
+            background: var(--defense-accent);
+        }
+
+        .defense-config-footer {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: center;
+            padding-top: 1rem;
+            border-top: 1px solid var(--defense-border);
+        }
+
+        .defense-config-note {
+            display: flex;
+            gap: .45rem;
+            align-items: center;
+            color: var(--defense-muted);
+            font-size: .76rem;
+        }
+
+        .defense-panel__header--session {
+            align-items: center;
+        }
+
+        .defense-session__meta {
+            margin-top: .55rem;
+        }
+
+        .defense-session__actions {
             display: flex;
             flex-wrap: wrap;
             justify-content: flex-end;
             gap: .5rem;
         }
 
-            .ds-project-tags span,
-            .ds-soft-pill {
-                display: inline-flex;
-                align-items: center;
-                gap: .38rem;
-                border-radius: 999px;
-                padding: .38rem .62rem;
-                color: var(--ds-blue);
-                background: var(--ds-soft);
-                font-size: .74rem;
-                font-weight: 750;
-                white-space: nowrap;
-            }
-
-        .ds-layout {
+        .defense-progress-card {
             display: grid;
-            grid-template-columns: minmax(0, 1.45fr) minmax(320px, .75fr);
-            gap: 1rem;
-            align-items: start;
-        }
-
-        .ds-main-card,
-        .ds-side-card,
-        .ds-empty {
-            border-radius: 26px;
-            overflow: hidden;
-        }
-
-        .ds-card-head {
-            min-height: 74px;
-            padding: 1rem;
-            border-bottom: 1px solid var(--ds-border);
-            display: flex;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: .4rem 1rem;
             align-items: center;
-            justify-content: space-between;
-            gap: 1rem;
-        }
-
-            .ds-card-head.compact {
-                min-height: auto;
-            }
-
-            .ds-card-head h2 {
-                margin: 0;
-                color: var(--ds-text);
-                font-size: 1.05rem;
-                font-weight: 760;
-                letter-spacing: -.02em;
-            }
-
-        .ds-ai-note {
-            display: flex;
-            align-items: flex-start;
-            gap: .55rem;
-            margin: 1rem 1rem 0;
-            padding: .8rem .9rem;
+            margin: 1rem 1.2rem .75rem;
+            padding: .9rem 1rem;
+            border: 1px solid #dbe5ef;
             border-radius: 18px;
-            color: #1E3A8A;
-            background: #EFF6FF;
-            border: 1px solid #BFDBFE;
-            font-size: .83rem;
-            line-height: 1.5;
+            background: #f8fafc;
         }
 
-        .ds-qa-list {
-            display: grid;
-            gap: .8rem;
-            padding: 1rem;
-        }
-
-        .ds-qa-card {
-            border: 1px solid var(--ds-border);
-            border-radius: 22px;
-            background: #fff;
-            overflow: hidden;
-            transition: .16s ease;
-        }
-
-            .ds-qa-card[open] {
-                border-color: #B8C8DD;
-                box-shadow: 0 14px 28px rgba(40,56,94,.08);
+            .defense-progress-card strong,
+            .defense-progress-card span {
+                display: block;
             }
 
-            .ds-qa-card summary {
-                list-style: none;
-                cursor: pointer;
-                display: grid;
-                grid-template-columns: auto minmax(0, 1fr) auto;
-                gap: .8rem;
-                align-items: center;
-                padding: 1rem;
+            .defense-progress-card strong {
+                font-size: .82rem;
             }
 
-                .ds-qa-card summary::-webkit-details-marker {
-                    display: none;
-                }
-
-        .ds-question-index {
-            width: 46px;
-            height: 46px;
-            display: grid;
-            place-items: center;
-            border-radius: 17px;
-            color: #fff;
-            background: linear-gradient(135deg, #061C49, var(--ds-blue));
-            font-size: .82rem;
-            font-weight: 800;
-            flex: none;
-        }
-
-        .ds-question-top {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: .7rem;
-            margin-bottom: .28rem;
-        }
-
-            .ds-question-top span {
-                display: inline-flex;
-                align-items: center;
-                gap: .35rem;
-                color: var(--ds-steel);
-                font-size: .72rem;
-                font-weight: 800;
-                text-transform: uppercase;
-                letter-spacing: .05em;
+            .defense-progress-card span {
+                margin-top: .15rem;
+                color: var(--defense-muted);
+                font-size: .7rem;
             }
 
-            .ds-question-top b {
-                border-radius: 999px;
-                padding: .24rem .5rem;
-                color: #92400E;
-                background: #FEF3C7;
-                font-size: .68rem;
-                font-weight: 750;
-                white-space: nowrap;
-            }
-
-        .ds-question-content h3 {
-            margin: 0;
-            color: var(--ds-text);
-            font-size: .96rem;
-            font-weight: 720;
-            line-height: 1.45;
-        }
-
-        .ds-chevron {
-            color: #94A3B8;
-            transition: .18s ease;
-        }
-
-        .ds-qa-card[open] .ds-chevron {
-            transform: rotate(180deg);
-            color: var(--ds-blue);
-        }
-
-        .ds-answer-box {
-            margin: 0 1rem 1rem 4.85rem;
-            padding: .95rem;
-            border-radius: 18px;
-            background: #F8FAFC;
-            border: 1px solid var(--ds-border);
-        }
-
-        .ds-answer-label {
-            display: inline-flex;
-            align-items: center;
-            gap: .4rem;
-            margin-bottom: .55rem;
-            color: var(--ds-green);
-            font-size: .74rem;
-            font-weight: 800;
-            text-transform: uppercase;
-            letter-spacing: .04em;
-        }
-
-        .ds-answer-box p {
-            margin: 0;
-            color: #475569;
-            font-size: .88rem;
-            line-height: 1.65;
-        }
-
-        .ds-answer-note {
-            display: flex;
-            gap: .45rem;
-            align-items: flex-start;
-            margin-top: .8rem;
-            padding-top: .75rem;
-            border-top: 1px solid var(--ds-border);
-            color: var(--ds-muted);
-            font-size: .76rem;
-            line-height: 1.45;
-        }
-
-        .ds-side {
-            display: grid;
-            gap: 1rem;
-        }
-
-        .ds-focus-list,
-        .ds-checklist,
-        .ds-rubric {
-            display: grid;
-            gap: .7rem;
-            padding: 1rem;
-        }
-
-            .ds-focus-list > div {
-                display: grid;
-                grid-template-columns: auto minmax(0, 1fr);
-                gap: .75rem;
-                align-items: start;
-                padding: .85rem;
-                border: 1px solid var(--ds-border);
-                border-radius: 18px;
-                background: #fff;
-            }
-
-            .ds-focus-list i {
-                width: 40px;
-                height: 40px;
-                display: grid;
-                place-items: center;
-                border-radius: 15px;
-                color: #fff;
-                background: linear-gradient(135deg, #061C49, var(--ds-blue));
+            .defense-progress-card b {
+                color: var(--defense-blue);
                 font-size: 1rem;
             }
 
-            .ds-focus-list strong {
-                display: block;
-                color: var(--ds-text);
-                font-size: .86rem;
-                font-weight: 760;
-            }
-
-            .ds-focus-list small {
-                display: block;
-                margin-top: .18rem;
-                color: var(--ds-muted);
-                font-size: .74rem;
-                line-height: 1.45;
-            }
-
-            .ds-checklist div {
-                display: flex;
-                gap: .55rem;
-                align-items: flex-start;
-                color: #334155;
-                font-size: .82rem;
-                line-height: 1.5;
-            }
-
-            .ds-checklist i {
-                color: var(--ds-green);
-                margin-top: .13rem;
-                flex: none;
-            }
-
-        .ds-rubric-item {
-            display: grid;
-            gap: .35rem;
-        }
-
-            .ds-rubric-item div:first-child {
-                display: flex;
-                justify-content: space-between;
-                gap: .7rem;
-                color: #334155;
-                font-size: .82rem;
-                font-weight: 680;
-            }
-
-            .ds-rubric-item b {
-                color: var(--ds-muted);
-                font-size: .78rem;
-            }
-
-        .ds-progress {
+        .defense-progress-track {
+            grid-column: 1 / -1;
             height: 8px;
             overflow: hidden;
             border-radius: 999px;
-            background: #E8ECF2;
+            background: #e2e8f0;
         }
 
-            .ds-progress span {
+            .defense-progress-track span {
+                height: 100%;
+                margin: 0;
+                border-radius: inherit;
+                background: linear-gradient(90deg, var(--defense-steel), var(--defense-blue));
+            }
+
+        .defense-selected-areas {
+            padding: 0 1.2rem .9rem;
+        }
+
+        .defense-question-list {
+            display: grid;
+            gap: .9rem;
+            padding: 0 1.2rem 1.2rem;
+        }
+
+        .defense-question-card {
+            overflow: hidden;
+            border: 1px solid var(--defense-border);
+            border-radius: 22px;
+            background: #fff;
+        }
+
+            .defense-question-card.is-evaluated {
+                border-color: #cbd5e1;
+                box-shadow: 0 14px 28px rgba(48, 65, 99, .06);
+            }
+
+        .defense-question-card__header {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: .85rem;
+            align-items: flex-start;
+            padding: 1rem;
+            border-bottom: 1px solid var(--defense-border);
+            background: #fbfdff;
+        }
+
+        .defense-question-number {
+            width: 48px;
+            height: 48px;
+            display: grid;
+            place-items: center;
+            border-radius: 16px;
+            color: #fff;
+            background: linear-gradient(135deg, var(--defense-navy), var(--defense-blue));
+            font-size: .82rem;
+            font-weight: 680;
+        }
+
+        .defense-question-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .4rem;
+        }
+
+            .defense-question-tags span {
+                display: inline-flex;
+                align-items: center;
+                gap: .3rem;
+                padding: .28rem .48rem;
+                border-radius: 999px;
+                color: #52647f;
+                background: #eef2f7;
+                font-size: .66rem;
+                font-weight: 620;
+            }
+
+            .defense-question-tags .is-complete {
+                color: #304163;
+                background: #e8eef5;
+            }
+
+        .defense-question-title h3 {
+            margin: .55rem 0 0;
+            font-size: 1rem;
+            font-weight: 640;
+            line-height: 1.48;
+        }
+
+        .defense-question-card__body {
+            padding: 1rem;
+        }
+
+        .defense-answer-form label,
+        .defense-answer-form label small {
+            display: block;
+        }
+
+        .defense-answer-form label {
+            font-size: .8rem;
+            font-weight: 640;
+        }
+
+            .defense-answer-form label small {
+                margin-top: .2rem;
+                color: var(--defense-muted);
+                font-size: .7rem;
+                font-weight: 500;
+            }
+
+        .defense-answer-form textarea {
+            width: 100%;
+            min-height: 145px;
+            margin-top: .6rem;
+            padding: .9rem 1rem;
+            resize: vertical;
+            border: 1px solid #cfd8e5;
+            border-radius: 16px;
+            outline: none;
+            color: var(--defense-ink);
+            background: #fff;
+            font: inherit;
+            font-size: .86rem;
+            line-height: 1.6;
+            transition: border-color .15s ease, box-shadow .15s ease;
+        }
+
+            .defense-answer-form textarea:focus {
+                border-color: #7890ad;
+                box-shadow: 0 0 0 4px rgba(81,108,141,.12);
+            }
+
+        .defense-answer-form__footer {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: center;
+            margin-top: .65rem;
+        }
+
+            .defense-answer-form__footer > span {
+                color: var(--defense-muted);
+                font-size: .7rem;
+            }
+
+        .defense-locked {
+            display: flex;
+            align-items: center;
+            gap: .7rem;
+            margin-top: .85rem;
+            padding: .8rem .9rem;
+            border: 1px dashed #cbd5e1;
+            border-radius: 16px;
+            color: #64748b;
+            background: #f8fafc;
+        }
+
+            .defense-locked > i {
+                width: 36px;
+                height: 36px;
+                display: grid;
+                place-items: center;
+                flex: none;
+                border-radius: 12px;
+                color: var(--defense-blue);
+                background: #e8eef5;
+            }
+
+            .defense-locked strong,
+            .defense-locked span {
+                display: block;
+            }
+
+            .defense-locked strong {
+                font-size: .76rem;
+            }
+
+            .defense-locked span {
+                margin-top: .1rem;
+                font-size: .68rem;
+                line-height: 1.4;
+            }
+
+        .defense-evaluation {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--defense-border);
+        }
+
+        .defense-evaluation__heading {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: center;
+        }
+
+            .defense-evaluation__heading h4 {
+                margin: .15rem 0 0;
+                font-size: 1.1rem;
+                font-weight: 680;
+            }
+
+        .defense-score-ring {
+            --value: calc(var(--score) * 1%);
+            width: 74px;
+            height: 74px;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            border-radius: 50%;
+            background: radial-gradient(circle closest-side, white 76%, transparent 78% 100%), conic-gradient(var(--defense-blue) var(--value), #e2e8f0 0);
+        }
+
+            .defense-score-ring strong {
+                font-size: 1.1rem;
+                line-height: 1;
+            }
+
+            .defense-score-ring small {
+                margin-top: .08rem;
+                color: var(--defense-muted);
+                font-size: .62rem;
+            }
+
+        .defense-score-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: .65rem;
+            margin-top: .9rem;
+        }
+
+            .defense-score-grid article {
+                padding: .75rem;
+                border: 1px solid var(--defense-border);
+                border-radius: 16px;
+                background: #fbfdff;
+            }
+
+            .defense-score-grid span,
+            .defense-score-grid strong {
+                display: block;
+            }
+
+            .defense-score-grid span {
+                color: var(--defense-muted);
+                font-size: .68rem;
+            }
+
+            .defense-score-grid strong {
+                margin-top: .2rem;
+                font-size: .96rem;
+            }
+
+            .defense-score-grid article > div {
+                height: 6px;
+                margin-top: .5rem;
+                overflow: hidden;
+                border-radius: 999px;
+                background: #e2e8f0;
+            }
+
+            .defense-score-grid i {
                 display: block;
                 height: 100%;
                 border-radius: inherit;
-                background: linear-gradient(90deg, var(--ds-steel), var(--ds-blue));
+                background: linear-gradient(90deg, #7890ad, var(--defense-blue));
             }
 
-        .ds-empty {
-            min-height: 520px;
-            display: grid;
-            place-items: center;
-            align-content: center;
-            text-align: center;
-            gap: .7rem;
-            padding: 2rem;
+        .defense-feedback-summary {
+            display: flex;
+            gap: .65rem;
+            align-items: flex-start;
+            margin-top: .85rem;
+            padding: .85rem;
+            border: 1px solid #bfdbfe;
+            border-radius: 16px;
+            color: #1e3a8a;
+            background: #eff6ff;
         }
 
-        .ds-empty-small {
-            margin: 1rem;
+            .defense-feedback-summary p {
+                margin: 0;
+                font-size: .78rem;
+                line-height: 1.55;
+            }
+
+        .defense-feedback-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: .7rem;
+            margin-top: .8rem;
+        }
+
+        .defense-feedback-card {
+            padding: .85rem;
+            border: 1px solid;
+            border-radius: 17px;
+        }
+
+            .defense-feedback-card header {
+                display: flex;
+                align-items: center;
+                gap: .4rem;
+                font-size: .76rem;
+                font-weight: 660;
+            }
+
+            .defense-feedback-card ul {
+                display: grid;
+                gap: .35rem;
+                margin: .6rem 0 0;
+                padding-left: 1.05rem;
+                font-size: .72rem;
+                line-height: 1.45;
+            }
+
+            .defense-feedback-card p {
+                margin: .55rem 0 0;
+                font-size: .72rem;
+                line-height: 1.45;
+            }
+
+        .defense-feedback-card--positive {
+            color: #304163;
+            border-color: #cbd5e1;
+            background: #f8fafc;
+        }
+
+        .defense-feedback-card--warning {
+            color: #92400e;
+            border-color: #fde68a;
+            background: #fffbeb;
+        }
+
+        .defense-reference {
+            margin-top: .8rem;
+            overflow: hidden;
+            border: 1px solid #dbe5ef;
+            border-radius: 17px;
+            background: #fff;
+        }
+
+            .defense-reference summary {
+                display: flex;
+                justify-content: space-between;
+                gap: 1rem;
+                align-items: center;
+                padding: .85rem;
+                cursor: pointer;
+                color: var(--defense-blue);
+                font-size: .76rem;
+                font-weight: 660;
+            }
+
+                .defense-reference summary span {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: .4rem;
+                }
+
+        .defense-reference__body {
+            display: grid;
+            gap: .8rem;
+            padding: 0 .85rem .85rem;
+            border-top: 1px solid var(--defense-border);
+        }
+
+            .defense-reference__body > div {
+                padding-top: .8rem;
+            }
+
+        .defense-reference__label {
+            display: block;
+            margin-bottom: .35rem;
+            color: var(--defense-accent);
+            font-size: .66rem;
+            font-weight: 660;
+            letter-spacing: .06em;
+            text-transform: uppercase;
+        }
+
+        .defense-reference p,
+        .defense-reference li {
+            color: #475569;
+            font-size: .76rem;
+            line-height: 1.55;
+        }
+
+        .defense-reference p {
+            margin: 0;
+        }
+
+        .defense-reference ul {
+            display: grid;
+            gap: .28rem;
+            margin: 0;
+            padding-left: 1rem;
+        }
+
+        .defense-follow-up {
+            display: flex;
+            gap: .65rem;
+            align-items: flex-start;
+            margin-top: .8rem;
+            padding: .85rem;
+            border-radius: 16px;
+            color: #4c1d95;
+            background: #f5f3ff;
+            border: 1px solid #ddd6fe;
+        }
+
+            .defense-follow-up span,
+            .defense-follow-up strong {
+                display: block;
+            }
+
+            .defense-follow-up span {
+                font-size: .64rem;
+                font-weight: 650;
+                letter-spacing: .05em;
+                text-transform: uppercase;
+            }
+
+            .defense-follow-up strong {
+                margin-top: .2rem;
+                font-size: .78rem;
+                line-height: 1.45;
+            }
+
+        .defense-placeholder,
+        .defense-empty {
             min-height: 360px;
-            border-radius: 24px;
             display: grid;
             place-items: center;
             align-content: center;
-            text-align: center;
-            gap: .7rem;
+            gap: .55rem;
             padding: 2rem;
+            text-align: center;
         }
 
-        .ds-empty-icon {
+        .defense-placeholder__visual,
+        .defense-empty__icon {
             width: 78px;
             height: 78px;
             display: grid;
             place-items: center;
-            border-radius: 28px;
-            color: var(--ds-steel);
-            background: #EEF2F6;
+            border-radius: 26px;
+            color: var(--defense-blue);
+            background: #eef2f7;
             font-size: 2rem;
         }
 
-        .ds-empty h2,
-        .ds-empty-small h2 {
+        .defense-placeholder p,
+        .defense-empty p {
+            max-width: 590px;
             margin: 0;
-            color: var(--ds-text);
-            font-size: 1.35rem;
-            font-weight: 800;
-        }
-
-        .ds-empty p,
-        .ds-empty-small p {
-            max-width: 560px;
-            margin: 0;
-            color: var(--ds-muted);
+            color: var(--defense-muted);
+            font-size: .84rem;
             line-height: 1.6;
         }
 
-        @@media (max-width: 1180px) {
-            .ds-hero,
-            .ds-layout {
-                grid-template-columns: 1fr;
-            }
-
-            .ds-hero-panel {
-                min-height: 120px;
-            }
-
-            .ds-project-strip {
-                align-items: flex-start;
-                flex-direction: column;
-            }
-
-            .ds-project-tags {
-                justify-content: flex-start;
-            }
+        .defense-side-card header {
+            padding: 1.1rem 1.1rem .9rem;
+            border-bottom: 1px solid var(--defense-border);
         }
 
-        @@media (max-width: 767px) {
-            .ds-hero {
-                padding: 1rem;
-            }
+        .defense-side-card h3 {
+            margin-top: .3rem;
+            font-size: .96rem;
+            font-weight: 640;
+            line-height: 1.4;
+        }
 
-            .ds-card-head,
-            .ds-question-top {
-                align-items: flex-start;
-                flex-direction: column;
-            }
+        .defense-side-card header p {
+            margin: .4rem 0 0;
+            color: var(--defense-muted);
+            font-size: .72rem;
+            line-height: 1.55;
+        }
 
-            .ds-qa-card summary {
+        .defense-answer-guide {
+            display: grid;
+            gap: 0;
+            padding: .4rem 1.05rem 1rem;
+        }
+
+            .defense-answer-guide > div {
+                display: grid;
                 grid-template-columns: auto minmax(0, 1fr);
+                gap: .7rem;
+                align-items: flex-start;
+                padding: .85rem 0;
+                border-bottom: 1px solid #edf1f5;
             }
 
-            .ds-chevron {
+                .defense-answer-guide > div:last-child {
+                    border-bottom: 0;
+                }
+
+                .defense-answer-guide > div > span {
+                    width: 30px;
+                    height: 30px;
+                    display: grid;
+                    place-items: center;
+                    border-radius: 10px;
+                    color: #fff;
+                    background: var(--defense-blue);
+                    font-size: .7rem;
+                    font-weight: 600;
+                }
+
+            .defense-answer-guide h4 {
+                margin: 0;
+                color: var(--defense-ink);
+                font-size: .78rem;
+                font-weight: 620;
+                line-height: 1.35;
+            }
+
+            .defense-answer-guide p {
+                margin: .2rem 0 0;
+                color: var(--defense-muted);
+                font-size: .69rem;
+                line-height: 1.5;
+            }
+
+        .defense-checklist {
+            display: grid;
+            gap: .15rem;
+            margin: 0;
+            padding: .65rem 1.05rem .8rem;
+            list-style: none;
+        }
+
+            .defense-checklist li {
+                display: grid;
+                grid-template-columns: auto minmax(0, 1fr);
+                gap: .6rem;
+                align-items: flex-start;
+                padding: .62rem 0;
+                color: #475569;
+                border-bottom: 1px solid #edf1f5;
+                font-size: .72rem;
+                line-height: 1.5;
+            }
+
+                .defense-checklist li:last-child {
+                    border-bottom: 0;
+                }
+
+            .defense-checklist i {
+                width: 24px;
+                height: 24px;
+                display: grid;
+                place-items: center;
+                margin-top: .02rem;
+                border-radius: 8px;
+                color: var(--defense-blue);
+                background: #eef2f7;
+                font-size: .72rem;
+            }
+
+        .defense-side-note {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: .55rem;
+            align-items: flex-start;
+            margin: 0 1.05rem 1.05rem;
+            padding: .75rem;
+            border: 1px solid #dbe5ef;
+            border-radius: 14px;
+            color: #52647f;
+            background: #f8fafc;
+            font-size: .68rem;
+            line-height: 1.5;
+        }
+
+            .defense-side-note i {
+                margin-top: .08rem;
+                color: var(--defense-blue);
+            }
+
+        .defense-busy {
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            display: grid;
+            place-items: center;
+            padding: 1rem;
+            background: rgba(7, 29, 73, .42);
+            backdrop-filter: blur(4px);
+        }
+
+            .defense-busy[hidden] {
                 display: none;
             }
 
-            .ds-answer-box {
-                margin: 0 1rem 1rem;
+            .defense-busy > div {
+                min-width: 270px;
+                display: grid;
+                justify-items: center;
+                gap: .45rem;
+                padding: 1.4rem;
+                border-radius: 22px;
+                color: var(--defense-ink);
+                background: #fff;
+                box-shadow: 0 24px 60px rgba(15,23,42,.24);
             }
 
-            .ds-question-top b {
-                width: fit-content;
+            .defense-busy strong {
+                margin-top: .25rem;
+                font-size: .86rem;
+            }
+
+            .defense-busy small {
+                color: var(--defense-muted);
+                font-size: .7rem;
+            }
+
+        .defense-spinner {
+            width: 42px;
+            height: 42px;
+            border: 4px solid #dbe5ef;
+            border-top-color: var(--defense-blue);
+            border-radius: 50%;
+            animation: defense-spin .8s linear infinite;
+        }
+
+        @@keyframes defense-spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .defense-page strong,
+        .defense-page b {
+            font-weight: 560;
+        }
+
+        .defense-page h1 {
+            font-weight: 650;
+        }
+
+        .defense-page h2,
+        .defense-page h3,
+        .defense-page h4 {
+            font-weight: 600;
+        }
+
+        .defense-page .defense-button,
+        .defense-page .defense-kicker,
+        .defense-page .defense-hero__eyebrow {
+            font-weight: 600;
+        }
+
+        .defense-page h1,
+        .defense-page h2,
+        .defense-page h3,
+        .defense-page h4 {
+            text-wrap: balance;
+        }
+
+        .defense-panel,
+        .defense-side-card,
+        .defense-context,
+        .defense-question-card {
+            transition: box-shadow .16s ease, border-color .16s ease;
+        }
+
+        @@media (max-width: 1200px) {
+            .defense-hero,
+            .defense-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .defense-hero__stats {
+                min-width: 0;
+            }
+
+            .defense-sidebar {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @@media (max-width: 900px) {
+            .defense-area-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .defense-context,
+            .defense-panel__header--session,
+            .defense-config-footer {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .defense-context__tags,
+            .defense-session__actions {
+                justify-content: flex-start;
+            }
+
+            .defense-score-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @@media (max-width: 700px) {
+            .defense-toast-stack {
+                top: .75rem;
+                right: .75rem;
+                left: .75rem;
+                width: auto;
+            }
+
+            .defense-hero__stats,
+            .defense-sidebar,
+            .defense-feedback-grid,
+            .defense-area-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .defense-count-picker {
+                grid-template-columns: repeat(5, minmax(48px, 1fr));
+            }
+
+            .defense-hero__actions,
+            .defense-session__actions {
+                width: 100%;
+            }
+
+                .defense-hero__actions .defense-button,
+                .defense-session__actions form,
+                .defense-session__actions .defense-button {
+                    width: 100%;
+                }
+
+            .defense-question-card__header {
+                grid-template-columns: 1fr;
+            }
+
+            .defense-answer-form__footer,
+            .defense-evaluation__heading {
+                align-items: flex-start;
+                flex-direction: column;
             }
         }
     </style>
+}
+
+@section Scripts {
+    <script>
+        (() => {
+            const busy = document.getElementById("defense-busy");
+            const toastStack = document.getElementById("defense-toast-stack");
+            const areaGrid = document.getElementById("defense-area-grid");
+
+            const dismissToast = toast => {
+                if (!toast || toast.dataset.dismissing === "true") {
+                    return;
+                }
+
+                toast.dataset.dismissing = "true";
+                toast.classList.add("is-leaving");
+                toast.classList.remove("is-visible");
+
+                window.setTimeout(() => {
+                    toast.remove();
+                }, 260);
+            };
+
+            const scheduleToastDismissal = toast => {
+                const delay = Number(toast.dataset.autoDismiss || 5000);
+
+                window.setTimeout(() => {
+                    dismissToast(toast);
+                }, delay);
+            };
+
+            const showToast = (
+                title,
+                message,
+                type = "error",
+                duration = 5000
+            ) => {
+                if (!toastStack) {
+                    return;
+                }
+
+                const toast = document.createElement("div");
+                toast.className =
+                    `defense-toast defense-toast--${type}`;
+                toast.setAttribute(
+                    "role",
+                    type === "error" ? "alert" : "status"
+                );
+                toast.dataset.defenseToast = "";
+                toast.dataset.autoDismiss = String(duration);
+                toast.style.setProperty(
+                    "--toast-duration",
+                    `${duration}ms`
+                );
+
+                const iconClass =
+                    type === "error"
+                        ? "bi-exclamation-circle"
+                        : "bi-check2-circle";
+
+                toast.innerHTML = `
+                    <span class="defense-toast__icon">
+                        <i class="bi ${iconClass}"></i>
+                    </span>
+
+                    <div class="defense-toast__content">
+                        <strong></strong>
+                        <span></span>
+                    </div>
+
+                    <button type="button"
+                            class="defense-toast__close"
+                            data-toast-close
+                            aria-label="Dismiss message">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+
+                    <span class="defense-toast__timer"></span>
+                `;
+
+                toast.querySelector("strong").textContent = title;
+                toast.querySelector(
+                    ".defense-toast__content > span"
+                ).textContent = message;
+
+                toastStack.appendChild(toast);
+
+                window.requestAnimationFrame(() => {
+                    toast.classList.add("is-visible");
+                });
+
+                scheduleToastDismissal(toast);
+            };
+
+            document
+                .querySelectorAll("[data-defense-toast]")
+                .forEach(toast => {
+                    const duration = Number(
+                        toast.dataset.autoDismiss || 5000
+                    );
+
+                    toast.style.setProperty(
+                        "--toast-duration",
+                        `${duration}ms`
+                    );
+
+                    scheduleToastDismissal(toast);
+                });
+
+            document.addEventListener("click", event => {
+                const closeButton =
+                    event.target.closest("[data-toast-close]");
+
+                if (!closeButton) {
+                    return;
+                }
+
+                dismissToast(
+                    closeButton.closest("[data-defense-toast]")
+                );
+            });
+
+            document.querySelectorAll("form").forEach(form => {
+                form.addEventListener("submit", event => {
+                    if (form.id === "defense-config-form") {
+                        const checkedAreas =
+                            form.querySelectorAll(
+                                'input[name="FocusAreas"]:checked'
+                            );
+
+                        if (checkedAreas.length === 0) {
+                            event.preventDefault();
+
+                            areaGrid?.classList.remove(
+                                "has-validation-error"
+                            );
+
+                            window.requestAnimationFrame(() => {
+                                areaGrid?.classList.add(
+                                    "has-validation-error"
+                                );
+                            });
+
+                            showToast(
+                                "Choose a defense field",
+                                "Select at least one area before generating your practice questions.",
+                                "error",
+                                4800
+                            );
+
+                            document
+                                .getElementById("practice-config")
+                                ?.scrollIntoView({
+                                    behavior: "smooth",
+                                    block: "start"
+                                });
+
+                            return;
+                        }
+
+                        areaGrid?.classList.remove(
+                            "has-validation-error"
+                        );
+                    }
+
+                    if (busy) {
+                        busy.hidden = false;
+                    }
+
+                    form
+                        .querySelectorAll(
+                            'button[type="submit"]'
+                        )
+                        .forEach(button => {
+                            button.disabled = true;
+                        });
+                });
+            });
+
+            document
+                .querySelectorAll(
+                    'input[name="FocusAreas"]'
+                )
+                .forEach(input => {
+                    input.addEventListener("change", () => {
+                        if (
+                            document.querySelectorAll(
+                                'input[name="FocusAreas"]:checked'
+                            ).length > 0
+                        ) {
+                            areaGrid?.classList.remove(
+                                "has-validation-error"
+                            );
+                        }
+                    });
+                });
+
+            document
+                .querySelectorAll("[data-answer-textarea]")
+                .forEach(textarea => {
+                    const form =
+                        textarea.closest("[data-answer-form]");
+                    const output =
+                        form?.querySelector("[data-word-count]");
+
+                    const updateCount = () => {
+                        const words = textarea.value
+                            .trim()
+                            .split(/\s+/)
+                            .filter(Boolean)
+                            .length;
+
+                        if (output) {
+                            output.textContent =
+                                `${words} word${words === 1 ? "" : "s"}`;
+                        }
+                    };
+
+                    textarea.addEventListener(
+                        "input",
+                        updateCount
+                    );
+
+                    updateCount();
+                });
+        })();
+    </script>
 }

@@ -251,6 +251,12 @@ public class AiServiceClient : IAiServiceClient
             "/defense-simulator/generate-questions",
             request,
             CamelCaseJsonOpts);
+    public Task<DefenseEvaluateAnswerResponse?> EvaluateDefenseAnswerAsync(
+    DefenseEvaluateAnswerRequest request) =>
+    PostAsync<DefenseEvaluateAnswerResponse>(
+        "/defense-simulator/evaluate-answer",
+        request,
+        CamelCaseJsonOpts);
 
     // ── Market Demand (real-time AI) ──────────────────────────────────────────
     // VERIFY: confirm this path matches what's actually registered in
@@ -272,3 +278,5 @@ public class AiServiceClient : IAiServiceClient
     public Task<FypMentorServiceResponse?> AskFypMentorAsync(FypMentorRequest request) =>
         PostAsync<FypMentorServiceResponse>("/fyp-chat", request, CamelCaseJsonOpts);
 }
+
+
