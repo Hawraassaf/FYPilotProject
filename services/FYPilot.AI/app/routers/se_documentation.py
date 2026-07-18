@@ -9,7 +9,7 @@ from app.agents.se_documentation.se_documentation_orchestrator import (
     SEDocumentationOrchestratorAgent as SEDocumentationAgent,
     SEDocumentationRequest,
 )
-router = APIRouter(tags=["SE Documentation"])
+
 
 
 class SEDocumentationJobDto(BaseModel):

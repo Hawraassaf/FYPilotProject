@@ -250,23 +250,6 @@ try:
 
     app.include_router(fyp_chat.router)
     logger.info("FYP Mentor Chat router loaded")
-except Exception as exception:
-    logger.warning(
-        "FYP Mentor Chat router skipped: %s",
-        exception,
-    )
-
-
-try:
-    from app.routers import se_documentation
-
-    app.include_router(se_documentation.router)
-    logger.info("SE Documentation router loaded")
-except Exception as exception:
-    logger.warning(
-        "SE Documentation router skipped: %s",
-        exception,
-    )
 
 
 try:
@@ -274,26 +257,7 @@ try:
 
     app.include_router(defense_simulator.router)
     logger.info("Defense Simulator router loaded")
-except Exception as exception:
-    logger.warning(
-        "Defense Simulator router skipped: %s",
-        exception,
-    )
 
-
-try:
-    from app.routers import ollama_test
-
-    app.include_router(ollama_test.router)
-    logger.info("Ollama test router loaded")
-except Exception as exception:
-    logger.warning(
-        "Ollama test router skipped: %s",
-        exception,
-    )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Heavy ML routers — loaded only if dependencies are available
 # ─────────────────────────────────────────────────────────────────────────────
 
