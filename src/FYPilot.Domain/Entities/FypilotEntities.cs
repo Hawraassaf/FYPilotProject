@@ -95,13 +95,15 @@ public class RoadmapPhase
 [Table("chat_messages")]
 public class ChatMessage
 {
-    [Key] [Column("id")] public int Id { get; set; }
+    [Key][Column("id")] public int Id { get; set; }
     [Column("user_id")] public int UserId { get; set; }
     [Column("idea_id")] public int? IdeaId { get; set; }
+    [Column("mentor_chat_session_id")] public int? MentorChatSessionId { get; set; }
     [Column("role")] public string Role { get; set; } = "user";
     [Column("content")] public string Content { get; set; } = "";
     [Column("created_at")] public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     [ForeignKey(nameof(UserId))] public User? User { get; set; }
+    [ForeignKey(nameof(MentorChatSessionId))] public MentorChatSession? MentorChatSession { get; set; }
 }
 
 [Table("market_needs")]

@@ -32,6 +32,30 @@ static string BuildConnectionString()
         $"Host={host};Port={port};Database={db};Username={user};Password={pass};SSL Mode=Disable;Trust Server Certificate=true;";
 }
 
+// SEC-0 fail-fast check: crash at STARTUP with a clear message if the AI
+// service key is missing, rather than discovering it later via mysterious
+// 401s on every AI call. AiServiceClient's own constructor also reads this
+// env var independently (see AiServiceClient.cs) — this call exists purely
+// for the fail-fast validation, its return value is intentionally unused.
+static string GetRequiredAiServiceApiKey(IConfiguration configuration)
+{
+    var key =
+        Environment.GetEnvironmentVariable("AI_SERVICE_API_KEY")
+        ?? configuration["AiService:InternalApiKey"]
+        ?? configuration["AiService:ApiKey"];
+
+    if (string.IsNullOrWhiteSpace(key))
+    {
+        throw new InvalidOperationException(
+            "AI_SERVICE_API_KEY is missing. Set the same key in both the .NET app and the FastAPI service."
+        );
+    }
+
+    return key;
+}
+
+_ = GetRequiredAiServiceApiKey(builder.Configuration);
+
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(BuildConnectionString()));
 
@@ -69,6 +93,11 @@ builder.Services.AddAuthorization(options =>
 });
 
 // ── AI Service ────────────────────────────────────────────────────────────────
+// NOTE: the X-Internal-Api-Key header is added by AiServiceClient itself
+// (in its own constructor), not via IHttpClientFactory's default client —
+// AiServiceClient builds its own HttpClient internally. An earlier version
+// of this file registered the header on Options.DefaultName here, but
+// nothing consumed that client for AI calls, so it did nothing. Removed.
 builder.Services.AddSingleton<IAiServiceClient, AiServiceClient>();
 builder.Services.AddHttpClient();
 
@@ -77,7 +106,10 @@ builder.Services.AddScoped<
     IDocumentationGeneratorService,
     DocumentationGeneratorService>();
 
-// ── Session ───────────────────────────────────────────────────────────────────
+// ── Session: used to store generated AI ideas for Shuffle 2-2-2 ───────────────
+// (FIX: this was registered twice — once configured, once bare immediately
+// after the Google Calendar block below. The bare call would have silently
+// overridden these options with defaults. Kept only this configured one.)
 builder.Services.AddDistributedMemoryCache();
 
 builder.Services.AddSession(options =>
@@ -101,7 +133,7 @@ builder.Services.Configure<GoogleCalendarSettings>(
 builder.Services.AddScoped<
     IGoogleCalendarService,
     GoogleCalendarService>();
-builder.Services.AddSession();
+
 // ── Email Sender ──────────────────────────────────────────────────────────────
 builder.Services.Configure<SmtpSettings>(
     builder.Configuration.GetSection("Smtp"));

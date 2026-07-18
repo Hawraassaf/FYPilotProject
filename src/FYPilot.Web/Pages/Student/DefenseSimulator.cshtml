@@ -1,91 +1,940 @@
 @page
 @model FYPilot.Web.Pages.Student.DefenseSimulatorModel
 @{
-    ViewData["Title"]    = "Defense Simulator";
-    ViewData["Subtitle"] = "Prepare for your FYP proposal defense with professor-style Q&A";
+    ViewData["Title"] = "Defense Simulator";
+    ViewData["Subtitle"] = "AI-generated professor-style questions for your FYP defense.";
+
+    var questionCount = Model.QnA?.Count ?? 0;
 }
 
-<div class="row g-4">
-    <div class="col-lg-7">
-        <div class="page-card p-4">
-            <div class="d-flex align-items-center justify-content-between mb-4">
-                <h6 class="fw-bold mb-0"><i class="bi bi-shield-check me-2 text-danger"></i>Defense Q&A Practice</h6>
-                @if (Model.Idea != null)
-                {
-                    <span class="badge bg-primary-subtle text-primary">@Model.Idea.Title.Substring(0, Math.Min(Model.Idea.Title.Length, 30))…</span>
-                }
+<section class="ds-page">
+
+    <header class="ds-hero">
+        <div class="ds-hero-content">
+            <span class="ds-eyebrow">AI Defense Simulator</span>
+            <h1>Practice AI-generated professor questions before your FYP defense.</h1>
+
+            <p>
+                The simulator uses your selected project idea, technologies, domain, skills, and roadmap context
+                to generate realistic defense questions using the AI backend.
+            </p>
+
+            <div class="ds-hero-actions">
+                <a href="/Student/DefenseSimulator" class="ds-btn ds-btn-light">
+                    <i class="bi bi-stars"></i>
+                    Generate AI Questions
+                </a>
+
+                <a href="/Student/IdeaGenerator" class="ds-btn ds-btn-ghost">
+                    <i class="bi bi-lightbulb"></i>
+                    Change idea
+                </a>
+
+                <a href="/Student/Dashboard" class="ds-btn ds-btn-ghost">
+                    <i class="bi bi-grid"></i>
+                    Dashboard
+                </a>
+            </div>
+        </div>
+
+        <div class="ds-hero-panel">
+            <div class="ds-hero-icon">
+                <i class="bi bi-robot"></i>
             </div>
 
-            @if (Model.Idea == null)
-            {
-                <div class="text-center py-4 text-muted">
-                    <i class="bi bi-shield display-4"></i>
-                    <p class="mt-3">No project selected. <a href="/Student/IdeaGenerator">Generate an idea first.</a></p>
+            <div>
+                <span>@questionCount</span>
+                <small>AI-generated questions</small>
+            </div>
+        </div>
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div class="alert alert-warning ds-alert">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            @Model.ErrorMessage
+        </div>
+    }
+
+    @if (Model.Idea == null)
+    {
+        <section class="ds-empty">
+            <div class="ds-empty-icon">
+                <i class="bi bi-shield"></i>
+            </div>
+
+            <h2>No project idea selected yet</h2>
+
+            <p>
+                Generate or select a project idea first, then return here so the AI can generate
+                defense questions based on that specific project.
+            </p>
+
+            <a href="/Student/IdeaGenerator" class="ds-btn ds-btn-primary">
+                <i class="bi bi-lightbulb"></i>
+                Generate project idea
+            </a>
+        </section>
+    }
+    else
+    {
+        <section class="ds-project-strip">
+            <div>
+                <span class="ds-eyebrow">Current project context sent to AI</span>
+                <h2>@Model.Idea.Title</h2>
+            </div>
+
+            <div class="ds-project-tags">
+                <span>
+                    <i class="bi bi-folder2-open"></i>
+                    @(string.IsNullOrWhiteSpace(Model.Idea.Domain) ? "Project domain" : Model.Idea.Domain)
+                </span>
+
+                <span>
+                    <i class="bi bi-cpu"></i>
+                    @(string.IsNullOrWhiteSpace(Model.Idea.RequiredTechnologies) ? "Technologies" : Model.Idea.RequiredTechnologies)
+                </span>
+
+                <span>
+                    <i class="bi bi-stars"></i>
+                    Ollama AI generated
+                </span>
+            </div>
+        </section>
+
+        <section class="ds-layout">
+
+            <main class="ds-main-card">
+                <div class="ds-card-head">
+                    <div>
+                        <span class="ds-eyebrow">AI practice room</span>
+                        <h2>Professor-style Q&A</h2>
+                    </div>
+
+                    <span class="ds-soft-pill">
+                        <i class="bi bi-robot"></i>
+                        @questionCount AI questions
+                    </span>
                 </div>
-            }
-            else
-            {
-                @foreach (var (q, a, category) in Model.QnA)
+
+                @if (Model.QnA == null || !Model.QnA.Any())
                 {
-                    <div class="mb-4 p-3 rounded-3" style="border:1px solid #e2e8f0">
-                        <div class="d-flex align-items-start gap-2 mb-2">
-                            <span class="badge bg-danger flex-shrink-0 mt-1">Professor</span>
-                            <div class="fw-semibold small">@q</div>
+                    <div class="ds-empty-small">
+                        <div class="ds-empty-icon">
+                            <i class="bi bi-hourglass-split"></i>
                         </div>
-                        <div class="ms-4 mt-2">
-                            <div class="small text-muted fw-semibold mb-1">
-                                <span class="badge bg-success-subtle text-success me-1">Suggested Answer</span>
-                                <span class="badge bg-secondary-subtle text-secondary">@category</span>
+
+                        <h2>No AI questions generated yet</h2>
+
+                        <p>
+                            Click Generate AI Questions to request customized questions from the Defense Simulator backend.
+                        </p>
+
+                        <a href="/Student/DefenseSimulator" class="ds-btn ds-btn-primary">
+                            <i class="bi bi-stars"></i>
+                            Generate AI Questions
+                        </a>
+                    </div>
+                }
+                else
+                {
+                    <div class="ds-ai-note">
+                        <i class="bi bi-info-circle"></i>
+                        These questions are generated dynamically by the AI backend using your selected project context.
+                    </div>
+
+                    <div class="ds-qa-list">
+                        @{
+                            var questionNumber = 0;
+                        }
+
+                        @foreach (var (q, a, category) in Model.QnA)
+                        {
+                            questionNumber++;
+
+                            <details class="ds-qa-card" @(questionNumber == 1 ? "open" : "")>
+                                <summary>
+                                    <div class="ds-question-index">
+                                        @questionNumber.ToString("00")
+                                    </div>
+
+                                    <div class="ds-question-content">
+                                        <div class="ds-question-top">
+                                            <span>
+                                                <i class="bi bi-person-badge"></i>
+                                                AI-generated professor question
+                                            </span>
+
+                                            <b>@(string.IsNullOrWhiteSpace(category) ? "General" : category)</b>
+                                        </div>
+
+                                        <h3>@q</h3>
+                                    </div>
+
+                                    <i class="bi bi-chevron-down ds-chevron"></i>
+                                </summary>
+
+                                <div class="ds-answer-box">
+                                    <div class="ds-answer-label">
+                                        <i class="bi bi-stars"></i>
+                                        AI suggested answer structure
+                                    </div>
+
+                                    <p>@a</p>
+
+                                    <div class="ds-answer-note">
+                                        <i class="bi bi-info-circle"></i>
+                                        Do not memorize word-for-word. Use this structure to understand what a strong answer should cover.
+                                    </div>
+                                </div>
+                            </details>
+                        }
+                    </div>
+                }
+            </main>
+
+            <aside class="ds-side">
+
+                <article class="ds-side-card">
+                    <div class="ds-card-head compact">
+                        <div>
+                            <span class="ds-eyebrow">AI context</span>
+                            <h2>What is sent to the backend?</h2>
+                        </div>
+                    </div>
+
+                    <div class="ds-focus-list">
+                        <div>
+                            <i class="bi bi-lightbulb"></i>
+                            <div>
+                                <strong>Selected idea</strong>
+                                <small>The AI uses your current FYP idea title, problem, target users, and domain.</small>
                             </div>
-                            <p class="small mb-0 text-muted">@a</p>
+                        </div>
+
+                        <div>
+                            <i class="bi bi-cpu"></i>
+                            <div>
+                                <strong>Technologies</strong>
+                                <small>The AI asks technical questions based on your project stack and implementation choices.</small>
+                            </div>
+                        </div>
+
+                        <div>
+                            <i class="bi bi-map"></i>
+                            <div>
+                                <strong>Roadmap phases</strong>
+                                <small>If a roadmap exists, the AI can ask about planning, milestones, and implementation order.</small>
+                            </div>
+                        </div>
+
+                        <div>
+                            <i class="bi bi-person-check"></i>
+                            <div>
+                                <strong>Student skills</strong>
+                                <small>The AI can generate realistic questions based on your skills and missing skills.</small>
+                            </div>
                         </div>
                     </div>
-                }
-            }
-        </div>
-    </div>
+                </article>
 
-    <div class="col-lg-5">
-        <div class="page-card p-4 mb-3">
-            <h6 class="fw-bold mb-3"><i class="bi bi-mortarboard me-2 text-warning"></i>Defense Tips</h6>
-            <div class="d-flex flex-column gap-2">
-                @foreach (var tip in new[] {
-                    "Know your problem inside out — not just your solution",
-                    "Have your dataset or data source ready to explain",
-                    "Prepare a clear 2-minute project pitch",
-                    "Anticipate 'Why not just use X?' questions",
-                    "Be ready to justify every technology choice",
-                    "Have measurable success criteria defined",
-                    "Show awareness of limitations and future work",
-                })
-                {
-                    <div class="d-flex gap-2 align-items-start">
-                        <i class="bi bi-check-circle-fill text-success mt-1 flex-shrink-0"></i>
-                        <span class="small">@tip</span>
+                <article class="ds-side-card">
+                    <div class="ds-card-head compact">
+                        <div>
+                            <span class="ds-eyebrow">Defense focus</span>
+                            <h2>What professors usually test</h2>
+                        </div>
                     </div>
-                }
-            </div>
-        </div>
 
-        <div class="page-card p-4">
-            <h6 class="fw-bold mb-3"><i class="bi bi-lightning me-2 text-primary"></i>Defense Scoring Rubric</h6>
-            @foreach (var (criterion, weight) in new[] {
-                ("Problem Statement Clarity", 20),
-                ("Solution Novelty",          20),
-                ("Technical Feasibility",     25),
-                ("Methodology Soundness",     20),
-                ("Presentation Quality",      15),
-            })
-            {
-                <div class="mb-2">
-                    <div class="d-flex justify-content-between small mb-1">
-                        <span>@criterion</span><span class="text-muted">@weight%</span>
+                    <div class="ds-focus-list">
+                        <div>
+                            <i class="bi bi-bullseye"></i>
+                            <div>
+                                <strong>Problem clarity</strong>
+                                <small>Can you explain why this project matters?</small>
+                            </div>
+                        </div>
+
+                        <div>
+                            <i class="bi bi-cpu"></i>
+                            <div>
+                                <strong>Technical choices</strong>
+                                <small>Can you justify your tools, model, or architecture?</small>
+                            </div>
+                        </div>
+
+                        <div>
+                            <i class="bi bi-graph-up-arrow"></i>
+                            <div>
+                                <strong>Evaluation plan</strong>
+                                <small>Can you prove your solution works?</small>
+                            </div>
+                        </div>
+
+                        <div>
+                            <i class="bi bi-exclamation-triangle"></i>
+                            <div>
+                                <strong>Limitations</strong>
+                                <small>Can you honestly explain risks and future work?</small>
+                            </div>
+                        </div>
                     </div>
-                    <div class="progress" style="height:6px">
-                        <div class="progress-bar bg-primary" style="width:@weight%"></div>
+                </article>
+
+                <article class="ds-side-card">
+                    <div class="ds-card-head compact">
+                        <div>
+                            <span class="ds-eyebrow">Quick checklist</span>
+                            <h2>Before entering the defense</h2>
+                        </div>
                     </div>
-                </div>
+
+                    <div class="ds-checklist">
+                        @foreach (var tip in new[] {
+                            "Prepare a clear 2-minute project pitch.",
+                            "Know your problem, not only your solution.",
+                            "Explain your dataset or data source.",
+                            "Justify every technology choice.",
+                            "Define measurable success criteria.",
+                            "Mention limitations and future improvements."
+                        })
+                        {
+                            <div>
+                                <i class="bi bi-check-circle-fill"></i>
+                                <span>@tip</span>
+                            </div>
+                        }
+                    </div>
+                </article>
+
+                <article class="ds-side-card">
+                    <div class="ds-card-head compact">
+                        <div>
+                            <span class="ds-eyebrow">Rubric</span>
+                            <h2>Defense scoring guide</h2>
+                        </div>
+                    </div>
+
+                    <div class="ds-rubric">
+                        @foreach (var (criterion, weight) in new[] {
+                            ("Problem clarity", 20),
+                            ("Solution novelty", 20),
+                            ("Technical feasibility", 25),
+                            ("Methodology", 20),
+                            ("Presentation quality", 15),
+                        })
+                        {
+                            <div class="ds-rubric-item">
+                                <div>
+                                    <span>@criterion</span>
+                                    <b>@weight%</b>
+                                </div>
+
+                                <div class="ds-progress">
+                                    <span style="width:@weight%"></span>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </article>
+
+            </aside>
+        </section>
+    }
+</section>
+
+@section Head {
+    <style>
+        :root {
+            --ds-navy: #28385E;
+            --ds-blue: #304163;
+            --ds-steel: #516C8D;
+            --ds-bg: #F7F8FA;
+            --ds-border: #E8ECF2;
+            --ds-text: #111827;
+            --ds-muted: #64748B;
+            --ds-soft: #F1F4F8;
+            --ds-green: #047857;
+            --ds-orange: #C2410C;
+        }
+
+        .ds-page {
+            max-width: 1480px;
+            margin: 0 auto;
+            color: var(--ds-text);
+            padding-bottom: 1.5rem;
+        }
+
+        .ds-alert {
+            margin-bottom: 1rem;
+            border-radius: 18px;
+            border: 1px solid #FDE68A;
+            background: #FFFBEB;
+            color: #92400E;
+            font-size: .9rem;
+        }
+
+        .ds-hero {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 230px;
+            gap: 1rem;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding: 1.45rem;
+            border-radius: 30px;
+            color: #fff;
+            background: radial-gradient(circle at 18% 16%, rgba(255,255,255,.18), transparent 22%), radial-gradient(circle at 84% 10%, rgba(255,255,255,.12), transparent 20%), linear-gradient(135deg, #061C49 0%, var(--ds-navy) 56%, var(--ds-steel) 128%);
+            box-shadow: 0 18px 44px rgba(40,56,94,.16);
+            overflow: hidden;
+        }
+
+        .ds-eyebrow {
+            display: block;
+            margin-bottom: .3rem;
+            color: var(--ds-steel);
+            font-size: .72rem;
+            font-weight: 800;
+            letter-spacing: .12em;
+            text-transform: uppercase;
+        }
+
+        .ds-hero .ds-eyebrow {
+            color: rgba(255,255,255,.72);
+        }
+
+        .ds-hero h1 {
+            max-width: 820px;
+            margin: 0;
+            font-size: clamp(1.75rem, 3vw, 2.7rem);
+            line-height: 1.05;
+            font-weight: 780;
+            letter-spacing: -.045em;
+        }
+
+        .ds-hero p {
+            max-width: 760px;
+            margin: .65rem 0 0;
+            color: rgba(255,255,255,.78);
+            font-size: .95rem;
+            line-height: 1.65;
+        }
+
+        .ds-hero-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .65rem;
+            margin-top: 1rem;
+        }
+
+        .ds-hero-panel {
+            min-height: 160px;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            text-align: center;
+            gap: .7rem;
+            padding: 1rem;
+            border-radius: 26px;
+            background: rgba(255,255,255,.12);
+            border: 1px solid rgba(255,255,255,.16);
+            backdrop-filter: blur(8px);
+        }
+
+        .ds-hero-icon {
+            width: 54px;
+            height: 54px;
+            display: grid;
+            place-items: center;
+            border-radius: 20px;
+            color: var(--ds-navy);
+            background: #fff;
+            font-size: 1.45rem;
+        }
+
+        .ds-hero-panel span {
+            display: block;
+            color: #fff;
+            font-size: 2.4rem;
+            font-weight: 800;
+            line-height: 1;
+        }
+
+        .ds-hero-panel small {
+            color: rgba(255,255,255,.75);
+            font-size: .8rem;
+        }
+
+        .ds-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .45rem;
+            border-radius: 14px;
+            padding: .7rem .95rem;
+            text-decoration: none;
+            font-size: .84rem;
+            font-weight: 750;
+            border: 1px solid transparent;
+            transition: .15s ease;
+        }
+
+        .ds-btn-primary {
+            color: #fff;
+            background: linear-gradient(135deg, #061C49, var(--ds-blue));
+        }
+
+            .ds-btn-primary:hover {
+                color: #fff;
+                transform: translateY(-1px);
+                box-shadow: 0 12px 22px rgba(40,56,94,.18);
             }
-        </div>
-    </div>
-</div>
+
+        .ds-btn-light {
+            color: var(--ds-blue);
+            background: #fff;
+        }
+
+            .ds-btn-light:hover {
+                color: var(--ds-blue);
+                transform: translateY(-1px);
+            }
+
+        .ds-btn-ghost {
+            color: #fff;
+            background: rgba(255,255,255,.12);
+            border-color: rgba(255,255,255,.2);
+        }
+
+            .ds-btn-ghost:hover {
+                color: #fff;
+                background: rgba(255,255,255,.18);
+            }
+
+        .ds-project-strip,
+        .ds-main-card,
+        .ds-side-card,
+        .ds-empty,
+        .ds-empty-small {
+            background: #fff;
+            border: 1px solid var(--ds-border);
+            box-shadow: 0 14px 34px rgba(15,23,42,.05);
+        }
+
+        .ds-project-strip {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            padding: 1rem 1.15rem;
+            border-radius: 24px;
+        }
+
+            .ds-project-strip h2 {
+                margin: 0;
+                color: var(--ds-text);
+                font-size: 1.05rem;
+                font-weight: 760;
+                line-height: 1.35;
+            }
+
+        .ds-project-tags {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: .5rem;
+        }
+
+            .ds-project-tags span,
+            .ds-soft-pill {
+                display: inline-flex;
+                align-items: center;
+                gap: .38rem;
+                border-radius: 999px;
+                padding: .38rem .62rem;
+                color: var(--ds-blue);
+                background: var(--ds-soft);
+                font-size: .74rem;
+                font-weight: 750;
+                white-space: nowrap;
+            }
+
+        .ds-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1.45fr) minmax(320px, .75fr);
+            gap: 1rem;
+            align-items: start;
+        }
+
+        .ds-main-card,
+        .ds-side-card,
+        .ds-empty {
+            border-radius: 26px;
+            overflow: hidden;
+        }
+
+        .ds-card-head {
+            min-height: 74px;
+            padding: 1rem;
+            border-bottom: 1px solid var(--ds-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+            .ds-card-head.compact {
+                min-height: auto;
+            }
+
+            .ds-card-head h2 {
+                margin: 0;
+                color: var(--ds-text);
+                font-size: 1.05rem;
+                font-weight: 760;
+                letter-spacing: -.02em;
+            }
+
+        .ds-ai-note {
+            display: flex;
+            align-items: flex-start;
+            gap: .55rem;
+            margin: 1rem 1rem 0;
+            padding: .8rem .9rem;
+            border-radius: 18px;
+            color: #1E3A8A;
+            background: #EFF6FF;
+            border: 1px solid #BFDBFE;
+            font-size: .83rem;
+            line-height: 1.5;
+        }
+
+        .ds-qa-list {
+            display: grid;
+            gap: .8rem;
+            padding: 1rem;
+        }
+
+        .ds-qa-card {
+            border: 1px solid var(--ds-border);
+            border-radius: 22px;
+            background: #fff;
+            overflow: hidden;
+            transition: .16s ease;
+        }
+
+            .ds-qa-card[open] {
+                border-color: #B8C8DD;
+                box-shadow: 0 14px 28px rgba(40,56,94,.08);
+            }
+
+            .ds-qa-card summary {
+                list-style: none;
+                cursor: pointer;
+                display: grid;
+                grid-template-columns: auto minmax(0, 1fr) auto;
+                gap: .8rem;
+                align-items: center;
+                padding: 1rem;
+            }
+
+                .ds-qa-card summary::-webkit-details-marker {
+                    display: none;
+                }
+
+        .ds-question-index {
+            width: 46px;
+            height: 46px;
+            display: grid;
+            place-items: center;
+            border-radius: 17px;
+            color: #fff;
+            background: linear-gradient(135deg, #061C49, var(--ds-blue));
+            font-size: .82rem;
+            font-weight: 800;
+            flex: none;
+        }
+
+        .ds-question-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .7rem;
+            margin-bottom: .28rem;
+        }
+
+            .ds-question-top span {
+                display: inline-flex;
+                align-items: center;
+                gap: .35rem;
+                color: var(--ds-steel);
+                font-size: .72rem;
+                font-weight: 800;
+                text-transform: uppercase;
+                letter-spacing: .05em;
+            }
+
+            .ds-question-top b {
+                border-radius: 999px;
+                padding: .24rem .5rem;
+                color: #92400E;
+                background: #FEF3C7;
+                font-size: .68rem;
+                font-weight: 750;
+                white-space: nowrap;
+            }
+
+        .ds-question-content h3 {
+            margin: 0;
+            color: var(--ds-text);
+            font-size: .96rem;
+            font-weight: 720;
+            line-height: 1.45;
+        }
+
+        .ds-chevron {
+            color: #94A3B8;
+            transition: .18s ease;
+        }
+
+        .ds-qa-card[open] .ds-chevron {
+            transform: rotate(180deg);
+            color: var(--ds-blue);
+        }
+
+        .ds-answer-box {
+            margin: 0 1rem 1rem 4.85rem;
+            padding: .95rem;
+            border-radius: 18px;
+            background: #F8FAFC;
+            border: 1px solid var(--ds-border);
+        }
+
+        .ds-answer-label {
+            display: inline-flex;
+            align-items: center;
+            gap: .4rem;
+            margin-bottom: .55rem;
+            color: var(--ds-green);
+            font-size: .74rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+        }
+
+        .ds-answer-box p {
+            margin: 0;
+            color: #475569;
+            font-size: .88rem;
+            line-height: 1.65;
+        }
+
+        .ds-answer-note {
+            display: flex;
+            gap: .45rem;
+            align-items: flex-start;
+            margin-top: .8rem;
+            padding-top: .75rem;
+            border-top: 1px solid var(--ds-border);
+            color: var(--ds-muted);
+            font-size: .76rem;
+            line-height: 1.45;
+        }
+
+        .ds-side {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .ds-focus-list,
+        .ds-checklist,
+        .ds-rubric {
+            display: grid;
+            gap: .7rem;
+            padding: 1rem;
+        }
+
+            .ds-focus-list > div {
+                display: grid;
+                grid-template-columns: auto minmax(0, 1fr);
+                gap: .75rem;
+                align-items: start;
+                padding: .85rem;
+                border: 1px solid var(--ds-border);
+                border-radius: 18px;
+                background: #fff;
+            }
+
+            .ds-focus-list i {
+                width: 40px;
+                height: 40px;
+                display: grid;
+                place-items: center;
+                border-radius: 15px;
+                color: #fff;
+                background: linear-gradient(135deg, #061C49, var(--ds-blue));
+                font-size: 1rem;
+            }
+
+            .ds-focus-list strong {
+                display: block;
+                color: var(--ds-text);
+                font-size: .86rem;
+                font-weight: 760;
+            }
+
+            .ds-focus-list small {
+                display: block;
+                margin-top: .18rem;
+                color: var(--ds-muted);
+                font-size: .74rem;
+                line-height: 1.45;
+            }
+
+            .ds-checklist div {
+                display: flex;
+                gap: .55rem;
+                align-items: flex-start;
+                color: #334155;
+                font-size: .82rem;
+                line-height: 1.5;
+            }
+
+            .ds-checklist i {
+                color: var(--ds-green);
+                margin-top: .13rem;
+                flex: none;
+            }
+
+        .ds-rubric-item {
+            display: grid;
+            gap: .35rem;
+        }
+
+            .ds-rubric-item div:first-child {
+                display: flex;
+                justify-content: space-between;
+                gap: .7rem;
+                color: #334155;
+                font-size: .82rem;
+                font-weight: 680;
+            }
+
+            .ds-rubric-item b {
+                color: var(--ds-muted);
+                font-size: .78rem;
+            }
+
+        .ds-progress {
+            height: 8px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: #E8ECF2;
+        }
+
+            .ds-progress span {
+                display: block;
+                height: 100%;
+                border-radius: inherit;
+                background: linear-gradient(90deg, var(--ds-steel), var(--ds-blue));
+            }
+
+        .ds-empty {
+            min-height: 520px;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            text-align: center;
+            gap: .7rem;
+            padding: 2rem;
+        }
+
+        .ds-empty-small {
+            margin: 1rem;
+            min-height: 360px;
+            border-radius: 24px;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            text-align: center;
+            gap: .7rem;
+            padding: 2rem;
+        }
+
+        .ds-empty-icon {
+            width: 78px;
+            height: 78px;
+            display: grid;
+            place-items: center;
+            border-radius: 28px;
+            color: var(--ds-steel);
+            background: #EEF2F6;
+            font-size: 2rem;
+        }
+
+        .ds-empty h2,
+        .ds-empty-small h2 {
+            margin: 0;
+            color: var(--ds-text);
+            font-size: 1.35rem;
+            font-weight: 800;
+        }
+
+        .ds-empty p,
+        .ds-empty-small p {
+            max-width: 560px;
+            margin: 0;
+            color: var(--ds-muted);
+            line-height: 1.6;
+        }
+
+        @@media (max-width: 1180px) {
+            .ds-hero,
+            .ds-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .ds-hero-panel {
+                min-height: 120px;
+            }
+
+            .ds-project-strip {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .ds-project-tags {
+                justify-content: flex-start;
+            }
+        }
+
+        @@media (max-width: 767px) {
+            .ds-hero {
+                padding: 1rem;
+            }
+
+            .ds-card-head,
+            .ds-question-top {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .ds-qa-card summary {
+                grid-template-columns: auto minmax(0, 1fr);
+            }
+
+            .ds-chevron {
+                display: none;
+            }
+
+            .ds-answer-box {
+                margin: 0 1rem 1rem;
+            }
+
+            .ds-question-top b {
+                width: fit-content;
+            }
+        }
+    </style>
+}

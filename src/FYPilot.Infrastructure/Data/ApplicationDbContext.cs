@@ -19,6 +19,21 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<Challenge> Challenges { get; set; }
     public DbSet<Activity> Activities { get; set; }
 
+    // Market Demand Analysis (real-time AI: search + local LLM)
+    public DbSet<MarketDemandAnalysis> MarketDemandAnalysis =>
+        Set<MarketDemandAnalysis>();
+    public DbSet<MarketDemandSource> MarketDemandSources =>
+        Set<MarketDemandSource>();
+    public DbSet<MarketSimilarSolution> MarketSimilarSolutions =>
+        Set<MarketSimilarSolution>();
+    public DbSet<MarketTrendSignal> MarketTrendSignals =>
+        Set<MarketTrendSignal>();
+    public DbSet<MarketDemandYearlyPoint> MarketDemandYearlyPoints =>
+        Set<MarketDemandYearlyPoint>();
+
+    // Mentor Chat
+    public DbSet<MentorChatSession> MentorChatSessions => Set<MentorChatSession>();
+
     // FYPilot core
     public DbSet<StudentSkill> StudentSkills { get; set; }
     public DbSet<ProjectIdea> ProjectIdeas { get; set; }
@@ -32,13 +47,17 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<Meeting> Meetings { get; set; }
     public DbSet<ProjectDocumentation> ProjectDocumentations => Set<ProjectDocumentation>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
-   public DbSet<FeedbackMessage> FeedbackMessages => Set<FeedbackMessage>();
+    public DbSet<FeedbackMessage> FeedbackMessages => Set<FeedbackMessage>();
+
+    // Supervisor Assignment & Notifications
     public DbSet<SupervisorPreferenceBatch> SupervisorPreferenceBatches { get; set; }
     public DbSet<SupervisorPreference> SupervisorPreferences { get; set; }
     public DbSet<SupervisorAssignment> SupervisorAssignments { get; set; }
     public DbSet<Notification> Notifications { get; set; }
 
+    // Google Calendar Integration
     public DbSet<GoogleCalendarToken> GoogleCalendarTokens => Set<GoogleCalendarToken>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -48,6 +67,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             e.HasIndex(u => u.Email).IsUnique();
             e.Property(u => u.Role).HasDefaultValue("student");
         });
+
         modelBuilder.Entity<SupervisorProfile>(entity =>
         {
             entity.ToTable("supervisor_profiles");
@@ -121,6 +141,104 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<MarketDemandAnalysis>(entity =>
+        {
+            entity.ToTable("market_demand_analysis");
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.MarketDemand).HasMaxLength(50);
+            entity.Property(x => x.TargetSector).HasMaxLength(300);
+            entity.Property(x => x.CountryContext).HasMaxLength(120);
+            entity.Property(x => x.Source).HasMaxLength(120);
+            entity.Property(x => x.Provider).HasMaxLength(120);
+            entity.Property(x => x.ModelUsed).HasMaxLength(200);
+            entity.Property(x => x.SearchProvider).HasMaxLength(200);
+            entity.Property(x => x.ConfidenceLevel).HasMaxLength(30);
+            entity.Property(x => x.ForecastStatus).HasMaxLength(80);
+            entity.Property(x => x.ForecastModel).HasMaxLength(120);
+            entity.Property(x => x.TrendDirection).HasMaxLength(30);
+            entity.Property(x => x.TrendStrength).HasMaxLength(30);
+
+            // Preserve compatibility with the forecast migration already applied.
+            entity.Property(x => x.TrendSlopePerYear)
+                .HasColumnName("TrendSlopePerWeek");
+
+            entity.HasOne(x => x.ProjectIdea)
+                .WithMany()
+                .HasForeignKey(x => x.ProjectIdeaId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(x => new
+            {
+                x.UserId,
+                x.ProjectIdeaId,
+                x.AnalyzedAt
+            });
+        });
+
+        modelBuilder.Entity<MarketDemandYearlyPoint>(entity =>
+        {
+            entity.ToTable("market_demand_yearly_points");
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.DemandIndex)
+                .HasPrecision(6, 2);
+            entity.Property(x => x.EvidenceSummary)
+                .HasColumnType("text");
+            entity.Property(x => x.SourceUrlsJson)
+                .HasColumnType("text");
+
+            entity.HasOne(x => x.MarketDemandAnalysis)
+                .WithMany(x => x.YearlyPoints)
+                .HasForeignKey(x => x.MarketDemandAnalysisId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(x => new
+            {
+                x.MarketDemandAnalysisId,
+                x.Year
+            }).IsUnique();
+        });
+
+        modelBuilder.Entity<MarketDemandSource>(entity =>
+        {
+            entity.ToTable("market_demand_sources");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Title).HasMaxLength(500);
+            entity.Property(x => x.Url).HasMaxLength(2000);
+            entity.Property(x => x.Publisher).HasMaxLength(250);
+            entity.Property(x => x.SourceType).HasMaxLength(100);
+            entity.HasOne(x => x.MarketDemandAnalysis)
+                .WithMany(x => x.Sources)
+                .HasForeignKey(x => x.MarketDemandAnalysisId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MarketSimilarSolution>(entity =>
+        {
+            entity.ToTable("market_similar_solutions");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).HasMaxLength(300);
+            entity.Property(x => x.Similarity).HasMaxLength(30);
+            entity.HasOne(x => x.MarketDemandAnalysis)
+                .WithMany(x => x.SimilarSolutions)
+                .HasForeignKey(x => x.MarketDemandAnalysisId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MarketTrendSignal>(entity =>
+        {
+            entity.ToTable("market_trend_signals");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Topic).HasMaxLength(300);
+            entity.Property(x => x.Direction).HasMaxLength(30);
+            entity.Property(x => x.SourceUrl).HasMaxLength(2000);
+            entity.HasOne(x => x.MarketDemandAnalysis)
+                .WithMany(x => x.TrendSignals)
+                .HasForeignKey(x => x.MarketDemandAnalysisId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<ProjectRoadmap>(e =>
         {
             e.HasOne(r => r.Idea)
@@ -134,6 +252,12 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<MentorChatSession>()
+            .HasMany(s => s.Messages)
+            .WithOne(m => m.MentorChatSession)
+            .HasForeignKey(m => m.MentorChatSessionId)
+            .OnDelete(DeleteBehavior.Cascade);
+
         modelBuilder.Entity<SupervisorEvaluation>(e =>
         {
             e.HasOne(se => se.Idea)
@@ -146,6 +270,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
                 .HasForeignKey(se => se.SupervisorId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
+
         modelBuilder.Entity<ProjectDocumentation>(entity =>
         {
             entity.ToTable("project_documentations");
@@ -163,6 +288,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.Property(e => e.AiTechnicalReportJson).IsRequired();
             entity.Property(e => e.SupervisorStatus).IsRequired();
         });
+
         modelBuilder.Entity<PasswordResetToken>(entity =>
         {
             entity.ToTable("password_reset_tokens");
@@ -196,5 +322,14 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.HasIndex(e => e.TokenHash)
                 .IsUnique();
         });
+
+        // NOTE: SupervisorPreferenceBatch, SupervisorPreference,
+        // SupervisorAssignment, Notification, and GoogleCalendarToken have
+        // no explicit OnModelCreating configuration in either source version
+        // — they were relying on EF Core default conventions (or being
+        // configured elsewhere, e.g. IEntityTypeConfiguration classes, not
+        // present in either file reviewed). Nothing was invented here; if
+        // those entities need explicit table/column mapping, add it the
+        // same way as the blocks above.
     }
 }
