@@ -1,14 +1,16 @@
 """
-ProjectIdeaAgent — LLM-assisted, skill-based FYP idea generation for FYPilot.
+ProjectIdeaAgent — real-time, skill-based FYP idea generation for FYPilot.
 
 Design:
-- Ollama is used only for natural-language idea generation.
+- ProviderChain is the primary generation layer.
+- Groq Compound Mini is used when real-time search is requested.
+- Gemini and Ollama remain fallbacks through ProviderChain.
+- A direct Ollama call remains as an emergency fallback.
 - Scores are calculated deterministically in Python.
-- Each generation returns 4 ideas.
-- .NET will display 2 ideas at a time and shuffle between the saved 4.
+- Each generation returns exactly 4 ideas.
+- .NET displays 2 ideas at a time and shuffles between the saved 4.
 - Regenerate sends previousIdeaTitles so the agent avoids old ideas.
-- If Ollama is unavailable, slow, or returns invalid JSON, fallback ideas are returned.
-- The app should never crash because of Ollama.
+- The app should never crash because an AI provider is unavailable.
 """
 
 import json
@@ -19,6 +21,8 @@ from typing import Any, Optional
 
 import requests
 from pydantic import BaseModel, Field
+
+from app.services.llm_provider import ProviderChain
 
 logger = logging.getLogger("fypilot-agent")
 
@@ -73,26 +77,46 @@ class IdeaGenerationRequest(BaseModel):
 class IdeaGenerationResponse(BaseModel):
     ideas: list[ProjectIdea]
     generatedAt: str
+    provider: str | None = None
+    modelUsed: str | None = None
+    searchUsed: bool = False
 
 
 # ── Agent ─────────────────────────────────────────────────────────────────────
 
 class ProjectIdeaAgent:
     """
-    Generates 4 personalized FYP ideas.
+    Generates exactly 4 personalized FYP ideas.
 
-    Ollama generates idea text.
+    Provider priority:
+    1. Groq Compound Mini with real-time search
+    2. Gemini fallback
+    3. Ollama fallback through ProviderChain
+    4. Direct Ollama emergency fallback
+    5. Deterministic fallback ideas
+
     Python cleans, validates, filters repetition, and calculates scores.
     """
 
     def __init__(self, model: str = "phi3"):
+        self.provider_chain = ProviderChain()
+
+        # Direct Ollama emergency fallback.
         self.model = model
         self.ollama_url = "http://localhost:11434/api/generate"
 
-        # Debug/status fields used by the router
+        # Status fields used by the router.
         self.last_llm_used = False
-        self.last_error = None
-        self.last_raw_llm_response = None
+        self.last_error: str | None = None
+        self.last_raw_llm_response: str | None = None
+        self.last_provider: str | None = None
+        self.last_model_used: str | None = None
+        self.last_search_used = False
+        self.last_search_failed = False
+        self.last_search_provider: str | None = None
+        self.last_search_model_used: str | None = None
+        self.last_search_error: str | None = None
+        self.last_sources: list[dict[str, str]] = []
 
         self.allowed_stack = [
             "ASP.NET Core Razor Pages",
@@ -124,35 +148,119 @@ class ProjectIdeaAgent:
 
     def generate_ideas(self, profile: StudentProfile) -> list[ProjectIdea]:
         """
-        Generate exactly 4 ideas.
+        Generate exactly four ideas using a two-step grounded workflow.
+
+        Step 1: Groq Compound Mini performs a small dedicated web search and
+        returns real source metadata.
+
+        Step 2: The normal provider chain generates strict idea JSON from the
+        student profile plus the compact evidence gathered in step 1.
         """
         self.last_llm_used = False
         self.last_error = None
         self.last_raw_llm_response = None
+        self.last_provider = None
+        self.last_model_used = None
+        self.last_search_used = False
+        self.last_search_failed = False
+        self.last_search_provider = None
+        self.last_search_model_used = None
+        self.last_search_error = None
+        self.last_sources = []
 
-        prompt = self._build_prompt(profile)
-        llm_text = self._call_ollama(prompt)
+        raw_ideas: Optional[list[dict[str, Any]]] = None
 
-        raw_ideas = None
+        # --------------------------------------------------------------
+        # STEP 1: Small, dedicated Groq Compound web-search request.
+        # --------------------------------------------------------------
+        try:
+            search_result = self.provider_chain.search_web(
+                self._build_search_query(profile)
+            )
 
-        if llm_text:
-            raw_ideas = self._parse_llm_json(llm_text)
+            self.last_search_provider = (
+                search_result.provider
+                if search_result.provider != "none"
+                else None
+            )
+            self.last_search_model_used = search_result.model
+            self.last_search_used = bool(
+                search_result.search_used and search_result.sources
+            )
+            self.last_search_failed = not self.last_search_used
+            self.last_search_error = search_result.error
+            self.last_sources = list(search_result.sources or [])[:8]
+
+        except Exception as ex:
+            self.last_search_failed = True
+            self.last_search_error = f"Search step failed: {ex}"
+            logger.exception("Idea market-evidence search failed.")
+
+        evidence_context = self._format_sources_for_prompt(self.last_sources)
+        prompt = self._build_prompt(profile, evidence_context)
+
+        # --------------------------------------------------------------
+        # STEP 2: Structured generation without another web-search call.
+        # --------------------------------------------------------------
+        try:
+            result = self.provider_chain.generate_json(
+                prompt,
+                use_search=False
+            )
+
+            self.last_provider = (
+                result.provider
+                if result.provider != "none"
+                else None
+            )
+            self.last_model_used = result.model
+
+            if result.ok and isinstance(result.data, dict):
+                self.last_raw_llm_response = json.dumps(
+                    result.data,
+                    ensure_ascii=False
+                )[:1500]
+                raw_ideas = self._extract_ideas_from_data(result.data)
+            else:
+                self.last_error = (
+                    result.error
+                    or "ProviderChain did not return valid idea JSON."
+                )
+
+        except Exception as ex:
+            self.last_error = f"Generation step failed: {ex}"
+            logger.exception("ProviderChain idea generation failed.")
+
+        # Emergency direct Ollama fallback. It receives the same evidence in
+        # the prompt, so sources can still be shown when cloud generation fails.
+        if not raw_ideas:
+            ollama_text = self._call_ollama(prompt)
+
+            if ollama_text:
+                parsed = self._parse_llm_json(ollama_text)
+
+                if parsed:
+                    raw_ideas = parsed
+                    self.last_provider = "ollama"
+                    self.last_model_used = self.model
 
         if raw_ideas:
             self.last_llm_used = True
+            self.last_error = None
         else:
             self.last_llm_used = False
             if self.last_error is None:
-                self.last_error = "Ollama did not return valid idea JSON. Used fallback ideas."
+                self.last_error = (
+                    "All AI providers returned invalid output. "
+                    "Used deterministic fallback ideas."
+                )
             raw_ideas = self._fallback_raw_ideas(profile)
 
-        # Remove duplicates and ideas similar to previous generated ideas
         raw_ideas = self._remove_repeated_or_previous_ideas(
             raw_ideas,
             profile.previousIdeaTitles
         )
 
-        # Add fallback ideas if Ollama returned fewer than 4 usable ideas
         if len(raw_ideas) < IDEAS_PER_BATCH:
             raw_ideas.extend(self._fallback_raw_ideas(profile))
 
@@ -161,18 +269,83 @@ class ProjectIdeaAgent:
             profile.previousIdeaTitles
         )
 
-        # Final emergency backup to guarantee exactly 4 ideas
         backup_index = 0
         while len(raw_ideas) < IDEAS_PER_BATCH:
             raw_ideas.append(self._backup_raw_idea(profile, backup_index))
             backup_index += 1
 
-        ideas: list[ProjectIdea] = []
-
-        for raw in raw_ideas[:IDEAS_PER_BATCH]:
-            ideas.append(self._complete_and_score(profile, raw))
+        ideas = [
+            self._complete_and_score(profile, raw)
+            for raw in raw_ideas[:IDEAS_PER_BATCH]
+        ]
 
         return ideas[:IDEAS_PER_BATCH]
+
+    def _build_search_query(self, profile: StudentProfile) -> str:
+        """Build a deliberately small Compound search request."""
+        domain = str(profile.preferredDomain or "Computer Science").strip()
+        major = str(profile.major or "Computer Science").strip()
+
+        return (
+            "Use live web search. Find 5 to 8 current credible sources about "
+            f"real market needs, public problems, and technology opportunities "
+            f"in Lebanon relevant to {domain} and {major} final-year projects. "
+            "Prioritize official institutions, universities, international "
+            "organizations, reputable research, and established news sources. "
+            "Focus on education, SMEs, agriculture, energy, healthcare, jobs, "
+            "and digital transformation when relevant. Summarize each source "
+            "briefly and include its real URL."
+        )
+
+    def _format_sources_for_prompt(
+        self,
+        sources: list[dict[str, str]]
+    ) -> str:
+        """Convert real search results into a compact generation context."""
+        if not sources:
+            return (
+                "No verified live sources were available. Avoid specific current "
+                "claims, statistics, named reports, or invented citations."
+            )
+
+        lines: list[str] = []
+
+        for index, source in enumerate(sources[:8], start=1):
+            title = str(source.get("title") or "Web source").strip()[:180]
+            url = str(source.get("url") or "").strip()[:500]
+            snippet = " ".join(
+                str(source.get("snippet") or "").split()
+            )[:350]
+
+            lines.append(
+                f"{index}. {title} | {url} | {snippet}"
+            )
+
+        return "\n".join(lines)
+
+    def _extract_ideas_from_data(
+        self,
+        data: dict[str, Any]
+    ) -> Optional[list[dict[str, Any]]]:
+        """
+        Validate ProviderChain JSON without serializing and reparsing it.
+        """
+        ideas = data.get("ideas")
+
+        if not isinstance(ideas, list):
+            self.last_error = (
+                "AI JSON was valid, but it did not contain an 'ideas' list. "
+                f"Keys: {list(data.keys())}"
+            )
+            return None
+
+        valid_ideas = [idea for idea in ideas if isinstance(idea, dict)]
+
+        if not valid_ideas:
+            self.last_error = "AI JSON contained an empty or invalid ideas list."
+            return None
+
+        return valid_ideas
 
     # ── Ollama ────────────────────────────────────────────────────────────────
 
@@ -215,7 +388,11 @@ class ProjectIdeaAgent:
             logger.warning("Ollama unavailable. Falling back. Error: %s", ex)
             return None
 
-    def _build_prompt(self, profile: StudentProfile) -> str:
+    def _build_prompt(
+        self,
+        profile: StudentProfile,
+        evidence_context: str = ""
+    ) -> str:
         skills_text = ", ".join(
             [
                 f"{skill} rating {profile.skillRatings.get(skill, 3)}/5"
@@ -245,7 +422,20 @@ Make the concepts meaningfully different from previous generated titles.
         return f"""
 You are ProjectIdeaAgent inside FYPilot, an Academic Intelligence System for Final Year Project planning.
 
-Generate exactly 4 original and realistic Final Year Project ideas.
+Generate exactly 4 original, current, and realistic Final Year Project ideas.
+
+The web-search step already collected the verified evidence below. Use this
+material to understand current Lebanese needs and opportunities. Do not invent
+additional sources, statistics, organizations, URLs, or market claims.
+
+VERIFIED LIVE EVIDENCE:
+{evidence_context}
+
+Every generated idea should be reasonably connected to at least one evidence
+item, but do not place citations or URLs inside the idea fields. The API will
+display the verified sources separately. If the evidence is weak, keep claims
+qualitative. Avoid generic outdated CRUD projects. Each idea must still match
+the student's skills, available time, team size, target difficulty, and domain.
 
 Student profile:
 - Major: {profile.major}
@@ -328,7 +518,7 @@ Return exactly this JSON structure with exactly 4 filled idea objects:
             except json.JSONDecodeError:
                 match = re.search(r"\{.*\}", clean_text, re.DOTALL)
                 if not match:
-                    self.last_error = "Ollama returned text, but no JSON object was found."
+                    self.last_error = "AI provider returned text, but no JSON object was found."
                     return None
 
                 data = json.loads(match.group(0))
@@ -337,7 +527,7 @@ Return exactly this JSON structure with exactly 4 filled idea objects:
 
             if not isinstance(ideas, list):
                 self.last_error = (
-                    f"Ollama JSON parsed, but it does not contain an ideas list. "
+                    f"AI JSON parsed, but it does not contain an ideas list. "
                     f"Keys: {list(data.keys())}"
                 )
                 return None
@@ -345,14 +535,14 @@ Return exactly this JSON structure with exactly 4 filled idea objects:
             valid_ideas = [idea for idea in ideas if isinstance(idea, dict)]
 
             if len(valid_ideas) == 0:
-                self.last_error = "Ollama JSON contains ideas, but the list is empty or invalid."
+                self.last_error = "AI JSON contains ideas, but the list is empty or invalid."
                 return None
 
             self.last_error = None
             return valid_ideas
 
         except Exception as ex:
-            self.last_error = f"Could not parse Ollama JSON: {str(ex)}"
+            self.last_error = f"Could not parse AI JSON: {str(ex)}"
             return None
 
     # ── Filtering repeated ideas ──────────────────────────────────────────────

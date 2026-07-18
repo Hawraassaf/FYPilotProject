@@ -10,7 +10,6 @@ from app.agents.se_documentation.se_documentation_orchestrator import (
     SEDocumentationRequest,
 )
 
-router = APIRouter(tags=["SE Documentation"])
 
 
 class SEDocumentationJobDto(BaseModel):
