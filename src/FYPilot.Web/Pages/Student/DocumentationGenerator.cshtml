@@ -862,6 +862,14 @@
         </div>
     }
 
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div class="alert alert-danger sdoc-alert no-print">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            @Model.ErrorMessage
+        </div>
+    }
+
     <div asp-validation-summary="ModelOnly" class="text-danger mb-3 no-print"></div>
 
     <div class="sdoc-shell">

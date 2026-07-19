@@ -210,7 +210,17 @@
 
                         var collapseId = $"idea-details-{idea.Id}";
                         var headingId = $"idea-heading-{idea.Id}";
-                        var isOpen = i == 0;
+                        var isOpen = Model.OpenIdeaId.HasValue
+                            ? idea.Id == Model.OpenIdeaId.Value
+                            : i == 0;
+
+                        Model.LatestMarketInsights.TryGetValue(idea.Id, out var marketInsight);
+                        var hasReadyInsight = marketInsight is { OverallOpportunityScore: not null };
+                        var feasibilityStatus = idea.FeasibilityScore >= 80
+                            ? "Strong"
+                            : idea.FeasibilityScore >= 60
+                                ? "Moderate"
+                                : "Developing";
 
                         <article class="idea2-idea-item">
                             <button class="idea2-idea-summary @(isOpen ? "" : "collapsed")"
@@ -246,9 +256,32 @@
                                     </p>
                                 </div>
 
-                                <div class="idea2-score-mini">
-                                    <strong>@idea.FeasibilityScore%</strong>
-                                    <span>Feasible</span>
+                                <div class="idea2-score-mini-group marketfp-header-score-group">
+                                    <div class="marketfp-mini-score is-feasibility"
+                                         title="Feasibility estimate generated with this project idea.">
+                                        <em>Feasibility</em>
+                                        <strong>@idea.FeasibilityScore%</strong>
+                                        <span>@feasibilityStatus</span>
+                                    </div>
+
+                                    @if (hasReadyInsight)
+                                    {
+                                        <div class="marketfp-mini-score is-evidence"
+                                             title="Evidence-based regional opportunity score. It is not market share or expected revenue.">
+                                            <em>Market Opportunity</em>
+                                            <strong>@(marketInsight!.OverallOpportunityScore)%</strong>
+                                            <span>Evidence-backed</span>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div class="marketfp-mini-score is-preliminary"
+                                             title="Preliminary estimate generated with the idea. Open the idea to run regional evidence analysis.">
+                                            <em>Market</em>
+                                            <strong>@idea.MarketDemandScore%</strong>
+                                            <span>Preliminary</span>
+                                        </div>
+                                    }
                                 </div>
 
                                 <div class="idea2-arrow">
@@ -319,12 +352,20 @@
                                             </div>
                                         </div>
 
-                                        <div>
-                                            <span>Market Demand</span>
+                                        <div class="marketfp-preliminary-score-card">
+                                            <span class="marketfp-preliminary-label">
+                                                Preliminary Market Fit
+                                                <i class="bi bi-info-circle"
+                                                   tabindex="0"
+                                                   data-bs-toggle="tooltip"
+                                                   data-bs-placement="top"
+                                                   title="This initial score is generated with the project idea. Market Insight performs a separate evidence-based analysis across Lebanon, MENA and the global market."></i>
+                                            </span>
                                             <strong>@idea.MarketDemandScore%</strong>
                                             <div class="idea2-progress">
                                                 <div style="width:@(idea.MarketDemandScore)%"></div>
                                             </div>
+                                            <small class="marketfp-score-help">AI estimate before regional evidence</small>
                                         </div>
 
                                         <div>
@@ -335,6 +376,367 @@
                                             </div>
                                         </div>
                                     </div>
+
+                                    <section class="marketfp-section">
+                                        <div class="marketfp-head">
+                                            <div class="marketfp-title-wrap">
+                                                <span class="marketfp-icon-tile" aria-hidden="true">
+                                                    <i class="bi bi-globe2"></i>
+                                                </span>
+
+                                                <div>
+                                                    <h4>Market Insight</h4>
+                                                    <p>Where this idea has the strongest evidence-based opportunity.</p>
+                                                </div>
+                                            </div>
+
+                                            <span class="marketfp-status-badge @(hasReadyInsight ? "is-ready" : "is-pending")">
+                                                <i class="bi @(hasReadyInsight ? "bi-patch-check" : "bi-hourglass-split")"></i>
+                                                @(hasReadyInsight ? "Evidence-backed" : "Not analyzed")
+                                            </span>
+                                        </div>
+
+                                        @{
+                                            var showInlineError =
+                                                Model.OpenIdeaId == idea.Id &&
+                                                !string.IsNullOrWhiteSpace(Model.ErrorMessage) &&
+                                                !hasReadyInsight;
+                                        }
+
+                                        @if (showInlineError)
+                                        {
+                                            <div class="marketfp-alert">
+                                                <i class="bi bi-exclamation-triangle-fill mt-1"></i>
+                                                <span>@Model.ErrorMessage</span>
+                                            </div>
+                                        }
+
+                                        @if (!hasReadyInsight)
+                                        {
+                                            <div class="marketfp-empty">
+                                                <div class="marketfp-empty-copy">
+                                                    <span class="marketfp-empty-icon" aria-hidden="true">
+                                                        <i class="bi bi-compass"></i>
+                                                    </span>
+
+                                                    <div>
+                                                        <h5>Discover the idea’s strongest market</h5>
+
+                                                        <p>
+                                                            Compare verified opportunity signals across Lebanon,
+                                                            MENA and the global market.
+                                                        </p>
+
+                                                        <div class="marketfp-region-pills" aria-label="Regions included in the analysis">
+                                                            <span><i class="bi bi-geo-alt"></i> Lebanon</span>
+                                                            <span><i class="bi bi-bounding-box-circles"></i> MENA</span>
+                                                            <span><i class="bi bi-globe"></i> Global</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div class="marketfp-empty-action">
+                                                    <form method="post"
+                                                          asp-page-handler="AnalyzeMarket"
+                                                          data-marketfp-analyze-form>
+                                                        @Html.AntiForgeryToken()
+                                                        <input type="hidden" name="ideaId" value="@idea.Id" />
+
+                                                        <button type="submit"
+                                                                class="marketfp-btn"
+                                                                data-marketfp-submit-btn
+                                                                aria-busy="false">
+                                                            <i class="bi bi-radar"></i>
+                                                            <span data-marketfp-btn-label>Analyze Regional Demand</span>
+                                                        </button>
+                                                    </form>
+
+                                                    <small>One research request analyzes all three regions.</small>
+                                                </div>
+                                            </div>
+
+                                            <div class="marketfp-note">
+                                                <i class="bi bi-info-circle" aria-hidden="true"></i>
+                                                <span>
+                                                    Regional percentages are normalized evidence-based opportunity
+                                                    scores. They are not market share, revenue estimates or
+                                                    probability of commercial success.
+                                                </span>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            var snapshot = marketInsight!;
+                                            var whyDemanded = IdeaGeneratorModel.ParseStringList(snapshot.WhyDemandedJson);
+                                            var expansionPath = IdeaGeneratorModel.ParseStringList(snapshot.ExpansionPathJson);
+                                            var limitations = IdeaGeneratorModel.ParseStringList(snapshot.LimitationsJson);
+                                            var sources = IdeaGeneratorModel.ParseSources(snapshot.SourcesJson);
+                                            var verifiedCount = sources.Count(s => s.IsVerified);
+                                            var orderedRegions = snapshot.Regions
+                                                .OrderBy(r => r.RegionKey == "lebanon" ? 0 : r.RegionKey == "mena" ? 1 : 2)
+                                                .ToList();
+
+                                            <div class="marketfp-panel">
+
+                                                @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage) && Model.OpenIdeaId == idea.Id)
+                                                {
+                                                    <div class="marketfp-alert">
+                                                        <i class="bi bi-exclamation-triangle-fill mt-1"></i>
+                                                        <span>@Model.ErrorMessage</span>
+                                                    </div>
+                                                }
+
+                                                <div class="marketfp-overall-grid">
+                                                    <div class="marketfp-overall-card is-primary">
+                                                        <div class="marketfp-label">
+                                                            Market Opportunity
+                                                            <i class="bi bi-info-circle marketfp-info-icon"
+                                                               tabindex="0"
+                                                               data-bs-toggle="tooltip"
+                                                               data-bs-placement="top"
+                                                               title="This is a normalized evidence-based regional opportunity score. It is not market share, revenue, or probability of commercial success."></i>
+                                                        </div>
+                                                        <strong>@(snapshot.OverallOpportunityScore)%</strong>
+                                                        <span class="marketfp-tone">@snapshot.OverallDemandLevel opportunity</span>
+                                                    </div>
+
+                                                    <div class="marketfp-overall-card">
+                                                        <div class="marketfp-label">Evidence confidence</div>
+                                                        <strong>@(snapshot.OverallConfidenceScore)%</strong>
+                                                        <span class="marketfp-tone">
+                                                            @(snapshot.OverallConfidenceScore >= 80 ? "High" : snapshot.OverallConfidenceScore >= 55 ? "Medium" : "Low") confidence
+                                                        </span>
+                                                    </div>
+
+                                                    <div class="marketfp-overall-card">
+                                                        <div class="marketfp-label">Best launch market</div>
+                                                        <strong class="marketfp-summary-text">@snapshot.BestLaunchMarket</strong>
+                                                        <span class="marketfp-tone">Strongest starting point</span>
+                                                    </div>
+
+                                                    <div class="marketfp-overall-card">
+                                                        <div class="marketfp-label">Expansion path</div>
+                                                        <div class="marketfp-summary-path">
+                                                            @for (var pathIndex = 0; pathIndex < expansionPath.Count; pathIndex++)
+                                                            {
+                                                                <span>@expansionPath[pathIndex]</span>
+
+                                                                @if (pathIndex < expansionPath.Count - 1)
+                                                                {
+                                                                    <i class="bi bi-arrow-right"></i>
+                                                                }
+                                                            }
+                                                        </div>
+                                                        <span class="marketfp-tone">Recommended sequence</span>
+                                                    </div>
+                                                </div>
+
+                                                <div class="marketfp-subhead">
+                                                    <div>
+                                                        <h5>Regional Demand Footprint</h5>
+                                                        <p>Evidence-based opportunity by geography.</p>
+                                                    </div>
+                                                </div>
+
+                                                <div class="marketfp-regions-grid">
+                                                    @foreach (var region in orderedRegions)
+                                                    {
+                                                        var isBest = string.Equals(region.RegionName, snapshot.BestLaunchMarket, StringComparison.OrdinalIgnoreCase);
+                                                        var levelClass = "level-" + region.DemandLevel.ToLowerInvariant().Replace(" ", "-");
+
+                                                        <article class="marketfp-region-card @(isBest ? "is-best" : "")">
+                                                            <div class="marketfp-region-head">
+                                                                <h5>@region.RegionName</h5>
+
+                                                                @if (isBest)
+                                                                {
+                                                                    <span class="marketfp-best-badge">
+                                                                        <i class="bi bi-star-fill"></i>
+                                                                        Best start
+                                                                    </span>
+                                                                }
+                                                            </div>
+
+                                                            <div class="marketfp-region-score">
+                                                                @(region.OpportunityScore.HasValue ? $"{region.OpportunityScore}%" : "—")
+                                                            </div>
+
+                                                            <div class="marketfp-region-demand @levelClass">
+                                                                <i class="bi bi-circle-fill"></i>
+                                                                @region.DemandLevel opportunity
+                                                            </div>
+
+                                                            <div class="marketfp-region-meta">
+                                                                <span>Confidence: @(region.ConfidenceScore)%</span>
+                                                                <span class="text-capitalize">Competition: @region.CompetitionPressure</span>
+                                                            </div>
+
+                                                            <p>@region.EvidenceSummary</p>
+                                                        </article>
+                                                    }
+                                                </div>
+
+                                                @if (!string.IsNullOrWhiteSpace(snapshot.BestLaunchReason))
+                                                {
+                                                    <div class="marketfp-launch-rationale">
+                                                        <span class="marketfp-rationale-icon" aria-hidden="true">
+                                                            <i class="bi bi-geo-alt"></i>
+                                                        </span>
+
+                                                        <div>
+                                                            <label>Why start in @snapshot.BestLaunchMarket?</label>
+                                                            <p>@snapshot.BestLaunchReason</p>
+                                                        </div>
+                                                    </div>
+                                                }
+
+                                                @if (whyDemanded.Any())
+                                                {
+                                                    <div class="marketfp-insight-block">
+                                                        <div class="marketfp-subhead">
+                                                            <div>
+                                                                <h5>Why this idea is demanded</h5>
+                                                                <p>The strongest evidence signals behind the opportunity.</p>
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="marketfp-why-list">
+                                                            @{
+                                                                var demandIcons = new[]
+                                                                {
+                                                                    "bi-lightning-charge",
+                                                                    "bi-people",
+                                                                    "bi-graph-up-arrow"
+                                                                };
+                                                            }
+
+                                                            @for (var reasonIndex = 0; reasonIndex < whyDemanded.Count; reasonIndex++)
+                                                            {
+                                                                <div class="marketfp-why-item">
+                                                                    <span aria-hidden="true">
+                                                                        <i class="bi @demandIcons[Math.Min(reasonIndex, demandIcons.Length - 1)]"></i>
+                                                                    </span>
+                                                                    <p>@whyDemanded[reasonIndex]</p>
+                                                                </div>
+                                                            }
+                                                        </div>
+                                                    </div>
+                                                }
+
+                                                @if (!string.IsNullOrWhiteSpace(snapshot.StrategicRecommendation))
+                                                {
+                                                    <div class="marketfp-recommendation">
+                                                        <label>
+                                                            <i class="bi bi-lightbulb"></i>
+                                                            Recommended market path
+                                                        </label>
+                                                        <p>@snapshot.StrategicRecommendation</p>
+                                                    </div>
+                                                }
+
+                                                @if (limitations.Any())
+                                                {
+                                                    <details class="marketfp-limitations">
+                                                        <summary>
+                                                            <i class="bi bi-shield-exclamation"></i>
+                                                            Analysis limitations
+                                                            <span>@limitations.Count</span>
+                                                        </summary>
+
+                                                        <ul>
+                                                            @foreach (var limitation in limitations)
+                                                            {
+                                                                <li>@limitation</li>
+                                                            }
+                                                        </ul>
+                                                    </details>
+                                                }
+
+                                                <div class="marketfp-evidence-status">
+                                                    <div>
+                                                        <span>Sources</span>
+                                                        <strong>@sources.Count</strong>
+                                                    </div>
+
+                                                    <div>
+                                                        <span>Recognized</span>
+                                                        <strong>@verifiedCount</strong>
+                                                    </div>
+
+                                                    <div>
+                                                        <span>Live research</span>
+                                                        <strong>@(snapshot.GroundedInLiveData ? "Yes" : "Limited")</strong>
+                                                    </div>
+
+                                                    <div>
+                                                        <span>Analyzed</span>
+                                                        <strong>@snapshot.AnalyzedAt.ToLocalTime().ToString("MMM d, yyyy")</strong>
+                                                    </div>
+                                                </div>
+
+                                                @if (sources.Any())
+                                                {
+                                                    <details class="marketfp-source-disclosure">
+                                                        <summary>
+                                                            <span>
+                                                                <i class="bi bi-journal-text"></i>
+                                                                View evidence sources
+                                                            </span>
+                                                            <small>@sources.Count source(s)</small>
+                                                        </summary>
+
+                                                        <ul class="marketfp-sources-list">
+                                                            @foreach (var source in sources.Take(6))
+                                                            {
+                                                                <li>
+                                                                    <div>
+                                                                        <a href="@source.Url"
+                                                                           target="_blank"
+                                                                           rel="noopener noreferrer"
+                                                                           title="@source.Title">
+                                                                            @source.Title
+                                                                        </a>
+
+                                                                        @if (!string.IsNullOrWhiteSpace(source.Publisher))
+                                                                        {
+                                                                            <small>@source.Publisher</small>
+                                                                        }
+                                                                    </div>
+
+                                                                    @if (source.IsVerified)
+                                                                    {
+                                                                        <span class="marketfp-verified-badge">
+                                                                            <i class="bi bi-patch-check"></i>
+                                                                            Recognized
+                                                                        </span>
+                                                                    }
+                                                                </li>
+                                                            }
+                                                        </ul>
+                                                    </details>
+                                                }
+
+                                                <div class="marketfp-actions">
+                                                    <form method="post"
+                                                          asp-page-handler="AnalyzeMarket"
+                                                          data-marketfp-analyze-form>
+                                                        @Html.AntiForgeryToken()
+                                                        <input type="hidden" name="ideaId" value="@idea.Id" />
+
+                                                        <button type="submit" class="marketfp-outline-btn" data-marketfp-submit-btn>
+                                                            <i class="bi bi-arrow-clockwise"></i>
+                                                            <span data-marketfp-btn-label>Refresh Insight</span>
+                                                        </button>
+                                                    </form>
+
+                                                    <a href="/Student/MarketDemand?ideaId=@idea.Id" class="marketfp-link-btn">
+                                                        <span>Open Full Yearly Intelligence</span>
+                                                        <i class="bi bi-arrow-up-right"></i>
+                                                    </a>
+                                                </div>
+                                            </div>
+                                        }
+                                    </section>
 
                                     <form method="post" asp-page-handler="Select" class="idea2-detail-actions">
                                         @Html.AntiForgeryToken()
@@ -402,7 +804,7 @@
 </div>
 @section Head {
     <style>
-        /* Fix assessed skills being cut when there are many skills */
+        /* Assessed-skills wrapping */
         .idea2-skills-panel {
             height: auto !important;
             max-height: none !important;
@@ -440,6 +842,994 @@
                 background: rgba(255, 255, 255, .08);
                 border-radius: 999px;
             }
+
+        /* Let the page scroll naturally instead of trapping expanded ideas
+                   inside a small internal viewport. */
+        .idea2-accordion {
+            max-height: none !important;
+            overflow: visible !important;
+            padding-right: 0 !important;
+        }
+
+        .idea2-results-card {
+            overflow: visible !important;
+        }
+
+        /* ───────────────────────────────────────────────────────────────
+                   Compact header scores
+                   ─────────────────────────────────────────────────────────────── */
+        .marketfp-header-score-group {
+            display: flex;
+            align-items: stretch;
+            justify-content: flex-end;
+            gap: .55rem;
+            flex: 0 0 auto;
+        }
+
+        .marketfp-mini-score {
+            width: 108px;
+            min-height: 72px;
+            padding: .62rem .7rem;
+            border: 1px solid #dbe4f0;
+            border-radius: 16px;
+            background: #f7f9fc;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            box-shadow: 0 6px 18px rgba(33, 55, 93, .055);
+            line-height: 1.05;
+        }
+
+            .marketfp-mini-score em {
+                display: block;
+                max-width: 100%;
+                margin-bottom: .28rem;
+                overflow: hidden;
+                color: #65738b;
+                font-size: .66rem;
+                font-style: normal;
+                font-weight: 700;
+                letter-spacing: .02em;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .marketfp-mini-score strong {
+                color: #203b67;
+                font-size: 1.14rem;
+                font-weight: 800;
+                letter-spacing: -.025em;
+            }
+
+            .marketfp-mini-score span {
+                margin-top: .25rem;
+                color: #738098;
+                font-size: .64rem;
+                font-weight: 650;
+                white-space: nowrap;
+            }
+
+            .marketfp-mini-score.is-feasibility {
+                border-color: #d9e3f0;
+                background: linear-gradient(180deg, #f7faff 0%, #eef4fb 100%);
+            }
+
+            .marketfp-mini-score.is-preliminary {
+                border-color: #e3dfef;
+                background: linear-gradient(180deg, #fbfaff 0%, #f3f0f9 100%);
+            }
+
+            .marketfp-mini-score.is-evidence {
+                border-color: #d5def0;
+                background: linear-gradient(180deg, #f6f8ff 0%, #edf1fb 100%);
+            }
+
+        .marketfp-preliminary-label {
+            display: inline-flex !important;
+            align-items: center;
+            gap: .35rem;
+        }
+
+            .marketfp-preliminary-label i {
+                color: #78879d;
+                cursor: help;
+                font-size: .78rem;
+            }
+
+        .marketfp-score-help {
+            display: block;
+            margin-top: .48rem;
+            color: #7a8799;
+            font-size: .68rem;
+            line-height: 1.25;
+        }
+
+        /* ───────────────────────────────────────────────────────────────
+                   Market Insight shell
+                   ─────────────────────────────────────────────────────────────── */
+        .marketfp-section {
+            margin-top: 1.15rem;
+            overflow: hidden;
+            border: 1px solid #dfe6f1;
+            border-radius: 18px;
+            background: #ffffff;
+            box-shadow: 0 12px 34px rgba(27, 48, 83, .065);
+        }
+
+        .marketfp-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 1.1rem 1.2rem;
+            border-bottom: 1px solid #e8edf5;
+            background: radial-gradient(circle at 100% 0%, rgba(118, 105, 180, .08), transparent 34%), linear-gradient(180deg, #fbfcff 0%, #f8faff 100%);
+        }
+
+        .marketfp-title-wrap {
+            display: flex;
+            align-items: center;
+            min-width: 0;
+            gap: .8rem;
+        }
+
+        .marketfp-icon-tile {
+            width: 42px;
+            height: 42px;
+            border: 1px solid #d7e1f0;
+            border-radius: 13px;
+            background: #edf3fb;
+            color: #294d7e;
+            display: inline-flex;
+            flex: 0 0 auto;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.08rem;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9);
+        }
+
+        .marketfp-head h4 {
+            margin: 0;
+            color: #172c4e;
+            font-size: 1.12rem;
+            font-weight: 760;
+            letter-spacing: -.015em;
+        }
+
+        .marketfp-head p {
+            margin: .22rem 0 0;
+            color: #69768a;
+            font-size: .82rem;
+            line-height: 1.4;
+        }
+
+        .marketfp-status-badge {
+            min-height: 30px;
+            padding: .38rem .68rem;
+            border: 1px solid #dde4ef;
+            border-radius: 999px;
+            display: inline-flex;
+            flex: 0 0 auto;
+            align-items: center;
+            gap: .38rem;
+            color: #6f7d91;
+            background: #fff;
+            font-size: .7rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+            .marketfp-status-badge.is-ready {
+                color: #314e79;
+                border-color: #ced9ea;
+                background: #eef3fb;
+            }
+
+        .marketfp-empty {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 1.3rem;
+            padding: 1.35rem 1.2rem 1.05rem;
+        }
+
+        .marketfp-empty-copy {
+            display: flex;
+            align-items: flex-start;
+            min-width: 0;
+            gap: .85rem;
+        }
+
+        .marketfp-empty-icon {
+            width: 42px;
+            height: 42px;
+            border: 1px solid #dce4f0;
+            border-radius: 13px;
+            background: #f4f7fb;
+            color: #3f5f8b;
+            display: inline-flex;
+            flex: 0 0 auto;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+        }
+
+        .marketfp-empty h5,
+        .marketfp-subhead h5 {
+            margin: 0;
+            color: #1b3153;
+            font-size: .98rem;
+            font-weight: 750;
+            letter-spacing: -.01em;
+        }
+
+        .marketfp-empty p {
+            max-width: 620px;
+            margin: .34rem 0 0;
+            color: #66758a;
+            font-size: .84rem;
+            line-height: 1.55;
+        }
+
+        .marketfp-region-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .45rem;
+            margin-top: .8rem;
+        }
+
+            .marketfp-region-pills span {
+                min-height: 29px;
+                padding: .35rem .62rem;
+                border: 1px solid #dce4ef;
+                border-radius: 999px;
+                background: #f8fafd;
+                color: #475c7a;
+                display: inline-flex;
+                align-items: center;
+                gap: .35rem;
+                font-size: .72rem;
+                font-weight: 680;
+            }
+
+            .marketfp-region-pills i {
+                color: #667da0;
+                font-size: .72rem;
+            }
+
+        .marketfp-empty-action {
+            min-width: 230px;
+            text-align: center;
+        }
+
+            .marketfp-empty-action form {
+                margin: 0;
+            }
+
+            .marketfp-empty-action small {
+                display: block;
+                margin-top: .48rem;
+                color: #7d899a;
+                font-size: .68rem;
+            }
+
+        .marketfp-btn {
+            min-height: 44px;
+            width: 100%;
+            padding: .72rem 1rem;
+            border: 1px solid #2d4d79;
+            border-radius: 11px;
+            background: #2d4d79;
+            color: #fff;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .55rem;
+            box-shadow: 0 8px 18px rgba(38, 68, 108, .18);
+            font-size: .8rem;
+            font-weight: 730;
+            transition: transform .16s ease, box-shadow .16s ease, background .16s ease;
+        }
+
+            .marketfp-btn:hover {
+                background: #233f68;
+                border-color: #233f68;
+                color: #fff;
+                transform: translateY(-1px);
+                box-shadow: 0 10px 22px rgba(38, 68, 108, .23);
+            }
+
+            .marketfp-btn:focus-visible,
+            .marketfp-outline-btn:focus-visible,
+            .marketfp-link-btn:focus-visible {
+                outline: 3px solid rgba(80, 111, 163, .25);
+                outline-offset: 2px;
+            }
+
+            .marketfp-btn:disabled {
+                cursor: wait;
+                opacity: .75;
+                transform: none;
+                box-shadow: none;
+            }
+
+        .marketfp-note {
+            margin: 0 1.2rem 1.2rem;
+            padding: .72rem .8rem;
+            border: 1px solid #e1e7f1;
+            border-radius: 11px;
+            background: #f8faff;
+            color: #69778c;
+            display: flex;
+            align-items: flex-start;
+            gap: .55rem;
+            font-size: .72rem;
+            line-height: 1.45;
+        }
+
+            .marketfp-note i {
+                margin-top: .08rem;
+                color: #5d7396;
+                flex: 0 0 auto;
+            }
+
+        .marketfp-alert {
+            margin: 1rem 1.2rem 0;
+            padding: .8rem .9rem;
+            border: 1px solid #eadfcd;
+            border-radius: 12px;
+            background: #fcfaf6;
+            color: #6f604a;
+            display: flex;
+            align-items: flex-start;
+            gap: .55rem;
+            font-size: .78rem;
+            line-height: 1.45;
+        }
+
+            .marketfp-alert i {
+                color: #8a7658;
+            }
+
+        /* ───────────────────────────────────────────────────────────────
+                   Evidence-backed state
+                   ─────────────────────────────────────────────────────────────── */
+        .marketfp-panel {
+            padding: 1.15rem 1.2rem 1.2rem;
+        }
+
+            .marketfp-panel > .marketfp-alert {
+                margin: 0 0 1rem;
+            }
+
+        .marketfp-overall-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: .65rem;
+        }
+
+        .marketfp-overall-card {
+            min-width: 0;
+            min-height: 104px;
+            padding: .82rem .85rem;
+            border: 1px solid #e0e7f1;
+            border-radius: 14px;
+            background: #f9fbfe;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+            .marketfp-overall-card.is-primary {
+                border-color: #d3deed;
+                background: linear-gradient(150deg, #f3f7fd 0%, #eef2fb 100%);
+            }
+
+        .marketfp-label {
+            color: #6e7b8f;
+            display: flex;
+            align-items: center;
+            gap: .35rem;
+            font-size: .69rem;
+            font-weight: 720;
+            letter-spacing: .01em;
+        }
+
+        .marketfp-info-icon {
+            color: #71819a;
+            cursor: help;
+        }
+
+        .marketfp-overall-card > strong {
+            margin-top: .36rem;
+            color: #1e3a63;
+            font-size: 1.45rem;
+            font-weight: 800;
+            letter-spacing: -.035em;
+            line-height: 1.05;
+        }
+
+        .marketfp-overall-card .marketfp-summary-text {
+            overflow: hidden;
+            font-size: 1.02rem;
+            line-height: 1.2;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .marketfp-tone {
+            margin-top: .32rem;
+            color: #7b8798;
+            font-size: .68rem;
+            line-height: 1.3;
+        }
+
+        .marketfp-summary-path {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: .28rem;
+            margin-top: .42rem;
+            color: #29486f;
+            font-size: .75rem;
+            font-weight: 740;
+            line-height: 1.25;
+        }
+
+            .marketfp-summary-path i {
+                color: #8b99ad;
+                font-size: .65rem;
+            }
+
+        .marketfp-subhead {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-top: 1.15rem;
+            margin-bottom: .65rem;
+        }
+
+            .marketfp-subhead p {
+                margin: .18rem 0 0;
+                color: #788699;
+                font-size: .72rem;
+            }
+
+        .marketfp-regions-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: .72rem;
+        }
+
+        .marketfp-region-card {
+            position: relative;
+            min-width: 0;
+            padding: .95rem;
+            overflow: hidden;
+            border: 1px solid #e0e6f0;
+            border-radius: 15px;
+            background: #fff;
+            box-shadow: 0 8px 20px rgba(30, 51, 84, .045);
+        }
+
+            .marketfp-region-card::before {
+                content: "";
+                position: absolute;
+                inset: 0 auto 0 0;
+                width: 3px;
+                background: #b7c4d8;
+            }
+
+            .marketfp-region-card.is-best {
+                border-color: #cfd9eb;
+                background: linear-gradient(160deg, #ffffff 0%, #f6f8fd 100%);
+            }
+
+                .marketfp-region-card.is-best::before {
+                    background: #536f9d;
+                }
+
+        .marketfp-region-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .55rem;
+        }
+
+            .marketfp-region-head h5 {
+                margin: 0;
+                color: #263e62;
+                font-size: .85rem;
+                font-weight: 760;
+            }
+
+        .marketfp-best-badge,
+        .marketfp-verified-badge {
+            padding: .27rem .48rem;
+            border: 1px solid #d6deeb;
+            border-radius: 999px;
+            background: #f1f4fa;
+            color: #4c6283;
+            display: inline-flex;
+            align-items: center;
+            gap: .25rem;
+            font-size: .6rem;
+            font-weight: 730;
+            white-space: nowrap;
+        }
+
+        .marketfp-region-score {
+            margin-top: .68rem;
+            color: #1f3e69;
+            font-size: 1.65rem;
+            font-weight: 820;
+            letter-spacing: -.045em;
+            line-height: 1;
+        }
+
+        .marketfp-region-demand {
+            margin-top: .42rem;
+            color: #546780;
+            display: flex;
+            align-items: center;
+            gap: .35rem;
+            font-size: .7rem;
+            font-weight: 700;
+            text-transform: capitalize;
+        }
+
+            .marketfp-region-demand i {
+                color: #788ba8;
+                font-size: .43rem;
+            }
+
+            .marketfp-region-demand.level-very-high i {
+                color: #425f8b;
+            }
+
+            .marketfp-region-demand.level-high i {
+                color: #607aa2;
+            }
+
+            .marketfp-region-demand.level-medium i {
+                color: #8a91a1;
+            }
+
+            .marketfp-region-demand.level-low i {
+                color: #a09aa4;
+            }
+
+        .marketfp-region-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .38rem;
+            margin-top: .72rem;
+        }
+
+            .marketfp-region-meta span {
+                padding: .28rem .42rem;
+                border: 1px solid #e2e7ef;
+                border-radius: 8px;
+                background: #f8fafc;
+                color: #68778d;
+                font-size: .63rem;
+                font-weight: 650;
+            }
+
+        .marketfp-region-card > p {
+            margin: .72rem 0 0;
+            color: #5f6d80;
+            display: -webkit-box;
+            overflow: hidden;
+            font-size: .73rem;
+            line-height: 1.48;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 4;
+        }
+
+        .marketfp-launch-rationale {
+            margin-top: .8rem;
+            padding: .85rem .9rem;
+            border: 1px solid #dde5f0;
+            border-radius: 13px;
+            background: #f9fbfe;
+            display: flex;
+            align-items: flex-start;
+            gap: .72rem;
+        }
+
+        .marketfp-rationale-icon {
+            width: 34px;
+            height: 34px;
+            border: 1px solid #d8e1ee;
+            border-radius: 10px;
+            background: #eef3fa;
+            color: #48658f;
+            display: inline-flex;
+            flex: 0 0 auto;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .marketfp-launch-rationale label {
+            color: #324e73;
+            display: block;
+            font-size: .73rem;
+            font-weight: 750;
+        }
+
+        .marketfp-launch-rationale p {
+            margin: .25rem 0 0;
+            color: #67758a;
+            font-size: .75rem;
+            line-height: 1.5;
+        }
+
+        .marketfp-insight-block {
+            margin-top: .15rem;
+        }
+
+        .marketfp-why-list {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: .65rem;
+        }
+
+        .marketfp-why-item {
+            min-width: 0;
+            padding: .76rem;
+            border: 1px solid #e2e7f0;
+            border-radius: 13px;
+            background: #fbfcfe;
+            display: flex;
+            align-items: flex-start;
+            gap: .58rem;
+        }
+
+            .marketfp-why-item > span {
+                width: 29px;
+                height: 29px;
+                border-radius: 9px;
+                background: #edf2f9;
+                color: #4b678e;
+                display: inline-flex;
+                flex: 0 0 auto;
+                align-items: center;
+                justify-content: center;
+                font-size: .75rem;
+            }
+
+            .marketfp-why-item p {
+                margin: 0;
+                color: #5d6b80;
+                font-size: .72rem;
+                line-height: 1.46;
+            }
+
+        .marketfp-recommendation {
+            margin-top: .85rem;
+            padding: .92rem 1rem;
+            border: 1px solid #dcdff0;
+            border-radius: 14px;
+            background: radial-gradient(circle at 100% 0%, rgba(117, 98, 164, .08), transparent 40%), #f7f6fb;
+        }
+
+            .marketfp-recommendation label {
+                color: #4a4f75;
+                display: flex;
+                align-items: center;
+                gap: .42rem;
+                font-size: .74rem;
+                font-weight: 760;
+            }
+
+            .marketfp-recommendation p {
+                margin: .38rem 0 0;
+                color: #5f647c;
+                font-size: .76rem;
+                line-height: 1.55;
+            }
+
+        .marketfp-limitations,
+        .marketfp-source-disclosure {
+            margin-top: .8rem;
+            overflow: hidden;
+            border: 1px solid #e1e6ef;
+            border-radius: 12px;
+            background: #fff;
+        }
+
+            .marketfp-limitations summary,
+            .marketfp-source-disclosure summary {
+                min-height: 42px;
+                padding: .68rem .78rem;
+                cursor: pointer;
+                color: #52647e;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: .75rem;
+                font-size: .72rem;
+                font-weight: 720;
+                list-style: none;
+            }
+
+                .marketfp-limitations summary span {
+                    margin-left: auto;
+                    padding: .15rem .42rem;
+                    border-radius: 999px;
+                    background: #f0f3f8;
+                    color: #68758a;
+                    font-size: .62rem;
+                }
+
+            .marketfp-limitations ul {
+                margin: 0;
+                padding: 0 .95rem .8rem 2rem;
+                color: #68758a;
+                font-size: .71rem;
+                line-height: 1.5;
+            }
+
+        .marketfp-evidence-status {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: .55rem;
+            margin-top: .9rem;
+            padding-top: .85rem;
+            border-top: 1px solid #e8ecf3;
+        }
+
+            .marketfp-evidence-status > div {
+                min-width: 0;
+            }
+
+            .marketfp-evidence-status span {
+                color: #8792a3;
+                display: block;
+                font-size: .61rem;
+                font-weight: 680;
+            }
+
+            .marketfp-evidence-status strong {
+                margin-top: .12rem;
+                overflow: hidden;
+                color: #4a5e7b;
+                display: block;
+                font-size: .7rem;
+                font-weight: 760;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+        .marketfp-source-disclosure summary span {
+            display: inline-flex;
+            align-items: center;
+            gap: .4rem;
+        }
+
+        .marketfp-source-disclosure summary small {
+            color: #8994a4;
+            font-size: .64rem;
+            font-weight: 650;
+        }
+
+        .marketfp-sources-list {
+            margin: 0;
+            padding: 0;
+            border-top: 1px solid #edf0f5;
+            list-style: none;
+        }
+
+            .marketfp-sources-list li {
+                padding: .68rem .78rem;
+                border-bottom: 1px solid #edf0f5;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: .8rem;
+            }
+
+                .marketfp-sources-list li:last-child {
+                    border-bottom: 0;
+                }
+
+                .marketfp-sources-list li > div {
+                    min-width: 0;
+                }
+
+            .marketfp-sources-list a {
+                overflow: hidden;
+                color: #334f77;
+                display: block;
+                font-size: .7rem;
+                font-weight: 710;
+                text-decoration: none;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+                .marketfp-sources-list a:hover {
+                    text-decoration: underline;
+                }
+
+            .marketfp-sources-list small {
+                margin-top: .12rem;
+                color: #8994a3;
+                display: block;
+                font-size: .61rem;
+            }
+
+        .marketfp-actions {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: .6rem;
+            margin-top: .9rem;
+        }
+
+            .marketfp-actions form {
+                margin: 0;
+            }
+
+        .marketfp-outline-btn,
+        .marketfp-link-btn {
+            min-height: 40px;
+            padding: .62rem .8rem;
+            border-radius: 10px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .45rem;
+            font-size: .72rem;
+            font-weight: 720;
+            text-decoration: none;
+            transition: background .16s ease, border-color .16s ease, transform .16s ease;
+        }
+
+        .marketfp-outline-btn {
+            border: 1px solid #d4deec;
+            background: #fff;
+            color: #3d587e;
+        }
+
+            .marketfp-outline-btn:hover {
+                border-color: #bdcadc;
+                background: #f7f9fc;
+                color: #2d486f;
+                transform: translateY(-1px);
+            }
+
+        .marketfp-link-btn {
+            margin-left: auto;
+            border: 1px solid transparent;
+            background: transparent;
+            color: #3b567d;
+        }
+
+            .marketfp-link-btn:hover {
+                background: #f4f7fb;
+                color: #29486f;
+            }
+
+        @@media (max-width: 1199.98px) {
+            .marketfp-overall-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .marketfp-regions-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .marketfp-region-card:last-child {
+                grid-column: 1 / -1;
+            }
+
+            .marketfp-why-list {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @@media (max-width: 991.98px) {
+            .marketfp-header-score-group {
+                width: 100%;
+                justify-content: flex-start;
+                order: 3;
+            }
+
+            .marketfp-mini-score {
+                width: 104px;
+                min-height: 66px;
+            }
+
+            .marketfp-empty {
+                grid-template-columns: 1fr;
+            }
+
+            .marketfp-empty-action {
+                min-width: 0;
+                max-width: 320px;
+                text-align: left;
+            }
+        }
+
+        @@media (max-width: 767.98px) {
+            .marketfp-head {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .marketfp-status-badge {
+                margin-left: 50px;
+            }
+
+            .marketfp-overall-grid,
+            .marketfp-regions-grid,
+            .marketfp-evidence-status {
+                grid-template-columns: 1fr;
+            }
+
+            .marketfp-region-card:last-child {
+                grid-column: auto;
+            }
+
+            .marketfp-empty-copy {
+                align-items: flex-start;
+            }
+
+            .marketfp-actions {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+                .marketfp-actions form,
+                .marketfp-outline-btn,
+                .marketfp-link-btn {
+                    width: 100%;
+                }
+
+            .marketfp-link-btn {
+                margin-left: 0;
+            }
+        }
+
+        @@media (max-width: 575.98px) {
+            .marketfp-section {
+                border-radius: 15px;
+            }
+
+            .marketfp-head,
+            .marketfp-panel,
+            .marketfp-empty {
+                padding-left: .9rem;
+                padding-right: .9rem;
+            }
+
+            .marketfp-note {
+                margin-left: .9rem;
+                margin-right: .9rem;
+            }
+
+            .marketfp-header-score-group {
+                gap: .4rem;
+            }
+
+            .marketfp-mini-score {
+                width: calc(50% - .2rem);
+                min-width: 0;
+            }
+
+            .marketfp-empty-copy {
+                flex-direction: column;
+            }
+
+            .marketfp-status-badge {
+                margin-left: 0;
+            }
+        }
     </style>
 }
 @section Scripts {
@@ -457,5 +1847,38 @@
                 }, 350);
             });
         }, 2500);
+
+        // Market Insight — loading state on submit. Regional research can
+        // take a few seconds, so the clicked button is disabled and shows a
+        // spinner to prevent duplicate submissions, without freezing the
+        // rest of the page.
+        document.querySelectorAll("[data-marketfp-analyze-form]").forEach(function (form) {
+            form.addEventListener("submit", function () {
+                const button = form.querySelector("[data-marketfp-submit-btn]");
+                if (!button || button.disabled) {
+                    return;
+                }
+
+                button.disabled = true;
+                button.setAttribute("aria-busy", "true");
+
+                const label = button.querySelector("[data-marketfp-btn-label]");
+                if (label) {
+                    label.textContent = "Analyzing regional signals…";
+                }
+
+                const icon = button.querySelector("i");
+                if (icon) {
+                    icon.className = "spinner-border spinner-border-sm";
+                }
+            });
+        });
+
+        // Bootstrap tooltip for the "Market Opportunity" info icon.
+        document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
+            if (window.bootstrap && window.bootstrap.Tooltip) {
+                new window.bootstrap.Tooltip(el);
+            }
+        });
     </script>
 }

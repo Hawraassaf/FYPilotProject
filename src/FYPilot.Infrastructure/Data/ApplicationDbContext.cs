@@ -46,6 +46,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<SupervisorEvaluation> SupervisorEvaluations { get; set; }
     public DbSet<Meeting> Meetings { get; set; }
     public DbSet<ProjectDocumentation> ProjectDocumentations => Set<ProjectDocumentation>();
+    public DbSet<MarketOpportunitySnapshot> MarketOpportunitySnapshots => Set<MarketOpportunitySnapshot>();
+    public DbSet<MarketOpportunityRegion> MarketOpportunityRegions => Set<MarketOpportunityRegion>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<FeedbackMessage> FeedbackMessages => Set<FeedbackMessage>();
 
@@ -287,6 +289,64 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.Property(e => e.DiagramDescriptionsJson).IsRequired();
             entity.Property(e => e.AiTechnicalReportJson).IsRequired();
             entity.Property(e => e.SupervisorStatus).IsRequired();
+        });
+
+        modelBuilder.Entity<MarketOpportunitySnapshot>(entity =>
+        {
+            entity.ToTable("market_opportunity_snapshots");
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Status).HasMaxLength(40);
+            entity.Property(x => x.OverallDemandLevel).HasMaxLength(30);
+            entity.Property(x => x.BestLaunchMarket).HasMaxLength(120);
+            entity.Property(x => x.BestLaunchReason).HasMaxLength(2000);
+            entity.Property(x => x.ExpansionPathJson).HasColumnType("text");
+            entity.Property(x => x.WhyDemandedJson).HasColumnType("text");
+            entity.Property(x => x.StrategicRecommendation).HasColumnType("text");
+            entity.Property(x => x.LimitationsJson).HasColumnType("text");
+            entity.Property(x => x.SourcesJson).HasColumnType("text");
+            entity.Property(x => x.Provider).HasMaxLength(120);
+            entity.Property(x => x.ModelUsed).HasMaxLength(200);
+
+            entity.HasOne(x => x.ProjectIdea)
+                .WithMany()
+                .HasForeignKey(x => x.ProjectIdeaId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(x => x.ProjectIdeaId);
+            entity.HasIndex(x => x.UserId);
+            entity.HasIndex(x => x.AnalyzedAt);
+
+            // Efficiently loading "latest snapshot per idea" for several
+            // ideas at once (Idea Generator) benefits from this composite
+            // index ordered for a descending scan per idea.
+            entity.HasIndex(x => new { x.ProjectIdeaId, x.AnalyzedAt });
+        });
+
+        modelBuilder.Entity<MarketOpportunityRegion>(entity =>
+        {
+            entity.ToTable("market_opportunity_regions");
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.RegionKey).HasMaxLength(20);
+            entity.Property(x => x.RegionName).HasMaxLength(50);
+            entity.Property(x => x.DemandLevel).HasMaxLength(30);
+            entity.Property(x => x.CompetitionPressure).HasMaxLength(20);
+            entity.Property(x => x.EvidenceSummary).HasColumnType("text");
+            entity.Property(x => x.ScoreBreakdownJson).HasColumnType("text");
+            entity.Property(x => x.SourceUrlsJson).HasColumnType("text");
+
+            entity.HasOne(x => x.Snapshot)
+                .WithMany(x => x.Regions)
+                .HasForeignKey(x => x.SnapshotId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(x => new { x.SnapshotId, x.RegionKey }).IsUnique();
         });
 
         modelBuilder.Entity<PasswordResetToken>(entity =>

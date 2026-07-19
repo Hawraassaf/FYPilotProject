@@ -132,9 +132,9 @@ class DefenseSimulatorOrchestrator:
         return GenerateDefenseQuestionsResponse(
             questions=questions,
             llmUsed=llm_used,
-            source="ollama" if llm_used else "dynamic-fallback",
+            source=self.question_agent.last_provider if llm_used else "dynamic-fallback",
             ollamaError=self.question_agent.last_error,
-            modelUsed=request.model,
+            modelUsed=self.question_agent.last_model_used or request.model,
             consistencyWarnings=self._build_defense_consistency_warnings(questions),
             message="Defense questions generated successfully",
         )
@@ -184,9 +184,9 @@ class DefenseSimulatorOrchestrator:
             followUpQuestion=follow_up,
             feedbackSummary=feedback_summary,
             llmUsed=llm_used,
-            source="ollama" if llm_used else "dynamic-fallback",
+            source=self.evaluator_agent.last_provider if llm_used else "dynamic-fallback",
             ollamaError=self.evaluator_agent.last_error,
-            modelUsed=request.model,
+            modelUsed=self.evaluator_agent.last_model_used or request.model,
         )
 
     def _clean_questions(

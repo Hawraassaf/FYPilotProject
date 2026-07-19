@@ -4,30 +4,194 @@ using FYPilot.Application.Interfaces;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace FYPilot.Infrastructure.Services;
 
 public class DocumentationGeneratorService : IDocumentationGeneratorService
 {
     private readonly ApplicationDbContext _db;
+    private readonly IAiServiceClient _aiService;
+    private readonly ILogger<DocumentationGeneratorService> _logger;
 
-    public DocumentationGeneratorService(ApplicationDbContext db)
+    public DocumentationGeneratorService(
+        ApplicationDbContext db,
+        IAiServiceClient aiService,
+        ILogger<DocumentationGeneratorService> logger)
     {
         _db = db;
+        _aiService = aiService;
+        _logger = logger;
     }
 
     public async Task<GeneratedDocumentationDto> GenerateAsync(GenerateDocumentationRequest request)
     {
-        var functionalRequirements = GenerateFunctionalRequirements(request);
-        var nonFunctionalRequirements = GenerateNonFunctionalRequirements(request);
-        var useCases = GenerateUseCases(request);
-        var edgeCases = GenerateEdgeCases(request);
-        var databaseDesign = GenerateDatabaseDesign(request);
-        var uiDesign = GenerateUiDesign(request);
-        var diagramDescriptions = GenerateDiagramDescriptions(request);
-        var aiTechnicalReport = GenerateAiTechnicalReport(request);
+        var aiDocumentation = await TryGenerateWithAiAsync(request);
 
-        var documentation = new ProjectDocumentation
+        var documentation = aiDocumentation != null
+            ? BuildEntityFromAiDocumentation(request, aiDocumentation)
+            : BuildEntityFromFallback(request);
+
+        _db.ProjectDocumentations.Add(documentation);
+        await _db.SaveChangesAsync();
+
+        return ToDto(documentation);
+    }
+
+    private async Task<AiSeDocumentationDto?> TryGenerateWithAiAsync(GenerateDocumentationRequest request)
+    {
+        try
+        {
+            var aiRequest = await BuildAiRequestAsync(request);
+            var response = await _aiService.GenerateSeDocumentationAsync(aiRequest);
+
+            return response?.Documentation;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "AI SE documentation generation failed for project idea {ProjectIdeaId}. Falling back to deterministic generation.",
+                request.ProjectIdeaId);
+
+            return null;
+        }
+    }
+
+    private async Task<AiSeDocumentationRequest> BuildAiRequestAsync(GenerateDocumentationRequest request)
+    {
+        var idea = await _db.ProjectIdeas
+            .AsNoTracking()
+            .FirstOrDefaultAsync(i => i.Id == request.ProjectIdeaId);
+
+        var profile = await _db.StudentProfiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.UserId == request.UserId);
+
+        var skills = await _db.StudentSkills
+            .AsNoTracking()
+            .Where(s => s.UserId == request.UserId)
+            .ToListAsync();
+
+        var roadmap = await _db.ProjectRoadmaps
+            .Include(r => r.Phases)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.IdeaId == request.ProjectIdeaId && r.UserId == request.UserId);
+
+        var skillNames = skills
+            .Select(s => s.SkillName)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var skillRatings = skills
+            .Where(s => !string.IsNullOrWhiteSpace(s.SkillName))
+            .GroupBy(s => s.SkillName.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => Math.Clamp(g.First().Rating, 1, 5),
+                StringComparer.OrdinalIgnoreCase);
+
+        var studentProfile = new AiSeDocStudentProfile(
+            Major: profile?.Major ?? "Computer Science",
+            ExperienceLevel: profile?.ExperienceLevel ?? "intermediate",
+            TeamSize: profile?.TeamMembers ?? 1,
+            AvailableHoursPerWeek: profile?.AvailableHoursPerWeek ?? 10,
+            Skills: skillNames,
+            SkillRatings: skillRatings);
+
+        var selectedIdea = new AiSeDocSelectedIdea(
+            Id: idea?.Id,
+            Title: idea?.Title ?? request.ProjectTitle,
+            ProblemStatement: idea?.ProblemStatement ?? request.ProjectDescription,
+            TargetUsers: idea?.TargetUsers ?? string.Empty,
+            WhyUseful: idea?.WhyUseful ?? string.Empty,
+            RequiredTechnologies: idea?.RequiredTechnologies ?? request.TechStack,
+            RequiredSkills: idea?.RequiredSkills ?? string.Empty,
+            MissingSkills: idea?.MissingSkills ?? string.Empty,
+            DifficultyLevel: idea?.DifficultyLevel ?? "medium",
+            ExpectedDurationWeeks: idea != null && idea.ExpectedDurationWeeks > 0 ? idea.ExpectedDurationWeeks : 10,
+            Domain: idea?.Domain ?? request.Domain,
+            FinalDeliverables: idea?.FinalDeliverables ?? string.Empty);
+
+        var roadmapPhases = roadmap?.Phases
+            .OrderBy(p => p.PhaseNumber)
+            .Select(p => new AiSeDocRoadmapPhase(
+                PhaseNumber: p.PhaseNumber,
+                Name: p.Name,
+                Objective: p.Objective,
+                Tasks: DeserializeTasks(p.TasksJson),
+                ExpectedOutput: p.ExpectedOutput,
+                SuccessCriteria: p.SuccessCriteria,
+                IsCompleted: p.IsCompleted))
+            .ToList() ?? [];
+
+        return new AiSeDocumentationRequest(
+            StudentProfile: studentProfile,
+            SelectedIdea: selectedIdea,
+            Roadmap: roadmapPhases,
+            ExistingNotes: string.Empty);
+    }
+
+    private static List<string> DeserializeTasks(string tasksJson)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(tasksJson) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static ProjectDocumentation BuildEntityFromAiDocumentation(
+        GenerateDocumentationRequest request,
+        AiSeDocumentationDto doc)
+    {
+        var functionalRequirements = doc.FunctionalRequirements
+            .Select(r => $"{r.Id}: {r.Title} — {r.Description} (Priority: {r.Priority})")
+            .ToList();
+
+        var nonFunctionalRequirements = doc.NonFunctionalRequirements
+            .Select(r => $"{r.Id}: {r.Title} — {r.Description} (Priority: {r.Priority})")
+            .ToList();
+
+        var useCases = doc.UseCases
+            .Select(u => $"{u.Id}: {u.Title} — Actor: {u.Actor}. Goal: {u.Goal}.")
+            .ToList();
+
+        var edgeCases = doc.EdgeCases
+            .Select(e => $"{e.Id}: {e.Scenario} — {e.ExpectedHandling}")
+            .ToList();
+
+        var databaseDesign = doc.DatabaseEntities
+            .Select(e => $"{e.Name}: {e.Purpose} (Fields: {string.Join(", ", e.ImportantFields)})")
+            .Concat(doc.EntityRelationships.Select(r =>
+                $"{r.FromEntity} → {r.ToEntity} ({r.Type}): {r.Description}"))
+            .ToList();
+
+        var uiDesign = doc.SystemModules
+            .Select(m => $"{m.Name} screen: {m.Responsibility}")
+            .ToList();
+
+        var diagramDescriptions =
+            $"Entity Relationship Diagram (Mermaid):\n{doc.MermaidERD}\n\n" +
+            $"Class Diagram (Mermaid):\n{doc.MermaidClassDiagram}\n\n" +
+            $"Activity Diagram (Mermaid):\n{doc.ActivityDiagram}\n\n" +
+            $"Sequence Diagram (Mermaid):\n{doc.SequenceDiagram}";
+
+        var aiTechnicalReport =
+            $"Architecture: {doc.Architecture.Style}\n\n" +
+            $"{doc.Architecture.Explanation}\n\n" +
+            $"AI / Service Layer: {doc.Architecture.AiService}\n\n" +
+            "Risks and Limitations:\n" +
+            string.Join("\n", doc.RisksAndLimitations.Select(r => $"- {r}")) + "\n\n" +
+            "Expected Outcomes:\n" +
+            string.Join("\n", doc.ExpectedOutcomes.Select(o => $"- {o}")) + "\n\n" +
+            $"Documentation Quality Score: {doc.DocumentationQualityScore}/100";
+
+        return new ProjectDocumentation
         {
             UserId = request.UserId,
             ProjectIdeaId = request.ProjectIdeaId,
@@ -47,11 +211,39 @@ public class DocumentationGeneratorService : IDocumentationGeneratorService
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
+    }
 
-        _db.ProjectDocumentations.Add(documentation);
-        await _db.SaveChangesAsync();
+    private static ProjectDocumentation BuildEntityFromFallback(GenerateDocumentationRequest request)
+    {
+        var functionalRequirements = GenerateFunctionalRequirements(request);
+        var nonFunctionalRequirements = GenerateNonFunctionalRequirements(request);
+        var useCases = GenerateUseCases(request);
+        var edgeCases = GenerateEdgeCases(request);
+        var databaseDesign = GenerateDatabaseDesign(request);
+        var uiDesign = GenerateUiDesign(request);
+        var diagramDescriptions = GenerateDiagramDescriptions(request);
+        var aiTechnicalReport = GenerateAiTechnicalReport(request);
 
-        return ToDto(documentation);
+        return new ProjectDocumentation
+        {
+            UserId = request.UserId,
+            ProjectIdeaId = request.ProjectIdeaId,
+            Title = $"{request.ProjectTitle} - Software Engineering Specification",
+
+            FunctionalRequirementsJson = JsonSerializer.Serialize(functionalRequirements),
+            NonFunctionalRequirementsJson = JsonSerializer.Serialize(nonFunctionalRequirements),
+            UseCasesJson = JsonSerializer.Serialize(useCases),
+            EdgeCasesJson = JsonSerializer.Serialize(edgeCases),
+            DatabaseDesignJson = JsonSerializer.Serialize(databaseDesign),
+            UiDesignJson = JsonSerializer.Serialize(uiDesign),
+            DiagramDescriptionsJson = JsonSerializer.Serialize(diagramDescriptions),
+            AiTechnicalReportJson = JsonSerializer.Serialize(aiTechnicalReport),
+
+            SupervisorStatus = "Draft",
+            SupervisorComment = string.Empty,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
     }
 
     public async Task<GeneratedDocumentationDto?> GetByIdAsync(int id)

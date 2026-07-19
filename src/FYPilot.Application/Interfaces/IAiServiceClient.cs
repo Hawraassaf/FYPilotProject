@@ -1,4 +1,5 @@
 using FYPilot.Application.DTOs;
+using FYPilot.Application.DTOs.Documentation;
 
 namespace FYPilot.Application.Interfaces;
 
@@ -55,4 +56,13 @@ public interface IAiServiceClient
 
     /// <summary>POST /fyp-chat — Ask the FYP mentor a question.</summary>
     Task<FypMentorServiceResponse?> AskFypMentorAsync(FypMentorRequest request);
+
+    /// <summary>POST /generate-se-documentation — Generate AI-based software engineering documentation.</summary>
+    Task<AiSeDocumentationServiceResponse?> GenerateSeDocumentationAsync(AiSeDocumentationRequest request);
+
+    /// <summary>POST /analyze-market-footprint — Regional demand footprint (Lebanon / MENA / Global) for the Idea Generator.</summary>
+    Task<MarketFootprintResponse?> AnalyzeMarketFootprintAsync(
+        MarketFootprintRequest request,
+        CancellationToken cancellationToken = default
+    );
 }

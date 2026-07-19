@@ -3,8 +3,9 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import requests
 from pydantic import BaseModel, Field
+
+from app.services.llm_provider import ProviderChain
 
 
 class SEDocStudentProfile(BaseModel):
@@ -171,15 +172,19 @@ class SEDocumentationDto(BaseModel):
 
 class SEDocumentationOrchestratorAgent:
     def __init__(self):
-        self.ollama_url = "http://localhost:11434/api/generate"
+        self.provider_chain = ProviderChain()
         self.last_llm_used = False
         self.last_error: Optional[str] = None
         self.last_raw_llm_response: Optional[str] = None
+        self.last_provider: Optional[str] = None
+        self.last_model_used: Optional[str] = None
 
     def generate(self, request: SEDocumentationRequest) -> SEDocumentationDto:
         self.last_llm_used = False
         self.last_error = None
         self.last_raw_llm_response = None
+        self.last_provider = None
+        self.last_model_used = None
 
         try:
             llm_sections = self._generate_llm_sections(request)
@@ -193,12 +198,10 @@ class SEDocumentationOrchestratorAgent:
 
     def _generate_llm_sections(self, request: SEDocumentationRequest) -> Dict[str, Any]:
         context = self._context_text(request)
-        model = request.model or "qwen2.5-coder:7b"
 
         sections: Dict[str, Any] = {}
 
-        sections["requirements"] = self._call_ollama_json(
-            model=model,
+        sections["requirements"] = self._call_llm_json(
             prompt=f"""
 Return ONLY valid JSON.
 
@@ -224,8 +227,7 @@ Rules:
 """
         )
 
-        sections["useCases"] = self._call_ollama_json(
-            model=model,
+        sections["useCases"] = self._call_llm_json(
             prompt=f"""
 Return ONLY valid JSON.
 
@@ -261,8 +263,7 @@ Rules:
 """
         )
 
-        sections["modules"] = self._call_ollama_json(
-            model=model,
+        sections["modules"] = self._call_llm_json(
             prompt=f"""
 Return ONLY valid JSON.
 
@@ -291,8 +292,7 @@ Rules:
 """
         )
 
-        sections["database"] = self._call_ollama_json(
-            model=model,
+        sections["database"] = self._call_llm_json(
             prompt=f"""
 Return ONLY valid JSON.
 
@@ -318,8 +318,7 @@ Rules:
 """
         )
 
-        sections["testing"] = self._call_ollama_json(
-            model=model,
+        sections["testing"] = self._call_llm_json(
             prompt=f"""
 Return ONLY valid JSON.
 
@@ -350,26 +349,20 @@ Rules:
 
         return sections
 
-    def _call_ollama_json(self, model: str, prompt: str) -> Dict[str, Any]:
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-            "format": "json",
-            "options": {
-                "temperature": 0.15,
-                "num_ctx": 4096,
-                "num_predict": 1800
-            }
-        }
+    def _call_llm_json(self, prompt: str) -> Dict[str, Any]:
+        result = self.provider_chain.generate_json(prompt, use_search=False)
 
-        response = requests.post(self.ollama_url, json=payload, timeout=300)
-        response.raise_for_status()
+        self.last_provider = result.provider if result.provider != "none" else None
+        self.last_model_used = result.model
 
-        raw = response.json().get("response", "")
-        self.last_raw_llm_response = raw[:3000]
+        if not result.ok or not isinstance(result.data, dict):
+            raise RuntimeError(
+                result.error or "No provider returned valid JSON for this section."
+            )
 
-        return json.loads(self._extract_json(raw))
+        self.last_raw_llm_response = json.dumps(result.data, ensure_ascii=False)[:3000]
+
+        return result.data
 
     def _assemble_documentation(
         self,
@@ -482,8 +475,12 @@ Rules:
                 frontend="ASP.NET Core Razor Pages",
                 backend="ASP.NET Core application with Python FastAPI AI service",
                 database="PostgreSQL",
-                aiService=f"Ollama local LLM using {request.model or 'qwen2.5-coder:7b'}",
-                externalServices=["Ollama local model server"],
+                aiService=(
+                    f"Cloud/local AI provider chain (Groq -> Gemini -> Ollama), "
+                    f"last used: {self.last_provider or 'dynamic-fallback'} "
+                    f"({self.last_model_used or 'n/a'})"
+                ),
+                externalServices=["Groq API", "Gemini API", "Ollama local model server"],
                 explanation="The .NET application manages authentication, pages, database access, and student workflow. The Python FastAPI service runs AI agents and returns validated documentation. PostgreSQL stores users, profiles, ideas, skills, roadmap data, chats, and generated documentation."
             ),
             apiIntegrationPoints=[
@@ -742,15 +739,6 @@ Notes:
     AI-->>Web: Validated documentation
     Web-->>Student: Display documentation
 """
-
-    def _extract_json(self, text: str) -> str:
-        start = text.find("{")
-        end = text.rfind("}")
-
-        if start == -1 or end == -1 or end <= start:
-            raise ValueError("No valid JSON object found in Ollama response.")
-
-        return text[start:end + 1]
 
     def _split_items(self, value: str, default: List[str]) -> List[str]:
         if not value or not value.strip():

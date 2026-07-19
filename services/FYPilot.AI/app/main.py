@@ -1,19 +1,11 @@
-"""
-FYPilot — Python AI & Data Science Service
-
-Lightweight startup:
-- Health endpoints always start.
-- Working AI routers load safely.
-- Optional/heavy routers are skipped gracefully if dependencies/files are missing.
-
-Requires Python 3.11+.
-"""
-
 import logging
 import os
 
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+load_dotenv()
 
 from app.routers import health
 from app.security import verify_api_key
@@ -120,7 +112,16 @@ except Exception as exception:
         "Market Demand Forecasting router skipped: %s",
         exception,
     )
+try:
+    from app.routers import market_footprint
 
+    app.include_router(market_footprint.router)
+    logger.info("Market Footprint router loaded")
+except Exception as exception:
+    logger.exception(
+        "Market Footprint router skipped: %s",
+        exception,
+    )
 try:
     from app.routers import cloud_idea_router
 
@@ -250,6 +251,11 @@ try:
 
     app.include_router(fyp_chat.router)
     logger.info("FYP Mentor Chat router loaded")
+except Exception as exception:
+    logger.warning(
+        "FYP Mentor Chat router skipped: %s",
+        exception,
+    )
 
 
 try:
@@ -257,6 +263,26 @@ try:
 
     app.include_router(defense_simulator.router)
     logger.info("Defense Simulator router loaded")
+except Exception as exception:
+    logger.warning(
+        "Defense Simulator router skipped: %s",
+        exception,
+    )
+
+
+try:
+    from app.routers import se_documentation
+
+    app.include_router(se_documentation.router)
+    logger.info("SE Documentation router loaded")
+except Exception as exception:
+    logger.warning(
+        "SE Documentation router skipped: %s",
+        exception,
+    )
+
+
+
 
 # Heavy ML routers — loaded only if dependencies are available
 # ─────────────────────────────────────────────────────────────────────────────
@@ -332,6 +358,7 @@ def ds_health():
             "hybrid_ai": [
                 "POST /analyze-market-demand",
                 "POST /analyze-market-needs",
+                "POST /analyze-market-footprint",
                 "POST /generate-ideas-cloud",
                 "POST /predict-skill-match",
             ],

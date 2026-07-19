@@ -24,8 +24,9 @@ import logging
 import re
 from typing import Any, Optional
 
-import requests
 from pydantic import BaseModel, Field
+
+from app.services.llm_provider import ProviderChain
 
 logger = logging.getLogger("fypilot-roadmap-agent")
 
@@ -109,13 +110,14 @@ class ProjectRoadmapAgent:
     weekly expansion, and team responsibility derivation.
     """
 
-    def __init__(self, model: str = "qwen2.5-coder:7b"):
-        self.model = model
-        self.ollama_url = "http://localhost:11434/api/generate"
+    def __init__(self):
+        self.provider_chain = ProviderChain()
 
         self.last_llm_used = False
         self.last_error = None
         self.last_raw_llm_response = None
+        self.last_provider: str | None = None
+        self.last_model_used: str | None = None
 
         self.blocked_terms = [
             "react",
@@ -157,6 +159,8 @@ class ProjectRoadmapAgent:
         self.last_llm_used = False
         self.last_error = None
         self.last_raw_llm_response = None
+        self.last_provider = None
+        self.last_model_used = None
 
         total_weeks = self._normalize_weeks(request.expectedDurationWeeks)
 
@@ -170,7 +174,7 @@ class ProjectRoadmapAgent:
 
         if self.last_error is None:
             self.last_error = (
-                "Ollama did not return a valid roadmap phase plan. "
+                "No AI provider returned a valid roadmap phase plan. "
                 "Used fallback roadmap."
             )
 
@@ -187,18 +191,30 @@ class ProjectRoadmapAgent:
         total_weeks: int,
     ) -> Optional[_RoadmapPlan]:
         prompt = self._build_phase_prompt(request, total_weeks)
-        llm_text = self._call_ollama(prompt)
-
-        if not llm_text:
-            return None
-
-        raw = self._parse_llm_json(llm_text)
-
-        if not raw:
-            return None
 
         try:
-            plan = _RoadmapPlan.model_validate(raw)
+            result = self.provider_chain.generate_json(prompt, use_search=False)
+        except Exception as ex:
+            self.last_error = f"Roadmap generation failed: {ex}"
+            logger.exception("Roadmap generation failed.")
+            return None
+
+        self.last_provider = (
+            result.provider if result.provider != "none" else None
+        )
+        self.last_model_used = result.model
+
+        if not result.ok or not isinstance(result.data, dict):
+            self.last_error = result.error or "No provider returned valid roadmap JSON."
+            return None
+
+        self.last_raw_llm_response = json.dumps(
+            result.data,
+            ensure_ascii=False,
+        )[:1500]
+
+        try:
+            plan = _RoadmapPlan.model_validate(result.data)
         except Exception as ex:
             self.last_error = f"Roadmap plan failed validation: {str(ex)}"
             return None
@@ -263,46 +279,6 @@ class ProjectRoadmapAgent:
     def _contains_blocked_term(self, text: str) -> bool:
         lowered = text.lower()
         return any(term in lowered for term in self.blocked_terms)
-
-    def _call_ollama(self, prompt: str) -> Optional[str]:
-        try:
-            response = requests.post(
-                self.ollama_url,
-                json={
-                    "model": self.model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "format": "json",
-                    "keep_alive": "30m",
-                    "options": {
-                        "temperature": 0.25,
-                        "num_predict": 1600,
-                        "num_ctx": 4096,
-                    },
-                },
-                timeout=(15, 480),
-            )
-
-            if not response.ok:
-                self.last_error = f"Ollama returned HTTP status {response.status_code}"
-                logger.warning(self.last_error)
-                return None
-
-            data = response.json()
-            text = data.get("response")
-
-            self.last_raw_llm_response = str(text)[:1500] if text else None
-
-            if not text or not isinstance(text, str):
-                self.last_error = "Ollama response did not contain valid text."
-                return None
-
-            return text
-
-        except Exception as ex:
-            self.last_error = str(ex)
-            logger.warning("Ollama unavailable. Falling back. Error: %s", ex)
-            return None
 
     def _build_phase_prompt(
         self,
@@ -695,31 +671,6 @@ Return exactly this JSON structure:
     # =========================================================================
     # Ollama JSON parsing
     # =========================================================================
-
-    def _parse_llm_json(self, text: str) -> Optional[dict[str, Any]]:
-        try:
-            clean_text = text.strip()
-
-            try:
-                data = json.loads(clean_text)
-            except json.JSONDecodeError:
-                match = re.search(r"\{.*\}", clean_text, re.DOTALL)
-
-                if not match:
-                    self.last_error = "Ollama returned text, but no JSON object was found."
-                    return None
-
-                data = json.loads(match.group(0))
-
-            if not isinstance(data, dict):
-                self.last_error = "Ollama JSON parsed, but it is not an object."
-                return None
-
-            return data
-
-        except Exception as ex:
-            self.last_error = f"Could not parse Ollama JSON: {str(ex)}"
-            return None
 
     # =========================================================================
     # Fallback path (unchanged behavior from v1, used only when the LLM fails)

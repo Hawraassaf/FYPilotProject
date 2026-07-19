@@ -4,18 +4,19 @@ IdeaComparisonAgent — LLM-based comparison and ranking of generated project id
 Design:
 - Compares all generated ideas for the current student.
 - Uses student skills, team size, available hours, and experience level.
-- Ollama performs reasoning and ranking.
-- Python validates output and provides fallback if Ollama fails.
+- ProviderChain (Groq -> Gemini -> Ollama) performs reasoning and ranking.
+- Python validates output and provides fallback if every provider fails.
 - Maximum compared ideas is capped to avoid slow responses.
 """
 
 import json
 import logging
 import re
-from typing import Any, Optional
+from typing import Any
 
-import requests
 from pydantic import BaseModel, Field
+
+from app.services.llm_provider import ProviderChain
 
 logger = logging.getLogger("fypilot-idea-comparison-agent")
 
@@ -82,13 +83,14 @@ class IdeaComparisonAgent:
     Python validates, completes, and protects the app from invalid output.
     """
 
-    def __init__(self, model: str = "phi3"):
-        self.model = model
-        self.ollama_url = "http://localhost:11434/api/generate"
+    def __init__(self):
+        self.provider_chain = ProviderChain()
 
         self.last_llm_used = False
         self.last_error = None
         self.last_raw_llm_response = None
+        self.last_provider: str | None = None
+        self.last_model_used: str | None = None
 
         self.max_ideas = 12
 
@@ -114,6 +116,8 @@ class IdeaComparisonAgent:
         self.last_llm_used = False
         self.last_error = None
         self.last_raw_llm_response = None
+        self.last_provider = None
+        self.last_model_used = None
 
         ideas = self._normalize_ideas(request.ideas)
 
@@ -131,12 +135,31 @@ class IdeaComparisonAgent:
         )
 
         prompt = self._build_prompt(limited_request)
-        llm_text = self._call_ollama(prompt)
 
         raw = None
 
-        if llm_text:
-            raw = self._parse_llm_json(llm_text)
+        try:
+            result = self.provider_chain.generate_json(prompt, use_search=False)
+
+            self.last_provider = (
+                result.provider if result.provider != "none" else None
+            )
+            self.last_model_used = result.model
+
+            if result.ok and isinstance(result.data, dict):
+                self.last_raw_llm_response = json.dumps(
+                    result.data,
+                    ensure_ascii=False,
+                )[:1500]
+                raw = result.data
+            else:
+                self.last_error = (
+                    result.error or "No provider returned valid idea comparison JSON."
+                )
+
+        except Exception as ex:
+            self.last_error = f"Idea comparison generation failed: {ex}"
+            logger.exception("Idea comparison generation failed.")
 
         if raw:
             self.last_llm_used = True
@@ -145,7 +168,7 @@ class IdeaComparisonAgent:
 
             if self.last_error is None:
                 self.last_error = (
-                    "Ollama did not return valid idea comparison JSON. "
+                    "All AI providers failed to return valid idea comparison JSON. "
                     "Used fallback comparison."
                 )
 
@@ -164,44 +187,6 @@ class IdeaComparisonAgent:
         ]
 
         return valid_ideas[: self.max_ideas]
-
-    def _call_ollama(self, prompt: str) -> Optional[str]:
-        try:
-            response = requests.post(
-                self.ollama_url,
-                json={
-                    "model": self.model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "format": "json",
-                    "options": {
-                        "temperature": 0.2,
-                        "num_predict": 2200,
-                    },
-                },
-                timeout=600,
-            )
-
-            if not response.ok:
-                self.last_error = f"Ollama returned HTTP status {response.status_code}"
-                logger.warning(self.last_error)
-                return None
-
-            data = response.json()
-            text = data.get("response")
-
-            self.last_raw_llm_response = str(text)[:1500] if text else None
-
-            if not text or not isinstance(text, str):
-                self.last_error = "Ollama response did not contain valid text."
-                return None
-
-            return text
-
-        except Exception as ex:
-            self.last_error = str(ex)
-            logger.warning("Ollama unavailable. Falling back. Error: %s", ex)
-            return None
 
     def _build_prompt(self, request: IdeaComparisonRequest) -> str:
         skills_text = (
@@ -318,31 +303,6 @@ Return exactly this JSON structure:
   "finalRecommendation": ""
 }}
 """
-
-    def _parse_llm_json(self, text: str) -> Optional[dict[str, Any]]:
-        try:
-            clean_text = text.strip()
-
-            try:
-                data = json.loads(clean_text)
-            except json.JSONDecodeError:
-                match = re.search(r"\{.*\}", clean_text, re.DOTALL)
-
-                if not match:
-                    self.last_error = "Ollama returned text, but no JSON object was found."
-                    return None
-
-                data = json.loads(match.group(0))
-
-            if not isinstance(data, dict):
-                self.last_error = "Ollama JSON parsed, but it is not an object."
-                return None
-
-            return data
-
-        except Exception as ex:
-            self.last_error = f"Could not parse Ollama JSON: {str(ex)}"
-            return None
 
     def _complete_and_validate(
         self,

@@ -10,6 +10,7 @@ from app.agents.se_documentation.se_documentation_orchestrator import (
     SEDocumentationRequest,
 )
 
+router = APIRouter(tags=["SE Documentation"])
 
 
 class SEDocumentationJobDto(BaseModel):
@@ -49,7 +50,9 @@ def generate_se_documentation(request: SEDocumentationRequest) -> Dict[str, Any]
         "documentation": documentation.model_dump(),
         "agent": "SEDocumentationAgent",
         "llmUsed": agent.last_llm_used,
-        "source": "ollama" if agent.last_llm_used else "dynamic-fallback",
+        "source": agent.last_provider if agent.last_llm_used else "dynamic-fallback",
+        "provider": agent.last_provider,
+        "modelUsed": agent.last_model_used,
         "ollamaError": agent.last_error,
         "ollamaRawPreview": agent.last_raw_llm_response,
         "generatedAt": datetime.utcnow().isoformat(),
@@ -126,7 +129,7 @@ def run_se_documentation_job(job_id: str, request: SEDocumentationRequest):
 
         job.documentation = documentation.model_dump()
         job.llmUsed = agent.last_llm_used
-        job.source = "ollama" if agent.last_llm_used else "dynamic-fallback"
+        job.source = agent.last_provider if agent.last_llm_used else "dynamic-fallback"
         job.ollamaError = agent.last_error
 
         update_job(
