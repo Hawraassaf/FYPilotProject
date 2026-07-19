@@ -34,4 +34,8 @@ public class User
     public CompanyProfile? CompanyProfile { get; set; }
     public ICollection<Project> Projects { get; set; } = [];
     public ICollection<Activity> Activities { get; set; } = [];
+
+    public bool MustChangePassword { get; set; } = false;
+
+    public DateTime? PasswordChangedAtUtc { get; set; }
 }

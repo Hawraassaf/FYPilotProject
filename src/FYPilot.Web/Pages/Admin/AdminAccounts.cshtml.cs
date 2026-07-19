@@ -62,7 +62,8 @@ public class AdminAccountsModel(ApplicationDbContext db) : PageModel
         var fullName = Input.FullName.Trim();
 
         var emailExists = await db.Users
-            .AnyAsync(u => u.Email.ToLower() == generatedEmail.ToLower());
+            .AnyAsync(u =>
+                u.Email.ToLower() == generatedEmail.ToLower());
 
         if (emailExists)
         {
@@ -78,9 +79,17 @@ public class AdminAccountsModel(ApplicationDbContext db) : PageModel
         {
             FullName = fullName,
             Email = generatedEmail,
+
+            // This password is only the temporary first-login password.
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(Input.Password),
+
             Role = "admin",
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+
+            // The new admin must change the temporary password
+            // before accessing the administrator pages.
+            MustChangePassword = true,
+            PasswordChangedAtUtc = null
         };
 
         try
@@ -89,14 +98,16 @@ public class AdminAccountsModel(ApplicationDbContext db) : PageModel
             await db.SaveChangesAsync();
 
             SuccessMessage =
-                $"Administrator {generatedEmail} was created successfully.";
+                $"Administrator {generatedEmail} was created successfully. " +
+                "They must change their temporary password during their first login.";
 
             return RedirectToPage();
         }
         catch (DbUpdateException)
         {
             ErrorMessage =
-                "The administrator could not be created. The generated email may already be in use.";
+                "The administrator could not be created. " +
+                "The generated email may already be in use.";
 
             return RedirectToPage();
         }
@@ -126,7 +137,9 @@ public class AdminAccountsModel(ApplicationDbContext db) : PageModel
             .ThenBy(a => a.CreatedAt)
             .ToList();
 
-        var nextNumber = preparedNextNumber ?? await GetNextAdminNumberAsync();
+        var nextNumber =
+            preparedNextNumber ?? await GetNextAdminNumberAsync();
+
         NextAdminEmail = BuildAdminEmail(nextNumber);
 
         if (string.IsNullOrWhiteSpace(Input.FullName))
@@ -161,7 +174,9 @@ public class AdminAccountsModel(ApplicationDbContext db) : PageModel
 
             if (number.HasValue)
             {
-                highestNumber = Math.Max(highestNumber, number.Value);
+                highestNumber = Math.Max(
+                    highestNumber,
+                    number.Value);
             }
         }
 
@@ -188,9 +203,11 @@ public class AdminAccountsModel(ApplicationDbContext db) : PageModel
             return null;
         }
 
-        return int.TryParse(match.Groups["number"].Value, out var number)
-            ? number
-            : null;
+        return int.TryParse(
+            match.Groups["number"].Value,
+            out var number)
+                ? number
+                : null;
     }
 
     private static string BuildAdminEmail(int number)
@@ -215,24 +232,35 @@ public class AdminAccountsModel(ApplicationDbContext db) : PageModel
         {
             ModelState.AddModelError(
                 "Input.Password",
-                "Password must contain an uppercase letter, a lowercase letter, and a number.");
+                "The temporary password must contain an uppercase letter, a lowercase letter, and a number.");
         }
     }
 
     public sealed class CreateAdminInput
     {
         [Required]
-        [StringLength(100, MinimumLength = 3)]
+        [StringLength(
+            100,
+            MinimumLength = 3,
+            ErrorMessage = "The administrator name must contain at least 3 characters.")]
+        [Display(Name = "Administrator Name")]
         public string FullName { get; set; } = "";
 
         [Required]
-        [StringLength(100, MinimumLength = 8)]
+        [StringLength(
+            100,
+            MinimumLength = 8,
+            ErrorMessage = "The temporary password must contain at least 8 characters.")]
         [DataType(DataType.Password)]
+        [Display(Name = "Temporary Password")]
         public string Password { get; set; } = "";
 
         [Required]
         [DataType(DataType.Password)]
-        [Compare(nameof(Password), ErrorMessage = "Passwords do not match.")]
+        [Compare(
+            nameof(Password),
+            ErrorMessage = "The temporary passwords do not match.")]
+        [Display(Name = "Confirm Temporary Password")]
         public string ConfirmPassword { get; set; } = "";
     }
 

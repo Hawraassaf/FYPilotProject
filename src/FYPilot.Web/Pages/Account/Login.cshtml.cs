@@ -15,74 +15,155 @@ public class LoginModel(ApplicationDbContext db) : PageModel
     public InputModel Input { get; set; } = new();
 
     public string? ErrorMessage { get; private set; }
+
     public string? ReturnUrl { get; private set; }
 
     public class InputModel
     {
-        [Required] [EmailAddress] public string Email    { get; set; } = "";
-        [Required]                public string Password { get; set; } = "";
+        [Required]
+        [EmailAddress]
+        public string Email { get; set; } = "";
+
+        [Required]
+        [DataType(DataType.Password)]
+        public string Password { get; set; } = "";
     }
 
-    public IActionResult OnGet(string? returnUrl = null)
+    public async Task<IActionResult> OnGetAsync(
+        string? returnUrl = null)
     {
         ReturnUrl = returnUrl;
-        if (User.Identity?.IsAuthenticated == true) return RedirectToDashboard();
-        return Page();
-    }
 
-    public async Task<IActionResult> OnPostAsync(string? returnUrl = null)
-    {
-        if (!ModelState.IsValid)
+        if (User.Identity?.IsAuthenticated != true)
         {
-            ErrorMessage = "Please enter email and password.";
             return Page();
         }
 
-        var email = Input.Email.Trim().ToLowerInvariant();
+        var userIdValue =
+            User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (int.TryParse(userIdValue, out var userId))
+        {
+            var currentUser = await db.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.Id == userId);
+
+            if (currentUser?.MustChangePassword == true)
+            {
+                return RedirectToPage(
+                    "/Account/ForceChangePassword");
+            }
+
+            return RedirectToDashboard(currentUser?.Role);
+        }
+
+        return RedirectToDashboard();
+    }
+
+    public async Task<IActionResult> OnPostAsync(
+        string? returnUrl = null)
+    {
+        ReturnUrl = returnUrl;
+
+        if (!ModelState.IsValid)
+        {
+            ErrorMessage =
+                "Please enter a valid email and password.";
+
+            return Page();
+        }
+
+        var email =
+            Input.Email.Trim().ToLowerInvariant();
 
         var user = await db.Users
-            .FirstOrDefaultAsync(u => u.Email.ToLower() == email);
+            .FirstOrDefaultAsync(
+                u => u.Email.ToLower() == email);
 
-        if (user == null || !BCrypt.Net.BCrypt.Verify(Input.Password, user.PasswordHash))
+        if (user == null ||
+            !BCrypt.Net.BCrypt.Verify(
+                Input.Password,
+                user.PasswordHash))
         {
             ErrorMessage = "Invalid email or password.";
             return Page();
         }
 
         var claims = new List<Claim>
-    {
-        new(ClaimTypes.NameIdentifier, user.Id.ToString()),
-        new(ClaimTypes.Email, user.Email),
-        new(ClaimTypes.Name, user.FullName),
-        new(ClaimTypes.Role, user.Role),
-        new("userId", user.Id.ToString())
-    };
+        {
+            new(
+                ClaimTypes.NameIdentifier,
+                user.Id.ToString()),
 
-        var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+            new(
+                ClaimTypes.Email,
+                user.Email),
+
+            new(
+                ClaimTypes.Name,
+                user.FullName),
+
+            new(
+                ClaimTypes.Role,
+                user.Role),
+
+            new(
+                "userId",
+                user.Id.ToString())
+        };
+
+        var identity = new ClaimsIdentity(
+            claims,
+            CookieAuthenticationDefaults.AuthenticationScheme);
+
         var principal = new ClaimsPrincipal(identity);
 
         await HttpContext.SignInAsync(
             CookieAuthenticationDefaults.AuthenticationScheme,
             principal,
-            new AuthenticationProperties { IsPersistent = true }
-        );
+            new AuthenticationProperties
+            {
+                IsPersistent = true
+            });
 
-        if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
+        /*
+         * A newly created administrator is redirected immediately
+         * to the forced password-change page.
+         *
+         * This check must happen before processing returnUrl so the
+         * administrator cannot bypass the password-change screen.
+         */
+        if (user.MustChangePassword)
         {
-            return Redirect(returnUrl);
+            return RedirectToPage(
+                "/Account/ForceChangePassword");
+        }
+
+        if (!string.IsNullOrWhiteSpace(returnUrl) &&
+            Url.IsLocalUrl(returnUrl))
+        {
+            return LocalRedirect(returnUrl);
         }
 
         return RedirectToDashboard(user.Role);
     }
 
-    private IActionResult RedirectToDashboard(string? role = null)
+    private IActionResult RedirectToDashboard(
+        string? role = null)
     {
-        role ??= User.FindFirst(ClaimTypes.Role)?.Value;
-        return role switch
+        role ??=
+            User.FindFirst(ClaimTypes.Role)?.Value;
+
+        return role?.ToLowerInvariant() switch
         {
-            "supervisor" => RedirectToPage("/Supervisor/Dashboard"),
-            "admin"      => RedirectToPage("/Admin/Dashboard"),
-            _            => RedirectToPage("/Student/Dashboard"),
+            "supervisor" =>
+                RedirectToPage("/Supervisor/Dashboard"),
+
+            "admin" =>
+                RedirectToPage("/Admin/Dashboard"),
+
+            _ =>
+                RedirectToPage("/Student/Dashboard")
         };
     }
 }

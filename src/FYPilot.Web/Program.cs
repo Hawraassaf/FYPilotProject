@@ -3,6 +3,7 @@ using FYPilot.Infrastructure.Data;
 using FYPilot.Infrastructure.Services;
 using FYPilot.Web.Configuration;
 using FYPilot.Web.Hubs;
+using FYPilot.Web.Middleware;
 using FYPilot.Web.Services.GoogleCalendar;
 using FYPilot.Web.Services.Meetings;
 using FYPilot.Web.Services.Notifications;
@@ -22,22 +23,39 @@ static string BuildConnectionString()
         return url;
     }
 
-    var host = Environment.GetEnvironmentVariable("PGHOST") ?? "localhost";
-    var port = Environment.GetEnvironmentVariable("PGPORT") ?? "5432";
-    var db = Environment.GetEnvironmentVariable("PGDATABASE") ?? "fyp_db";
-    var user = Environment.GetEnvironmentVariable("PGUSER") ?? "postgres";
-    var pass = Environment.GetEnvironmentVariable("PGPASSWORD") ?? "123456";
+    var host =
+        Environment.GetEnvironmentVariable("PGHOST")
+        ?? "localhost";
+
+    var port =
+        Environment.GetEnvironmentVariable("PGPORT")
+        ?? "5432";
+
+    var database =
+        Environment.GetEnvironmentVariable("PGDATABASE")
+        ?? "fyp_db";
+
+    var user =
+        Environment.GetEnvironmentVariable("PGUSER")
+        ?? "postgres";
+
+    var password =
+        Environment.GetEnvironmentVariable("PGPASSWORD")
+        ?? "123456";
 
     return
-        $"Host={host};Port={port};Database={db};Username={user};Password={pass};SSL Mode=Disable;Trust Server Certificate=true;";
+        $"Host={host};" +
+        $"Port={port};" +
+        $"Database={database};" +
+        $"Username={user};" +
+        $"Password={password};" +
+        "SSL Mode=Disable;" +
+        "Trust Server Certificate=true;";
 }
 
-// SEC-0 fail-fast check: crash at STARTUP with a clear message if the AI
-// service key is missing, rather than discovering it later via mysterious
-// 401s on every AI call. AiServiceClient's own constructor also reads this
-// env var independently (see AiServiceClient.cs) — this call exists purely
-// for the fail-fast validation, its return value is intentionally unused.
-static string GetRequiredAiServiceApiKey(IConfiguration configuration)
+// ── AI Service Key ────────────────────────────────────────────────────────────
+static string GetRequiredAiServiceApiKey(
+    IConfiguration configuration)
 {
     var key =
         Environment.GetEnvironmentVariable("AI_SERVICE_API_KEY")
@@ -47,8 +65,9 @@ static string GetRequiredAiServiceApiKey(IConfiguration configuration)
     if (string.IsNullOrWhiteSpace(key))
     {
         throw new InvalidOperationException(
-            "AI_SERVICE_API_KEY is missing. Set the same key in both the .NET app and the FastAPI service."
-        );
+            "AI_SERVICE_API_KEY is missing. " +
+            "Set the same key in both the .NET app " +
+            "and the FastAPI service.");
     }
 
     return key;
@@ -56,12 +75,15 @@ static string GetRequiredAiServiceApiKey(IConfiguration configuration)
 
 _ = GetRequiredAiServiceApiKey(builder.Configuration);
 
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(BuildConnectionString()));
+// ── Database Context ──────────────────────────────────────────────────────────
+builder.Services.AddDbContext<ApplicationDbContext>(
+    options =>
+        options.UseNpgsql(BuildConnectionString()));
 
 // ── Cookie Authentication ─────────────────────────────────────────────────────
 builder.Services
-    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddAuthentication(
+        CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
         options.LoginPath = "/Account/Login";
@@ -93,12 +115,10 @@ builder.Services.AddAuthorization(options =>
 });
 
 // ── AI Service ────────────────────────────────────────────────────────────────
-// NOTE: the X-Internal-Api-Key header is added by AiServiceClient itself
-// (in its own constructor), not via IHttpClientFactory's default client —
-// AiServiceClient builds its own HttpClient internally. An earlier version
-// of this file registered the header on Options.DefaultName here, but
-// nothing consumed that client for AI calls, so it did nothing. Removed.
-builder.Services.AddSingleton<IAiServiceClient, AiServiceClient>();
+builder.Services.AddSingleton<
+    IAiServiceClient,
+    AiServiceClient>();
+
 builder.Services.AddHttpClient();
 
 // ── Documentation Generator Service ───────────────────────────────────────────
@@ -106,10 +126,7 @@ builder.Services.AddScoped<
     IDocumentationGeneratorService,
     DocumentationGeneratorService>();
 
-// ── Session: used to store generated AI ideas for Shuffle 2-2-2 ───────────────
-// (FIX: this was registered twice — once configured, once bare immediately
-// after the Google Calendar block below. The bare call would have silently
-// overridden these options with defaults. Kept only this configured one.)
+// ── Session ───────────────────────────────────────────────────────────────────
 builder.Services.AddDistributedMemoryCache();
 
 builder.Services.AddSession(options =>
@@ -138,7 +155,9 @@ builder.Services.AddScoped<
 builder.Services.Configure<SmtpSettings>(
     builder.Configuration.GetSection("Smtp"));
 
-builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
+builder.Services.AddScoped<
+    IEmailSender,
+    SmtpEmailSender>();
 
 // ── Notifications + Supervisor Services ───────────────────────────────────────
 builder.Services.AddScoped<
@@ -159,7 +178,7 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
-// ── Middleware ────────────────────────────────────────────────────────────────
+// ── Middleware Pipeline ───────────────────────────────────────────────────────
 app.UseStaticFiles();
 
 app.UseRouting();
@@ -167,12 +186,24 @@ app.UseRouting();
 app.UseSession();
 
 app.UseAuthentication();
+
+/*
+ * Blocks a newly created administrator from opening any other page
+ * until the temporary password has been changed.
+ *
+ * It must remain after UseAuthentication because it needs to know
+ * which user is currently logged in.
+ */
+app.UseMiddleware<ForcePasswordChangeMiddleware>();
+
 app.UseAuthorization();
 
 // ── SignalR Hubs ──────────────────────────────────────────────────────────────
-// Must be mapped after authentication and authorization middleware.
-app.MapHub<FeedbackChatHub>("/hubs/feedback-chat");
-app.MapHub<NotificationHub>("/hubs/notifications");
+app.MapHub<FeedbackChatHub>(
+    "/hubs/feedback-chat");
+
+app.MapHub<NotificationHub>(
+    "/hubs/notifications");
 
 // ── Endpoints ─────────────────────────────────────────────────────────────────
 app.MapHealthChecks("/healthz");
@@ -188,10 +219,11 @@ using (var scope = app.Services.CreateScope())
     {
         db.Database.EnsureCreated();
 
-        // Keep this OFF to avoid inserting old demo data again.
+        // Keep this disabled to avoid inserting old demo data.
         // await DataSeeder.SeedAsync(db);
 
-        app.Logger.LogInformation("Database ready.");
+        app.Logger.LogInformation(
+            "Database ready.");
     }
     catch (Exception ex)
     {
@@ -202,6 +234,9 @@ using (var scope = app.Services.CreateScope())
 }
 
 // ── Application URL ───────────────────────────────────────────────────────────
-var port = Environment.GetEnvironmentVariable("PORT") ?? "5000";
+var applicationPort =
+    Environment.GetEnvironmentVariable("PORT")
+    ?? "5000";
 
-app.Run($"http://0.0.0.0:{port}");
+app.Run(
+    $"http://0.0.0.0:{applicationPort}");

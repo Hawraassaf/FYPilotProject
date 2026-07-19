@@ -25,10 +25,13 @@
     <header class="admin-accounts-hero">
         <div>
             <span class="admin-eyebrow">Main administrator control</span>
+
             <h1>Administrator Accounts</h1>
+
             <p>
                 Create secure administrator accounts without changing PostgreSQL manually.
-                Every administrator receives a separate identity and the same operational admin role.
+                Every new administrator receives a separate account with a temporary password
+                that must be replaced during the first login.
             </p>
         </div>
 
@@ -37,6 +40,7 @@
                 <span>Total administrators</span>
                 <strong>@Model.Admins.Count</strong>
             </div>
+
             <div>
                 <span>Next account</span>
                 <strong class="next-email">@Model.NextAdminEmail</strong>
@@ -50,6 +54,7 @@
                 <div class="heading-icon">
                     <i class="bi bi-person-plus-fill"></i>
                 </div>
+
                 <div>
                     <span>Create account</span>
                     <h2>New Administrator</h2>
@@ -60,6 +65,7 @@
                   asp-page-handler="Create"
                   id="createAdminForm"
                   class="admin-create-form">
+
                 @Html.AntiForgeryToken()
 
                 <div asp-validation-summary="ModelOnly"
@@ -67,70 +73,104 @@
 
                 <div class="form-field">
                     <label>Generated email</label>
+
                     <div class="readonly-email">
                         <i class="bi bi-envelope"></i>
+
                         <input value="@Model.NextAdminEmail"
                                readonly
                                aria-label="Generated administrator email" />
                     </div>
-                    <small>The system generates the next available admin number automatically.</small>
+
+                    <small>
+                        The system generates the next available administrator
+                        number automatically.
+                    </small>
                 </div>
 
                 <div class="form-field">
-                    <label asp-for="Input.FullName">Display name</label>
+                    <label asp-for="Input.FullName">
+                        Display name
+                    </label>
+
                     <input asp-for="Input.FullName"
                            class="form-control"
-                           autocomplete="name" />
+                           autocomplete="name"
+                           placeholder="Enter the administrator name" />
+
                     <span asp-validation-for="Input.FullName"
                           class="text-danger"></span>
                 </div>
 
                 <div class="form-field">
-                    <label asp-for="Input.Password">Temporary password</label>
+                    <label asp-for="Input.Password">
+                        Temporary password
+                    </label>
+
                     <div class="password-wrap">
                         <input asp-for="Input.Password"
                                class="form-control"
-                               autocomplete="new-password" />
+                               autocomplete="new-password"
+                               placeholder="Enter a temporary password" />
+
                         <button type="button"
                                 class="password-toggle"
                                 data-target="Input_Password"
-                                aria-label="Show or hide password">
+                                aria-label="Show or hide temporary password">
+
                             <i class="bi bi-eye"></i>
                         </button>
                     </div>
+
                     <span asp-validation-for="Input.Password"
                           class="text-danger"></span>
-                    <small>At least 8 characters with uppercase, lowercase, and a number.</small>
+
+                    <small>
+                        Use at least 8 characters with an uppercase letter,
+                        a lowercase letter, and a number. This password is only
+                        for the administrator's first login.
+                    </small>
                 </div>
 
                 <div class="form-field">
-                    <label asp-for="Input.ConfirmPassword">Confirm password</label>
+                    <label asp-for="Input.ConfirmPassword">
+                        Confirm temporary password
+                    </label>
+
                     <div class="password-wrap">
                         <input asp-for="Input.ConfirmPassword"
                                class="form-control"
-                               autocomplete="new-password" />
+                               autocomplete="new-password"
+                               placeholder="Re-enter the temporary password" />
+
                         <button type="button"
                                 class="password-toggle"
                                 data-target="Input_ConfirmPassword"
-                                aria-label="Show or hide password confirmation">
+                                aria-label="Show or hide temporary password confirmation">
+
                             <i class="bi bi-eye"></i>
                         </button>
                     </div>
+
                     <span asp-validation-for="Input.ConfirmPassword"
                           class="text-danger"></span>
                 </div>
 
                 <div class="security-note">
                     <i class="bi bi-shield-lock-fill"></i>
+
                     <p>
-                        The password is hashed before storage. It cannot be displayed later,
-                        so share it securely with the new administrator.
+                        The temporary password is securely hashed before storage.
+                        After logging in for the first time, the new administrator
+                        will be required to replace it with a private and secure
+                        personal password before accessing administrator pages.
                     </p>
                 </div>
 
                 <button type="submit"
                         class="create-admin-button"
                         id="createAdminButton">
+
                     <i class="bi bi-person-plus"></i>
                     <span>Create Administrator</span>
                 </button>
@@ -140,12 +180,16 @@
         <article class="admin-directory-card">
             <div class="directory-heading">
                 <div>
-                    <span class="admin-eyebrow">Account directory</span>
+                    <span class="admin-eyebrow">
+                        Account directory
+                    </span>
+
                     <h2>Current Administrators</h2>
                 </div>
 
                 <label class="admin-search">
                     <i class="bi bi-search"></i>
+
                     <input type="search"
                            id="adminSearch"
                            placeholder="Search name or email..."
@@ -156,9 +200,12 @@
             <div class="admin-list" id="adminList">
                 @foreach (var admin in Model.Admins)
                 {
-                    var searchText = $"{admin.FullName} {admin.Email}".ToLowerInvariant();
+                    var searchText =
+                        $"{admin.FullName} {admin.Email}".ToLowerInvariant();
 
-                    <div class="admin-row" data-search="@searchText">
+                    <div class="admin-row"
+                         data-search="@searchText">
+
                         <div class="admin-avatar">
                             @Initials(admin.FullName)
                         </div>
@@ -176,13 +223,19 @@
                                 }
                                 else
                                 {
-                                    <span class="regular-admin-badge">Administrator</span>
+                                    <span class="regular-admin-badge">
+                                        Administrator
+                                    </span>
                                 }
                             </div>
 
                             <span>@admin.Email</span>
+
                             <small>
-                                Created @admin.CreatedAt.ToLocalTime().ToString("MMM d, yyyy • hh:mm tt")
+                                Created
+                                @admin.CreatedAt
+                                .ToLocalTime()
+                                .ToString("MMM d, yyyy • hh:mm tt")
                             </small>
                         </div>
 
@@ -193,7 +246,9 @@
                     </div>
                 }
 
-                <div class="admin-empty" id="adminSearchEmpty">
+                <div class="admin-empty"
+                     id="adminSearchEmpty">
+
                     <i class="bi bi-search"></i>
                     <p>No administrator matches your search.</p>
                 </div>
@@ -201,8 +256,10 @@
 
             <footer class="directory-footer">
                 <i class="bi bi-info-circle"></i>
+
                 <span>
-                    The list stays inside a fixed-height scroll area, even when many accounts are created.
+                    The list stays inside a fixed-height scroll area,
+                    even when many accounts are created.
                 </span>
             </footer>
         </article>
@@ -246,7 +303,7 @@
             margin-bottom: 1rem;
             border-radius: 26px;
             color: #fff;
-            background: radial-gradient(circle at 88% 18%, rgba(255,255,255,.14), transparent 24%), linear-gradient(135deg, var(--admin-deep), var(--admin-navy) 58%, var(--admin-steel));
+            background: radial-gradient( circle at 88% 18%, rgba(255,255,255,.14), transparent 24%), linear-gradient( 135deg, var(--admin-deep), var(--admin-navy) 58%, var(--admin-steel));
             box-shadow: 0 22px 48px rgba(40, 56, 94, .16);
         }
 
@@ -553,7 +610,7 @@
             display: grid;
             place-items: center;
             color: #fff;
-            background: linear-gradient(135deg, var(--admin-navy), var(--admin-steel));
+            background: linear-gradient( 135deg, var(--admin-navy), var(--admin-steel));
             font-size: .74rem;
             font-weight: 800;
         }
@@ -693,49 +750,85 @@
     <partial name="_ValidationScriptsPartial" />
 
     <script>
-        document.querySelectorAll(".password-toggle").forEach(function (button) {
-            button.addEventListener("click", function () {
-                const input = document.getElementById(button.dataset.target);
-                const icon = button.querySelector("i");
+        document
+            .querySelectorAll(".password-toggle")
+            .forEach(function (button) {
+                button.addEventListener("click", function () {
+                    const input =
+                        document.getElementById(button.dataset.target);
 
-                if (!input) return;
+                    const icon =
+                        button.querySelector("i");
 
-                const show = input.type === "password";
-                input.type = show ? "text" : "password";
+                    if (!input) {
+                        return;
+                    }
 
-                if (icon) {
-                    icon.className = show ? "bi bi-eye-slash" : "bi bi-eye";
-                }
+                    const show =
+                        input.type === "password";
+
+                    input.type =
+                        show ? "text" : "password";
+
+                    if (icon) {
+                        icon.className =
+                            show
+                                ? "bi bi-eye-slash"
+                                : "bi bi-eye";
+                    }
+                });
             });
-        });
 
-        const searchInput = document.getElementById("adminSearch");
-        const rows = Array.from(document.querySelectorAll(".admin-row"));
-        const emptyState = document.getElementById("adminSearchEmpty");
+        const searchInput =
+            document.getElementById("adminSearch");
+
+        const rows =
+            Array.from(
+                document.querySelectorAll(".admin-row"));
+
+        const emptyState =
+            document.getElementById("adminSearchEmpty");
 
         searchInput?.addEventListener("input", function () {
-            const value = searchInput.value.trim().toLowerCase();
+            const value =
+                searchInput.value.trim().toLowerCase();
+
             let visibleCount = 0;
 
             rows.forEach(function (row) {
-                const matches = !value || (row.dataset.search || "").includes(value);
-                row.style.display = matches ? "grid" : "none";
+                const matches =
+                    !value ||
+                    (row.dataset.search || "").includes(value);
 
-                if (matches) visibleCount++;
+                row.style.display =
+                    matches ? "grid" : "none";
+
+                if (matches) {
+                    visibleCount++;
+                }
             });
 
             if (emptyState) {
-                emptyState.style.display = visibleCount === 0 ? "grid" : "none";
+                emptyState.style.display =
+                    visibleCount === 0
+                        ? "grid"
+                        : "none";
             }
         });
 
-        const form = document.getElementById("createAdminForm");
-        const submitButton = document.getElementById("createAdminButton");
+        const form =
+            document.getElementById("createAdminForm");
+
+        const submitButton =
+            document.getElementById("createAdminButton");
 
         form?.addEventListener("submit", function () {
-            if (!form.checkValidity() || !submitButton) return;
+            if (!form.checkValidity() || !submitButton) {
+                return;
+            }
 
             submitButton.disabled = true;
+
             submitButton.innerHTML =
                 '<span class="spinner-border spinner-border-sm"></span>' +
                 '<span>Creating...</span>';
@@ -752,12 +845,17 @@
         }
 
         var parts = fullName
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Split(
+                ' ',
+                StringSplitOptions.RemoveEmptyEntries)
             .Take(2)
             .ToList();
 
         return parts.Count == 0
             ? "AD"
-            : string.Join("", parts.Select(p => p[0])).ToUpperInvariant();
+            : string.Join(
+                "",
+                parts.Select(p => p[0]))
+                .ToUpperInvariant();
     }
 }
