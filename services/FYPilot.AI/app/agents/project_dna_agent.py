@@ -2,20 +2,21 @@
 ProjectDNAAgent — LLM-based Project DNA Analysis for FYPilot.
 
 Design:
-- Ollama is used for reasoning-based project analysis.
+- ProviderChain (Groq -> Gemini -> Ollama) is used for reasoning-based project analysis.
 - No dataset or trained ML model is required.
 - The agent analyzes a selected project idea against the student's profile and skills.
-- Python validates the LLM output and provides fallback if Ollama fails.
-- The app should never crash because of Ollama.
+- Python validates the LLM output and provides fallback if every provider fails.
+- The app should never crash because an AI provider is unavailable.
 """
 
 import json
 import logging
 import re
-from typing import Any, Optional
+from typing import Any
 
-import requests
 from pydantic import BaseModel, Field
+
+from app.services.llm_provider import ProviderChain
 
 logger = logging.getLogger("fypilot-dna-agent")
 
@@ -86,13 +87,14 @@ class ProjectDNAAgent:
     Python validates, normalizes, and protects the application from invalid output.
     """
 
-    def __init__(self, model: str = "phi3"):
-        self.model = model
-        self.ollama_url = "http://localhost:11434/api/generate"
+    def __init__(self):
+        self.provider_chain = ProviderChain()
 
         self.last_llm_used = False
         self.last_error = None
         self.last_raw_llm_response = None
+        self.last_provider: str | None = None
+        self.last_model_used: str | None = None
 
         self.blocked_terms = [
             "react",
@@ -116,14 +118,35 @@ class ProjectDNAAgent:
         self.last_llm_used = False
         self.last_error = None
         self.last_raw_llm_response = None
+        self.last_provider = None
+        self.last_model_used = None
 
         prompt = self._build_prompt(request)
-        llm_text = self._call_ollama(prompt)
 
         raw = None
 
-        if llm_text:
-            raw = self._parse_llm_json(llm_text)
+        try:
+            result = self.provider_chain.generate_json(prompt, use_search=False)
+
+            self.last_provider = (
+                result.provider if result.provider != "none" else None
+            )
+            self.last_model_used = result.model
+
+            if result.ok and isinstance(result.data, dict):
+                self.last_raw_llm_response = json.dumps(
+                    result.data,
+                    ensure_ascii=False,
+                )[:1500]
+                raw = result.data
+            else:
+                self.last_error = (
+                    result.error or "No provider returned valid Project DNA JSON."
+                )
+
+        except Exception as ex:
+            self.last_error = f"Project DNA generation failed: {ex}"
+            logger.exception("Project DNA generation failed.")
 
         if raw:
             self.last_llm_used = True
@@ -132,52 +155,13 @@ class ProjectDNAAgent:
 
             if self.last_error is None:
                 self.last_error = (
-                    "Ollama did not return valid Project DNA JSON. "
+                    "All AI providers failed to return valid Project DNA JSON. "
                     "Used fallback DNA analysis."
                 )
 
             raw = self._fallback_raw_analysis(request)
 
         return self._complete_and_validate(request, raw)
-
-    def _call_ollama(self, prompt: str) -> Optional[str]:
-        try:
-            response = requests.post(
-                self.ollama_url,
-                json={
-                    "model": self.model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "format": "json",
-                    "options": {
-                        "temperature": 0.2,
-                        "num_predict": 1500,
-                    },
-                },
-                timeout=600,
-            )
-
-            if not response.ok:
-                self.last_error = f"Ollama returned HTTP status {response.status_code}"
-                logger.warning(self.last_error)
-                return None
-
-            data = response.json()
-            text = data.get("response")
-
-            self.last_raw_llm_response = str(text)[:1500] if text else None
-
-            if not text or not isinstance(text, str):
-                self.last_error = "Ollama response did not contain valid text."
-                logger.warning(self.last_error)
-                return None
-
-            return text
-
-        except Exception as ex:
-            self.last_error = str(ex)
-            logger.warning("Ollama unavailable. Falling back. Error: %s", ex)
-            return None
 
     def _build_prompt(self, request: ProjectDNARequest) -> str:
         skills_text = (
@@ -324,32 +308,6 @@ Return exactly this JSON structure:
   "summary": ""
 }}
 """
-
-    def _parse_llm_json(self, text: str) -> Optional[dict[str, Any]]:
-        try:
-            clean_text = text.strip()
-
-            try:
-                data = json.loads(clean_text)
-            except json.JSONDecodeError:
-                match = re.search(r"\{.*\}", clean_text, re.DOTALL)
-
-                if not match:
-                    self.last_error = "Ollama returned text, but no JSON object was found."
-                    return None
-
-                data = json.loads(match.group(0))
-
-            if not isinstance(data, dict):
-                self.last_error = "Ollama JSON parsed, but it is not an object."
-                return None
-
-            self.last_error = None
-            return data
-
-        except Exception as ex:
-            self.last_error = f"Could not parse Ollama JSON: {str(ex)}"
-            return None
 
     def _complete_and_validate(
         self,

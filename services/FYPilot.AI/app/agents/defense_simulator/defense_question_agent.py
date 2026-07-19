@@ -1,72 +1,53 @@
 import json
 from typing import Any, Dict, Optional
 
-import requests
+from app.services.llm_provider import ProviderChain
 
 
 class DefenseQuestionAgent:
     """
-    Responsible only for generating defense questions using Ollama.
+    Responsible only for generating defense questions.
+
+    Uses ProviderChain (Groq -> Gemini -> Ollama) so cloud providers are tried
+    before falling back to the slower local Ollama model.
     """
 
-    def __init__(
-        self,
-        ollama_url: str = "http://localhost:11434/api/generate",
-        default_model: str = "qwen2.5-coder:7b",
-    ):
-        self.ollama_url = ollama_url
-        self.default_model = default_model
+    def __init__(self):
+        self.provider_chain = ProviderChain()
         self.last_error: Optional[str] = None
         self.last_raw_response: Optional[str] = None
+        self.last_provider: Optional[str] = None
+        self.last_model_used: Optional[str] = None
 
     def generate_questions(self, request: Any) -> Dict[str, Any]:
         self.last_error = None
         self.last_raw_response = None
+        self.last_provider = None
+        self.last_model_used = None
 
-        model = getattr(request, "model", None) or self.default_model
         prompt = self._build_prompt(request)
 
         try:
-            return self._call_ollama_json(model=model, prompt=prompt)
+            result = self.provider_chain.generate_json(prompt, use_search=False)
+
+            self.last_provider = (
+                result.provider if result.provider != "none" else None
+            )
+            self.last_model_used = result.model
+
+            if result.ok and isinstance(result.data, dict):
+                self.last_raw_response = json.dumps(
+                    result.data,
+                    ensure_ascii=False,
+                )[:3000]
+                return result.data
+
+            self.last_error = result.error or "No provider returned valid question JSON."
+            return {}
+
         except Exception as e:
             self.last_error = str(e)
             return {}
-
-    def _call_ollama_json(self, model: str, prompt: str) -> Dict[str, Any]:
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-            "format": "json",
-            "options": {
-                "temperature": 0.2,
-                "num_ctx": 4096,
-                "num_predict": 2200,
-            },
-        }
-
-        response = requests.post(
-            self.ollama_url,
-            json=payload,
-            timeout=300,
-        )
-
-        response.raise_for_status()
-
-        raw = response.json().get("response", "")
-        self.last_raw_response = raw[:3000]
-
-        json_text = self._extract_json(raw)
-        return json.loads(json_text)
-
-    def _extract_json(self, text: str) -> str:
-        start = text.find("{")
-        end = text.rfind("}")
-
-        if start == -1 or end == -1 or end <= start:
-            raise ValueError("No valid JSON object found in Ollama response.")
-
-        return text[start:end + 1]
 
     def _build_prompt(self, request: Any) -> str:
         profile = request.studentProfile

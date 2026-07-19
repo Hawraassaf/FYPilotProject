@@ -148,7 +148,8 @@ public class DocumentationGeneratorModel : PageModel
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Software documentation generation failed. Backend error: {ex.Message}";
+            var detail = ex.InnerException?.Message ?? ex.Message;
+            ErrorMessage = $"Software documentation generation failed. Backend error: {ex.Message} | Detail: {detail}";
         }
 
         BuildProjectIdeaOptions();

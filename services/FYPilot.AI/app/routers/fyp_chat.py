@@ -43,3 +43,14 @@ def fyp_chat(request: FypMentorRequest):
     return {
         "answer": review.revised_answer,
         "agent": "FypMentorAgent",
+        "llmUsed": mentor_agent.last_llm_used,
+        "source": mentor_agent.last_provider if mentor_agent.last_llm_used else "dynamic-fallback",
+        "provider": mentor_agent.last_provider,
+        "modelUsed": mentor_agent.last_model_used,
+        "ollamaError": mentor_agent.last_error,
+        "reviewApproved": review.approved,
+        "reviewScore": review.review_score,
+        "reviewIssues": [issue.model_dump() for issue in review.issues],
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "message": "Mentor response generated successfully",
+    }

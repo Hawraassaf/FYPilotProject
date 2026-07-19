@@ -3,6 +3,7 @@ using System;
 using FYPilot.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FYPilot.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260719131942_AddProjectDocumentationsTable")]
+    partial class AddProjectDocumentationsTable
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -688,154 +691,6 @@ namespace FYPilot.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("market_needs");
-                });
-
-            modelBuilder.Entity("FYPilot.Domain.Entities.MarketOpportunityRegion", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("CompetitionPressure")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<int>("ConfidenceScore")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("DemandLevel")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
-
-                    b.Property<string>("EvidenceSummary")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int?>("OpportunityScore")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("RegionKey")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<string>("RegionName")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<string>("ScoreBreakdownJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int>("SnapshotId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("SourceUrlsJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SnapshotId", "RegionKey")
-                        .IsUnique();
-
-                    b.ToTable("market_opportunity_regions", (string)null);
-                });
-
-            modelBuilder.Entity("FYPilot.Domain.Entities.MarketOpportunitySnapshot", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("AnalyzedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("BestLaunchMarket")
-                        .IsRequired()
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)");
-
-                    b.Property<string>("BestLaunchReason")
-                        .IsRequired()
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ExpansionPathJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<bool>("GroundedInLiveData")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("LimitationsJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("ModelUsed")
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<int>("OverallConfidenceScore")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("OverallDemandLevel")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
-
-                    b.Property<int?>("OverallOpportunityScore")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("ProjectIdeaId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Provider")
-                        .IsRequired()
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)");
-
-                    b.Property<string>("SourcesJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)");
-
-                    b.Property<string>("StrategicRecommendation")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("WhyDemandedJson")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AnalyzedAt");
-
-                    b.HasIndex("ProjectIdeaId");
-
-                    b.HasIndex("UserId");
-
-                    b.HasIndex("ProjectIdeaId", "AnalyzedAt");
-
-                    b.ToTable("market_opportunity_snapshots", (string)null);
                 });
 
             modelBuilder.Entity("FYPilot.Domain.Entities.MarketSimilarSolution", b =>
@@ -2070,12 +1925,6 @@ namespace FYPilot.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("full_name");
 
-                    b.Property<bool>("MustChangePassword")
-                        .HasColumnType("boolean");
-
-                    b.Property<DateTime?>("PasswordChangedAtUtc")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasColumnType("text")
@@ -2230,36 +2079,6 @@ namespace FYPilot.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("MarketDemandAnalysis");
-                });
-
-            modelBuilder.Entity("FYPilot.Domain.Entities.MarketOpportunityRegion", b =>
-                {
-                    b.HasOne("FYPilot.Domain.Entities.MarketOpportunitySnapshot", "Snapshot")
-                        .WithMany("Regions")
-                        .HasForeignKey("SnapshotId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Snapshot");
-                });
-
-            modelBuilder.Entity("FYPilot.Domain.Entities.MarketOpportunitySnapshot", b =>
-                {
-                    b.HasOne("FYPilot.Domain.Entities.ProjectIdea", "ProjectIdea")
-                        .WithMany()
-                        .HasForeignKey("ProjectIdeaId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("FYPilot.Domain.Entities.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("ProjectIdea");
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("FYPilot.Domain.Entities.MarketSimilarSolution", b =>
@@ -2531,11 +2350,6 @@ namespace FYPilot.Infrastructure.Migrations
                     b.Navigation("TrendSignals");
 
                     b.Navigation("YearlyPoints");
-                });
-
-            modelBuilder.Entity("FYPilot.Domain.Entities.MarketOpportunitySnapshot", b =>
-                {
-                    b.Navigation("Regions");
                 });
 
             modelBuilder.Entity("FYPilot.Domain.Entities.MentorChatSession", b =>

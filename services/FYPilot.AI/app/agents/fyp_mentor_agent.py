@@ -8,11 +8,7 @@ The agent:
 - Supports implementation help, roadmap guidance, code generation,
   database design, API integration, testing, documentation, defense,
   and team planning.
-- Uses Ollama as the reasoning engine.
-- Uses ONE model (qwen2.5-coder:7b) for both mentoring and code generation.
-  Rationale: the host runs Ollama 100% on CPU with limited RAM, so
-  alternating between two 7B models forces a ~5.5GB model reload on every
-  switch. One always-warm model removes that penalty and a failure mode.
+- Uses ProviderChain (Groq -> Gemini -> Ollama) as the reasoning engine.
 - Validates AI responses and returns safe fallback answers.
 """
 
@@ -23,8 +19,9 @@ import logging
 import re
 from typing import Any, Literal, Optional
 
-import requests
 from pydantic import BaseModel, Field
+
+from app.services.llm_provider import ProviderChain
 
 logger = logging.getLogger("fypilot-mentor-agent")
 
@@ -142,24 +139,16 @@ class FypMentorAnswer(BaseModel):
 class FypMentorAgent:
     """
     Context-aware AI mentor for final year projects.
-
-    Single model for all requests (see module docstring for rationale):
-        qwen2.5-coder:7b
     """
 
-    def __init__(
-        self,
-        model: str = "qwen2.5-coder:7b",
-        code_model: Optional[str] = "qwen2.5-coder:7b",
-    ):
-        self.model = model
-        self.code_model = code_model or model
-        self.ollama_url = "http://localhost:11434/api/chat"
+    def __init__(self):
+        self.provider_chain = ProviderChain()
 
         self.last_llm_used = False
-        self.last_repair_used = False
         self.last_error: Optional[str] = None
         self.last_raw_llm_response: Optional[str] = None
+        self.last_provider: Optional[str] = None
+        self.last_model_used: Optional[str] = None
 
         self.allowed_intents = {
             "general_fyp_help",
@@ -215,15 +204,34 @@ class FypMentorAgent:
             "{...}",
         }
 
+        self.greeting_phrases = {
+            "hi",
+            "hii",
+            "hiii",
+            "hello",
+            "helloo",
+            "hey",
+            "heyy",
+            "yo",
+            "sup",
+            "greetings",
+            "good morning",
+            "good afternoon",
+            "good evening",
+            "whats up",
+            "how are you",
+        }
+
     # =========================================================================
     # Main Entry Point
     # =========================================================================
 
     def chat(self, request: FypMentorRequest) -> FypMentorAnswer:
         self.last_llm_used = False
-        self.last_repair_used = False
         self.last_error = None
         self.last_raw_llm_response = None
+        self.last_provider = None
+        self.last_model_used = None
 
         message = request.message.strip()
 
@@ -238,6 +246,9 @@ class FypMentorAgent:
                 assumptions=[],
                 codeBlocks=[],
             )
+
+        if self._is_greeting_only(message):
+            return self._greeting_answer(request)
 
         code_requested = self._is_code_request(
             message=message,
@@ -269,35 +280,32 @@ class FypMentorAgent:
                 codeBlocks=[],
             )
 
-        messages = self._build_messages(request)
+        prompt = self._build_prompt(request)
 
-        selected_model = self.code_model if code_requested else self.model
+        raw = None
 
-        # Latency control for CPU-only inference (~4-8 tokens/sec):
-        # - Normal mentor answers: 800 tokens (~1.5-3 min worst case, usually
-        #   ~60-100s), paired with the "2-4 short paragraphs" system rule so
-        #   the model plans a short answer instead of getting truncated.
-        # - Code generation: 2600 tokens. Code responses are longer by nature,
-        #   but 4200 was ~14 minutes of CPU time and would exceed any sane
-        #   HTTP timeout. Code generation is not part of the live demo.
-        num_predict = 2600 if code_requested else 800
+        try:
+            result = self.provider_chain.generate_json(prompt, use_search=False)
 
-        llm_text = self._call_ollama_chat(
-            messages=messages,
-            num_predict=num_predict,
-            model=selected_model,
-        )
-
-        raw = self._parse_llm_json(llm_text) if llm_text else None
-
-        if raw is None and llm_text:
-            repaired_text = self._repair_json_response(
-                invalid_text=llm_text,
-                model=selected_model,
+            self.last_provider = (
+                result.provider if result.provider != "none" else None
             )
+            self.last_model_used = result.model
 
-            if repaired_text:
-                raw = self._parse_llm_json(repaired_text)
+            if result.ok and isinstance(result.data, dict):
+                self.last_raw_llm_response = json.dumps(
+                    result.data,
+                    ensure_ascii=False,
+                )[:2500]
+                raw = result.data
+            else:
+                self.last_error = (
+                    result.error or "No provider returned valid mentor JSON."
+                )
+
+        except Exception as ex:
+            self.last_error = f"Mentor generation failed: {ex}"
+            logger.exception("Mentor generation failed.")
 
         if raw:
             self.last_llm_used = True
@@ -311,7 +319,7 @@ class FypMentorAgent:
         self.last_llm_used = False
 
         if self.last_error is None:
-            self.last_error = "Ollama did not return valid mentor JSON."
+            self.last_error = "No AI provider returned valid mentor JSON."
 
         return self._fallback_answer(request)
 
@@ -319,10 +327,10 @@ class FypMentorAgent:
     # Prompt Construction
     # =========================================================================
 
-    def _build_messages(
+    def _build_prompt(
         self,
         request: FypMentorRequest,
-    ) -> list[dict[str, str]]:
+    ) -> str:
         system_prompt = """
 You are FypMentorAgent inside FYPilot, an Academic Intelligence System for Final Year Projects.
 
@@ -463,41 +471,31 @@ Return exactly this JSON structure:
             ),
         }
 
-        messages: list[dict[str, str]] = [
-            {
-                "role": "system",
-                "content": system_prompt,
-            }
-        ]
+        # Context budget control: keeps history under ~1500 tokens so it
+        # does not overwhelm the context JSON and question below.
+        history_lines = []
 
-        # Context budget control: system prompt (~1400 tokens) + history +
-        # context JSON + question must fit in num_ctx=8192, otherwise Ollama
-        # silently truncates from the START (dropping the system prompt).
-        # 6 messages x 1000 chars keeps history under ~1500 tokens.
         for history_item in request.recentMessages[-6:]:
             content = history_item.content.strip()
 
             if content:
-                messages.append(
-                    {
-                        "role": history_item.role,
-                        "content": content[:1000],
-                    }
-                )
+                history_lines.append(f"{history_item.role}: {content[:1000]}")
 
-        messages.append(
-            {
-                "role": "user",
-                "content": (
-                    "AUTHORITATIVE PROJECT CONTEXT:\n"
-                    f"{json.dumps(context, ensure_ascii=False, indent=2)}\n\n"
-                    "STUDENT QUESTION:\n"
-                    f"{request.message.strip()}"
-                ),
-            }
+        history_text = (
+            "\n".join(history_lines) if history_lines else "No previous messages."
         )
 
-        return messages
+        return f"""{system_prompt}
+
+CONVERSATION HISTORY:
+{history_text}
+
+AUTHORITATIVE PROJECT CONTEXT:
+{json.dumps(context, ensure_ascii=False, indent=2)}
+
+STUDENT QUESTION:
+{request.message.strip()}
+"""
 
     def _slim_roadmap_context(
         self,
@@ -549,131 +547,8 @@ Return exactly this JSON structure:
         }
 
     # =========================================================================
-    # Ollama Calls
-    # =========================================================================
-
-    def _call_ollama_chat(
-        self,
-        messages: list[dict[str, str]],
-        num_predict: int,
-        model: str,
-    ) -> Optional[str]:
-        try:
-            response = requests.post(
-                self.ollama_url,
-                json={
-                    "model": model,
-                    "messages": messages,
-                    "stream": False,
-                    "format": "json",
-                    "keep_alive": "30m",
-                    "options": {
-                        "temperature": 0.12,
-                        "num_predict": num_predict,
-                        "num_ctx": 8192,
-                    },
-                },
-                timeout=(15, 600),
-            )
-
-            if not response.ok:
-                self.last_error = (
-                    f"Ollama returned HTTP status {response.status_code}"
-                )
-
-                logger.warning(self.last_error)
-                return None
-
-            data = response.json()
-
-            message = data.get("message") or {}
-            content = message.get("content")
-
-            self.last_raw_llm_response = (
-                str(content)[:2500]
-                if content
-                else None
-            )
-
-            if not content or not isinstance(content, str):
-                self.last_error = "Ollama response did not contain chat content."
-                return None
-
-            return content
-
-        except Exception as ex:
-            self.last_error = str(ex)
-
-            logger.warning(
-                "Ollama unavailable. Mentor fallback used. Error: %s",
-                ex,
-            )
-
-            return None
-
-    def _repair_json_response(
-        self,
-        invalid_text: str,
-        model: str,
-    ) -> Optional[str]:
-        self.last_repair_used = True
-
-        repair_messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You repair invalid JSON. Return only one valid JSON object. "
-                    "Do not add markdown or explanation. Preserve the original meaning."
-                ),
-            },
-            {
-                "role": "user",
-                "content": invalid_text[:16000],
-            },
-        ]
-
-        return self._call_ollama_chat(
-            messages=repair_messages,
-            num_predict=1600,
-            model=model,
-        )
-
-    # =========================================================================
     # Parsing and Validation
     # =========================================================================
-
-    def _parse_llm_json(
-        self,
-        text: str,
-    ) -> Optional[dict[str, Any]]:
-        try:
-            clean_text = text.strip()
-
-            try:
-                data = json.loads(clean_text)
-
-            except json.JSONDecodeError:
-                match = re.search(
-                    r"\{.*\}",
-                    clean_text,
-                    re.DOTALL,
-                )
-
-                if not match:
-                    self.last_error = "No JSON object was found in the Ollama response."
-                    return None
-
-                data = json.loads(match.group(0))
-
-            if not isinstance(data, dict):
-                self.last_error = "Ollama JSON response was not an object."
-                return None
-
-            return data
-
-        except Exception as ex:
-            self.last_error = f"Could not parse Ollama JSON: {str(ex)}"
-            return None
 
     def _complete_and_validate(
         self,
@@ -1422,6 +1297,47 @@ Return exactly this JSON structure:
             context.append("codeContext")
 
         return context
+
+    def _is_greeting_only(self, message: str) -> bool:
+        """
+        True only for a bare greeting with no real question attached
+        ("hi", "hello there"), so a short-circuit reply skips the LLM
+        and the answer-review layer entirely instead of producing a
+        confusing "please rephrase" or generic-answer fallback.
+        """
+        normalized = re.sub(r"[^a-z ]", "", message.lower()).strip()
+        normalized = re.sub(r"\s+", " ", normalized)
+
+        return normalized in self.greeting_phrases
+
+    def _greeting_answer(self, request: FypMentorRequest) -> FypMentorAnswer:
+        if request.selectedIdea is not None:
+            reply = (
+                f"Hi! I'm your FYP Mentor for '{request.selectedIdea.title}'. "
+                "Ask me about your roadmap, skills, implementation, database "
+                "design, documentation, testing, or defense preparation."
+            )
+            used_context = ["selectedIdea"]
+        else:
+            reply = (
+                "Hi! I'm your FYP Mentor. Select a project idea first so I can "
+                "give specific guidance on your roadmap, skills, and implementation."
+            )
+            used_context = []
+
+        return FypMentorAnswer(
+            reply=reply,
+            intent="general_fyp_help",
+            usedContext=used_context,
+            suggestedNextActions=[
+                "Ask about your next roadmap phase.",
+                "Ask about required skills or technologies.",
+            ],
+            warning="",
+            confidence=95,
+            assumptions=[],
+            codeBlocks=[],
+        )
 
     def _clean_text(
         self,

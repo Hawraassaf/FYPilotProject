@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using FYPilot.Application.DTOs;
+using FYPilot.Application.DTOs.Documentation;
 using FYPilot.Application.Interfaces;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -277,6 +278,26 @@ public class AiServiceClient : IAiServiceClient
 
     public Task<FypMentorServiceResponse?> AskFypMentorAsync(FypMentorRequest request) =>
         PostAsync<FypMentorServiceResponse>("/fyp-chat", request, CamelCaseJsonOpts);
+
+    // ── SE Documentation ───────────────────────────────────────────────────────
+
+    public Task<AiSeDocumentationServiceResponse?> GenerateSeDocumentationAsync(
+        AiSeDocumentationRequest request) =>
+        PostAsync<AiSeDocumentationServiceResponse>(
+            "/generate-se-documentation",
+            request,
+            CamelCaseJsonOpts);
+
+    // ── Market Insight — Regional Demand Footprint ─────────────────────────────
+
+    public Task<MarketFootprintResponse?> AnalyzeMarketFootprintAsync(
+        MarketFootprintRequest request,
+        CancellationToken cancellationToken = default) =>
+        PostAsync<MarketFootprintResponse>(
+            "/analyze-market-footprint",
+            request,
+            CamelCaseJsonOpts,
+            cancellationToken);
 }
 
 

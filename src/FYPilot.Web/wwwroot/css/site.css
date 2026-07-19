@@ -3942,9 +3942,15 @@ body,
     background: #ffffff;
     padding: 1rem;
     display: grid;
-    grid-template-columns: 42px minmax(0, 1fr) 82px 38px;
+    grid-template-columns: 42px minmax(0, 1fr) auto 38px;
     align-items: center;
     gap: 0.9rem;
+}
+
+.idea2-score-mini-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 
     .idea2-idea-summary:hover {
@@ -4243,9 +4249,16 @@ body,
         grid-template-columns: 38px minmax(0, 1fr) 34px;
     }
 
-    .idea2-score-mini {
+    .idea2-score-mini-group {
         grid-column: 1 / -1;
         width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .idea2-score-mini,
+    .marketfp-mini-score {
+        flex: 1 1 140px;
+        width: auto;
         min-height: 54px;
         flex-direction: row;
         gap: 0.45rem;
@@ -7517,6 +7530,501 @@ body,
         grid-template-columns: 1fr;
     }
 }
+
+/* =========================================================
+   SNAKE ROADMAP — AI banner + winding execution path
+   ========================================================= */
+
+.snake-ai-banner {
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    gap: 1.1rem;
+    margin-bottom: 1.1rem;
+    padding: 1.35rem 1.5rem;
+    border-radius: 26px;
+    color: #ffffff;
+    background: linear-gradient(135deg, #28385E 0%, #304163 55%, #516C8D 120%);
+    box-shadow: 0 20px 48px rgba(40, 56, 94, 0.22);
+}
+
+.snake-ai-glow {
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(circle at 14% 20%, rgba(255, 255, 255, 0.16), transparent 30%),
+        radial-gradient(circle at 82% 84%, rgba(255, 255, 255, 0.1), transparent 34%);
+    animation: snakeGlowDrift 7s ease-in-out infinite alternate;
+    pointer-events: none;
+}
+
+@keyframes snakeGlowDrift {
+    from {
+        opacity: 0.75;
+        transform: translateX(-2%);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(2%);
+    }
+}
+
+.snake-ai-icon {
+    position: relative;
+    z-index: 1;
+    width: 58px;
+    height: 58px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 19px;
+    font-size: 1.5rem;
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    animation: snakeIconPulse 2.4s ease-in-out infinite;
+}
+
+@keyframes snakeIconPulse {
+    0%, 100% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.08);
+    }
+}
+
+.snake-ai-copy {
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    min-width: 0;
+}
+
+.snake-ai-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.28rem 0.65rem;
+    border-radius: 999px;
+    color: rgba(255, 255, 255, 0.92);
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    font-size: 0.68rem;
+    font-weight: 780;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    margin-bottom: 0.55rem;
+}
+
+.snake-ai-copy h2 {
+    color: #ffffff;
+    margin: 0;
+    font-size: clamp(1.05rem, 2vw, 1.35rem);
+    font-weight: 780;
+    letter-spacing: -0.03em;
+    line-height: 1.25;
+}
+
+.snake-ai-copy p {
+    max-width: 640px;
+    margin: 0.4rem 0 0;
+    color: rgba(255, 255, 255, 0.74);
+    font-size: 0.84rem;
+    line-height: 1.55;
+}
+
+.snake-ai-ring {
+    position: relative;
+    z-index: 1;
+    flex-shrink: 0;
+    width: 82px;
+    height: 82px;
+    border-radius: 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+    .snake-ai-ring strong {
+        color: #ffffff;
+        font-size: 1.3rem;
+        font-weight: 800;
+        line-height: 1;
+    }
+
+    .snake-ai-ring span {
+        color: rgba(255, 255, 255, 0.72);
+        font-size: 0.64rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-top: 0.3rem;
+    }
+
+.snake-track-container {
+    position: relative;
+    padding: 0.5rem clamp(0.5rem, 4vw, 3rem) 1rem;
+}
+
+.snake-svg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 0;
+    pointer-events: none;
+    overflow: visible;
+}
+
+.snake-track-line {
+    fill: none;
+    stroke: #E4EAF2;
+    stroke-width: 5;
+    stroke-linecap: round;
+    stroke-dasharray: 1 13;
+}
+
+.snake-progress-line {
+    fill: none;
+    stroke: #516C8D;
+    stroke: url(#snakeGradient);
+    stroke-width: 5;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.6s ease;
+    filter: drop-shadow(0 0 8px rgba(81, 108, 141, 0.55));
+}
+
+.snake-flow-dot {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 2;
+    width: 12px;
+    height: 12px;
+    margin: -6px 0 0 -6px;
+    border-radius: 999px;
+    background: radial-gradient(circle, #ffffff 0%, #9fc1e8 55%, transparent 75%);
+    box-shadow: 0 0 12px 4px rgba(159, 193, 232, 0.85);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s ease;
+}
+
+.snake-nodes {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2.4rem;
+}
+
+.snake-stop {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    width: min(66%, 560px);
+    animation: snakeStopIn 0.55s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+    animation-delay: calc(var(--d, 0) * 70ms);
+}
+
+@keyframes snakeStopIn {
+    from {
+        opacity: 0;
+        transform: translateY(22px) scale(0.94);
+    }
+
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+.snake-stop.pos-0 {
+    align-self: flex-start;
+}
+
+.snake-stop.pos-1 {
+    align-self: center;
+}
+
+.snake-stop.pos-2 {
+    align-self: flex-end;
+}
+
+.snake-node {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    z-index: 2;
+}
+
+.snake-node-dot {
+    position: relative;
+    z-index: 2;
+    width: 54px;
+    height: 54px;
+    border-radius: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 1.05rem;
+    color: #ffffff;
+    background: linear-gradient(145deg, #304163, #516C8D);
+    box-shadow: 0 14px 26px rgba(48, 65, 99, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    border: 3px solid #ffffff;
+    transition: transform 0.22s cubic-bezier(0.3, 1.4, 0.5, 1), box-shadow 0.22s ease;
+}
+
+.snake-stop.is-done .snake-node-dot {
+    background: linear-gradient(145deg, #3a4c72, #1d2c4a);
+    box-shadow: 0 10px 20px rgba(29, 44, 74, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.snake-stop.is-future .snake-node-dot {
+    color: #7C8DA6;
+    background: #EEF2F6;
+    border-color: #F7F8FA;
+    box-shadow: none;
+}
+
+.snake-stop.is-current .snake-node-dot {
+    transform: scale(1.14);
+    background: linear-gradient(145deg, #3a537f, #5f7fab);
+    box-shadow: 0 18px 34px rgba(48, 65, 99, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    animation: snakeCurrentBreathe 2.6s ease-in-out infinite;
+}
+
+@keyframes snakeCurrentBreathe {
+    0%, 100% {
+        box-shadow: 0 18px 34px rgba(48, 65, 99, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    }
+
+    50% {
+        box-shadow: 0 18px 40px rgba(81, 108, 141, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    }
+}
+
+.snake-node-pulse {
+    position: absolute;
+    top: 0;
+    width: 54px;
+    height: 54px;
+    border-radius: 18px;
+    border: 3px solid rgba(81, 108, 141, 0.55);
+    animation: snakePulseRing 1.8s ease-out infinite;
+}
+
+@keyframes snakePulseRing {
+    0% {
+        transform: scale(1);
+        opacity: 0.85;
+    }
+
+    100% {
+        transform: scale(1.65);
+        opacity: 0;
+    }
+}
+
+.snake-chip {
+    position: relative;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.7rem;
+    max-width: min(420px, 88vw);
+    padding: 0.55rem 0.6rem 0.55rem 0.85rem;
+    border-radius: 999px;
+    background: #ffffff;
+    border: 1px solid #E4EAF2;
+    box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+    transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+    .snake-chip:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 16px 30px rgba(15, 23, 42, 0.1);
+        border-color: #C9D6E6;
+    }
+
+    .snake-chip:focus-visible {
+        outline: 2px solid #516C8D;
+        outline-offset: 2px;
+    }
+
+.snake-chip-index {
+    flex-shrink: 0;
+    color: #516C8D;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.snake-chip-title {
+    min-width: 0;
+    color: #111827;
+    font-size: 0.9rem;
+    font-weight: 720;
+    letter-spacing: -0.01em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.snake-chip-flag {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28rem;
+    padding: 0.22rem 0.5rem;
+    border-radius: 999px;
+    color: #ffffff;
+    background: linear-gradient(135deg, #304163, #516C8D);
+    font-size: 0.6rem;
+    font-weight: 780;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+}
+
+.snake-chip-caret {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+    color: #516C8D;
+    background: #EEF2F6;
+    font-size: 0.72rem;
+    transition: transform 0.25s ease, background 0.16s ease;
+}
+
+.snake-chip[aria-expanded="true"] .snake-chip-caret {
+    background: #304163;
+    color: #ffffff;
+    transform: rotate(180deg);
+}
+
+.snake-stop.is-done .snake-chip-title {
+    color: #4B5A72;
+}
+
+.snake-stop.is-future .snake-chip {
+    background: #FCFDFE;
+    border-color: #EEF2F7;
+}
+
+.snake-stop.is-future .snake-chip-title {
+    color: #64748B;
+}
+
+.snake-stop.is-current .snake-chip {
+    border-color: #9FB4CC;
+    box-shadow: 0 16px 34px rgba(48, 65, 99, 0.16);
+}
+
+/* CSS-grid accordion: animates smoothly to real content height with no
+   JS measurement, so it stays correct no matter how long the tasks or
+   detail text are. */
+.snake-detail {
+    display: grid;
+    grid-template-rows: 0fr;
+    width: 100%;
+    transition: grid-template-rows 0.38s cubic-bezier(0.3, 0.9, 0.4, 1);
+}
+
+.snake-detail.is-open {
+    grid-template-rows: 1fr;
+}
+
+.snake-detail-inner {
+    min-height: 0;
+    overflow: hidden;
+}
+
+.snake-card {
+    margin-top: 0.85rem;
+    text-align: left;
+    background: #FAFBFD;
+    border: 1px solid #EEF2F7;
+    border-radius: 22px;
+    padding: 1rem 1.1rem;
+}
+
+.snake-stop.is-current .snake-card {
+    background: #ffffff;
+    border-color: #C9D6E6;
+    box-shadow: 0 16px 36px rgba(48, 65, 99, 0.14);
+}
+
+.snake-stop.is-done .snake-card {
+    background: #F6F8FB;
+}
+
+@media (max-width: 991px) {
+    .snake-stop {
+        width: 100%;
+    }
+
+    .snake-stop.pos-0,
+    .snake-stop.pos-1,
+    .snake-stop.pos-2 {
+        align-self: center;
+    }
+
+    .snake-ai-ring {
+        display: none;
+    }
+}
+
+@media (max-width: 575px) {
+    .snake-ai-banner {
+        flex-wrap: wrap;
+    }
+
+    .snake-ai-ring {
+        display: flex;
+        width: 100%;
+        height: auto;
+        flex-direction: row;
+        justify-content: space-between;
+        padding: 0.6rem 0.9rem;
+    }
+
+    .snake-node-dot,
+    .snake-node-pulse {
+        width: 44px;
+        height: 44px;
+        border-radius: 15px;
+    }
+
+    .snake-chip {
+        max-width: 100%;
+    }
+
+    .snake-chip-flag {
+        display: none;
+    }
+}
+
 /* =========================================================
    PROJECT DETAILS PAGE - FYPILOT THEME
    Paste at the VERY BOTTOM of wwwroot/css/site.css
@@ -14713,4 +15221,596 @@ body,
         .fyc-msg.is-service .fyc-bubble {
             max-width: 100%;
         }
+/* =========================================================
+   MARKET INSIGHT — REGIONAL DEMAND FOOTPRINT
+   Compact regional opportunity comparison inside the Idea Generator.
+   Palette: white / light blue-gray / navy / steel blue / soft indigo accent.
+   ========================================================= */
+
+.marketfp-mini-score {
+    width: 96px;
+    min-height: 62px;
+    border-radius: 18px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0.3rem 0.4rem;
+    text-align: center;
+}
+
+    .marketfp-mini-score em {
+        font-style: normal;
+        font-size: 0.58rem;
+        font-weight: 700;
+        line-height: 1.15;
+        margin-bottom: 0.1rem;
+    }
+
+    .marketfp-mini-score strong {
+        font-size: 1rem;
+        line-height: 1;
+    }
+
+    .marketfp-mini-score span {
+        font-size: 0.6rem;
+        margin-top: 0.2rem;
+    }
+
+.marketfp-mini-score.is-preliminary {
+    background: #F7F8FA;
+    border: 1px dashed #D8DEE9;
+}
+
+    .marketfp-mini-score.is-preliminary em,
+    .marketfp-mini-score.is-preliminary strong {
+        color: #516C8D;
+    }
+
+    .marketfp-mini-score.is-preliminary span {
+        color: #8A97AC;
+    }
+
+.marketfp-mini-score.is-evidence {
+    background: linear-gradient(135deg, #28385E, #516C8D);
+    color: #ffffff;
+}
+
+    .marketfp-mini-score.is-evidence em {
+        color: rgba(255, 255, 255, 0.78);
+    }
+
+    .marketfp-mini-score.is-evidence strong {
+        color: #ffffff;
+    }
+
+    .marketfp-mini-score.is-evidence span {
+        color: rgba(255, 255, 255, 0.72);
+    }
+
+/* Section wrapper inside expanded idea details */
+.marketfp-section {
+    margin-top: 0.85rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid #EEF2F7;
+}
+
+.marketfp-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.85rem;
+}
+
+    .marketfp-head h4 {
+        color: #111827;
+        font-size: 0.98rem;
+        font-weight: 800;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+    }
+
+    .marketfp-head p {
+        color: #64748B;
+        font-size: 0.8rem;
+        margin: 0.25rem 0 0;
+    }
+
+/* State A: empty */
+.marketfp-empty {
+    background: #FAFBFD;
+    border: 1px solid #EEF2F7;
+    border-radius: 18px;
+    padding: 1.1rem;
+    text-align: center;
+}
+
+    .marketfp-empty-icon {
+        width: 46px;
+        height: 46px;
+        margin: 0 auto 0.65rem;
+        border-radius: 15px;
+        background: #EEF2F6;
+        color: #516C8D;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.2rem;
+    }
+
+    .marketfp-empty h5 {
+        color: #111827;
+        font-size: 0.94rem;
+        font-weight: 750;
+        margin: 0 0 0.35rem;
+    }
+
+    .marketfp-empty p {
+        color: #64748B;
+        font-size: 0.84rem;
+        line-height: 1.55;
+        max-width: 480px;
+        margin: 0 auto;
+    }
+
+.marketfp-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    margin-top: 0.9rem;
+    padding: 0.62rem 1.1rem;
+    border: 0;
+    border-radius: 14px;
+    color: #ffffff;
+    background: linear-gradient(135deg, #304163, #516C8D);
+    font-weight: 720;
+    font-size: 0.85rem;
+    transition: 0.18s ease;
+}
+
+    .marketfp-btn:hover:not(:disabled) {
+        color: #ffffff;
+        background: linear-gradient(135deg, #28385E, #304163);
+    }
+
+    .marketfp-btn:disabled {
+        opacity: 0.75;
+        cursor: wait;
+    }
+
+    .marketfp-btn .spinner-border {
+        width: 0.85rem;
+        height: 0.85rem;
+        border-width: 0.15em;
+    }
+
+.marketfp-note {
+    margin-top: 0.6rem;
+    color: #8A97AC;
+    font-size: 0.72rem;
+    line-height: 1.5;
+}
+
+/* Failure banner (insufficient evidence) */
+.marketfp-alert {
+    background: #FFF9EA;
+    border: 1px solid #E8DCC2;
+    border-radius: 16px;
+    padding: 0.85rem 1rem;
+    color: #7d5a08;
+    font-size: 0.84rem;
+    margin-bottom: 0.85rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+}
+
+/* State C: results panel */
+.marketfp-panel {
+    background: #FAFBFD;
+    border: 1px solid #EEF2F7;
+    border-radius: 20px;
+    padding: 1.1rem;
+}
+
+.marketfp-overall-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.marketfp-overall-card {
+    background: #ffffff;
+    border: 1px solid #EEF2F7;
+    border-radius: 16px;
+    padding: 0.9rem;
+}
+
+    .marketfp-overall-card .marketfp-label {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        color: #64748B;
+        font-size: 0.72rem;
+        font-weight: 750;
+        margin-bottom: 0.4rem;
+    }
+
+    .marketfp-overall-card strong {
+        display: block;
+        color: #111827;
+        font-size: 1.5rem;
+        font-weight: 800;
+        line-height: 1;
+    }
+
+    .marketfp-overall-card span.marketfp-tone {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        margin-top: 0.45rem;
+        padding: 0.22rem 0.55rem;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        background: #EEF2F6;
+        color: #304163;
+    }
+
+.marketfp-info-icon {
+    color: #8A7FC7;
+    cursor: help;
+    font-size: 0.82rem;
+}
+
+/* Region cards */
+.marketfp-regions-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.marketfp-region-card {
+    background: #ffffff;
+    border: 1px solid #EEF2F7;
+    border-radius: 16px;
+    padding: 0.9rem;
+}
+
+    .marketfp-region-card.is-best {
+        border-color: #C9C2EA;
+        box-shadow: 0 10px 24px rgba(110, 98, 182, 0.12);
+    }
+
+    .marketfp-region-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .marketfp-region-head h5 {
+        color: #111827;
+        font-size: 0.88rem;
+        font-weight: 800;
+        margin: 0;
+    }
+
+    .marketfp-best-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0.18rem 0.45rem;
+        border-radius: 999px;
+        background: #F1EFFB;
+        color: #6E62B6;
+        font-size: 0.62rem;
+        font-weight: 750;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+
+    .marketfp-region-score {
+        color: #111827;
+        font-size: 1.5rem;
+        font-weight: 800;
+        line-height: 1;
+        margin-bottom: 0.3rem;
+    }
+
+    .marketfp-region-demand {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        font-size: 0.76rem;
+        font-weight: 700;
+        margin-bottom: 0.55rem;
+    }
+
+        .marketfp-region-demand i {
+            font-size: 0.6rem;
+        }
+
+        .marketfp-region-demand.level-very-high { color: #28385E; }
+        .marketfp-region-demand.level-high { color: #304163; }
+        .marketfp-region-demand.level-medium { color: #7d5a08; }
+        .marketfp-region-demand.level-low { color: #94623a; }
+        .marketfp-region-demand.level-unavailable { color: #94A3B8; }
+
+    .marketfp-region-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        margin-bottom: 0.55rem;
+    }
+
+        .marketfp-region-meta span {
+            color: #64748B;
+            background: #F7F8FA;
+            border: 1px solid #EEF2F7;
+            border-radius: 999px;
+            padding: 0.2rem 0.5rem;
+            font-size: 0.68rem;
+            font-weight: 650;
+        }
+
+    .marketfp-region-card p {
+        color: #475569;
+        font-size: 0.78rem;
+        line-height: 1.5;
+        margin: 0;
+    }
+
+/* Launch market + expansion path */
+.marketfp-two-col {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.marketfp-launch-card,
+.marketfp-expansion-card {
+    background: #ffffff;
+    border: 1px solid #EEF2F7;
+    border-radius: 16px;
+    padding: 0.9rem;
+}
+
+    .marketfp-launch-card label,
+    .marketfp-expansion-card label {
+        display: block;
+        color: #64748B;
+        font-size: 0.7rem;
+        font-weight: 750;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: 0.4rem;
+    }
+
+    .marketfp-launch-card strong {
+        color: #111827;
+        font-size: 1.05rem;
+        font-weight: 800;
+    }
+
+    .marketfp-launch-card p {
+        color: #64748B;
+        font-size: 0.8rem;
+        line-height: 1.5;
+        margin: 0.4rem 0 0;
+    }
+
+.marketfp-path {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+    .marketfp-path span {
+        color: #304163;
+        background: #EEF2F6;
+        border-radius: 999px;
+        padding: 0.3rem 0.6rem;
+        font-size: 0.8rem;
+        font-weight: 700;
+    }
+
+    .marketfp-path i {
+        color: #94A3B8;
+        font-size: 0.75rem;
+    }
+
+/* Why demanded + recommendation */
+.marketfp-why-list {
+    display: grid;
+    gap: 0.5rem;
+    margin: 0 0 1rem;
+    padding: 0;
+    list-style: none;
+}
+
+    .marketfp-why-list li {
+        display: flex;
+        gap: 0.5rem;
+        background: #ffffff;
+        border: 1px solid #EEF2F7;
+        border-radius: 14px;
+        padding: 0.65rem 0.75rem;
+        color: #334155;
+        font-size: 0.82rem;
+        line-height: 1.5;
+    }
+
+        .marketfp-why-list i {
+            color: #6E62B6;
+            margin-top: 0.15rem;
+            flex-shrink: 0;
+        }
+
+.marketfp-recommendation {
+    background: #ffffff;
+    border: 1px solid #EEF2F7;
+    border-radius: 16px;
+    padding: 0.9rem;
+    margin-bottom: 1rem;
+}
+
+    .marketfp-recommendation label {
+        display: flex;
+        align-items: center;
+        gap: 0.35rem;
+        color: #64748B;
+        font-size: 0.7rem;
+        font-weight: 750;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: 0.5rem;
+    }
+
+    .marketfp-recommendation p {
+        color: #334155;
+        font-size: 0.86rem;
+        line-height: 1.6;
+        margin: 0;
+    }
+
+/* Evidence status */
+.marketfp-evidence-status {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.6rem;
+    margin-bottom: 1rem;
+}
+
+    .marketfp-evidence-status > div {
+        background: #ffffff;
+        border: 1px solid #EEF2F7;
+        border-radius: 14px;
+        padding: 0.65rem 0.7rem;
+        text-align: center;
+    }
+
+    .marketfp-evidence-status span {
+        display: block;
+        color: #64748B;
+        font-size: 0.64rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        margin-bottom: 0.3rem;
+    }
+
+    .marketfp-evidence-status strong {
+        color: #111827;
+        font-size: 0.86rem;
+        font-weight: 750;
+    }
+
+.marketfp-sources-list {
+    display: grid;
+    gap: 0.4rem;
+    margin: 0.6rem 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+    .marketfp-sources-list li {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        background: #ffffff;
+        border: 1px solid #EEF2F7;
+        border-radius: 12px;
+        padding: 0.5rem 0.65rem;
+    }
+
+    .marketfp-sources-list a {
+        color: #304163;
+        font-size: 0.78rem;
+        font-weight: 650;
+        text-decoration: none;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+        .marketfp-sources-list a:hover {
+            color: #516C8D;
+            text-decoration: underline;
+        }
+
+    .marketfp-sources-list .marketfp-verified-badge {
+        flex-shrink: 0;
+        color: #6E62B6;
+        background: #F1EFFB;
+        border-radius: 999px;
+        padding: 0.15rem 0.45rem;
+        font-size: 0.62rem;
+        font-weight: 700;
+    }
+
+/* Actions */
+.marketfp-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid #EEF2F7;
+}
+
+.marketfp-outline-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.55rem 0.85rem;
+    border-radius: 13px;
+    border: 1px solid #DDDDDD;
+    background: #ffffff;
+    color: #304163;
+    font-weight: 700;
+    font-size: 0.82rem;
+    transition: 0.18s ease;
+}
+
+    .marketfp-outline-btn:hover {
+        color: #516C8D;
+        border-color: #516C8D;
+        background: #F7F8FA;
+    }
+
+@media (max-width: 1199px) {
+    .marketfp-regions-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 991px) {
+    .marketfp-overall-grid,
+    .marketfp-two-col {
+        grid-template-columns: 1fr;
+    }
+
+    .marketfp-evidence-status {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 767px) {
+    .marketfp-regions-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .marketfp-head {
+        flex-direction: column;
+    }
+}
 }
