@@ -33,6 +33,9 @@ public class User
     public SupervisorProfile? SupervisorProfile { get; set; }
     public CompanyProfile? CompanyProfile { get; set; }
     public ICollection<Project> Projects { get; set; } = [];
+
+    public ICollection<ProjectMember> ProjectMemberships { get; set; } = [];
+
     public ICollection<Activity> Activities { get; set; } = [];
 
     public bool MustChangePassword { get; set; } = false;

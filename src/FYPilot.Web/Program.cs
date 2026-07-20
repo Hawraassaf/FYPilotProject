@@ -217,13 +217,13 @@ using (var scope = app.Services.CreateScope())
 
     try
     {
-        db.Database.EnsureCreated();
+        if (!db.Database.CanConnect())
+        {
+            throw new InvalidOperationException(
+                "The application could not connect to the database.");
+        }
 
-        // Keep this disabled to avoid inserting old demo data.
-        // await DataSeeder.SeedAsync(db);
-
-        app.Logger.LogInformation(
-            "Database ready.");
+        app.Logger.LogInformation("Database connection ready.");
     }
     catch (Exception ex)
     {

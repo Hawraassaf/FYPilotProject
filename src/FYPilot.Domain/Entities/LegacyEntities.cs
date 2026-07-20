@@ -16,10 +16,22 @@ public class Project
     [Column("progress_percentage")] public int ProgressPercentage { get; set; } = 0;
     [Column("student_id")] public int StudentId { get; set; }
     [Column("supervisor_id")] public int? SupervisorId { get; set; }
+    [Column("project_idea_id")] public int? ProjectIdeaId { get; set; }
+
+    [Range(1, 3)]
+    [Column("maximum_members")] public int MaximumMembers { get; set; } = 3;
     [Column("created_at")] public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     [Column("updated_at")] public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     [ForeignKey(nameof(StudentId))] public User? Student { get; set; }
     [ForeignKey(nameof(SupervisorId))] public User? Supervisor { get; set; }
+    [ForeignKey(nameof(ProjectIdeaId))]
+    public ProjectIdea? ProjectIdea { get; set; }
+
+    public ICollection<ProjectMember> Members { get; set; } = [];
+
+    public ICollection<ProjectInvitation> Invitations { get; set; } = [];
+
+    public ICollection<TeammateRequest> TeammateRequests { get; set; } = [];
     public ICollection<ProjectTask> Tasks { get; set; } = [];
     public ICollection<Milestone> Milestones { get; set; } = [];
     public ICollection<Feedback> Feedbacks { get; set; } = [];
