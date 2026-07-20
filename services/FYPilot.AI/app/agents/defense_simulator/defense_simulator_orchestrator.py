@@ -530,6 +530,14 @@ class DefenseSimulatorOrchestrator:
     
     def _clean_unverified_project_claims(self, text: str) -> str:
         """
+        TEMPORARILY RETAINED FOR MIGRATION COMPATIBILITY. This defense
+        simulator is not yet wired into the shared review pipeline
+        (app/review/) -- only FYP Mentor Chat is, as the pilot. When the
+        defense simulator is migrated, this claim list should move into
+        app/review/registry.py the same way app/agents/answer_review_agent.py's
+        was, and the semantic Reviewer/Rewrite loop should replace this
+        regex-based cleanup. Do not remove until that migration happens.
+
         Removes or softens risky claims that Ollama may invent.
 
         The defense simulator should not claim the project has features

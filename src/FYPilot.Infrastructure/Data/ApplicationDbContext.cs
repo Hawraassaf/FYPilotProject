@@ -34,6 +34,9 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     // Mentor Chat
     public DbSet<MentorChatSession> MentorChatSessions => Set<MentorChatSession>();
 
+    // AI Output Review Pipeline (services/FYPilot.AI/app/review/pipeline.py)
+    public DbSet<AiOutputReview> AiOutputReviews => Set<AiOutputReview>();
+
     // FYPilot core
     public DbSet<StudentSkill> StudentSkills { get; set; }
     public DbSet<ProjectIdea> ProjectIdeas { get; set; }

@@ -761,6 +761,14 @@
                         </section>
                     }
 
+                    @{
+                        var latestAssistantMessageId = Model.Messages
+                            .Where(m => m.Role == "assistant")
+                            .Select(m => (int?)m.Id)
+                            .DefaultIfEmpty(null)
+                            .Max();
+                    }
+
                     @foreach (var msg in Model.Messages)
                     {
                         var isUser = msg.Role == "user";
@@ -786,6 +794,16 @@
                                                 ? "Service notice"
                                                 : "AI guidance")
                                         </span>
+
+                                        @if (Model.LatestReview != null && msg.Id == latestAssistantMessageId)
+                                        {
+                                            var (badgeClass, badgeLabel) = Model.DescribeReview(Model.LatestReview);
+
+                                            <span class="badge @badgeClass"
+                                                  title="@Model.LatestReview.DecisionReason">
+                                                <i class="bi bi-shield-check"></i> @badgeLabel
+                                            </span>
+                                        }
                                     </div>
                                 }
 

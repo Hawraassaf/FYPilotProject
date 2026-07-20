@@ -40,6 +40,28 @@ public class MentorChatModel(
 
     public FypMentorAnswerDto? MentorAnswer => MentorResponse?.Answer;
 
+    /// <summary>
+    /// The AI Quality Passport for the most recent assistant reply in this
+    /// chat session, loaded from the database so it survives the
+    /// Post/Redirect/Get cycle (MentorResponse itself does not). Null for
+    /// sessions where the latest reply was a trivial short-circuit answer
+    /// (greeting, empty message) that never reached the review pipeline.
+    /// </summary>
+    public AiOutputReview? LatestReview { get; private set; }
+
+    public (string CssClass, string Label) DescribeReview(AiOutputReview review) => review.Status switch
+    {
+        "approved" => ("bg-success", "Reviewed"),
+        "approved_with_minor_warnings" => ("bg-success", "Reviewed · minor notes"),
+        "unresolved" => ("bg-warning text-dark", "Unresolved · shown as-is"),
+        "rejected" => ("bg-danger", "Rejected · showing safe answer"),
+        "firewall_blocked" => ("bg-danger", "Blocked by content firewall"),
+        "review_unavailable" => ("bg-secondary", "Not semantically reviewed"),
+        "provider_unavailable" => ("bg-secondary", "AI service unavailable"),
+        "schema_invalid" => ("bg-secondary", "Formatting issue"),
+        _ => ("bg-secondary", review.Status),
+    };
+
     [TempData]
     public string? ErrorMessage { get; set; }
 
@@ -276,6 +298,44 @@ public class MentorChatModel(
 
         CurrentChat.UpdatedAt = DateTime.UtcNow;
 
+        // Trivial short-circuit exchanges (greetings, empty messages) report
+        // an empty ReviewRunId and never reached the review pipeline, so
+        // there is nothing meaningful to audit for them.
+        var review = MentorResponse?.Review;
+
+        if (review != null && !string.IsNullOrWhiteSpace(review.ReviewRunId))
+        {
+            db.AiOutputReviews.Add(new AiOutputReview
+            {
+                ReviewRunId = Guid.TryParse(review.ReviewRunId, out var reviewRunId)
+                    ? reviewRunId
+                    : Guid.NewGuid(),
+                UserId = userId,
+                ProjectIdeaId = SelectedIdeaId,
+                MentorChatSessionId = CurrentChat.Id,
+                AgentName = "FypMentorAgent",
+                Status = review.Status,
+                Usable = review.Usable,
+                WasRewritten = review.Attempts > 1,
+                Attempts = review.Attempts,
+                QualityScore = review.QualityScore,
+                DecisionReason = review.DecisionReason,
+                GeneratorProvider = MentorResponse!.Provider,
+                GeneratorModel = MentorResponse!.ModelUsed,
+                ReviewerProvider = review.ReviewerProvider,
+                ReviewerModel = review.ReviewerModel,
+                FirewallStatus = review.Status == "firewall_blocked" ? "blocked" : "passed",
+                FirewallInputFlagsJson = JsonSerializer.Serialize(review.FirewallInputFlags ?? []),
+                FirewallOutputFlagsJson = JsonSerializer.Serialize(review.FirewallOutputFlags ?? []),
+                IssuesJson = JsonSerializer.Serialize(review.Issues),
+                StrengthsJson = JsonSerializer.Serialize(review.Strengths),
+                AttemptHistoryJson = JsonSerializer.Serialize(review.AttemptHistory ?? []),
+                ReviewerVersion = review.ReviewerVersion,
+                CreatedAt = DateTime.UtcNow,
+                CompletedAt = DateTime.UtcNow
+            });
+        }
+
         await db.SaveChangesAsync();
 
         ClearMessageInput();
@@ -432,6 +492,12 @@ public class MentorChatModel(
             .OrderBy(m => m.CreatedAt)
             .ThenBy(m => m.Id)
             .ToList();
+
+        LatestReview = await db.AiOutputReviews
+            .AsNoTracking()
+            .Where(r => r.MentorChatSessionId == CurrentChat.Id)
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync();
     }
 
     private MentorStudentProfileDto BuildStudentProfileDto()

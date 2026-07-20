@@ -25,7 +25,15 @@ class GeminiClient:
                 "GEMINI_API_KEY is missing. Set it before starting FastAPI."
             )
 
-        self.client = genai.Client(api_key=api_key)
+        # SEC-3: an explicit per-call timeout (milliseconds) so a hung Gemini
+        # request cannot block a review-pipeline attempt indefinitely -- see
+        # the matching comment on GroqProvider in app/services/llm_provider.py.
+        timeout_ms = int(float(os.getenv("GEMINI_TIMEOUT_SECONDS", "60")) * 1000)
+
+        self.client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(timeout=timeout_ms),
+        )
         self.default_model = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
         self.last_error: str | None = None
         self.search_used: bool = False

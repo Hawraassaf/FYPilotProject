@@ -21,7 +21,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from app.services.llm_provider import ProviderChain
+from app.services.llm_provider import LLMResult, ProviderChain
 
 logger = logging.getLogger("fypilot-mentor-agent")
 
@@ -226,13 +226,22 @@ class FypMentorAgent:
     # Main Entry Point
     # =========================================================================
 
-    def chat(self, request: FypMentorRequest) -> FypMentorAnswer:
-        self.last_llm_used = False
-        self.last_error = None
-        self.last_raw_llm_response = None
-        self.last_provider = None
-        self.last_model_used = None
+    def try_short_circuit_answer(
+        self,
+        request: FypMentorRequest,
+    ) -> FypMentorAnswer | None:
+        """
+        Returns an immediate, deterministic answer for trivial exchanges --
+        an empty message, a bare greeting, or an explicit code request made
+        without usable code context -- none of which should ever reach an
+        LLM call or the review pipeline. Returns None when the request needs
+        real generation.
 
+        Exposed publicly (not just inlined in chat()) so app/routers/fyp_chat.py
+        can check for this BEFORE invoking ReviewPipeline, matching this
+        agent's long-standing behavior of skipping the LLM and the review
+        layer entirely for these trivial cases.
+        """
         message = request.message.strip()
 
         if not message:
@@ -280,6 +289,20 @@ class FypMentorAgent:
                 codeBlocks=[],
             )
 
+        return None
+
+    def chat(self, request: FypMentorRequest) -> FypMentorAnswer:
+        self.last_llm_used = False
+        self.last_error = None
+        self.last_raw_llm_response = None
+        self.last_provider = None
+        self.last_model_used = None
+
+        short_circuit = self.try_short_circuit_answer(request)
+
+        if short_circuit is not None:
+            return short_circuit
+
         prompt = self._build_prompt(request)
 
         raw = None
@@ -322,6 +345,54 @@ class FypMentorAgent:
             self.last_error = "No AI provider returned valid mentor JSON."
 
         return self._fallback_answer(request)
+
+    # =========================================================================
+    # Review pipeline integration (app/review/pipeline.py)
+    # =========================================================================
+
+    def build_safe_fallback(self, request: FypMentorRequest) -> FypMentorAnswer:
+        """
+        Public entry point for the deterministic fallback answer. Added so
+        callers such as app/routers/fyp_chat.py never reach into a private
+        method -- this is a thin, additive wrapper; _fallback_answer's
+        behavior is unchanged and nothing that already calls it is affected.
+        """
+        return self._fallback_answer(request)
+
+    def generate_candidate(self, request: FypMentorRequest) -> LLMResult | None:
+        """
+        Writer-stage entry point for ReviewPipeline (see app/review/pipeline.py).
+
+        PRECONDITION: callers must check try_short_circuit_answer(request)
+        FIRST and skip this method (and the whole review pipeline) entirely
+        when it returns a value -- an empty message, a bare greeting, or a
+        code request without usable context is intentionally never sent to
+        an LLM or the review pipeline. This method assumes that check has
+        already been done; it does not repeat it.
+
+        Reuses the existing chat() pipeline (prompt build -> ProviderChain
+        cascade -> _complete_and_validate) end to end rather than
+        duplicating or bypassing it, then wraps the result as an LLMResult so
+        it can flow through guarded_call like any other LLM stage.
+
+        Returns None -- signaling "no real provider output" to guarded_call,
+        which the pipeline maps to status="provider_unavailable" -- when
+        chat() itself had to fall back internally (self.last_llm_used is
+        False), since in that case there is no real candidate to review; the
+        router should use build_safe_fallback() directly instead.
+        """
+        answer = self.chat(request)
+
+        if not self.last_llm_used:
+            return None
+
+        return LLMResult(
+            ok=True,
+            provider=self.last_provider or "unknown",
+            model=self.last_model_used,
+            text="",
+            data=answer.model_dump(),
+        )
 
     # =========================================================================
     # Prompt Construction

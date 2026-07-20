@@ -278,6 +278,38 @@ def _used_web_tool(executed_tools: list[dict[str, Any]]) -> bool:
     return False
 
 
+def _basic_secret_scan_ok(result: "LLMResult") -> bool:
+    """
+    Universal, context-free backstop applied to EVERY provider response,
+    regardless of which agent called ProviderChain -- including the agents
+    not (yet) wired into the full review pipeline. Only checks for hard,
+    high-confidence secret patterns via app.llm_firewall.rules.secrets; the
+    rich, context-aware LlmFirewall used by ReviewPipeline is a separate,
+    more thorough check that only protects agents actually wired into it
+    (see app/review/pipeline.py and the honest-scope note there).
+
+    Returns False only when a "block"-severity secret pattern is found, in
+    which case ProviderChain treats this provider's response as unusable and
+    falls through to the next provider in the cascade -- the same behavior
+    as any other provider failure.
+    """
+    from app.llm_firewall.rules import secrets as secret_rules
+
+    text_to_scan = result.text or ""
+
+    if result.data is not None:
+        try:
+            text_to_scan += json.dumps(result.data, ensure_ascii=False, default=str)
+        except Exception:
+            text_to_scan += str(result.data)
+
+    if not text_to_scan:
+        return True
+
+    findings = secret_rules.scan({"provider_response": text_to_scan})
+    return not any(finding.action == "block" for finding in findings)
+
+
 class BaseProvider:
     name: str = "base"
 
@@ -340,6 +372,13 @@ class GroqProvider(BaseProvider):
             "groq/compound-mini",
         )
 
+        # SEC-3: an explicit per-call timeout is required so a hung Groq
+        # request cannot block a review-pipeline attempt indefinitely --
+        # this is a prerequisite for (and separate from) the pipeline's own
+        # aggregate wall-clock budget, which only checks time BETWEEN
+        # iterations and cannot interrupt a single in-flight call.
+        self.timeout_seconds = float(os.getenv("GROQ_TIMEOUT_SECONDS", "60"))
+
         self.enabled = bool(self.api_key)
         self.endpoint = "https://api.groq.com/openai/v1/chat/completions"
 
@@ -354,7 +393,7 @@ class GroqProvider(BaseProvider):
         """Normal Groq chat request used for structured generation."""
         from groq import Groq
 
-        client = Groq(api_key=self.api_key)
+        client = Groq(api_key=self.api_key, timeout=self.timeout_seconds)
 
         response = client.chat.completions.create(
             model=model,
@@ -395,7 +434,7 @@ class GroqProvider(BaseProvider):
         try:
             from groq import Groq
 
-            client = Groq(api_key=self.api_key)
+            client = Groq(api_key=self.api_key, timeout=self.timeout_seconds)
 
             response = client.chat.completions.create(
                 model=self.search_model,
@@ -931,6 +970,12 @@ class ProviderChain:
             )
 
             if result.ok and result.data is not None:
+                if not _basic_secret_scan_ok(result):
+                    errors.append(
+                        f"{result.provider}:{result.model} -> response withheld by basic secret scan"
+                    )
+                    continue
+
                 return result
 
             errors.append(
@@ -963,6 +1008,12 @@ class ProviderChain:
             )
 
             if result.ok and result.text:
+                if not _basic_secret_scan_ok(result):
+                    errors.append(
+                        f"{result.provider}:{result.model} -> response withheld by basic secret scan"
+                    )
+                    continue
+
                 return result
 
             errors.append(

@@ -636,7 +636,10 @@ public record FypMentorServiceResponse(
     string? OllamaError,
     string? OllamaRawPreview,
     DateTime? GeneratedAt,
-    string Message
+    string Message,
+    AiQualityPassportDto? Review = null,
+    string? Provider = null,
+    string? ModelUsed = null
 );
 
 public record FypMentorAnswerDto(

@@ -1,4 +1,12 @@
 """
+TEMPORARILY RETAINED FOR MIGRATION COMPATIBILITY — superseded by the shared
+review pipeline in app/review/ (see app/routers/fyp_chat.py, which now calls
+ReviewPipeline instead of this class). Do not remove until the new
+pipeline's comparison tests and the Mentor Chat pilot have both passed. Its
+risky-claim knowledge has been copied (not moved) into
+app/review/registry.py, reframed as domain hints fed into the semantic
+Reviewer's prompt rather than blind regex replacement.
+
 AnswerReviewAgent — deterministic review layer for AI-generated mentor answers.
 
 Runs AFTER the mentor agent's own validation (on the validated answer dict,
