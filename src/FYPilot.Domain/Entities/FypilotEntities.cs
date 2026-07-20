@@ -41,6 +41,7 @@ public class ProjectIdea
     [Column("created_at")] public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     [ForeignKey(nameof(UserId))] public User? User { get; set; }
     public FeasibilityReport? FeasibilityReport { get; set; }
+    public Project? Project { get; set; }
 }
 
 [Table("feasibility_reports")]

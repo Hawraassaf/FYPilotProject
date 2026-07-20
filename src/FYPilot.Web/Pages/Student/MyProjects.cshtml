@@ -1,0 +1,1076 @@
+﻿@page
+@model FYPilot.Web.Pages.Student.MyProjectsModel
+@{
+    ViewData["Title"] = "My Projects";
+    ViewData["Subtitle"] = "Manage all projects you own or collaborate on.";
+}
+
+<section class="my-projects-page">
+    <header class="projects-header">
+        <div>
+            <span class="page-eyebrow">
+                Project workspace
+            </span>
+
+            <h1>My Projects</h1>
+
+            <p>
+                Manage all projects you own or collaborate on.
+            </p>
+        </div>
+
+        <a asp-page="/Student/IdeaGenerator"
+           class="generate-project-button">
+
+            <i class="bi bi-plus-lg"></i>
+            <span>Generate Another Project</span>
+        </a>
+    </header>
+
+    <div class="project-statistics">
+        <article class="stat-card">
+            <div class="stat-icon stat-icon-blue">
+                <i class="bi bi-folder2-open"></i>
+            </div>
+
+            <div class="stat-content">
+                <span>Total Projects</span>
+                <strong>@Model.TotalProjects</strong>
+            </div>
+
+            <div class="stat-decoration stat-decoration-blue">
+                <i class="bi bi-bar-chart-fill"></i>
+            </div>
+        </article>
+
+        <article class="stat-card">
+            <div class="stat-icon stat-icon-green">
+                <i class="bi bi-person"></i>
+            </div>
+
+            <div class="stat-content">
+                <span>Owned Projects</span>
+                <strong>@Model.OwnedProjects</strong>
+            </div>
+
+            <div class="stat-decoration stat-decoration-green">
+                <i class="bi bi-crown-fill"></i>
+            </div>
+        </article>
+
+        <article class="stat-card">
+            <div class="stat-icon stat-icon-orange">
+                <i class="bi bi-people"></i>
+            </div>
+
+            <div class="stat-content">
+                <span>Collaborating On</span>
+                <strong>@Model.CollaboratingProjects</strong>
+            </div>
+
+            <div class="stat-decoration stat-decoration-orange">
+                <i class="bi bi-people-fill"></i>
+            </div>
+        </article>
+    </div>
+
+    <div class="project-toolbar">
+        <label class="project-search">
+            <i class="bi bi-search"></i>
+
+            <input type="search"
+                   id="projectSearch"
+                   placeholder="Search projects by name or domain..."
+                   autocomplete="off" />
+        </label>
+
+        <label class="project-filter">
+            <span class="visually-hidden">Filter by role</span>
+
+            <select id="roleFilter">
+                <option value="all">All Roles</option>
+                <option value="owner">Owner</option>
+                <option value="collaborator">Collaborator</option>
+            </select>
+
+            <i class="bi bi-chevron-down"></i>
+        </label>
+
+        <label class="project-filter">
+            <span class="visually-hidden">Filter by status</span>
+
+            <select id="statusFilter">
+                <option value="all">All Statuses</option>
+                <option value="planning">Planning</option>
+                <option value="active">Active</option>
+                <option value="in_progress">In Progress</option>
+                <option value="completed">Completed</option>
+            </select>
+
+            <i class="bi bi-chevron-down"></i>
+        </label>
+
+        <label class="project-filter project-sort">
+            <span class="visually-hidden">Sort projects</span>
+
+            <select id="sortProjects">
+                <option value="newest">Sort by: Newest First</option>
+                <option value="oldest">Sort by: Oldest First</option>
+                <option value="name">Sort by: Project Name</option>
+                <option value="team">Sort by: Team Size</option>
+            </select>
+
+            <i class="bi bi-filter-left"></i>
+        </label>
+    </div>
+
+    @if (Model.Projects.Count == 0)
+    {
+        <section class="projects-empty-state">
+            <div class="empty-state-icon">
+                <i class="bi bi-folder-plus"></i>
+            </div>
+
+            <h2>No projects yet</h2>
+
+            <p>
+                Generate an idea and select it to create your first
+                collaborative project workspace.
+            </p>
+
+            <a asp-page="/Student/IdeaGenerator"
+               class="generate-project-button">
+
+                <i class="bi bi-lightbulb-fill"></i>
+                Generate Your First Project
+            </a>
+        </section>
+    }
+    else
+    {
+        <div class="projects-grid"
+             id="projectsGrid">
+
+            @foreach (var project in Model.Projects)
+            {
+                var workspaceUrl =
+                    Url.Page(
+                        "/Student/ProjectWorkspace",
+                        new
+                        {
+                            projectId = project.Id
+                        });
+
+                <article class="project-card"
+                         data-project-card
+                         data-name="@project.Title.ToLowerInvariant()"
+                         data-domain="@project.Domain.ToLowerInvariant()"
+                         data-role="@project.Role.ToLowerInvariant()"
+                         data-status="@project.Status"
+                         data-created="@project.CreatedAt.Ticks"
+                         data-team="@project.ActiveMembersCount">
+
+                    <header class="project-card-header">
+                        <div class="project-title-group">
+                            <div class="project-icon @project.IconCssClass">
+                                <i class="@project.IconClass"></i>
+                            </div>
+
+                            <div>
+                                <h2>@project.Title</h2>
+                                <span>@project.Domain</span>
+                            </div>
+                        </div>
+
+                        <button type="button"
+                                class="project-more-button"
+                                title="Project options"
+                                aria-label="Project options">
+
+                            <i class="bi bi-three-dots-vertical"></i>
+                        </button>
+                    </header>
+
+                    <div class="project-badges">
+                        <span class="role-badge
+                            @(project.Role == "owner"
+                                  ? "owner-badge"
+                                  : "collaborator-badge")">
+
+                            <i class="bi
+                            @(project.Role == "owner"
+                                   ? "bi-crown-fill"
+                                   : "bi-people-fill")"></i>
+
+                            @project.RoleLabel
+                        </span>
+
+                        <span class="status-badge
+                            @project.StatusCssClass">
+
+                            <i class="bi
+                            @(project.Status == "active"
+                                   ? "bi-circle-fill"
+                                   : "bi-clock")"></i>
+
+                            @project.StatusLabel
+                        </span>
+                    </div>
+
+                    <div class="project-members-row">
+                        <div class="member-count">
+                            <i class="bi bi-people"></i>
+
+                            <span>
+                                @project.ActiveMembersCount
+                                of
+                                @project.MaximumMembers
+                                members
+                            </span>
+                        </div>
+
+                        <div class="member-avatars"
+                             aria-label="Project members">
+
+                            @foreach (var member in project.Members.Take(3))
+                            {
+                                <div class="member-avatar"
+                                     title="@member.FullName — @member.Role">
+
+                                    @member.Initials
+                                </div>
+                            }
+
+                            @for (
+                                var slot = project.ActiveMembersCount;
+                                slot < project.MaximumMembers &&
+                                slot < 3;
+                                slot++)
+                            {
+                                <div class="member-avatar empty-avatar"
+                                     title="Available team position">
+                                </div>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="team-progress-row">
+                        <div class="team-progress-track">
+                            <div class="team-progress-value"
+                                 style="width: @project.TeamFillPercentage%">
+                            </div>
+                        </div>
+
+                        <span>@project.TeamFillPercentage%</span>
+                    </div>
+
+                    <div class="project-divider"></div>
+
+                    <div class="project-created">
+                        <i class="bi bi-calendar3"></i>
+
+                        <span>
+                            Created on
+                            @project.CreatedAt
+                            .ToLocalTime()
+                            .ToString("MMM d, yyyy")
+                        </span>
+                    </div>
+
+                    <p class="project-description">
+                        @project.Description
+                    </p>
+
+                    <footer class="project-card-actions">
+                        <a asp-page="/Student/ProjectWorkspace"
+                           asp-route-projectId="@project.Id"
+                           class="open-project-button">
+
+                            <span>Open Project</span>
+                            <i class="bi bi-box-arrow-up-right"></i>
+                        </a>
+
+                        <a href="@($"{workspaceUrl}#team")"
+                           class="team-project-button">
+
+                            <i class="bi bi-person-plus"></i>
+                            <span>@project.TeamActionText</span>
+                        </a>
+                    </footer>
+                </article>
+            }
+        </div>
+
+        <section class="filtered-empty-state"
+                 id="filteredEmptyState">
+
+            <i class="bi bi-search"></i>
+            <h2>No matching projects</h2>
+
+            <p>
+                Try changing the search term or filters.
+            </p>
+        </section>
+    }
+</section>
+
+@section Head {
+    <style>
+        :root {
+            --projects-deep: #071D49;
+            --projects-navy: #28385E;
+            --projects-steel: #516C8D;
+            --projects-primary: #155EEF;
+            --projects-primary-dark: #0B4DD8;
+            --projects-border: #E2E8F0;
+            --projects-muted: #64748B;
+            --projects-soft: #F6F8FB;
+            --projects-green: #047857;
+            --projects-orange: #D97706;
+            --projects-purple: #7C3AED;
+        }
+
+        .my-projects-page {
+            max-width: 1500px;
+            margin: 0 auto;
+            padding-bottom: 2rem;
+            color: #111827;
+        }
+
+        .projects-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1.25rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .page-eyebrow {
+            display: block;
+            margin-bottom: .25rem;
+            color: var(--projects-steel);
+            font-size: .69rem;
+            font-weight: 800;
+            letter-spacing: .11em;
+            text-transform: uppercase;
+        }
+
+        .projects-header h1 {
+            margin: 0;
+            color: #111827;
+            font-size: clamp(1.75rem, 3vw, 2.55rem);
+            font-weight: 800;
+            letter-spacing: -.045em;
+        }
+
+        .projects-header p {
+            margin: .35rem 0 0;
+            color: var(--projects-muted);
+            font-size: .92rem;
+        }
+
+        .generate-project-button {
+            min-height: 52px;
+            padding: 0 1.2rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .6rem;
+            border-radius: 12px;
+            color: #fff;
+            background: linear-gradient( 135deg, var(--projects-primary), #0A55E8);
+            box-shadow: 0 12px 24px rgba(21, 94, 239, .2);
+            font-size: .84rem;
+            font-weight: 800;
+            text-decoration: none;
+            transition: .17s ease;
+        }
+
+            .generate-project-button:hover {
+                color: #fff;
+                background: linear-gradient( 135deg, var(--projects-primary-dark), #084ACB);
+                transform: translateY(-1px);
+            }
+
+        .project-statistics {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.25rem;
+        }
+
+        .stat-card {
+            min-height: 112px;
+            position: relative;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 1rem;
+            padding: 1.1rem;
+            overflow: hidden;
+            border: 1px solid var(--projects-border);
+            border-radius: 15px;
+            background: #fff;
+            box-shadow: 0 8px 22px rgba(15, 23, 42, .055);
+        }
+
+        .stat-icon {
+            width: 62px;
+            height: 62px;
+            display: grid;
+            place-items: center;
+            border-radius: 14px;
+            font-size: 1.55rem;
+        }
+
+        .stat-icon-blue {
+            color: var(--projects-primary);
+            background: #EAF1FF;
+        }
+
+        .stat-icon-green {
+            color: #059669;
+            background: #E6F8F2;
+        }
+
+        .stat-icon-orange {
+            color: #EA8B00;
+            background: #FFF3DF;
+        }
+
+        .stat-content span {
+            display: block;
+            color: var(--projects-muted);
+            font-size: .8rem;
+        }
+
+        .stat-content strong {
+            display: block;
+            margin-top: .1rem;
+            color: #111827;
+            font-size: 1.75rem;
+            line-height: 1;
+        }
+
+        .stat-decoration {
+            width: 48px;
+            height: 48px;
+            display: grid;
+            place-items: center;
+            border-radius: 50%;
+            font-size: 1.15rem;
+        }
+
+        .stat-decoration-blue {
+            color: var(--projects-primary);
+            background: #F0F5FF;
+        }
+
+        .stat-decoration-green {
+            color: #059669;
+            background: #EDFAF6;
+        }
+
+        .stat-decoration-orange {
+            color: #EA8B00;
+            background: #FFF7E9;
+        }
+
+        .project-toolbar {
+            display: grid;
+            grid-template-columns: minmax(280px, 1.6fr) minmax(150px, .62fr) minmax(160px, .7fr) minmax(210px, .85fr);
+            gap: .8rem;
+            margin-bottom: 1rem;
+        }
+
+        .project-search,
+        .project-filter {
+            min-height: 47px;
+            position: relative;
+            display: grid;
+            align-items: center;
+            border: 1px solid #D9E1EC;
+            border-radius: 11px;
+            background: #fff;
+        }
+
+        .project-search {
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: .65rem;
+            padding: 0 .9rem;
+        }
+
+            .project-search i {
+                color: #8793A5;
+            }
+
+            .project-search input,
+            .project-filter select {
+                width: 100%;
+                height: 45px;
+                border: 0;
+                outline: 0;
+                color: #334155;
+                background: transparent;
+                font-size: .77rem;
+            }
+
+                .project-search input::placeholder {
+                    color: #9AA5B5;
+                }
+
+        .project-filter {
+            grid-template-columns: minmax(0, 1fr) auto;
+            padding: 0 .75rem;
+        }
+
+            .project-filter select {
+                appearance: none;
+                cursor: pointer;
+            }
+
+            .project-filter i {
+                color: #718096;
+                pointer-events: none;
+            }
+
+        .project-sort {
+            margin-left: auto;
+        }
+
+        .projects-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 1rem;
+        }
+
+        .project-card {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            padding: 1rem;
+            border: 1px solid var(--projects-border);
+            border-radius: 14px;
+            background: #fff;
+            box-shadow: 0 9px 24px rgba(15, 23, 42, .055);
+            transition: transform .17s ease, box-shadow .17s ease, border-color .17s ease;
+        }
+
+            .project-card:hover {
+                transform: translateY(-3px);
+                border-color: #CBD7E7;
+                box-shadow: 0 15px 34px rgba(15, 23, 42, .095);
+            }
+
+        .project-card-header {
+            display: flex;
+            justify-content: space-between;
+            gap: .7rem;
+        }
+
+        .project-title-group {
+            min-width: 0;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: .75rem;
+            align-items: center;
+        }
+
+        .project-icon {
+            width: 55px;
+            height: 55px;
+            display: grid;
+            place-items: center;
+            border-radius: 12px;
+            color: #fff;
+            font-size: 1.55rem;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18);
+        }
+
+        .project-icon-navy {
+            background: linear-gradient( 145deg, #09245A, #0B3E91);
+        }
+
+        .project-icon-teal {
+            background: linear-gradient( 145deg, #05A78F, #09C2A4);
+        }
+
+        .project-icon-purple {
+            background: linear-gradient( 145deg, #7138E7, #9365F3);
+        }
+
+        .project-icon-orange {
+            background: linear-gradient( 145deg, #F59E0B, #F97316);
+        }
+
+        .project-icon-cyan {
+            background: linear-gradient( 145deg, #0891B2, #06B6D4);
+        }
+
+        .project-title-group h2 {
+            margin: 0;
+            overflow: hidden;
+            color: #111827;
+            font-size: .93rem;
+            font-weight: 800;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .project-title-group span {
+            display: block;
+            margin-top: .27rem;
+            overflow: hidden;
+            color: var(--projects-primary);
+            font-size: .73rem;
+            font-weight: 700;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .project-more-button {
+            width: 30px;
+            height: 34px;
+            flex: 0 0 auto;
+            display: grid;
+            place-items: center;
+            border: 0;
+            border-radius: 8px;
+            color: #64748B;
+            background: transparent;
+        }
+
+            .project-more-button:hover {
+                background: #F1F5F9;
+            }
+
+        .project-badges {
+            display: flex;
+            align-items: center;
+            gap: .45rem;
+            flex-wrap: wrap;
+            margin-top: 1rem;
+        }
+
+        .role-badge,
+        .status-badge {
+            min-height: 29px;
+            display: inline-flex;
+            align-items: center;
+            gap: .35rem;
+            padding: .3rem .65rem;
+            border-radius: 8px;
+            font-size: .66rem;
+            font-weight: 800;
+        }
+
+        .owner-badge {
+            color: #047857;
+            background: #E7F8F0;
+        }
+
+        .collaborator-badge {
+            color: #6D28D9;
+            background: #F0E9FF;
+        }
+
+        .status-planning {
+            color: #1D4ED8;
+            background: #EAF1FF;
+        }
+
+        .status-active,
+        .status-completed {
+            color: #047857;
+            background: #E7F8F0;
+        }
+
+        .status-progress {
+            color: #C56B00;
+            background: #FFF2DA;
+        }
+
+        .status-neutral {
+            color: #475569;
+            background: #EEF2F6;
+        }
+
+        .status-badge .bi-circle-fill {
+            font-size: .42rem;
+        }
+
+        .project-members-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .65rem;
+            margin-top: 1rem;
+        }
+
+        .member-count {
+            display: flex;
+            align-items: center;
+            gap: .35rem;
+            color: #475569;
+            font-size: .71rem;
+            white-space: nowrap;
+        }
+
+        .member-avatars {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+        }
+
+        .member-avatar {
+            width: 31px;
+            height: 31px;
+            margin-left: -6px;
+            display: grid;
+            place-items: center;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            color: #fff;
+            background: linear-gradient( 135deg, var(--projects-navy), var(--projects-steel));
+            box-shadow: 0 2px 7px rgba(15, 23, 42, .16);
+            font-size: .58rem;
+            font-weight: 800;
+        }
+
+            .member-avatar:first-child {
+                margin-left: 0;
+            }
+
+        .empty-avatar {
+            border: 1.5px dashed #BCC6D4;
+            background: #fff;
+            box-shadow: none;
+        }
+
+        .team-progress-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            gap: .55rem;
+            margin-top: .9rem;
+        }
+
+        .team-progress-track {
+            height: 5px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: #E5EAF1;
+        }
+
+        .team-progress-value {
+            height: 100%;
+            border-radius: inherit;
+            background: linear-gradient( 90deg, var(--projects-primary), #1A67FF);
+        }
+
+        .team-progress-row > span {
+            min-width: 30px;
+            color: var(--projects-muted);
+            font-size: .64rem;
+            text-align: right;
+        }
+
+        .project-divider {
+            height: 1px;
+            margin: 1rem 0 .85rem;
+            background: #EDF1F5;
+        }
+
+        .project-created {
+            display: flex;
+            align-items: center;
+            gap: .45rem;
+            color: #687386;
+            font-size: .68rem;
+        }
+
+        .project-description {
+            min-height: 66px;
+            margin: .75rem 0 1rem;
+            color: #475569;
+            font-size: .72rem;
+            line-height: 1.55;
+        }
+
+        .project-card-actions {
+            display: grid;
+            grid-template-columns: 1.08fr .92fr;
+            gap: .55rem;
+            margin-top: auto;
+        }
+
+        .open-project-button,
+        .team-project-button {
+            min-height: 42px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .4rem;
+            border-radius: 9px;
+            font-size: .68rem;
+            font-weight: 800;
+            text-decoration: none;
+            white-space: nowrap;
+            transition: .15s ease;
+        }
+
+        .open-project-button {
+            color: #fff;
+            background: var(--projects-primary);
+            box-shadow: 0 7px 15px rgba(21, 94, 239, .16);
+        }
+
+            .open-project-button:hover {
+                color: #fff;
+                background: var(--projects-primary-dark);
+            }
+
+        .team-project-button {
+            border: 1px solid #87ADFF;
+            color: var(--projects-primary);
+            background: #fff;
+        }
+
+            .team-project-button:hover {
+                color: var(--projects-primary-dark);
+                background: #F4F7FF;
+            }
+
+        .projects-empty-state,
+        .filtered-empty-state {
+            min-height: 390px;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            padding: 2rem;
+            border: 1px dashed #CAD4E2;
+            border-radius: 20px;
+            background: #FAFBFD;
+            text-align: center;
+        }
+
+        .filtered-empty-state {
+            display: none;
+        }
+
+            .empty-state-icon,
+            .filtered-empty-state > i {
+                width: 75px;
+                height: 75px;
+                display: grid;
+                place-items: center;
+                margin-bottom: 1rem;
+                border-radius: 22px;
+                color: var(--projects-primary);
+                background: #EAF1FF;
+                font-size: 2rem;
+            }
+
+            .projects-empty-state h2,
+            .filtered-empty-state h2 {
+                margin: 0;
+                font-size: 1.2rem;
+            }
+
+            .projects-empty-state p,
+            .filtered-empty-state p {
+                max-width: 470px;
+                margin: .55rem 0 1.2rem;
+                color: var(--projects-muted);
+                font-size: .8rem;
+                line-height: 1.6;
+            }
+
+        @@media (max-width: 1300px) {
+            .projects-grid {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+        }
+
+        @@media (max-width: 1050px) {
+            .project-toolbar {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .projects-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @@media (max-width: 760px) {
+            .projects-header {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .generate-project-button {
+                width: 100%;
+            }
+
+            .project-statistics {
+                grid-template-columns: 1fr;
+            }
+
+            .project-toolbar {
+                grid-template-columns: 1fr;
+            }
+
+            .project-sort {
+                margin-left: 0;
+            }
+
+            .projects-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @@media (max-width: 420px) {
+            .stat-decoration {
+                display: none;
+            }
+
+            .stat-card {
+                grid-template-columns: auto minmax(0, 1fr);
+            }
+
+            .project-card-actions {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+}
+
+@section Scripts {
+    <script>
+        (() => {
+            const grid =
+                document.getElementById("projectsGrid");
+
+            if (!grid) {
+                return;
+            }
+
+            const searchInput =
+                document.getElementById("projectSearch");
+
+            const roleFilter =
+                document.getElementById("roleFilter");
+
+            const statusFilter =
+                document.getElementById("statusFilter");
+
+            const sortSelect =
+                document.getElementById("sortProjects");
+
+            const emptyState =
+                document.getElementById("filteredEmptyState");
+
+            const cards =
+                Array.from(
+                    grid.querySelectorAll(
+                        "[data-project-card]"));
+
+            function applyFiltersAndSorting() {
+                const searchValue =
+                    (searchInput?.value ?? "")
+                        .trim()
+                        .toLowerCase();
+
+                const selectedRole =
+                    roleFilter?.value ?? "all";
+
+                const selectedStatus =
+                    statusFilter?.value ?? "all";
+
+                const selectedSort =
+                    sortSelect?.value ?? "newest";
+
+                const sortedCards =
+                    [...cards].sort((left, right) => {
+                        if (selectedSort === "oldest") {
+                            return Number(left.dataset.created) -
+                                   Number(right.dataset.created);
+                        }
+
+                        if (selectedSort === "name") {
+                            return (left.dataset.name ?? "")
+                                .localeCompare(
+                                    right.dataset.name ?? "");
+                        }
+
+                        if (selectedSort === "team") {
+                            return Number(right.dataset.team) -
+                                   Number(left.dataset.team);
+                        }
+
+                        return Number(right.dataset.created) -
+                               Number(left.dataset.created);
+                    });
+
+                let visibleCount = 0;
+
+                sortedCards.forEach(card => {
+                    grid.appendChild(card);
+
+                    const searchableText =
+                        `${card.dataset.name ?? ""} ` +
+                        `${card.dataset.domain ?? ""}`;
+
+                    const matchesSearch =
+                        !searchValue ||
+                        searchableText.includes(searchValue);
+
+                    const matchesRole =
+                        selectedRole === "all" ||
+                        card.dataset.role === selectedRole;
+
+                    const matchesStatus =
+                        selectedStatus === "all" ||
+                        card.dataset.status === selectedStatus;
+
+                    const visible =
+                        matchesSearch &&
+                        matchesRole &&
+                        matchesStatus;
+
+                    card.style.display =
+                        visible ? "flex" : "none";
+
+                    if (visible) {
+                        visibleCount++;
+                    }
+                });
+
+                if (emptyState) {
+                    emptyState.style.display =
+                        visibleCount === 0
+                            ? "grid"
+                            : "none";
+                }
+            }
+
+            searchInput?.addEventListener(
+                "input",
+                applyFiltersAndSorting);
+
+            roleFilter?.addEventListener(
+                "change",
+                applyFiltersAndSorting);
+
+            statusFilter?.addEventListener(
+                "change",
+                applyFiltersAndSorting);
+
+            sortSelect?.addEventListener(
+                "change",
+                applyFiltersAndSorting);
+
+            applyFiltersAndSorting();
+        })();
+    </script>
+}

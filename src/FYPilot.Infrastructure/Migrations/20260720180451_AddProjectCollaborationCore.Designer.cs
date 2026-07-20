@@ -3,6 +3,7 @@ using System;
 using FYPilot.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FYPilot.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260720180451_AddProjectCollaborationCore")]
+    partial class AddProjectCollaborationCore
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -54,138 +57,6 @@ namespace FYPilot.Infrastructure.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("activity");
-                });
-
-            modelBuilder.Entity("FYPilot.Domain.Entities.AiOutputReview", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("AgentName")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)")
-                        .HasColumnName("agent_name");
-
-                    b.Property<string>("AttemptHistoryJson")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("attempt_history_json");
-
-                    b.Property<int>("Attempts")
-                        .HasColumnType("integer")
-                        .HasColumnName("attempts");
-
-                    b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("completed_at");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("DecisionReason")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("decision_reason");
-
-                    b.Property<string>("FirewallInputFlagsJson")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("firewall_input_flags_json");
-
-                    b.Property<string>("FirewallOutputFlagsJson")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("firewall_output_flags_json");
-
-                    b.Property<string>("FirewallStatus")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)")
-                        .HasColumnName("firewall_status");
-
-                    b.Property<string>("GeneratorModel")
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)")
-                        .HasColumnName("generator_model");
-
-                    b.Property<string>("GeneratorProvider")
-                        .HasMaxLength(60)
-                        .HasColumnType("character varying(60)")
-                        .HasColumnName("generator_provider");
-
-                    b.Property<string>("IssuesJson")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("issues_json");
-
-                    b.Property<int?>("MentorChatSessionId")
-                        .HasColumnType("integer")
-                        .HasColumnName("mentor_chat_session_id");
-
-                    b.Property<int?>("ProjectIdeaId")
-                        .HasColumnType("integer")
-                        .HasColumnName("project_idea_id");
-
-                    b.Property<int?>("QualityScore")
-                        .HasColumnType("integer")
-                        .HasColumnName("quality_score");
-
-                    b.Property<Guid>("ReviewRunId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("review_run_id");
-
-                    b.Property<string>("ReviewerModel")
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)")
-                        .HasColumnName("reviewer_model");
-
-                    b.Property<string>("ReviewerProvider")
-                        .HasMaxLength(60)
-                        .HasColumnType("character varying(60)")
-                        .HasColumnName("reviewer_provider");
-
-                    b.Property<string>("ReviewerVersion")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)")
-                        .HasColumnName("reviewer_version");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)")
-                        .HasColumnName("status");
-
-                    b.Property<string>("StrengthsJson")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("strengths_json");
-
-                    b.Property<bool>("Usable")
-                        .HasColumnType("boolean")
-                        .HasColumnName("usable");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("user_id");
-
-                    b.Property<bool>("WasRewritten")
-                        .HasColumnType("boolean")
-                        .HasColumnName("was_rewritten");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("MentorChatSessionId");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("ai_output_reviews");
                 });
 
             modelBuilder.Entity("FYPilot.Domain.Entities.Challenge", b =>
@@ -2462,23 +2333,6 @@ namespace FYPilot.Infrastructure.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("FYPilot.Domain.Entities.AiOutputReview", b =>
-                {
-                    b.HasOne("FYPilot.Domain.Entities.MentorChatSession", "MentorChatSession")
-                        .WithMany()
-                        .HasForeignKey("MentorChatSessionId");
-
-                    b.HasOne("FYPilot.Domain.Entities.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("MentorChatSession");
 
                     b.Navigation("User");
                 });

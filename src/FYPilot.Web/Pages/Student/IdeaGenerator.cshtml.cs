@@ -255,54 +255,171 @@ public class IdeaGeneratorModel(
     {
         var userId = UserId();
 
-        var ideaExists = await db.ProjectIdeas
-            .AnyAsync(i =>
-                i.Id == ideaId &&
-                i.UserId == userId);
+        await using var transaction =
+            await db.Database.BeginTransactionAsync(
+                System.Data.IsolationLevel.Serializable);
 
-        if (!ideaExists)
+        try
         {
-            TempData["Error"] =
-                "The selected idea was not found or does not belong to your account.";
+            var idea = await db.ProjectIdeas
+                .FirstOrDefaultAsync(i =>
+                    i.Id == ideaId &&
+                    i.UserId == userId);
+
+            if (idea == null)
+            {
+                TempData["Error"] =
+                    "The selected idea was not found or does not belong to your account.";
+
+                await transaction.RollbackAsync();
+
+                return RedirectToPage();
+            }
+
+            /*
+             * Check whether this idea already has a project.
+             * This prevents duplicate project workspaces when the user
+             * clicks Select Idea more than once.
+             */
+            var existingProject = await db.Projects
+                .Include(project => project.Members)
+                .FirstOrDefaultAsync(project =>
+                    project.ProjectIdeaId == ideaId);
+
+            if (existingProject != null)
+            {
+                if (existingProject.StudentId != userId)
+                {
+                    TempData["Error"] =
+                        "This project workspace does not belong to your account.";
+
+                    await transaction.RollbackAsync();
+
+                    return RedirectToPage();
+                }
+
+                var alreadyActiveMember =
+                    existingProject.Members.Any(member =>
+                        member.UserId == userId &&
+                        member.Status == "active");
+
+                /*
+                 * Repair an incomplete older project record when the project
+                 * exists but its owner membership was not created.
+                 */
+                if (!alreadyActiveMember)
+                {
+                    existingProject.Members.Add(
+                        new ProjectMember
+                        {
+                            UserId = userId,
+                            Role = "owner",
+                            Status = "active",
+                            JoinedAt = DateTime.UtcNow
+                        });
+                }
+
+                idea.IsSelected = true;
+                existingProject.UpdatedAt = DateTime.UtcNow;
+
+                await db.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                TempData["Success"] =
+                    "This idea already has a project workspace. " +
+                    "Your owner access was confirmed.";
+
+                return RedirectToPage();
+            }
+
+            /*
+             * Create one shared project workspace from the selected idea.
+             */
+            var project = new Project
+            {
+                ProjectIdeaId = idea.Id,
+
+                // Temporary compatibility owner field.
+                StudentId = userId,
+
+                SupervisorId = null,
+
+                Title = idea.Title,
+
+                Description =
+                    !string.IsNullOrWhiteSpace(idea.ProblemStatement)
+                        ? idea.ProblemStatement
+                        : idea.WhyUseful,
+
+                Technologies = idea.RequiredTechnologies,
+
+                Status = "planning",
+
+                ProgressPercentage = 0,
+
+                // One owner plus up to two collaborators.
+                MaximumMembers = 3,
+
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            /*
+             * The project creator automatically becomes the first member
+             * and owner of this specific project.
+             */
+            project.Members.Add(
+                new ProjectMember
+                {
+                    UserId = userId,
+                    Role = "owner",
+                    Status = "active",
+                    JoinedAt = DateTime.UtcNow
+                });
+
+            idea.IsSelected = true;
+
+            db.Projects.Add(project);
+
+            await db.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            TempData["Success"] =
+                $"The project “{project.Title}” was created successfully. " +
+                "You are now its owner.";
 
             return RedirectToPage();
         }
-
-        await using var transaction =
-            await db.Database.BeginTransactionAsync();
-
-        await db.ProjectIdeas
-            .Where(i => i.UserId == userId)
-            .ExecuteUpdateAsync(update =>
-                update.SetProperty(
-                    idea => idea.IsSelected,
-                    false));
-
-        var updatedRows = await db.ProjectIdeas
-            .Where(i =>
-                i.Id == ideaId &&
-                i.UserId == userId)
-            .ExecuteUpdateAsync(update =>
-                update.SetProperty(
-                    idea => idea.IsSelected,
-                    true));
-
-        if (updatedRows != 1)
+        catch (DbUpdateException exception)
         {
             await transaction.RollbackAsync();
 
+            logger.LogError(
+                exception,
+                "Failed to create a project from idea {IdeaId} for user {UserId}.",
+                ideaId,
+                userId);
+
             TempData["Error"] =
-                "The project idea could not be selected. Please try again.";
+                "The project could not be created. Please try again.";
 
             return RedirectToPage();
         }
+        catch (Exception exception)
+        {
+            await transaction.RollbackAsync();
 
-        await transaction.CommitAsync();
+            logger.LogError(
+                exception,
+                "Unexpected error while selecting idea {IdeaId} for user {UserId}.",
+                ideaId,
+                userId);
 
-        TempData["Success"] =
-            "Project idea selected successfully.";
+            TempData["Error"] =
+                "An unexpected error occurred while creating the project.";
 
-        return RedirectToPage();
+            return RedirectToPage();
+        }
     }
 
     /// <summary>

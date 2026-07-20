@@ -13,6 +13,16 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
     // Legacy project management
     public DbSet<Project> Projects { get; set; }
+
+    public DbSet<ProjectMember> ProjectMembers =>
+        Set<ProjectMember>();
+
+    public DbSet<ProjectInvitation> ProjectInvitations =>
+        Set<ProjectInvitation>();
+
+    public DbSet<TeammateRequest> TeammateRequests =>
+        Set<TeammateRequest>();
+
     public DbSet<ProjectTask> Tasks { get; set; }
     public DbSet<Milestone> Milestones { get; set; }
     public DbSet<Feedback> Feedbacks { get; set; }
@@ -106,6 +116,9 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
         modelBuilder.Entity<Project>(e =>
         {
+            e.Property(p => p.MaximumMembers)
+                .HasDefaultValue(3);
+
             e.HasOne(p => p.Student)
                 .WithMany(u => u.Projects)
                 .HasForeignKey(p => p.StudentId)
@@ -115,8 +128,137 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
                 .WithMany()
                 .HasForeignKey(p => p.SupervisorId)
                 .OnDelete(DeleteBehavior.SetNull);
-        });
 
+            e.HasOne(p => p.ProjectIdea)
+                .WithOne(i => i.Project)
+                .HasForeignKey<Project>(p => p.ProjectIdeaId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasIndex(p => p.ProjectIdeaId)
+                .IsUnique();
+        });
+        modelBuilder.Entity<ProjectMember>(e =>
+        {
+            e.Property(member => member.Role)
+                .HasMaxLength(30)
+                .HasDefaultValue("collaborator");
+
+            e.Property(member => member.Status)
+                .HasMaxLength(30)
+                .HasDefaultValue("active");
+
+            e.HasOne(member => member.Project)
+                .WithMany(project => project.Members)
+                .HasForeignKey(member => member.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(member => member.User)
+                .WithMany(user => user.ProjectMemberships)
+                .HasForeignKey(member => member.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasIndex(member => new
+            {
+                member.ProjectId,
+                member.UserId
+            }).IsUnique();
+
+            e.HasIndex(member => new
+            {
+                member.UserId,
+                member.Status
+            });
+        });
+        modelBuilder.Entity<ProjectInvitation>(e =>
+        {
+            e.Property(invitation => invitation.InvitedEmail)
+                .HasMaxLength(256);
+
+            e.Property(invitation => invitation.TokenHash)
+                .HasMaxLength(64);
+
+            e.Property(invitation => invitation.Status)
+                .HasMaxLength(30)
+                .HasDefaultValue("pending");
+
+            e.Property(invitation => invitation.Source)
+                .HasMaxLength(30)
+                .HasDefaultValue("student_invite");
+
+            e.HasOne(invitation => invitation.Project)
+                .WithMany(project => project.Invitations)
+                .HasForeignKey(invitation => invitation.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(invitation => invitation.InvitedByUser)
+                .WithMany()
+                .HasForeignKey(invitation => invitation.InvitedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(invitation => invitation.InvitedUser)
+                .WithMany()
+                .HasForeignKey(invitation => invitation.InvitedUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            e.HasOne(invitation => invitation.TeammateRequest)
+                .WithMany(request => request.Invitations)
+                .HasForeignKey(invitation => invitation.TeammateRequestId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            e.HasIndex(invitation => invitation.TokenHash)
+                .IsUnique();
+
+            e.HasIndex(invitation => new
+            {
+                invitation.ProjectId,
+                invitation.InvitedEmail,
+                invitation.Status
+            });
+        });
+        modelBuilder.Entity<TeammateRequest>(e =>
+        {
+            e.Property(request => request.Domain)
+                .HasMaxLength(200);
+
+            e.Property(request => request.Status)
+                .HasMaxLength(30)
+                .HasDefaultValue("pending");
+
+            e.Property(request => request.RequestedMembersCount)
+                .HasDefaultValue(1);
+
+            e.HasOne(request => request.Project)
+                .WithMany(project => project.TeammateRequests)
+                .HasForeignKey(request => request.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(request => request.RequestedByUser)
+                .WithMany()
+                .HasForeignKey(request => request.RequestedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(request => request.MatchedUser)
+                .WithMany()
+                .HasForeignKey(request => request.MatchedUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            e.HasOne(request => request.MatchedBySupervisor)
+                .WithMany()
+                .HasForeignKey(request => request.MatchedBySupervisorId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            e.HasIndex(request => new
+            {
+                request.ProjectId,
+                request.Status
+            });
+
+            e.HasIndex(request => new
+            {
+                request.Domain,
+                request.Status
+            });
+        });
         modelBuilder.Entity<Feedback>(e =>
         {
             e.HasOne(f => f.Supervisor)
