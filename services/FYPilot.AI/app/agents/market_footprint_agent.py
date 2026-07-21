@@ -15,7 +15,7 @@ from app.models.market_footprint_models import (
     RegionResult,
     RegionScoreBreakdown,
 )
-from app.services.llm_provider import ProviderChain
+from app.services.llm_provider import LLMResult, ProviderChain
 from app.services.market_footprint_scoring import (
     calculate_evidence_strength,
     calculate_overall_confidence_score,
@@ -86,6 +86,19 @@ class MarketFootprintAgent:
         request: MarketFootprintRequest,
     ) -> MarketFootprintResponse:
         """
+        Async public entry point (unchanged contract) — delegates to the
+        synchronous core via a worker thread, so the existing async FastAPI
+        router caller is unaffected. ReviewPipeline is a plain synchronous
+        component and cannot await this directly, so _analyze_sync is also
+        exposed as a plain synchronous method for that caller.
+        """
+        return await asyncio.to_thread(self._analyze_sync, request)
+
+    def _analyze_sync(
+        self,
+        request: MarketFootprintRequest,
+    ) -> MarketFootprintResponse:
+        """
         Two-step Groq-first flow.
 
         1. ProviderChain.search_web() uses Groq Compound Mini to collect
@@ -105,10 +118,7 @@ class MarketFootprintAgent:
             search_query = self._build_search_query(request)
 
             try:
-                search_result = await asyncio.to_thread(
-                    self.chain.search_web,
-                    search_query,
-                )
+                search_result = self.chain.search_web(search_query)
             except Exception as exception:
                 logger.exception(
                     "Market footprint Groq web search crashed: %s",
@@ -170,8 +180,7 @@ class MarketFootprintAgent:
             evidence_context=evidence_context,
         )
 
-        result = await asyncio.to_thread(
-            self.chain.generate_json,
+        result = self.chain.generate_json(
             prompt,
             use_search=False,
         )
@@ -209,6 +218,55 @@ class MarketFootprintAgent:
             model=(str(getattr(result, "model", "") or "") or None),
             source_result=search_result,
             normalized_sources=normalized_sources,
+        )
+
+    # =========================================================================
+    # Review pipeline integration (app/review/pipeline.py)
+    # =========================================================================
+
+    def build_safe_fallback(
+        self,
+        request: MarketFootprintRequest,
+    ) -> MarketFootprintResponse:
+        """
+        Public entry point for the deterministic fallback response -- the
+        same "insufficient evidence" template _analyze_sync already returns
+        internally when no verifiable evidence is available. Exposed
+        publicly so routers never reach into a private method (matches
+        ProjectRoadmapAgent.build_safe_fallback).
+        """
+        return self._insufficient_evidence(
+            provider="none", model=None, status="insufficient_evidence",
+        )
+
+    def generate_candidate_from_result(
+        self,
+        result: MarketFootprintResponse,
+    ) -> LLMResult | None:
+        """
+        Writer-stage entry point for ReviewPipeline. Takes an ALREADY-
+        COMPUTED result from _analyze_sync() (the router runs it once,
+        up front, so it can also read the real matched sources before
+        building the ReviewContext's allowed_source_metadata for the
+        source_metadata_only URL policy -- see market_footprint.py) and
+        wraps it as an LLMResult so it can flow through guarded_call like
+        any other LLM stage, without re-running the live search/generation.
+
+        Returns None -- signaling "no real provider output" to guarded_call,
+        which the pipeline maps to status="provider_unavailable" -- whenever
+        status != "ready" (insufficient_evidence or provider_unavailable),
+        since in that case there is no real candidate to review; the router
+        should use build_safe_fallback() directly instead.
+        """
+        if result.status != "ready":
+            return None
+
+        return LLMResult(
+            ok=True,
+            provider=result.provider,
+            model=result.model_used,
+            text="",
+            data=result.model_dump(),
         )
 
     # ── Response assembly ────────────────────────────────────────────────────

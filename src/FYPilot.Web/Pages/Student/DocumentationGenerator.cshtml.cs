@@ -48,6 +48,40 @@ public class DocumentationGeneratorModel : PageModel
 
     public bool HasGeneratedDocumentation => GeneratedDocumentation != null;
 
+    /// <summary>
+    /// The AI Quality Passport for the most recently generated SE
+    /// documentation for this idea, loaded from the database so it survives
+    /// the Post/Redirect/Get cycle. Reuses the same AiOutputReview entity and
+    /// AiQualityPassportDto as Mentor Chat and Roadmap -- linked via
+    /// ProjectIdeaId, no new column or migration needed.
+    /// </summary>
+    public AiOutputReview? LatestReview { get; private set; }
+
+    public (string CssClass, string Label) DescribeReview(AiOutputReview review) => review.Status switch
+    {
+        "approved" => ("bg-success", "Reviewed"),
+        "approved_with_minor_warnings" => ("bg-success", "Reviewed · minor notes"),
+        "unresolved" => ("bg-warning text-dark", "Unresolved · shown as-is"),
+        "rejected" => ("bg-danger", "Rejected · showing safe documentation"),
+        "firewall_blocked" => ("bg-danger", "Blocked by content firewall"),
+        "review_unavailable" => ("bg-secondary", "Not semantically reviewed"),
+        "provider_unavailable" => ("bg-secondary", "AI service unavailable"),
+        "schema_invalid" => ("bg-secondary", "Formatting issue"),
+        _ => ("bg-secondary", review.Status),
+    };
+
+    private async Task LoadLatestReviewAsync(int ideaId, int userId)
+    {
+        LatestReview = await _db.AiOutputReviews
+            .AsNoTracking()
+            .Where(r =>
+                r.ProjectIdeaId == ideaId &&
+                r.UserId == userId &&
+                r.AgentName == "SEDocumentationAgent")
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync();
+    }
+
     public async Task OnGetAsync(int? projectIdeaId)
     {
         var userId = GetCurrentUserId();
@@ -143,6 +177,7 @@ public class DocumentationGeneratorModel : PageModel
         try
         {
             GeneratedDocumentation = await _documentationGeneratorService.GenerateAsync(Request);
+            await LoadLatestReviewAsync(SelectedProjectIdeaId, userId);
 
             Message = "AI software engineering documentation generated successfully for the selected project idea.";
         }
@@ -226,6 +261,8 @@ public class DocumentationGeneratorModel : PageModel
         Request = BuildRequestFromIdea(idea);
         Request.UserId = userId;
         Request.ProjectIdeaId = ideaId;
+
+        await LoadLatestReviewAsync(ideaId, userId);
     }
 
     private async Task<ProjectIdea?> GetUserProjectIdeaAsync(int ideaId, int userId)

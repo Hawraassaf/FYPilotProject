@@ -1,3 +1,5 @@
+using FYPilot.Application.DTOs;
+
 namespace FYPilot.Application.DTOs.Documentation;
 
 // ── Outgoing request to POST /generate-se-documentation ─────────────────────
@@ -59,7 +61,8 @@ public record AiSeDocumentationServiceResponse(
     string? OllamaError,
     string? OllamaRawPreview,
     DateTime? GeneratedAt,
-    string Message
+    string Message,
+    AiQualityPassportDto? Review = null
 );
 
 public record AiSeDocumentationDto(

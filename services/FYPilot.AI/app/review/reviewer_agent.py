@@ -32,6 +32,7 @@ class ReviewerAgent:
         *,
         known_risky_claims: list[str],
         mandatory_fields: list[str],
+        extra_rubric: str = "",
     ) -> str:
         risky_claims_text = (
             "\n".join(f"- {claim}" for claim in known_risky_claims)
@@ -42,6 +43,8 @@ class ReviewerAgent:
         mandatory_fields_text = (
             ", ".join(mandatory_fields) if mandatory_fields else "none specified"
         )
+
+        extra_rubric_block = f"\n{extra_rubric.strip()}\n" if extra_rubric.strip() else ""
 
         history_text = (
             "\n".join(context.untrusted_conversation_history[-6:])
@@ -86,6 +89,7 @@ Evaluate the candidate output for:
   category "missing_mandatory_content" if empty, generic, or a placeholder
 - overall quality, clarity, and directness of the response (category "quality")
 - consistency with the conversation history (category "consistency")
+{extra_rubric_block}
 
 For EVERY issue, decide requiresCorrection yourself: true only if showing
 this content as-is would be misleading, unsupported, incomplete, or
@@ -116,11 +120,13 @@ Return exactly this JSON structure:
         *,
         known_risky_claims: list[str] | None = None,
         mandatory_fields: list[str] | None = None,
+        extra_rubric: str = "",
     ) -> LLMResult:
         prompt = self.build_prompt(
             candidate,
             context,
             known_risky_claims=known_risky_claims or [],
             mandatory_fields=mandatory_fields or [],
+            extra_rubric=extra_rubric,
         )
         return self.provider_chain.generate_json(prompt, use_search=False)

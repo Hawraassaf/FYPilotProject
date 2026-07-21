@@ -115,7 +115,8 @@ class ReviewPipeline:
                 "firewall_blocked", usable=False, output={},
                 warning="The initial answer was blocked by the content firewall.",
                 review_run_id=review_run_id, history=history, attempts=0,
-                firewall_findings=self._findings_of(writer_result),
+                firewall_input_findings=self._input_findings_of(writer_result),
+                firewall_output_findings=self._output_findings_of(writer_result),
             )
 
         version = writer_result.output or {}
@@ -154,6 +155,7 @@ class ReviewPipeline:
                         v, context,
                         known_risky_claims=self.config.known_risky_claims,
                         mandatory_fields=self.config.mandatory_fields,
+                        extra_rubric=self.config.extra_rubric,
                     ),
                     schema=ReviewerFindings,
                 ),
@@ -161,7 +163,9 @@ class ReviewPipeline:
             )
 
             if reviewer_result.provider_failed or reviewer_result.blocked or not reviewer_result.schema_valid:
-                return self._review_unavailable_result(state, review_run_id, history, attempt)
+                return self._review_unavailable_result(
+                    state, review_run_id, history, attempt, guarded=reviewer_result,
+                )
 
             findings = ReviewerFindings.model_validate(reviewer_result.output)
             has_critical = any(issue.severity == "critical" for issue in findings.issues)
@@ -230,7 +234,9 @@ class ReviewPipeline:
             )
 
             if rewrite_result.provider_failed:
-                return self._review_unavailable_result(state, review_run_id, history, attempt)
+                return self._review_unavailable_result(
+                    state, review_run_id, history, attempt, guarded=rewrite_result,
+                )
 
             if rewrite_result.blocked:
                 return self._firewall_blocked_result(
@@ -281,7 +287,9 @@ class ReviewPipeline:
         next_attempt = attempt + 1
 
         if fix_result.provider_failed or fix_result.blocked:
-            terminal = self._schema_invalid_result(state, review_run_id, history, next_attempt)
+            terminal = self._schema_invalid_result(
+                state, review_run_id, history, next_attempt, guarded=fix_result,
+            )
             return version, False, next_attempt, terminal
 
         history.append(
@@ -309,13 +317,18 @@ class ReviewPipeline:
 
     def _review_unavailable_result(
         self, state: _PipelineState, review_run_id: str, history: list[AttemptRecord], attempt: int,
+        *, guarded: GuardedResult | None = None,
     ) -> PipelineResult:
+        input_findings = self._input_findings_of(guarded)
+        output_findings = self._output_findings_of(guarded)
+
         if state.last_approved_output:
             output, findings = state.last_approved_output
             return self._result(
                 "review_unavailable", usable=True, output=output, reviewer_findings=findings,
                 warning="A newer answer could not be verified; showing your previously approved answer.",
                 review_run_id=review_run_id, history=history, attempts=attempt, review_unavailable=True,
+                firewall_input_findings=input_findings, firewall_output_findings=output_findings,
             )
 
         if state.last_reviewed_noncritical_candidate:
@@ -324,6 +337,7 @@ class ReviewPipeline:
                 "review_unavailable", usable=True, output=output, reviewer_findings=findings,
                 warning="A newer answer could not be verified; showing the last verified answer.",
                 review_run_id=review_run_id, history=history, attempts=attempt, review_unavailable=True,
+                firewall_input_findings=input_findings, firewall_output_findings=output_findings,
             )
 
         if self.config.allow_unreviewed_output and state.last_structurally_valid_candidate:
@@ -331,12 +345,14 @@ class ReviewPipeline:
                 "review_unavailable", usable=True, output=state.last_structurally_valid_candidate,
                 warning="This answer passed structural checks but semantic review could not be completed.",
                 review_run_id=review_run_id, history=history, attempts=attempt, review_unavailable=True,
+                firewall_input_findings=input_findings, firewall_output_findings=output_findings,
             )
 
         return self._result(
             "review_unavailable", usable=False, output={},
             warning="Semantic review could not be completed and no safe answer is available.",
             review_run_id=review_run_id, history=history, attempts=attempt, review_unavailable=True,
+            firewall_input_findings=input_findings, firewall_output_findings=output_findings,
         )
 
     def _rejected_result(
@@ -364,19 +380,25 @@ class ReviewPipeline:
 
     def _schema_invalid_result(
         self, state: _PipelineState, review_run_id: str, history: list[AttemptRecord], attempt: int,
+        *, guarded: GuardedResult | None = None,
     ) -> PipelineResult:
+        input_findings = self._input_findings_of(guarded)
+        output_findings = self._output_findings_of(guarded)
+
         if state.last_reviewed_noncritical_candidate:
             output, findings = state.last_reviewed_noncritical_candidate
             return self._result(
                 "schema_invalid", usable=True, output=output, reviewer_findings=findings,
                 warning="A later version never became structurally valid; showing the last verified answer.",
                 review_run_id=review_run_id, history=history, attempts=attempt,
+                firewall_input_findings=input_findings, firewall_output_findings=output_findings,
             )
 
         return self._result(
             "schema_invalid", usable=False, output={},
             warning="Output never became structurally valid.",
             review_run_id=review_run_id, history=history, attempts=attempt,
+            firewall_input_findings=input_findings, firewall_output_findings=output_findings,
         )
 
     def _firewall_blocked_result(
@@ -389,20 +411,23 @@ class ReviewPipeline:
         *,
         stage_label: str,
     ) -> PipelineResult:
+        input_findings = self._input_findings_of(guarded)
+        output_findings = self._output_findings_of(guarded)
+
         if state.last_reviewed_noncritical_candidate:
             output, findings = state.last_reviewed_noncritical_candidate
             return self._result(
                 "firewall_blocked", usable=True, output=output, reviewer_findings=findings,
                 warning=f"The {stage_label} answer was blocked by the content firewall; showing the last verified answer.",
                 review_run_id=review_run_id, history=history, attempts=attempt + 1,
-                firewall_findings=self._findings_of(guarded),
+                firewall_input_findings=input_findings, firewall_output_findings=output_findings,
             )
 
         return self._result(
             "firewall_blocked", usable=False, output={},
             warning=f"The {stage_label} answer was blocked by the content firewall and no safe earlier version exists.",
             review_run_id=review_run_id, history=history, attempts=attempt + 1,
-            firewall_findings=self._findings_of(guarded),
+            firewall_input_findings=input_findings, firewall_output_findings=output_findings,
         )
 
     def _timeout_result(
@@ -438,8 +463,12 @@ class ReviewPipeline:
         return (time.monotonic() - started_at) > self.config.max_total_seconds
 
     @staticmethod
-    def _findings_of(guarded: GuardedResult) -> list:
-        return guarded.verdict.findings if guarded.verdict else []
+    def _input_findings_of(guarded: GuardedResult | None) -> list:
+        return guarded.input_verdict.findings if guarded and guarded.input_verdict else []
+
+    @staticmethod
+    def _output_findings_of(guarded: GuardedResult | None) -> list:
+        return guarded.output_verdict.findings if guarded and guarded.output_verdict else []
 
     def _result(
         self,
@@ -454,7 +483,8 @@ class ReviewPipeline:
         decision: RewriteDecision | None = None,
         warning: str = "",
         review_unavailable: bool = False,
-        firewall_findings: list | None = None,
+        firewall_input_findings: list | None = None,
+        firewall_output_findings: list | None = None,
     ) -> PipelineResult:
         return PipelineResult(
             status=status,  # type: ignore[arg-type]
@@ -467,5 +497,6 @@ class ReviewPipeline:
             attempts=attempts,
             attemptHistory=history,
             reviewRunId=review_run_id,
-            firewallOutputFindings=firewall_findings or [],
+            firewallInputFindings=firewall_input_findings or [],
+            firewallOutputFindings=firewall_output_findings or [],
         )

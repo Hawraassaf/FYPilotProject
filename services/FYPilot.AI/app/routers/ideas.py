@@ -18,11 +18,53 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, HTTPException
 
 from app.agents.project_idea_agent import ProjectIdeaAgent, StudentProfile
+from app.review.context import ReviewContext
+from app.review.pipeline import ReviewPipeline
+from app.review.response import build_review_response
 
 
 logger = logging.getLogger("fypilot-ideas")
 
 router = APIRouter(tags=["Idea Generation"])
+
+
+def _build_review_context(profile: StudentProfile) -> ReviewContext:
+    trusted_structural_context = {
+        "experienceLevel": profile.experienceLevel,
+        "targetDifficulty": profile.targetDifficulty,
+        "availableHoursPerWeek": profile.availableHoursPerWeek,
+        "teamSize": profile.teamSize,
+        "skillRatings": profile.skillRatings,
+        "lebaneseMarketRelevance": profile.lebaneseMarketRelevance,
+        "regenerate": profile.regenerate,
+    }
+
+    untrusted_project_text = {
+        "major": profile.major,
+        "preferredDomain": profile.preferredDomain,
+        "studentSkills": ", ".join(profile.studentSkills),
+        "projectGoals": ", ".join(profile.projectGoals),
+        "previousIdeaTitles": ", ".join(profile.previousIdeaTitles),
+    }
+
+    return ReviewContext(
+        agent_name="ProjectIdeaAgent",
+        trusted_system_instructions=(
+            "ProjectIdeaAgent: generates exactly 4 personalized final year "
+            "project ideas for a student, grounded in a live web-search step "
+            "for Lebanese market context. innovationScore, feasibilityScore, "
+            "marketDemandScore, expectedDurationWeeks, and difficultyLevel "
+            "are always computed deterministically, never written by the LLM."
+        ),
+        trusted_structural_context=trusted_structural_context,
+        untrusted_project_text=untrusted_project_text,
+        untrusted_user_input="",
+        untrusted_conversation_history=[],
+        untrusted_existing_code=None,
+        untrusted_retrieved_web_content=[],
+        previous_model_outputs=[],
+        allowed_source_metadata=[],
+    )
 
 
 def _get(data: Dict[str, Any], *names: str, default=None):
@@ -347,7 +389,7 @@ def _source_name(
     return provider or "dynamic-fallback"
 
 
-def _response_to_dict(ideas, agent: ProjectIdeaAgent):
+def _response_to_dict(ideas, agent: ProjectIdeaAgent, review: Dict[str, Any] | None = None):
     llm_used = bool(getattr(agent, "last_llm_used", False))
 
     # Provider/model used to create the structured idea JSON.
@@ -376,11 +418,12 @@ def _response_to_dict(ideas, agent: ProjectIdeaAgent):
 
     return {
         "ideas": [
-            idea.model_dump()
-            if hasattr(idea, "model_dump")
+            idea.model_dump() if hasattr(idea, "model_dump")
+            else idea if isinstance(idea, dict)
             else idea.dict()
             for idea in ideas
         ],
+        "review": review or {},
         "agent": "ProjectIdeaAgent",
         "llmUsed": llm_used,
         "agentFile": inspect.getfile(ProjectIdeaAgent),
@@ -429,9 +472,22 @@ def generate_ideas(body: Dict[str, Any]):
     try:
         profile = _build_profile(body)
         agent = ProjectIdeaAgent()
-        ideas = agent.generate_ideas(profile)
+        context = _build_review_context(profile)
+        pipeline = ReviewPipeline("ProjectIdeaAgent")
+        result = pipeline.run(
+            lambda: agent.generate_candidate(profile),
+            context,
+            writer_trusted_parts=context.trusted_text_fields(),
+            writer_untrusted_parts=context.untrusted_text_fields(),
+        )
 
-        return _response_to_dict(ideas, agent)
+        ideas_payload = (
+            result.output.get("ideas", [])
+            if result.usable
+            else agent.build_safe_fallback(profile)["ideas"]
+        )
+
+        return _response_to_dict(ideas_payload, agent, review=build_review_response(result))
 
     except Exception as ex:
         logger.exception("Idea generation endpoint failed.")

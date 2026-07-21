@@ -16,7 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.services.llm_provider import ProviderChain
+from app.services.llm_provider import LLMResult, ProviderChain
 
 logger = logging.getLogger("fypilot-idea-comparison-agent")
 
@@ -175,6 +175,66 @@ class IdeaComparisonAgent:
             raw = self._fallback_raw_comparison(limited_request)
 
         return self._complete_and_validate(limited_request, raw)
+
+    # =========================================================================
+    # Review pipeline integration (app/review/pipeline.py)
+    # =========================================================================
+
+    def build_safe_fallback(self, request: IdeaComparisonRequest) -> IdeaComparisonResponse:
+        """
+        Public entry point for the deterministic fallback comparison -- the
+        same template-based path compare() already falls back to internally
+        when every provider fails, exposed publicly so routers never reach
+        into a private method (matches ProjectRoadmapAgent.build_safe_fallback).
+        Mirrors compare()'s own empty-ideas short-circuit so an empty batch
+        never reaches _fallback_raw_comparison, which assumes at least one idea.
+        """
+        ideas = self._normalize_ideas(request.ideas)
+
+        if not ideas:
+            return self._empty_response()
+
+        limited_request = IdeaComparisonRequest(
+            studentMajor=request.studentMajor,
+            experienceLevel=request.experienceLevel,
+            teamSize=request.teamSize,
+            availableHoursPerWeek=request.availableHoursPerWeek,
+            studentSkills=request.studentSkills,
+            skillRatings=request.skillRatings,
+            ideas=ideas,
+        )
+
+        raw = self._fallback_raw_comparison(limited_request)
+
+        return self._complete_and_validate(limited_request, raw)
+
+    def generate_candidate(self, request: IdeaComparisonRequest) -> LLMResult | None:
+        """
+        Writer-stage entry point for ReviewPipeline. Reuses compare() end to
+        end (LLM ranking -> deterministic score clamping/completion) rather
+        than duplicating it, then wraps the result as an LLMResult so it can
+        flow through guarded_call like any other LLM stage.
+
+        Returns None -- signaling "no real provider output" to guarded_call,
+        which the pipeline maps to status="provider_unavailable" -- both when
+        compare() had to fall back internally (self.last_llm_used is False)
+        and when there were no valid ideas to compare at all (compare()
+        returns _empty_response() without ever calling a provider, so
+        last_llm_used stays False either way); the router should use
+        build_safe_fallback() directly instead in both cases.
+        """
+        result = self.compare(request)
+
+        if not self.last_llm_used:
+            return None
+
+        return LLMResult(
+            ok=True,
+            provider=self.last_provider or "unknown",
+            model=self.last_model_used,
+            text="",
+            data=result.model_dump(),
+        )
 
     def _normalize_ideas(
         self,

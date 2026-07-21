@@ -91,12 +91,118 @@ else
             </div>
         </div>
 
+        @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+        {
+            <div class="alert alert-warning">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                @Model.ErrorMessage
+            </div>
+        }
+
+        @if (Model.Comparison != null)
+        {
+            var comparison = Model.Comparison;
+            var rankedIdeas = comparison.Ideas.OrderBy(i => i.Rank).ToList();
+
+            <section class="card mb-4 p-3">
+                <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+                    <div>
+                        <div class="text-uppercase text-muted small fw-bold">AI-Reviewed Comparison</div>
+                        <h2 class="h4 mb-1">@comparison.ComparisonTitle</h2>
+                        <p class="text-muted small mb-0">
+                            This is the AI agent's own reasoning-based ranking and recommendation,
+                            reviewed by FYPilot's semantic Reviewer before being shown here --
+                            separate from the deterministic score table below.
+                        </p>
+                    </div>
+
+                    @if (Model.LatestReview != null)
+                    {
+                        var (badgeClass, badgeLabel) = Model.DescribeReview(Model.LatestReview);
+                        <span class="badge @badgeClass" title="@Model.LatestReview.DecisionReason">
+                            <i class="bi bi-shield-check"></i> @badgeLabel
+                        </span>
+                    }
+                </div>
+
+                <p>@comparison.Summary</p>
+
+                <div class="alert alert-success py-2">
+                    <i class="bi bi-trophy me-1"></i>
+                    <strong>Best idea:</strong> @comparison.BestIdeaTitle
+                </div>
+
+                <div class="d-flex flex-column gap-3">
+                    @foreach (var idea in rankedIdeas)
+                    {
+                        <div class="border rounded-3 p-3 @(idea.IdeaId == comparison.BestIdeaId ? "border-success" : "")">
+                            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <h3 class="h6 mb-0">#@idea.Rank &mdash; @idea.Title</h3>
+                                <span class="badge @(idea.RiskLevel == "Low" ? "bg-success" : idea.RiskLevel == "Medium" ? "bg-warning text-dark" : "bg-danger")">
+                                    @idea.RiskLevel risk
+                                </span>
+                            </div>
+
+                            <div class="small text-muted my-2">
+                                Overall @idea.OverallScore &middot;
+                                Skill Fit @idea.SkillFitScore &middot;
+                                Feasibility @idea.FeasibilityScore &middot;
+                                Innovation @idea.InnovationScore &middot;
+                                Market @idea.MarketRelevanceScore
+                            </div>
+
+                            <p class="mb-2"><strong>Best for:</strong> @idea.BestFor</p>
+
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <strong class="small">Strengths</strong>
+                                    <ul class="small mb-0">
+                                        @foreach (var s in idea.Strengths)
+                                        {
+                                            <li>@s</li>
+                                        }
+                                    </ul>
+                                </div>
+                                <div class="col-md-6">
+                                    <strong class="small">Weaknesses</strong>
+                                    <ul class="small mb-0">
+                                        @foreach (var w in idea.Weaknesses)
+                                        {
+                                            <li>@w</li>
+                                        }
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <p class="mb-0 mt-2"><em>@idea.Recommendation</em></p>
+                        </div>
+                    }
+                </div>
+
+                <div class="alert alert-info mt-3 mb-0">
+                    <i class="bi bi-lightbulb me-1"></i>
+                    <strong>Final recommendation:</strong> @comparison.FinalRecommendation
+                </div>
+
+                @if (Model.ComparisonResponse?.LlmUsed == true)
+                {
+                    <p class="text-muted small mt-2 mb-0">
+                        Generated using @(Model.ComparisonResponse.Provider ?? "AI")@(string.IsNullOrWhiteSpace(Model.ComparisonResponse.ModelUsed) ? "" : $" ({Model.ComparisonResponse.ModelUsed})").
+                    </p>
+                }
+            </section>
+        }
+
         <div class="ic3-card">
 
             <div class="ic3-metric-header">
                 <div>
                     <div class="ic3-kicker">Compare By</div>
                     <h2>Choose one or more priorities</h2>
+                    <p class="text-muted small mb-0">
+                        Deterministic scores stored on each idea -- not the AI-reviewed
+                        comparison above.
+                    </p>
                 </div>
 
                 <button type="button" class="btn ic3-clear-btn" id="ic3ResetMetrics">

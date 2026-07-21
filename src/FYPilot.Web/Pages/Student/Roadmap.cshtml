@@ -52,6 +52,17 @@ else
             </div>
         }
 
+        @if (Model.LatestReview != null)
+        {
+            var (badgeClass, badgeLabel) = Model.DescribeReview(Model.LatestReview);
+
+            <div class="mb-3">
+                <span class="badge @badgeClass" title="@Model.LatestReview.DecisionReason">
+                    <i class="bi bi-shield-check"></i> @badgeLabel
+                </span>
+            </div>
+        }
+
         <div class="rm-hero-grid">
             <div class="rm-project-card">
                 <div class="rm-project-head">

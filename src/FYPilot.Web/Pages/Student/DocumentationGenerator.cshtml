@@ -870,6 +870,16 @@
         </div>
     }
 
+    @if (Model.LatestReview != null)
+    {
+        var (badgeClass, badgeLabel) = Model.DescribeReview(Model.LatestReview);
+        <div class="mb-3 no-print">
+            <span class="badge @badgeClass" title="@Model.LatestReview.DecisionReason">
+                <i class="bi bi-shield-check"></i> @badgeLabel
+            </span>
+        </div>
+    }
+
     <div asp-validation-summary="ModelOnly" class="text-danger mb-3 no-print"></div>
 
     <div class="sdoc-shell">

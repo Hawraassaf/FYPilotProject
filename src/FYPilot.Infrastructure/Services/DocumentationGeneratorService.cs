@@ -26,26 +26,61 @@ public class DocumentationGeneratorService : IDocumentationGeneratorService
 
     public async Task<GeneratedDocumentationDto> GenerateAsync(GenerateDocumentationRequest request)
     {
-        var aiDocumentation = await TryGenerateWithAiAsync(request);
+        var aiResponse = await TryGenerateWithAiAsync(request);
+        var aiDocumentation = aiResponse?.Documentation;
 
         var documentation = aiDocumentation != null
             ? BuildEntityFromAiDocumentation(request, aiDocumentation)
             : BuildEntityFromFallback(request);
 
         _db.ProjectDocumentations.Add(documentation);
+
+        var review = aiResponse?.Review;
+
+        if (review != null)
+        {
+            _db.AiOutputReviews.Add(new AiOutputReview
+            {
+                ReviewRunId = Guid.TryParse(review.ReviewRunId, out var reviewRunId)
+                    ? reviewRunId
+                    : Guid.NewGuid(),
+                UserId = request.UserId,
+                ProjectIdeaId = request.ProjectIdeaId,
+                MentorChatSessionId = null,
+                AgentName = "SEDocumentationAgent",
+                Status = review.Status,
+                Usable = review.Usable,
+                WasRewritten = review.Attempts > 1,
+                Attempts = review.Attempts,
+                QualityScore = review.QualityScore,
+                DecisionReason = review.DecisionReason,
+                GeneratorProvider = aiResponse!.Provider,
+                GeneratorModel = aiResponse.ModelUsed,
+                ReviewerProvider = review.ReviewerProvider,
+                ReviewerModel = review.ReviewerModel,
+                FirewallStatus = review.Status == "firewall_blocked" ? "blocked" : "passed",
+                FirewallInputFlagsJson = JsonSerializer.Serialize(review.FirewallInputFlags ?? []),
+                FirewallOutputFlagsJson = JsonSerializer.Serialize(review.FirewallOutputFlags ?? []),
+                IssuesJson = JsonSerializer.Serialize(review.Issues),
+                StrengthsJson = JsonSerializer.Serialize(review.Strengths),
+                AttemptHistoryJson = JsonSerializer.Serialize(review.AttemptHistory ?? []),
+                ReviewerVersion = review.ReviewerVersion,
+                CreatedAt = DateTime.UtcNow,
+                CompletedAt = DateTime.UtcNow
+            });
+        }
+
         await _db.SaveChangesAsync();
 
         return ToDto(documentation);
     }
 
-    private async Task<AiSeDocumentationDto?> TryGenerateWithAiAsync(GenerateDocumentationRequest request)
+    private async Task<AiSeDocumentationServiceResponse?> TryGenerateWithAiAsync(GenerateDocumentationRequest request)
     {
         try
         {
             var aiRequest = await BuildAiRequestAsync(request);
-            var response = await _aiService.GenerateSeDocumentationAsync(aiRequest);
-
-            return response?.Documentation;
+            return await _aiService.GenerateSeDocumentationAsync(aiRequest);
         }
         catch (Exception ex)
         {

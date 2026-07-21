@@ -510,6 +510,16 @@
         </div>
     }
 
+    @if (Model.LatestReview != null)
+    {
+        var (badgeClass, badgeLabel) = Model.DescribeReview(Model.LatestReview);
+        <div class="mb-2">
+            <span class="badge @badgeClass" title="@Model.LatestReview.DecisionReason">
+                <i class="bi bi-shield-check"></i> @badgeLabel
+            </span>
+        </div>
+    }
+
     <a href="/Student/IdeaGenerator" class="text-decoration-none d-inline-flex align-items-center gap-1 mb-2" style="color:var(--md-primary,#2457e6); font-weight:750; font-size:.85rem;">
         <i class="bi bi-arrow-left"></i>
         Back to Idea Generator

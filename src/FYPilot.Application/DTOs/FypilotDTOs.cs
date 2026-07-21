@@ -88,7 +88,10 @@ public record GenerateIdeasResponse(
     string? OllamaRawPreview,
     string? AgentFile,
     DateTime? GeneratedAt,
-    string Message
+    string Message,
+    string? Provider = null,
+    string? ModelUsed = null,
+    AiQualityPassportDto? Review = null
 );
 
 public record GeneratedIdeaDto(
@@ -433,7 +436,10 @@ public record ProjectRoadmapServiceResponse(
     string? OllamaError,
     string? OllamaRawPreview,
     DateTime? GeneratedAt,
-    string Message
+    string Message,
+    AiQualityPassportDto? Review = null,
+    string? Provider = null,
+    string? ModelUsed = null
 );
 
 public record ProjectRoadmapDto(
@@ -464,7 +470,10 @@ public record ProjectDnaServiceResponse(
     string? OllamaError,
     string? OllamaRawPreview,
     DateTime? GeneratedAt,
-    string Message
+    string Message,
+    string? Provider = null,
+    string? ModelUsed = null,
+    AiQualityPassportDto? Review = null
 );
 
 public record ProjectDnaAnalysisDto(
@@ -535,7 +544,10 @@ public record IdeaComparisonServiceResponse(
     string? OllamaError,
     string? OllamaRawPreview,
     DateTime? GeneratedAt,
-    string Message
+    string Message,
+    string? Provider = null,
+    string? ModelUsed = null,
+    AiQualityPassportDto? Review = null
 );
 
 public record IdeaComparisonDto(

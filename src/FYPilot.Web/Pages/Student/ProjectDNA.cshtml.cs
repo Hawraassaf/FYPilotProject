@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using FYPilot.Application.DTOs;
 using FYPilot.Application.Interfaces;
 using FYPilot.Domain.Entities;
@@ -23,6 +24,28 @@ public class ProjectDNAModel(ApplicationDbContext db, IAiServiceClient aiService
     public bool LlmUsed { get; private set; }
     public string? Source { get; private set; }
     public string? ErrorMessage { get; private set; }
+
+    /// <summary>
+    /// The AI Quality Passport for the most recently generated DNA analysis
+    /// for this idea, loaded from the database so it survives the
+    /// Post/Redirect/Get cycle. Reuses the same AiOutputReview entity and
+    /// AiQualityPassportDto as Roadmap/SE Documentation -- linked via
+    /// ProjectIdeaId, no new column or migration needed.
+    /// </summary>
+    public AiOutputReview? LatestReview { get; private set; }
+
+    public (string CssClass, string Label) DescribeReview(AiOutputReview review) => review.Status switch
+    {
+        "approved" => ("bg-success", "Reviewed"),
+        "approved_with_minor_warnings" => ("bg-success", "Reviewed · minor notes"),
+        "unresolved" => ("bg-warning text-dark", "Unresolved · shown as-is"),
+        "rejected" => ("bg-danger", "Rejected · showing safe analysis"),
+        "firewall_blocked" => ("bg-danger", "Blocked by content firewall"),
+        "review_unavailable" => ("bg-secondary", "Not semantically reviewed"),
+        "provider_unavailable" => ("bg-secondary", "AI service unavailable"),
+        "schema_invalid" => ("bg-secondary", "Formatting issue"),
+        _ => ("bg-secondary", review.Status),
+    };
 
     public record RiskItem(string Category, string Level, string Description, string Mitigation);
 
@@ -65,6 +88,7 @@ public class ProjectDNAModel(ApplicationDbContext db, IAiServiceClient aiService
             Source = response.Source;
 
             ApplyAiAnalysis(response.Analysis);
+            await PersistReviewAsync(userId, ideaId, response);
         }
         catch
         {
@@ -72,6 +96,54 @@ public class ProjectDNAModel(ApplicationDbContext db, IAiServiceClient aiService
         }
 
         return Page();
+    }
+
+    private async Task PersistReviewAsync(int userId, int ideaId, ProjectDnaServiceResponse response)
+    {
+        var review = response.Review;
+
+        if (review == null)
+        {
+            return;
+        }
+
+        db.AiOutputReviews.Add(new AiOutputReview
+        {
+            ReviewRunId = Guid.TryParse(review.ReviewRunId, out var reviewRunId)
+                ? reviewRunId
+                : Guid.NewGuid(),
+            UserId = userId,
+            ProjectIdeaId = ideaId,
+            MentorChatSessionId = null,
+            AgentName = "ProjectDNAAgent",
+            Status = review.Status,
+            Usable = review.Usable,
+            WasRewritten = review.Attempts > 1,
+            Attempts = review.Attempts,
+            QualityScore = review.QualityScore,
+            DecisionReason = review.DecisionReason,
+            GeneratorProvider = response.Provider,
+            GeneratorModel = response.ModelUsed,
+            ReviewerProvider = review.ReviewerProvider,
+            ReviewerModel = review.ReviewerModel,
+            FirewallStatus = review.Status == "firewall_blocked" ? "blocked" : "passed",
+            FirewallInputFlagsJson = JsonSerializer.Serialize(review.FirewallInputFlags ?? []),
+            FirewallOutputFlagsJson = JsonSerializer.Serialize(review.FirewallOutputFlags ?? []),
+            IssuesJson = JsonSerializer.Serialize(review.Issues),
+            StrengthsJson = JsonSerializer.Serialize(review.Strengths),
+            AttemptHistoryJson = JsonSerializer.Serialize(review.AttemptHistory ?? []),
+            ReviewerVersion = review.ReviewerVersion,
+            CreatedAt = DateTime.UtcNow,
+            CompletedAt = DateTime.UtcNow
+        });
+
+        await db.SaveChangesAsync();
+
+        LatestReview = await db.AiOutputReviews
+            .AsNoTracking()
+            .Where(r => r.ProjectIdeaId == ideaId && r.UserId == userId && r.AgentName == "ProjectDNAAgent")
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync();
     }
 
     private async Task LoadPageDataAsync(int userId, int? ideaId)
@@ -97,6 +169,14 @@ public class ProjectDNAModel(ApplicationDbContext db, IAiServiceClient aiService
         Analysis = null;
         LlmUsed = false;
         Source = null;
+
+        LatestReview = Idea == null
+            ? null
+            : await db.AiOutputReviews
+                .AsNoTracking()
+                .Where(r => r.ProjectIdeaId == Idea.Id && r.UserId == userId && r.AgentName == "ProjectDNAAgent")
+                .OrderByDescending(r => r.CreatedAt)
+                .FirstOrDefaultAsync();
     }
 
     private ProjectDnaRequest BuildProjectDnaRequest(StudentProfile? profile)

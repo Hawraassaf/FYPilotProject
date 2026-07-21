@@ -26,7 +26,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-from app.services.llm_provider import ProviderChain
+from app.services.llm_provider import LLMResult, ProviderChain
 
 logger = logging.getLogger("fypilot-roadmap-agent")
 
@@ -180,6 +180,47 @@ class ProjectRoadmapAgent:
 
         raw = self._fallback_raw_roadmap(request, total_weeks)
         return self._complete_and_validate(request, raw, total_weeks)
+
+    # =========================================================================
+    # Review pipeline integration (app/review/pipeline.py)
+    # =========================================================================
+
+    def build_safe_fallback(self, request: ProjectRoadmapRequest) -> ProjectRoadmapResponse:
+        """
+        Public entry point for the deterministic fallback roadmap -- the same
+        template-based path generate() already falls back to internally when
+        every provider fails, exposed publicly so routers never reach into a
+        private method (matches FypMentorAgent.build_safe_fallback).
+        """
+        total_weeks = self._normalize_weeks(request.expectedDurationWeeks)
+        raw = self._fallback_raw_roadmap(request, total_weeks)
+        return self._complete_and_validate(request, raw, total_weeks)
+
+    def generate_candidate(self, request: ProjectRoadmapRequest) -> LLMResult | None:
+        """
+        Writer-stage entry point for ReviewPipeline. Reuses generate() end to
+        end (LLM phase design -> deterministic week expansion) rather than
+        duplicating it, then wraps the result as an LLMResult so it can flow
+        through guarded_call like any other LLM stage.
+
+        Returns None -- signaling "no real provider output" to guarded_call,
+        which the pipeline maps to status="provider_unavailable" -- when
+        generate() itself had to fall back internally (self.last_llm_used is
+        False), since in that case there is no real candidate to review; the
+        router should use build_safe_fallback() directly instead.
+        """
+        result = self.generate(request)
+
+        if not self.last_llm_used:
+            return None
+
+        return LLMResult(
+            ok=True,
+            provider=self.last_provider or "unknown",
+            model=self.last_model_used,
+            text="",
+            data=result.model_dump(),
+        )
 
     # =========================================================================
     # LLM phase-plan generation

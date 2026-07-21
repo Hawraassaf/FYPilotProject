@@ -242,7 +242,10 @@ public class AiServiceClient : IAiServiceClient
     // ── Idea Comparison ────────────────────────────────────────────────────────
 
     public Task<IdeaComparisonServiceResponse?> CompareGeneratedIdeasAsync(IdeaComparisonRequest request) =>
-        PostAsync<IdeaComparisonServiceResponse>("/compare-generated-ideas", request);
+        PostAsync<IdeaComparisonServiceResponse>(
+            "/compare-generated-ideas",
+            request,
+            CamelCaseJsonOpts);
 
     // ── Defense Simulator ─────────────────────────────────────────────────────
 

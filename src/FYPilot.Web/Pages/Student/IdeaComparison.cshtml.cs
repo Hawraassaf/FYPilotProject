@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using FYPilot.Application.DTOs;
 using FYPilot.Application.Interfaces;
 using FYPilot.Domain.Entities;
@@ -28,14 +29,39 @@ public class IdeaComparisonModel(
 
     public string? ErrorMessage { get; private set; }
 
+    /// <summary>
+    /// The AI Quality Passport for the most recently generated comparison.
+    /// Unlike Project DNA (one existing idea), one comparison covers a
+    /// batch of the student's own already-generated ideas at once (there is
+    /// no single ProjectIdeaId to key off), so this is scoped by UserId +
+    /// AgentName only -- reuses the same AiOutputReview entity, no new
+    /// column or migration needed.
+    /// </summary>
+    public AiOutputReview? LatestReview { get; private set; }
+
+    public (string CssClass, string Label) DescribeReview(AiOutputReview review) => review.Status switch
+    {
+        "approved" => ("bg-success", "Reviewed"),
+        "approved_with_minor_warnings" => ("bg-success", "Reviewed · minor notes"),
+        "unresolved" => ("bg-warning text-dark", "Unresolved · shown as-is"),
+        "rejected" => ("bg-danger", "Rejected · showing safe comparison"),
+        "firewall_blocked" => ("bg-danger", "Blocked by content firewall"),
+        "review_unavailable" => ("bg-secondary", "Not semantically reviewed"),
+        "provider_unavailable" => ("bg-secondary", "AI service unavailable"),
+        "schema_invalid" => ("bg-secondary", "Formatting issue"),
+        _ => ("bg-secondary", review.Status),
+    };
+
     public async Task OnGetAsync()
     {
         await LoadPageDataAsync();
+        await LoadLatestReviewAsync();
     }
 
     public async Task<IActionResult> OnPostCompareAsync()
     {
         await LoadPageDataAsync();
+        await LoadLatestReviewAsync();
 
         if (Ideas.Count < 2)
         {
@@ -53,7 +79,65 @@ public class IdeaComparisonModel(
             return Page();
         }
 
+        await PersistReviewAsync(ComparisonResponse);
+
         return Page();
+    }
+
+    private async Task PersistReviewAsync(IdeaComparisonServiceResponse response)
+    {
+        var review = response.Review;
+
+        if (review == null)
+        {
+            return;
+        }
+
+        var userId = UserId();
+
+        db.AiOutputReviews.Add(new AiOutputReview
+        {
+            ReviewRunId = Guid.TryParse(review.ReviewRunId, out var reviewRunId)
+                ? reviewRunId
+                : Guid.NewGuid(),
+            UserId = userId,
+            ProjectIdeaId = null,
+            MentorChatSessionId = null,
+            AgentName = "IdeaComparisonAgent",
+            Status = review.Status,
+            Usable = review.Usable,
+            WasRewritten = review.Attempts > 1,
+            Attempts = review.Attempts,
+            QualityScore = review.QualityScore,
+            DecisionReason = review.DecisionReason,
+            GeneratorProvider = response.Provider,
+            GeneratorModel = response.ModelUsed,
+            ReviewerProvider = review.ReviewerProvider,
+            ReviewerModel = review.ReviewerModel,
+            FirewallStatus = review.Status == "firewall_blocked" ? "blocked" : "passed",
+            FirewallInputFlagsJson = JsonSerializer.Serialize(review.FirewallInputFlags ?? []),
+            FirewallOutputFlagsJson = JsonSerializer.Serialize(review.FirewallOutputFlags ?? []),
+            IssuesJson = JsonSerializer.Serialize(review.Issues),
+            StrengthsJson = JsonSerializer.Serialize(review.Strengths),
+            AttemptHistoryJson = JsonSerializer.Serialize(review.AttemptHistory ?? []),
+            ReviewerVersion = review.ReviewerVersion,
+            CreatedAt = DateTime.UtcNow,
+            CompletedAt = DateTime.UtcNow
+        });
+
+        await db.SaveChangesAsync();
+        await LoadLatestReviewAsync();
+    }
+
+    private async Task LoadLatestReviewAsync()
+    {
+        var userId = UserId();
+
+        LatestReview = await db.AiOutputReviews
+            .AsNoTracking()
+            .Where(r => r.UserId == userId && r.AgentName == "IdeaComparisonAgent")
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync();
     }
 
     public async Task<IActionResult> OnPostSelectAsync(int ideaId)

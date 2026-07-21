@@ -36,10 +36,42 @@ public class IdeaGeneratorModel(
     /// <summary>Latest Regional Demand Footprint snapshot per visible idea (ProjectIdeaId -> snapshot).</summary>
     public Dictionary<int, MarketOpportunitySnapshot> LatestMarketInsights { get; private set; } = [];
 
+    /// <summary>
+    /// AI Quality Passport for the most recent Market Footprint analysis per
+    /// visible idea (ProjectIdeaId -> review). Reuses the same AiOutputReview
+    /// entity as every other agent, keyed by ProjectIdeaId like Roadmap/SE
+    /// Documentation/Project DNA since Market Footprint analyzes one
+    /// existing idea at a time.
+    /// </summary>
+    public Dictionary<int, AiOutputReview> LatestMarketFootprintReviews { get; private set; } = [];
+
     public string? SuccessMessage { get; private set; }
     public string? ErrorMessage { get; private set; }
 
     public bool HasAssessedSkills => AssessedSkills.Any();
+
+    /// <summary>
+    /// The AI Quality Passport for the most recently generated idea batch.
+    /// Unlike Roadmap/SE Documentation, one idea-generation review covers a
+    /// batch of 4 NEW ideas at once (there is no single existing
+    /// ProjectIdeaId to key off before they're created), so this is scoped
+    /// by UserId + AgentName only -- reuses the same AiOutputReview entity,
+    /// no new column or migration needed.
+    /// </summary>
+    public AiOutputReview? LatestReview { get; private set; }
+
+    public (string CssClass, string Label) DescribeReview(AiOutputReview review) => review.Status switch
+    {
+        "approved" => ("bg-success", "Reviewed"),
+        "approved_with_minor_warnings" => ("bg-success", "Reviewed · minor notes"),
+        "unresolved" => ("bg-warning text-dark", "Unresolved · shown as-is"),
+        "rejected" => ("bg-danger", "Rejected · showing safe ideas"),
+        "firewall_blocked" => ("bg-danger", "Blocked by content firewall"),
+        "review_unavailable" => ("bg-secondary", "Not semantically reviewed"),
+        "provider_unavailable" => ("bg-secondary", "AI service unavailable"),
+        "schema_invalid" => ("bg-secondary", "Formatting issue"),
+        _ => ("bg-secondary", review.Status),
+    };
 
     public sealed record MarketFootprintSourceView(
         string Title,
@@ -154,6 +186,7 @@ public class IdeaGeneratorModel(
         }
 
         var entities = await SaveGeneratedIdeasAsync(userId, aiResponse.Ideas);
+        await PersistReviewAsync(userId, aiResponse);
 
         HttpContext.Session.SetInt32("IdeaGroupIndex", 0);
 
@@ -167,6 +200,8 @@ public class IdeaGeneratorModel(
             : "using the AI fallback engine";
 
         SuccessMessage = $"{entities.Count} project idea(s) generated and saved successfully {sourceText}.";
+
+        await LoadLatestReviewAsync(userId);
 
         return Page();
     }
@@ -234,6 +269,7 @@ public class IdeaGeneratorModel(
         }
 
         var entities = await SaveGeneratedIdeasAsync(userId, aiResponse.Ideas);
+        await PersistReviewAsync(userId, aiResponse);
 
         HttpContext.Session.SetInt32("IdeaGroupIndex", 0);
 
@@ -247,6 +283,8 @@ public class IdeaGeneratorModel(
             : "using the AI fallback engine";
 
         SuccessMessage = $"{entities.Count} new project idea(s) regenerated successfully {sourceText}.";
+
+        await LoadLatestReviewAsync(userId);
 
         return Page();
     }
@@ -490,6 +528,42 @@ public class IdeaGeneratorModel(
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
             db.MarketOpportunitySnapshots.Add(snapshot);
+
+            var review = response.Review;
+
+            if (review != null)
+            {
+                db.AiOutputReviews.Add(new AiOutputReview
+                {
+                    ReviewRunId = Guid.TryParse(review.ReviewRunId, out var reviewRunId)
+                        ? reviewRunId
+                        : Guid.NewGuid(),
+                    UserId = userId,
+                    ProjectIdeaId = ideaId,
+                    MentorChatSessionId = null,
+                    AgentName = "MarketFootprintAgent",
+                    Status = review.Status,
+                    Usable = review.Usable,
+                    WasRewritten = review.Attempts > 1,
+                    Attempts = review.Attempts,
+                    QualityScore = review.QualityScore,
+                    DecisionReason = review.DecisionReason,
+                    GeneratorProvider = response.Provider,
+                    GeneratorModel = response.ModelUsed,
+                    ReviewerProvider = review.ReviewerProvider,
+                    ReviewerModel = review.ReviewerModel,
+                    FirewallStatus = review.Status == "firewall_blocked" ? "blocked" : "passed",
+                    FirewallInputFlagsJson = JsonSerializer.Serialize(review.FirewallInputFlags ?? []),
+                    FirewallOutputFlagsJson = JsonSerializer.Serialize(review.FirewallOutputFlags ?? []),
+                    IssuesJson = JsonSerializer.Serialize(review.Issues),
+                    StrengthsJson = JsonSerializer.Serialize(review.Strengths),
+                    AttemptHistoryJson = JsonSerializer.Serialize(review.AttemptHistory ?? []),
+                    ReviewerVersion = review.ReviewerVersion,
+                    CreatedAt = DateTime.UtcNow,
+                    CompletedAt = DateTime.UtcNow
+                });
+            }
+
             await db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
@@ -671,6 +745,57 @@ public class IdeaGeneratorModel(
         );
     }
 
+    private async Task PersistReviewAsync(int userId, GenerateIdeasResponse aiResponse)
+    {
+        var review = aiResponse.Review;
+
+        if (review == null)
+        {
+            return;
+        }
+
+        db.AiOutputReviews.Add(new AiOutputReview
+        {
+            ReviewRunId = Guid.TryParse(review.ReviewRunId, out var reviewRunId)
+                ? reviewRunId
+                : Guid.NewGuid(),
+            UserId = userId,
+            ProjectIdeaId = null,
+            MentorChatSessionId = null,
+            AgentName = "ProjectIdeaAgent",
+            Status = review.Status,
+            Usable = review.Usable,
+            WasRewritten = review.Attempts > 1,
+            Attempts = review.Attempts,
+            QualityScore = review.QualityScore,
+            DecisionReason = review.DecisionReason,
+            GeneratorProvider = aiResponse.Provider,
+            GeneratorModel = aiResponse.ModelUsed,
+            ReviewerProvider = review.ReviewerProvider,
+            ReviewerModel = review.ReviewerModel,
+            FirewallStatus = review.Status == "firewall_blocked" ? "blocked" : "passed",
+            FirewallInputFlagsJson = JsonSerializer.Serialize(review.FirewallInputFlags ?? []),
+            FirewallOutputFlagsJson = JsonSerializer.Serialize(review.FirewallOutputFlags ?? []),
+            IssuesJson = JsonSerializer.Serialize(review.Issues),
+            StrengthsJson = JsonSerializer.Serialize(review.Strengths),
+            AttemptHistoryJson = JsonSerializer.Serialize(review.AttemptHistory ?? []),
+            ReviewerVersion = review.ReviewerVersion,
+            CreatedAt = DateTime.UtcNow,
+            CompletedAt = DateTime.UtcNow
+        });
+
+        await db.SaveChangesAsync();
+    }
+
+    private async Task LoadLatestReviewAsync(int userId)
+    {
+        LatestReview = await db.AiOutputReviews
+            .AsNoTracking()
+            .Where(r => r.UserId == userId && r.AgentName == "ProjectIdeaAgent")
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync();
+    }
+
     private async Task<List<ProjectIdea>> SaveGeneratedIdeasAsync(int userId, List<GeneratedIdeaDto> ideas)
     {
         var entities = new List<ProjectIdea>();
@@ -786,6 +911,8 @@ public class IdeaGeneratorModel(
             .ToList();
 
         await LoadLatestMarketInsightsAsync(userId);
+        await LoadLatestMarketFootprintReviewsAsync(userId);
+        await LoadLatestReviewAsync(userId);
     }
 
     /// <summary>
@@ -814,6 +941,33 @@ public class IdeaGeneratorModel(
 
         LatestMarketInsights = snapshots
             .GroupBy(s => s.ProjectIdeaId)
+            .ToDictionary(group => group.Key, group => group.First());
+    }
+
+    /// <summary>Latest Market Footprint AI Quality Passport per visible idea.</summary>
+    private async Task LoadLatestMarketFootprintReviewsAsync(int userId)
+    {
+        LatestMarketFootprintReviews = [];
+
+        var ideaIds = GeneratedIdeas.Select(i => i.Id).ToList();
+
+        if (ideaIds.Count == 0)
+        {
+            return;
+        }
+
+        var reviews = await db.AiOutputReviews
+            .AsNoTracking()
+            .Where(r =>
+                r.UserId == userId &&
+                r.AgentName == "MarketFootprintAgent" &&
+                r.ProjectIdeaId != null &&
+                ideaIds.Contains(r.ProjectIdeaId.Value))
+            .OrderByDescending(r => r.CreatedAt)
+            .ToListAsync();
+
+        LatestMarketFootprintReviews = reviews
+            .GroupBy(r => r.ProjectIdeaId!.Value)
             .ToDictionary(group => group.Key, group => group.First());
     }
 

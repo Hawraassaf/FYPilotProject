@@ -23,6 +23,16 @@
         </div>
     }
 
+    @if (Model.LatestReview != null)
+    {
+        var (badgeClass, badgeLabel) = Model.DescribeReview(Model.LatestReview);
+        <div class="mb-3">
+            <span class="badge @badgeClass" title="@Model.LatestReview.DecisionReason">
+                <i class="bi bi-shield-check"></i> @badgeLabel
+            </span>
+        </div>
+    }
+
     <div class="idea2-layout">
 
         <section class="idea2-settings-card">
@@ -388,6 +398,16 @@
                                                 @(hasReadyInsight ? "Evidence-backed" : "Not analyzed")
                                             </span>
                                         </div>
+
+                                        @if (Model.LatestMarketFootprintReviews.TryGetValue(idea.Id, out var footprintReview))
+                                        {
+                                            var (footprintBadgeClass, footprintBadgeLabel) = Model.DescribeReview(footprintReview);
+                                            <div class="mb-2">
+                                                <span class="badge @footprintBadgeClass" title="@footprintReview.DecisionReason">
+                                                    <i class="bi bi-shield-check"></i> @footprintBadgeLabel
+                                                </span>
+                                            </div>
+                                        }
 
                                         @{
                                             var showInlineError =

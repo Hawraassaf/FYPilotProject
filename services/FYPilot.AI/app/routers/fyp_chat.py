@@ -23,80 +23,10 @@ from fastapi import APIRouter
 
 from app.agents.fyp_mentor_agent import FypMentorAgent, FypMentorRequest
 from app.review.context import ReviewContext
-from app.review.models import AttemptRecord, PipelineResult
 from app.review.pipeline import ReviewPipeline
+from app.review.response import build_review_response, empty_review_response
 
 router = APIRouter(tags=["FYP Mentor Chat"])
-
-
-def _latest_reviewer_metadata(
-    history: list[AttemptRecord],
-) -> tuple[str | None, str | None]:
-    """
-    Reviewer provider/model of the most recent AttemptRecord for which the
-    Reviewer actually completed -- found during live verification to be
-    missing from the API response entirely (AiOutputReview.ReviewerProvider/
-    ReviewerModel were always null even when a review had clearly run).
-    """
-    for record in reversed(history):
-        if record.reviewed:
-            return record.reviewerProvider, record.reviewerModel
-
-    return None, None
-
-
-def _safe_attempt_history(history: list[AttemptRecord]) -> list[dict[str, Any]]:
-    """
-    Sanitized attempt-history entries for the Quality Passport / audit trail.
-    Deliberately excludes ReviewerFindings and any candidate output text --
-    only the same safe metadata AttemptRecord already carries for audit
-    purposes (outputHash, not the candidate itself).
-    """
-    return [
-        {
-            "attemptNumber": record.attemptNumber,
-            "stage": record.stage,
-            "outputHash": record.outputHash,
-            "firewallPassed": record.firewallPassed,
-            "firewallFlags": record.firewallFlags,
-            "schemaValid": record.schemaValid,
-            "reviewed": record.reviewed,
-            "decision": record.decision.model_dump() if record.decision else None,
-            "generatorProvider": record.generatorProvider,
-            "generatorModel": record.generatorModel,
-            "reviewerProvider": record.reviewerProvider,
-            "reviewerModel": record.reviewerModel,
-            "kept": record.kept,
-            "createdAt": record.createdAt.isoformat(),
-        }
-        for record in history
-    ]
-
-
-def _build_review_response(result: PipelineResult) -> dict[str, Any]:
-    findings = result.reviewerFindings
-    reviewer_provider, reviewer_model = _latest_reviewer_metadata(result.attemptHistory)
-
-    return {
-        "status": result.status,
-        "usable": result.usable,
-        "reviewUnavailable": result.reviewUnavailable,
-        "warning": result.warning,
-        "qualityScore": findings.qualityScore if findings else None,
-        "strengths": findings.strengths if findings else [],
-        "issues": [issue.model_dump() for issue in (findings.issues if findings else [])],
-        "decisionReason": result.decision.reason if result.decision else "",
-        "attempts": result.attempts,
-        "reviewerVersion": result.reviewerVersion,
-        "reviewRunId": result.reviewRunId,
-        "reviewerProvider": reviewer_provider,
-        "reviewerModel": reviewer_model,
-        # Rule/category names only -- never the raw matched secret, complete
-        # prompt, or discarded candidate content. See app/llm_firewall/models.py.
-        "firewallInputFlags": [f.rule for f in result.firewallInputFindings],
-        "firewallOutputFlags": [f.rule for f in result.firewallOutputFindings],
-        "attemptHistory": _safe_attempt_history(result.attemptHistory),
-    }
 
 
 def _build_review_context(request: FypMentorRequest) -> ReviewContext:
@@ -198,24 +128,9 @@ def fyp_chat(request: FypMentorRequest):
             "provider": None,
             "modelUsed": None,
             "ollamaError": None,
-            "review": {
-                "status": "approved",
-                "usable": True,
-                "reviewUnavailable": False,
-                "warning": "",
-                "qualityScore": None,
-                "strengths": [],
-                "issues": [],
-                "decisionReason": "Trivial exchange answered directly; not sent to an LLM or the review pipeline.",
-                "attempts": 0,
-                "reviewerVersion": "n/a",
-                "reviewRunId": "",
-                "reviewerProvider": None,
-                "reviewerModel": None,
-                "firewallInputFlags": [],
-                "firewallOutputFlags": [],
-                "attemptHistory": [],
-            },
+            "review": empty_review_response(
+                "Trivial exchange answered directly; not sent to an LLM or the review pipeline."
+            ),
             "generatedAt": datetime.now(timezone.utc).isoformat(),
             "message": "Mentor response generated successfully",
         }
@@ -242,7 +157,7 @@ def fyp_chat(request: FypMentorRequest):
         "provider": mentor_agent.last_provider,
         "modelUsed": mentor_agent.last_model_used,
         "ollamaError": mentor_agent.last_error,
-        "review": _build_review_response(result),
+        "review": build_review_response(result),
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "message": "Mentor response generated successfully",
     }

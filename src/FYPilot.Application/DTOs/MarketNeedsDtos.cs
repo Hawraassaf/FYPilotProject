@@ -114,5 +114,6 @@ public sealed record AnalyzeMarketNeedsResponse(
     List<string> Risks,
     string Recommendation,
     List<string> NextSteps,
-    DateTime AnalyzedAt
+    DateTime AnalyzedAt,
+    AiQualityPassportDto? Review = null
 );

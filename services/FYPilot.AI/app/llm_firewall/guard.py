@@ -48,7 +48,16 @@ class GuardedResult:
     error: str | None = None
     output: dict | None = None
     schema_valid: bool = False
-    verdict: FirewallVerdict | None = None
+    # Kept separate (rather than a single "verdict") so callers can classify
+    # findings by which side of the LLM call produced them -- input_verdict
+    # covers the prompt-inspection pass (secrets in trusted/untrusted parts,
+    # injection patterns in untrusted parts), output_verdict covers the
+    # post-call inspection of the candidate itself (secrets, injection-echo,
+    # URL policy). Either may be None when that check never ran (e.g.
+    # output_verdict is None when blocked at the input stage, since the LLM
+    # is never called).
+    input_verdict: FirewallVerdict | None = None
+    output_verdict: FirewallVerdict | None = None
     provider: str | None = None
     model: str | None = None
     sources: list[dict[str, Any]] = field(default_factory=list)
@@ -77,7 +86,7 @@ def guarded_call(request: GuardedCallRequest, firewall: LlmFirewall) -> GuardedR
     input_verdict = firewall.inspect_prompt(request.trusted_parts, request.untrusted_parts)
 
     if input_verdict.has_blocking_finding():
-        return GuardedResult(stage=request.stage, blocked=True, verdict=input_verdict)
+        return GuardedResult(stage=request.stage, blocked=True, input_verdict=input_verdict)
 
     llm_result: LLMResult | None = request.call_fn()
 
@@ -88,6 +97,7 @@ def guarded_call(request: GuardedCallRequest, firewall: LlmFirewall) -> GuardedR
             error=(llm_result.error if llm_result else "No provider returned a result."),
             provider=(llm_result.provider if llm_result else None),
             model=(llm_result.model if llm_result else None),
+            input_verdict=input_verdict,
         )
 
     candidate = llm_result.data if llm_result.data is not None else _parse_text(llm_result.text)
@@ -104,7 +114,8 @@ def guarded_call(request: GuardedCallRequest, firewall: LlmFirewall) -> GuardedR
         return GuardedResult(
             stage=request.stage,
             blocked=True,
-            verdict=output_verdict,
+            input_verdict=input_verdict,
+            output_verdict=output_verdict,
             provider=llm_result.provider,
             model=llm_result.model,
             sources=llm_result.sources,
@@ -119,7 +130,8 @@ def guarded_call(request: GuardedCallRequest, firewall: LlmFirewall) -> GuardedR
         stage=request.stage,
         output=validated,
         schema_valid=schema_ok,
-        verdict=output_verdict,
+        input_verdict=input_verdict,
+        output_verdict=output_verdict,
         provider=llm_result.provider,
         model=llm_result.model,
         sources=llm_result.sources,

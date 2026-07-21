@@ -68,5 +68,6 @@ public sealed record MarketFootprintResponse(
     List<string> Limitations,
     List<MarketFootprintRegionResult> Regions,
     List<MarketFootprintSourceItem> Sources,
-    DateTime AnalyzedAt
+    DateTime AnalyzedAt,
+    AiQualityPassportDto? Review = null
 );

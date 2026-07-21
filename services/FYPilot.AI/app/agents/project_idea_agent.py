@@ -22,7 +22,7 @@ from typing import Any, Optional
 import requests
 from pydantic import BaseModel, Field
 
-from app.services.llm_provider import ProviderChain
+from app.services.llm_provider import LLMResult, ProviderChain
 
 logger = logging.getLogger("fypilot-agent")
 
@@ -280,6 +280,60 @@ class ProjectIdeaAgent:
         ]
 
         return ideas[:IDEAS_PER_BATCH]
+
+    # =========================================================================
+    # Review pipeline integration (app/review/pipeline.py)
+    # =========================================================================
+
+    def build_safe_fallback(self, profile: StudentProfile) -> dict[str, Any]:
+        """
+        Public entry point for the deterministic fallback idea batch -- the
+        same template-based path generate_ideas() already falls back to
+        internally when every provider fails, exposed publicly so routers
+        never reach into a private method (matches
+        ProjectRoadmapAgent.build_safe_fallback).
+        """
+        raw_ideas = self._fallback_raw_ideas(profile)
+
+        backup_index = 0
+        while len(raw_ideas) < IDEAS_PER_BATCH:
+            raw_ideas.append(self._backup_raw_idea(profile, backup_index))
+            backup_index += 1
+
+        ideas = [
+            self._complete_and_score(profile, raw)
+            for raw in raw_ideas[:IDEAS_PER_BATCH]
+        ]
+
+        return {"ideas": [idea.model_dump() for idea in ideas]}
+
+    def generate_candidate(self, profile: StudentProfile) -> LLMResult | None:
+        """
+        Writer-stage entry point for ReviewPipeline. Reuses generate_ideas()
+        end to end (live search step -> LLM idea generation -> deterministic
+        scoring) rather than duplicating it, then wraps the result as an
+        LLMResult so it can flow through guarded_call like any other LLM
+        stage.
+
+        Returns None -- signaling "no real provider output" to guarded_call,
+        which the pipeline maps to status="provider_unavailable" -- when
+        generate_ideas() had to fall back internally (self.last_llm_used is
+        False), since in that case there is no real candidate to review; the
+        router should use build_safe_fallback() directly instead.
+        """
+        ideas = self.generate_ideas(profile)
+
+        if not self.last_llm_used:
+            return None
+
+        return LLMResult(
+            ok=True,
+            provider=self.last_provider or "unknown",
+            model=self.last_model_used,
+            text="",
+            data={"ideas": [idea.model_dump() for idea in ideas]},
+            sources=self.last_sources,
+        )
 
     def _build_search_query(self, profile: StudentProfile) -> str:
         """Build a deliberately small Compound search request."""

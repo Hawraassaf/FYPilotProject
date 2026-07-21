@@ -8,9 +8,70 @@ from pydantic import BaseModel, Field
 from app.agents.se_documentation.se_documentation_orchestrator import (
     SEDocumentationOrchestratorAgent as SEDocumentationAgent,
     SEDocumentationRequest,
+    SEDocStudentProfile,
+    SEDocSelectedIdea,
 )
+from app.review.context import ReviewContext
+from app.review.pipeline import ReviewPipeline
+from app.review.response import build_review_response
 
 router = APIRouter(tags=["SE Documentation"])
+
+
+def _build_review_context(request: SEDocumentationRequest) -> ReviewContext:
+    profile = request.studentProfile or SEDocStudentProfile()
+    idea = request.selectedIdea or SEDocSelectedIdea()
+
+    trusted_structural_context = {
+        "teamSize": profile.teamSize,
+        "availableHoursPerWeek": profile.availableHoursPerWeek,
+        "experienceLevel": profile.experienceLevel,
+        "major": profile.major,
+        "skillRatings": profile.skillRatings,
+        "expectedDurationWeeks": idea.expectedDurationWeeks,
+        "difficultyLevel": idea.difficultyLevel,
+        "roadmapPhaseCount": len(request.roadmap),
+    }
+
+    roadmap_summary = "\n".join(
+        f"Phase {phase.phaseNumber}: {phase.name} - {phase.objective}"
+        for phase in request.roadmap
+    )
+
+    untrusted_project_text = {
+        "ideaTitle": idea.title,
+        "problemStatement": idea.problemStatement,
+        "targetUsers": idea.targetUsers,
+        "whyUseful": idea.whyUseful,
+        "requiredTechnologies": idea.requiredTechnologies,
+        "requiredSkills": idea.requiredSkills,
+        "missingSkills": idea.missingSkills,
+        "domain": idea.domain,
+        "finalDeliverables": idea.finalDeliverables,
+        "studentSkills": ", ".join(profile.skills),
+        "roadmapSummary": roadmap_summary,
+        "existingNotes": request.existingNotes,
+    }
+
+    return ReviewContext(
+        agent_name="SEDocumentationAgent",
+        trusted_system_instructions=(
+            "SEDocumentationAgent: generates structured software engineering "
+            "documentation (requirements, use cases, modules, database design, "
+            "diagrams, testing plan, traceability matrix) for a student's "
+            "selected final year project idea and roadmap. Diagram fields and "
+            "documentationQualityScore are always computed deterministically, "
+            "never written by the LLM."
+        ),
+        trusted_structural_context=trusted_structural_context,
+        untrusted_project_text=untrusted_project_text,
+        untrusted_user_input="",
+        untrusted_conversation_history=[],
+        untrusted_existing_code=None,
+        untrusted_retrieved_web_content=[],
+        previous_model_outputs=[],
+        allowed_source_metadata=[],
+    )
 
 
 class SEDocumentationJobDto(BaseModel):
@@ -44,10 +105,21 @@ def test_se_documentation_router():
 @router.post("/generate-se-documentation")
 def generate_se_documentation(request: SEDocumentationRequest) -> Dict[str, Any]:
     agent = SEDocumentationAgent()
-    documentation = agent.generate(request)
+    context = _build_review_context(request)
+    pipeline = ReviewPipeline("SEDocumentationAgent")
+    result = pipeline.run(
+        lambda: agent.generate_candidate(request),
+        context,
+        writer_trusted_parts=context.trusted_text_fields(),
+        writer_untrusted_parts=context.untrusted_text_fields(),
+    )
+
+    documentation = (
+        result.output if result.usable else agent.build_safe_fallback(request).model_dump()
+    )
 
     return {
-        "documentation": documentation.model_dump(),
+        "documentation": documentation,
         "agent": "SEDocumentationAgent",
         "llmUsed": agent.last_llm_used,
         "source": agent.last_provider if agent.last_llm_used else "dynamic-fallback",
@@ -55,6 +127,7 @@ def generate_se_documentation(request: SEDocumentationRequest) -> Dict[str, Any]
         "modelUsed": agent.last_model_used,
         "ollamaError": agent.last_error,
         "ollamaRawPreview": agent.last_raw_llm_response,
+        "review": build_review_response(result),
         "generatedAt": datetime.utcnow().isoformat(),
         "message": "SE documentation generated successfully",
     }

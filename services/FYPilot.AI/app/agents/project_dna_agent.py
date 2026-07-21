@@ -16,7 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.services.llm_provider import ProviderChain
+from app.services.llm_provider import LLMResult, ProviderChain
 
 logger = logging.getLogger("fypilot-dna-agent")
 
@@ -162,6 +162,45 @@ class ProjectDNAAgent:
             raw = self._fallback_raw_analysis(request)
 
         return self._complete_and_validate(request, raw)
+
+    # =========================================================================
+    # Review pipeline integration (app/review/pipeline.py)
+    # =========================================================================
+
+    def build_safe_fallback(self, request: ProjectDNARequest) -> ProjectDNAResponse:
+        """
+        Public entry point for the deterministic fallback DNA analysis -- the
+        same template-based path analyze() already falls back to internally
+        when every provider fails, exposed publicly so routers never reach
+        into a private method (matches ProjectRoadmapAgent.build_safe_fallback).
+        """
+        return self._complete_and_validate(request, self._fallback_raw_analysis(request))
+
+    def generate_candidate(self, request: ProjectDNARequest) -> LLMResult | None:
+        """
+        Writer-stage entry point for ReviewPipeline. Reuses analyze() end to
+        end (LLM reasoning -> deterministic score clamping/completion) rather
+        than duplicating it, then wraps the result as an LLMResult so it can
+        flow through guarded_call like any other LLM stage.
+
+        Returns None -- signaling "no real provider output" to guarded_call,
+        which the pipeline maps to status="provider_unavailable" -- when
+        analyze() had to fall back internally (self.last_llm_used is False),
+        since in that case there is no real candidate to review; the router
+        should use build_safe_fallback() directly instead.
+        """
+        result = self.analyze(request)
+
+        if not self.last_llm_used:
+            return None
+
+        return LLMResult(
+            ok=True,
+            provider=self.last_provider or "unknown",
+            model=self.last_model_used,
+            text="",
+            data=result.model_dump(),
+        )
 
     def _build_prompt(self, request: ProjectDNARequest) -> str:
         skills_text = (

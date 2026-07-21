@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -325,3 +326,8 @@ class MarketNeedsResponse(CamelModel):
     )
 
     analyzed_at: datetime = Field(alias="analyzedAt")
+
+    # AI Quality Passport — the ReviewPipeline result for this analysis.
+    # Optional/defaulted so a raw candidate (before review) can still
+    # validate against this same schema; populated by the router.
+    review: dict[str, Any] | None = None

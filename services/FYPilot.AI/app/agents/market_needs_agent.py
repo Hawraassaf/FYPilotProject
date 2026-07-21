@@ -16,7 +16,7 @@ from app.models.market_needs_models import (
     TrendSignal,
     YearlyMarketPoint,
 )
-from app.services.llm_provider import ProviderChain
+from app.services.llm_provider import LLMResult, ProviderChain
 from app.services.market_needs_scoring import (
     calculate_confidence_score,
     calculate_demand_score,
@@ -69,10 +69,22 @@ class MarketNeedsAgent:
         self,
         request: MarketNeedsRequest,
     ) -> MarketNeedsResponse:
+        """
+        Async public entry point (unchanged contract) — delegates to the
+        synchronous core via a worker thread, so the existing async FastAPI
+        router caller is unaffected. ReviewPipeline is a plain synchronous
+        component and cannot await this directly, so _analyze_sync is also
+        exposed as a plain synchronous method for that caller.
+        """
+        return await asyncio.to_thread(self._analyze_sync, request)
+
+    def _analyze_sync(
+        self,
+        request: MarketNeedsRequest,
+    ) -> MarketNeedsResponse:
         prompt = self._build_prompt(request)
 
-        result = await asyncio.to_thread(
-            self.chain.generate_json,
+        result = self.chain.generate_json(
             prompt,
             use_search=request.use_search,
         )
@@ -96,6 +108,56 @@ class MarketNeedsAgent:
             model=(str(getattr(result, "model", "")) or None),
             error=(str(getattr(result, "error", "")) or None),
             provider_result=result,
+        )
+
+    # =========================================================================
+    # Review pipeline integration (app/review/pipeline.py)
+    # =========================================================================
+
+    def build_safe_fallback(
+        self,
+        request: MarketNeedsRequest,
+    ) -> MarketNeedsResponse:
+        """
+        Public entry point for the deterministic fallback response -- the
+        same low-confidence template _analyze_sync already returns
+        internally when every provider fails, exposed publicly so routers
+        never reach into a private method (matches
+        ProjectRoadmapAgent.build_safe_fallback).
+        """
+        return self._fallback(
+            request,
+            "Handled by the review pipeline's safe-fallback path.",
+        )
+
+    def generate_candidate_from_result(
+        self,
+        result: MarketNeedsResponse,
+    ) -> LLMResult | None:
+        """
+        Writer-stage entry point for ReviewPipeline. Takes an ALREADY-
+        COMPUTED result from _analyze_sync() (the router runs it once, up
+        front, so it can also read the real matched sources before building
+        the ReviewContext's allowed_source_metadata for the
+        source_metadata_only URL policy -- see market_needs_router.py) and
+        wraps it as an LLMResult so it can flow through guarded_call like
+        any other LLM stage, without re-running the live research.
+
+        Returns None -- signaling "no real provider output" to guarded_call,
+        which the pipeline maps to status="provider_unavailable" -- whenever
+        _analyze_sync() had to fall back internally (source == "fallback"),
+        since in that case there is no real candidate to review; the router
+        should use build_safe_fallback() directly instead.
+        """
+        if result.source == "fallback":
+            return None
+
+        return LLMResult(
+            ok=True,
+            provider=result.provider,
+            model=result.model_used,
+            text="",
+            data=result.model_dump(),
         )
 
     def _create_response(

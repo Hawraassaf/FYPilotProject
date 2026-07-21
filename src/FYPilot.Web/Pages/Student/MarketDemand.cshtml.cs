@@ -47,6 +47,27 @@ public class MarketDemandModel(
     public string? SuccessMessage { get; private set; }
     public string? ErrorMessage { get; private set; }
 
+    /// <summary>
+    /// The AI Quality Passport for the most recently generated Market Needs
+    /// analysis for this idea, loaded from the database so it survives the
+    /// Post/Redirect/Get cycle. Reuses the same AiOutputReview entity and
+    /// AiQualityPassportDto as every other agent, linked via ProjectIdeaId.
+    /// </summary>
+    public AiOutputReview? LatestReview { get; private set; }
+
+    public (string CssClass, string Label) DescribeReview(AiOutputReview review) => review.Status switch
+    {
+        "approved" => ("bg-success", "Reviewed"),
+        "approved_with_minor_warnings" => ("bg-success", "Reviewed · minor notes"),
+        "unresolved" => ("bg-warning text-dark", "Unresolved · shown as-is"),
+        "rejected" => ("bg-danger", "Rejected · showing safe analysis"),
+        "firewall_blocked" => ("bg-danger", "Blocked by content firewall"),
+        "review_unavailable" => ("bg-secondary", "Not semantically reviewed"),
+        "provider_unavailable" => ("bg-secondary", "AI service unavailable"),
+        "schema_invalid" => ("bg-secondary", "Formatting issue"),
+        _ => ("bg-secondary", review.Status),
+    };
+
     public string HistoricalDataNote =>
         "Annual values are normalized evidence indices from 0 to 100. " +
         "They are not revenue, market size, or Google Trends values. " +
@@ -112,6 +133,42 @@ public class MarketDemandModel(
 
             db.MarketDemandAnalysis.Add(analysis);
             idea.MarketDemandScore = analysis.DemandScore;
+
+            var review = response.Review;
+
+            if (review != null)
+            {
+                db.AiOutputReviews.Add(new AiOutputReview
+                {
+                    ReviewRunId = Guid.TryParse(review.ReviewRunId, out var reviewRunId)
+                        ? reviewRunId
+                        : Guid.NewGuid(),
+                    UserId = userId,
+                    ProjectIdeaId = idea.Id,
+                    MentorChatSessionId = null,
+                    AgentName = "MarketNeedsAgent",
+                    Status = review.Status,
+                    Usable = review.Usable,
+                    WasRewritten = review.Attempts > 1,
+                    Attempts = review.Attempts,
+                    QualityScore = review.QualityScore,
+                    DecisionReason = review.DecisionReason,
+                    GeneratorProvider = response.Provider,
+                    GeneratorModel = response.ModelUsed,
+                    ReviewerProvider = review.ReviewerProvider,
+                    ReviewerModel = review.ReviewerModel,
+                    FirewallStatus = review.Status == "firewall_blocked" ? "blocked" : "passed",
+                    FirewallInputFlagsJson = JsonSerializer.Serialize(review.FirewallInputFlags ?? []),
+                    FirewallOutputFlagsJson = JsonSerializer.Serialize(review.FirewallOutputFlags ?? []),
+                    IssuesJson = JsonSerializer.Serialize(review.Issues),
+                    StrengthsJson = JsonSerializer.Serialize(review.Strengths),
+                    AttemptHistoryJson = JsonSerializer.Serialize(review.AttemptHistory ?? []),
+                    ReviewerVersion = review.ReviewerVersion,
+                    CreatedAt = DateTime.UtcNow,
+                    CompletedAt = DateTime.UtcNow
+                });
+            }
+
             await db.SaveChangesAsync(cancellationToken);
 
             TempData["Success"] =
@@ -178,6 +235,15 @@ public class MarketDemandModel(
         {
             return NotFound();
         }
+
+        LatestReview = await db.AiOutputReviews
+            .AsNoTracking()
+            .Where(r =>
+                r.ProjectIdeaId == IdeaId &&
+                r.UserId == userId &&
+                r.AgentName == "MarketNeedsAgent")
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
 
         Analysis = await db.MarketDemandAnalysis
             .AsNoTracking()
