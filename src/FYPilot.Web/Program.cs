@@ -166,6 +166,15 @@ builder.Services.AddScoped<
 
 builder.Services.AddScoped<SupervisorAccessService>();
 
+// ── Shared Project Context ────────────────────────────────────────────────────
+builder.Services.AddScoped<
+    IProjectAccessService,
+    ProjectAccessService>();
+
+builder.Services.AddScoped<
+    IActiveProjectService,
+    ActiveProjectService>();
+
 // ── Background Workers ────────────────────────────────────────────────────────
 builder.Services.AddHostedService<MeetingReminderWorker>();
 
