@@ -15,7 +15,10 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<Project> Projects { get; set; }
 
     public DbSet<ProjectMember> ProjectMembers =>
-        Set<ProjectMember>();
+     Set<ProjectMember>();
+
+    public DbSet<ProjectActivity> ProjectActivities =>
+        Set<ProjectActivity>();
 
     public DbSet<ProjectInvitation> ProjectInvitations =>
         Set<ProjectInvitation>();
@@ -79,8 +82,21 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
         modelBuilder.Entity<User>(e =>
         {
-            e.HasIndex(u => u.Email).IsUnique();
-            e.Property(u => u.Role).HasDefaultValue("student");
+            e.HasIndex(user => user.Email)
+                .IsUnique();
+
+            e.Property(user => user.Role)
+                .HasDefaultValue("student");
+
+            e.Property(user => user.LastProjectPage)
+                .HasMaxLength(200);
+
+            e.HasOne(user => user.LastActiveProject)
+                .WithMany()
+                .HasForeignKey(user => user.LastActiveProjectId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            e.HasIndex(user => user.LastActiveProjectId);
         });
 
         modelBuilder.Entity<SupervisorProfile>(entity =>
@@ -168,6 +184,44 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
                 member.UserId,
                 member.Status
             });
+        });
+        modelBuilder.Entity<ProjectActivity>(e =>
+        {
+            e.Property(activity => activity.ActionType)
+                .HasMaxLength(80)
+                .IsRequired();
+
+            e.Property(activity => activity.Description)
+                .HasMaxLength(1000)
+                .IsRequired();
+
+            e.HasOne(activity => activity.Project)
+                .WithMany(project => project.Activities)
+                .HasForeignKey(activity => activity.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(activity => activity.User)
+                .WithMany(user => user.ProjectActivities)
+                .HasForeignKey(activity => activity.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(activity => activity.PreviousIdea)
+                .WithMany()
+                .HasForeignKey(activity => activity.PreviousIdeaId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            e.HasOne(activity => activity.NewIdea)
+                .WithMany()
+                .HasForeignKey(activity => activity.NewIdeaId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            e.HasIndex(activity => new
+            {
+                activity.ProjectId,
+                activity.CreatedAtUtc
+            });
+
+            e.HasIndex(activity => activity.UserId);
         });
         modelBuilder.Entity<ProjectInvitation>(e =>
         {

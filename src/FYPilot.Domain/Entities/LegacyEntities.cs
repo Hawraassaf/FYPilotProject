@@ -32,6 +32,9 @@ public class Project
     public ICollection<ProjectInvitation> Invitations { get; set; } = [];
 
     public ICollection<TeammateRequest> TeammateRequests { get; set; } = [];
+
+    public ICollection<ProjectActivity> Activities { get; set; } = [];
+
     public ICollection<ProjectTask> Tasks { get; set; } = [];
     public ICollection<Milestone> Milestones { get; set; } = [];
     public ICollection<Feedback> Feedbacks { get; set; } = [];
