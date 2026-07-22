@@ -348,6 +348,26 @@
                             }
                         </div>
 
+                        @if (Model.LatestQuestionsReview != null || Model.LatestEvaluationReview != null)
+                        {
+                            <div class="d-flex flex-wrap gap-2 mb-2">
+                                @if (Model.LatestQuestionsReview != null)
+                                {
+                                    var (qBadgeClass, qBadgeLabel) = Model.DescribeReview(Model.LatestQuestionsReview);
+                                    <span class="badge @qBadgeClass" title="@Model.LatestQuestionsReview.DecisionReason">
+                                        <i class="bi bi-shield-check"></i> Questions: @qBadgeLabel
+                                    </span>
+                                }
+                                @if (Model.LatestEvaluationReview != null)
+                                {
+                                    var (eBadgeClass, eBadgeLabel) = Model.DescribeReview(Model.LatestEvaluationReview);
+                                    <span class="badge @eBadgeClass" title="@Model.LatestEvaluationReview.DecisionReason">
+                                        <i class="bi bi-shield-check"></i> Latest evaluation: @eBadgeLabel
+                                    </span>
+                                }
+                            </div>
+                        }
+
                         <div class="defense-question-list">
                             @for (var index = 0; index < Model.State.Questions.Count; index++)
                             {

@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from app.agents.defense_simulator.defense_question_agent import DefenseQuestionAgent
 from app.agents.defense_simulator.defense_evaluator_agent import DefenseEvaluatorAgent
+from app.services.llm_provider import LLMResult
 
 
 class DefenseStudentProfileDto(BaseModel):
@@ -78,6 +79,28 @@ class EvaluateDefenseAnswerRequest(BaseModel):
     model: str = "qwen2.5-coder:7b"
 
 
+class DefenseQuestionBatch(BaseModel):
+    """Review-pipeline candidate shape for DefenseQuestionAgent -- just the
+    reviewable question list, without the llmUsed/source/metadata fields
+    the orchestrator adds afterward."""
+
+    questions: List[DefenseQuestionDto] = Field(default_factory=list)
+
+
+class DefenseEvaluationCandidate(BaseModel):
+    """Review-pipeline candidate shape for DefenseEvaluatorAgent -- just the
+    reviewable evaluation fields, without the llmUsed/source/metadata fields
+    the orchestrator adds afterward."""
+
+    score: int = 0
+    level: str = ""
+    strengths: List[str] = Field(default_factory=list)
+    missingPoints: List[str] = Field(default_factory=list)
+    improvedAnswer: str = ""
+    followUpQuestion: str = ""
+    feedbackSummary: str = ""
+
+
 class EvaluateDefenseAnswerResponse(BaseModel):
     score: int
     level: str
@@ -135,7 +158,7 @@ class DefenseSimulatorOrchestrator:
             source=self.question_agent.last_provider if llm_used else "dynamic-fallback",
             ollamaError=self.question_agent.last_error,
             modelUsed=self.question_agent.last_model_used or request.model,
-            consistencyWarnings=self._build_defense_consistency_warnings(questions),
+            consistencyWarnings=self.build_defense_consistency_warnings(questions),
             message="Defense questions generated successfully",
         )
 
@@ -151,6 +174,23 @@ class DefenseSimulatorOrchestrator:
             raw = self._fallback_evaluation(request)
             llm_used = False
 
+        cleaned = self._clean_evaluation_fields(raw)
+
+        return EvaluateDefenseAnswerResponse(
+            **cleaned,
+            llmUsed=llm_used,
+            source=self.evaluator_agent.last_provider if llm_used else "dynamic-fallback",
+            ollamaError=self.evaluator_agent.last_error,
+            modelUsed=self.evaluator_agent.last_model_used or request.model,
+        )
+
+    def _clean_evaluation_fields(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Shared deterministic cleanup used by both evaluate_answer() (the
+        existing, still-used response path) and generate_evaluation_candidate()/
+        build_safe_evaluation_fallback() (the review-pipeline path) -- extracted
+        so both apply IDENTICAL normalization instead of duplicating it.
+        """
         strengths = self._clean_string_list(raw.get("strengths", []))
         missing_points = self._clean_string_list(raw.get("missingPoints", []))
 
@@ -175,19 +215,106 @@ class DefenseSimulatorOrchestrator:
         feedback_summary = self._clean_text(raw.get("feedbackSummary", ""))
         feedback_summary = self._clean_unverified_project_claims(feedback_summary)
 
-        return EvaluateDefenseAnswerResponse(
-            score=self._clean_score(raw.get("score", 0)),
-            level=self._clean_level(raw.get("level", "")),
-            strengths=strengths,
-            missingPoints=missing_points,
-            improvedAnswer=improved_answer,
-            followUpQuestion=follow_up,
-            feedbackSummary=feedback_summary,
-            llmUsed=llm_used,
-            source=self.evaluator_agent.last_provider if llm_used else "dynamic-fallback",
-            ollamaError=self.evaluator_agent.last_error,
-            modelUsed=self.evaluator_agent.last_model_used or request.model,
+        return {
+            "score": self._clean_score(raw.get("score", 0)),
+            "level": self._clean_level(raw.get("level", "")),
+            "strengths": strengths,
+            "missingPoints": missing_points,
+            "improvedAnswer": improved_answer,
+            "followUpQuestion": follow_up,
+            "feedbackSummary": feedback_summary,
+        }
+
+    # =========================================================================
+    # Review pipeline integration (app/review/pipeline.py)
+    # =========================================================================
+
+    def generate_questions_candidate(
+        self,
+        request: GenerateDefenseQuestionsRequest,
+    ) -> LLMResult | None:
+        """
+        Writer-stage entry point for ReviewPipeline. Reuses generate_questions()'s
+        underlying LLM call + deterministic cleanup (_clean_questions: category/
+        difficulty coercion, sequential DQ-NN ids, count padding) rather than
+        duplicating it, then wraps the result as an LLMResult.
+
+        Returns None -- signaling "no real provider output" to guarded_call,
+        which the pipeline maps to status="provider_unavailable" -- whenever
+        the LLM call itself failed (no questions dict returned at all), since
+        in that case there is no real candidate to review; the router should
+        use build_safe_questions_fallback() directly instead.
+        """
+        raw = self.question_agent.generate_questions(request)
+        questions = self._clean_questions(raw, request)
+        llm_used = bool(raw and raw.get("questions"))
+
+        if not llm_used or not questions:
+            return None
+
+        return LLMResult(
+            ok=True,
+            provider=self.question_agent.last_provider or "unknown",
+            model=self.question_agent.last_model_used,
+            text="",
+            data={"questions": [question.model_dump() for question in questions]},
         )
+
+    def build_safe_questions_fallback(
+        self,
+        request: GenerateDefenseQuestionsRequest,
+    ) -> Dict[str, Any]:
+        """
+        Public entry point for the deterministic fallback question bank --
+        the same template bank generate_questions() already falls back to
+        internally when the LLM call fails, exposed publicly so routers
+        never reach into a private method.
+        """
+        questions = self._fallback_questions(request)
+        return {"questions": [question.model_dump() for question in questions]}
+
+    def generate_evaluation_candidate(
+        self,
+        request: EvaluateDefenseAnswerRequest,
+    ) -> LLMResult | None:
+        """
+        Writer-stage entry point for ReviewPipeline. Reuses the evaluator's
+        LLM call + the same deterministic cleanup evaluate_answer() applies
+        (_clean_evaluation_fields), then wraps the result as an LLMResult.
+
+        Returns None -- signaling "no real provider output" to guarded_call,
+        which the pipeline maps to status="provider_unavailable" -- whenever
+        the LLM call itself failed, since in that case there is no real
+        candidate to review; the router should use
+        build_safe_evaluation_fallback() directly instead.
+        """
+        raw = self.evaluator_agent.evaluate_answer(request)
+
+        if not raw:
+            return None
+
+        cleaned = self._clean_evaluation_fields(raw)
+
+        return LLMResult(
+            ok=True,
+            provider=self.evaluator_agent.last_provider or "unknown",
+            model=self.evaluator_agent.last_model_used,
+            text="",
+            data=cleaned,
+        )
+
+    def build_safe_evaluation_fallback(
+        self,
+        request: EvaluateDefenseAnswerRequest,
+    ) -> Dict[str, Any]:
+        """
+        Public entry point for the deterministic fallback evaluation -- the
+        same word-count/keyword-matching template evaluate_answer() already
+        falls back to internally when the LLM call fails, exposed publicly
+        so routers never reach into a private method.
+        """
+        raw = self._fallback_evaluation(request)
+        return self._clean_evaluation_fields(raw)
 
     def _clean_questions(
         self,
@@ -488,7 +615,7 @@ class DefenseSimulatorOrchestrator:
             "feedbackSummary": "This is an automatic fallback evaluation because Ollama was not available.",
         }
     
-    def _build_defense_consistency_warnings(
+    def build_defense_consistency_warnings(
         self,
         questions: List[DefenseQuestionDto],
     ) -> List[str]:

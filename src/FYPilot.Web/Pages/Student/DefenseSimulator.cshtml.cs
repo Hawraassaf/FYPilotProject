@@ -28,6 +28,30 @@ public class DefenseSimulatorModel(
 
     public string? SuccessMessage { get; private set; }
 
+    /// <summary>
+    /// AI Quality Passport for the most recently generated question batch
+    /// and the most recently evaluated answer for the current idea. Unlike
+    /// the practice session itself (session-only, ephemeral), these are
+    /// persisted to the database via the same AiOutputReview entity as
+    /// every other agent, linked via ProjectIdeaId.
+    /// </summary>
+    public AiOutputReview? LatestQuestionsReview { get; private set; }
+
+    public AiOutputReview? LatestEvaluationReview { get; private set; }
+
+    public (string CssClass, string Label) DescribeReview(AiOutputReview review) => review.Status switch
+    {
+        "approved" => ("bg-success", "Reviewed"),
+        "approved_with_minor_warnings" => ("bg-success", "Reviewed · minor notes"),
+        "unresolved" => ("bg-warning text-dark", "Unresolved · shown as-is"),
+        "rejected" => ("bg-danger", "Rejected · showing safe content"),
+        "firewall_blocked" => ("bg-danger", "Blocked by content firewall"),
+        "review_unavailable" => ("bg-secondary", "Not semantically reviewed"),
+        "provider_unavailable" => ("bg-secondary", "AI service unavailable"),
+        "schema_invalid" => ("bg-secondary", "Formatting issue"),
+        _ => ("bg-secondary", review.Status),
+    };
+
     [BindProperty]
     public int NumberOfQuestions { get; set; } = 3;
 
@@ -210,6 +234,9 @@ public class DefenseSimulatorModel(
             };
 
             SavePracticeState();
+            await PersistReviewAsync(
+                UserId(), "DefenseEvaluatorAgent", response.Review, response.Source, response.ModelUsed);
+            await LoadLatestReviewsAsync(UserId());
 
             SuccessMessage =
                 $"Question {QuestionIndex + 1} was evaluated successfully.";
@@ -295,6 +322,9 @@ public class DefenseSimulatorModel(
             };
 
             SavePracticeState();
+            await PersistReviewAsync(
+                UserId(), "DefenseQuestionAgent", response?.Review, response?.Source, response?.ModelUsed);
+            await LoadLatestReviewsAsync(UserId());
 
             SuccessMessage =
                 $"{questions.Count} new defense question(s) generated.";
@@ -440,6 +470,82 @@ public class DefenseSimulatorModel(
                 .OrderByDescending(item => item.CreatedAt)
                 .ThenByDescending(item => item.Id)
                 .FirstOrDefaultAsync();
+
+        await LoadLatestReviewsAsync(userId);
+    }
+
+    private async Task LoadLatestReviewsAsync(int userId)
+    {
+        LatestQuestionsReview = null;
+        LatestEvaluationReview = null;
+
+        if (Idea == null)
+        {
+            return;
+        }
+
+        LatestQuestionsReview = await db.AiOutputReviews
+            .AsNoTracking()
+            .Where(r =>
+                r.ProjectIdeaId == Idea.Id &&
+                r.UserId == userId &&
+                r.AgentName == "DefenseQuestionAgent")
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        LatestEvaluationReview = await db.AiOutputReviews
+            .AsNoTracking()
+            .Where(r =>
+                r.ProjectIdeaId == Idea.Id &&
+                r.UserId == userId &&
+                r.AgentName == "DefenseEvaluatorAgent")
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync();
+    }
+
+    private async Task PersistReviewAsync(
+        int userId,
+        string agentName,
+        AiQualityPassportDto? review,
+        string? provider,
+        string? modelUsed)
+    {
+        if (review == null || Idea == null)
+        {
+            return;
+        }
+
+        db.AiOutputReviews.Add(new AiOutputReview
+        {
+            ReviewRunId = Guid.TryParse(review.ReviewRunId, out var reviewRunId)
+                ? reviewRunId
+                : Guid.NewGuid(),
+            UserId = userId,
+            ProjectIdeaId = Idea.Id,
+            MentorChatSessionId = null,
+            AgentName = agentName,
+            Status = review.Status,
+            Usable = review.Usable,
+            WasRewritten = review.Attempts > 1,
+            Attempts = review.Attempts,
+            QualityScore = review.QualityScore,
+            DecisionReason = review.DecisionReason,
+            GeneratorProvider = provider,
+            GeneratorModel = modelUsed,
+            ReviewerProvider = review.ReviewerProvider,
+            ReviewerModel = review.ReviewerModel,
+            FirewallStatus = review.Status == "firewall_blocked" ? "blocked" : "passed",
+            FirewallInputFlagsJson = JsonSerializer.Serialize(review.FirewallInputFlags ?? []),
+            FirewallOutputFlagsJson = JsonSerializer.Serialize(review.FirewallOutputFlags ?? []),
+            IssuesJson = JsonSerializer.Serialize(review.Issues),
+            StrengthsJson = JsonSerializer.Serialize(review.Strengths),
+            AttemptHistoryJson = JsonSerializer.Serialize(review.AttemptHistory ?? []),
+            ReviewerVersion = review.ReviewerVersion,
+            CreatedAt = DateTime.UtcNow,
+            CompletedAt = DateTime.UtcNow
+        });
+
+        await db.SaveChangesAsync();
     }
 
     private static string BuildDocumentationSummary(

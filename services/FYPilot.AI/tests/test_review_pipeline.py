@@ -40,6 +40,8 @@ from app.review.models import ReviewerFindings, ReviewerIssue  # noqa: E402
 from app.review.pipeline import ReviewPipeline  # noqa: E402
 from app.review.registry import (  # noqa: E402
     AgentReviewConfig,
+    DefenseEvaluationCandidateSchema,
+    DefenseQuestionBatchCandidateSchema,
     IdeaComparisonCandidateSchema,
     IdeaGenerationCandidateSchema,
     MarketFootprintCandidateSchema,
@@ -1827,6 +1829,158 @@ class MarketNeedsPipelineTests(unittest.TestCase):
         result = pipeline.run(
             lambda: _ok(_needs_candidate()),
             context,
+            writer_trusted_parts={}, writer_untrusted_parts={},
+        )
+        self.assertEqual(result.status, "approved")
+        self.assertTrue(result.usable)
+        self.assertEqual(result.attempts, 1)
+
+
+def _defense_question(id_="DQ-01", category="Problem Understanding", difficulty="Medium"):
+    return {
+        "id": id_,
+        "category": category,
+        "difficulty": difficulty,
+        "question": "What problem does this project solve?",
+        "expectedAnswerPoints": ["point one", "point two", "point three"],
+        "followUpQuestion": "Can you elaborate on that?",
+    }
+
+
+def _defense_question_batch(questions=None):
+    questions = (
+        questions
+        if questions is not None
+        else [
+            _defense_question("DQ-01", "Problem Understanding"),
+            _defense_question("DQ-02", "Technical Architecture"),
+        ]
+    )
+    return {"questions": questions}
+
+
+class DefenseQuestionRegistryTests(unittest.TestCase):
+    """
+    Batch 7a of the review-pipeline rollout (see app/review/registry.py).
+    Covers the registry entry and the DefenseQuestionBatchCandidateSchema
+    structural invariants that must survive a Rewrite untouched.
+    """
+
+    def test_registry_entry_matches_spec(self):
+        config = get_agent_config("DefenseQuestionAgent")
+        self.assertEqual(config.max_rewrites, 1)
+        self.assertEqual(config.url_mode, "no_urls_allowed")
+        self.assertFalse(config.allow_unreviewed_output)
+        self.assertIn("questions", config.mandatory_fields)
+        self.assertTrue(config.extra_rubric.strip())
+        self.assertIs(config.schema, DefenseQuestionBatchCandidateSchema)
+
+    def test_valid_batch_passes_schema(self):
+        DefenseQuestionBatchCandidateSchema.model_validate(_defense_question_batch())
+
+    def test_empty_questions_rejected(self):
+        with self.assertRaises(Exception):
+            DefenseQuestionBatchCandidateSchema.model_validate({"questions": []})
+
+    def test_duplicate_ids_rejected(self):
+        candidate = _defense_question_batch(questions=[
+            _defense_question("DQ-01", "Problem Understanding"),
+            _defense_question("DQ-01", "Technical Architecture"),
+        ])
+        with self.assertRaises(Exception):
+            DefenseQuestionBatchCandidateSchema.model_validate(candidate)
+
+    def test_invalid_category_rejected(self):
+        candidate = _defense_question_batch(questions=[
+            _defense_question("DQ-01", category="Not A Real Category"),
+        ])
+        with self.assertRaises(Exception):
+            DefenseQuestionBatchCandidateSchema.model_validate(candidate)
+
+    def test_invalid_difficulty_rejected(self):
+        candidate = _defense_question_batch(questions=[
+            _defense_question("DQ-01", difficulty="Impossible"),
+        ])
+        with self.assertRaises(Exception):
+            DefenseQuestionBatchCandidateSchema.model_validate(candidate)
+
+
+class DefenseQuestionPipelineTests(unittest.TestCase):
+    def test_clean_batch_is_approved(self):
+        pipeline = ReviewPipeline(
+            "DefenseQuestionAgent",
+            reviewer_agent=_FakeReviewerAgent([_reviewer_ok(issues=[])]),
+            rewrite_agent=_FakeRewriteAgent(),
+        )
+        result = pipeline.run(
+            lambda: _ok(_defense_question_batch()),
+            _context(),
+            writer_trusted_parts={}, writer_untrusted_parts={},
+        )
+        self.assertEqual(result.status, "approved")
+        self.assertTrue(result.usable)
+        self.assertEqual(result.attempts, 1)
+
+
+def _defense_evaluation(score=78, level="Good", **overrides):
+    base = {
+        "score": score,
+        "level": level,
+        "strengths": ["clear explanation of the core idea"],
+        "missingPoints": ["missing a concrete implementation detail"],
+        "improvedAnswer": "A stronger answer would explain the reasoning with an example.",
+        "followUpQuestion": "Can you explain this with an example from your implementation?",
+        "feedbackSummary": "Good attempt overall, with room for more specific detail.",
+    }
+    base.update(overrides)
+    return base
+
+
+class DefenseEvaluationRegistryTests(unittest.TestCase):
+    """
+    Batch 7b of the review-pipeline rollout (see app/review/registry.py).
+    Covers the registry entry and the DefenseEvaluationCandidateSchema
+    structural invariant that must survive a Rewrite untouched.
+    """
+
+    def test_registry_entry_matches_spec(self):
+        config = get_agent_config("DefenseEvaluatorAgent")
+        self.assertEqual(config.max_rewrites, 1)
+        self.assertEqual(config.url_mode, "no_urls_allowed")
+        self.assertFalse(config.allow_unreviewed_output)
+        self.assertIn("feedbackSummary", config.mandatory_fields)
+        self.assertIn("improvedAnswer", config.mandatory_fields)
+        self.assertTrue(config.extra_rubric.strip())
+        self.assertIs(config.schema, DefenseEvaluationCandidateSchema)
+
+    def test_valid_evaluation_passes_schema(self):
+        DefenseEvaluationCandidateSchema.model_validate(_defense_evaluation(score=78, level="Good"))
+
+    def test_score_out_of_range_rejected(self):
+        candidate = _defense_evaluation(score=150, level="Excellent")
+        with self.assertRaises(Exception):
+            DefenseEvaluationCandidateSchema.model_validate(candidate)
+
+    def test_level_score_mismatch_rejected(self):
+        candidate = _defense_evaluation(score=95, level="Weak")
+        with self.assertRaises(Exception):
+            DefenseEvaluationCandidateSchema.model_validate(candidate)
+
+    def test_all_level_bands_are_internally_consistent(self):
+        for score, level in [(95, "Excellent"), (85, "Very Good"), (70, "Good"), (55, "Average"), (20, "Weak")]:
+            DefenseEvaluationCandidateSchema.model_validate(_defense_evaluation(score=score, level=level))
+
+
+class DefenseEvaluationPipelineTests(unittest.TestCase):
+    def test_clean_evaluation_is_approved(self):
+        pipeline = ReviewPipeline(
+            "DefenseEvaluatorAgent",
+            reviewer_agent=_FakeReviewerAgent([_reviewer_ok(issues=[])]),
+            rewrite_agent=_FakeRewriteAgent(),
+        )
+        result = pipeline.run(
+            lambda: _ok(_defense_evaluation()),
+            _context(),
             writer_trusted_parts={}, writer_untrusted_parts={},
         )
         self.assertEqual(result.status, "approved")

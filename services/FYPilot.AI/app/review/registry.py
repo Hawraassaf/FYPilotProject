@@ -12,6 +12,10 @@ from dataclasses import dataclass, field
 
 from pydantic import BaseModel, model_validator
 
+from app.agents.defense_simulator.defense_simulator_orchestrator import (
+    DefenseEvaluationCandidate,
+    DefenseQuestionBatch,
+)
 from app.agents.fyp_mentor_agent import FypMentorAnswer
 from app.agents.project_dna_agent import ProjectDNAResponse
 from app.agents.project_idea_agent import IDEAS_PER_BATCH, ProjectIdea
@@ -591,6 +595,152 @@ class MarketNeedsCandidateSchema(MarketNeedsResponse):
         return self
 
 
+# Migrated from DefenseSimulatorOrchestrator._clean_unverified_project_claims's
+# replacement dict (see defense_simulator_orchestrator.py) -- there they were
+# blindly regex-replaced; here they are domain knowledge fed into the semantic
+# Reviewer's prompt, matching how _MENTOR_KNOWN_RISKY_CLAIMS was migrated from
+# answer_review_agent.py. The regex cleanup itself is left in place as a
+# defense-in-depth backstop, not removed.
+_DEFENSE_KNOWN_RISKY_CLAIMS = [
+    "ASP.NET Core Identity",
+    "data is encrypted before storing",
+    "regular security audits",
+    "security audits will be conducted",
+    "deployment is complete",
+    "deployed to production",
+    "natural language processing techniques",
+    "React",
+    "Node.js",
+    "Vue",
+    "Angular",
+    "Flutter",
+    "Azure",
+    "AWS",
+    "Kubernetes",
+    "blockchain",
+]
+
+_DEFENSE_QUESTIONS_VALID_CATEGORIES = {
+    "Problem Understanding",
+    "Technical Architecture",
+    "Database Design",
+    "AI Integration",
+    "Feasibility",
+    "Testing and Validation",
+    "Security",
+    "Limitations",
+    "Future Work",
+    "Business Value",
+}
+_DEFENSE_QUESTIONS_VALID_DIFFICULTIES = {"Easy", "Medium", "Hard"}
+
+_DEFENSE_QUESTIONS_EXTRA_RUBRIC = """
+DEFENSE QUESTION-SPECIFIC REVIEW CRITERIA (in addition to the standard criteria above):
+- Do NOT invent or imply confirmed project features (security audits,
+  database encryption, ASP.NET Core Identity, completed deployment) unless
+  the selected idea/roadmap context explicitly states them; flag as
+  "unsupported_claim".
+- category must be one of: Problem Understanding, Technical Architecture,
+  Database Design, AI Integration, Feasibility, Testing and Validation,
+  Security, Limitations, Future Work, Business Value. Flag any other value
+  as "missing_mandatory_content".
+- difficulty must be one of: Easy, Medium, Hard.
+- Technology alignment: flag (category "project_alignment") any mention of
+  a technology outside the project's actual stack.
+- Each question should be specific to this project, not generic.
+"""
+
+
+class DefenseQuestionBatchCandidateSchema(DefenseQuestionBatch):
+    """
+    Wraps the orchestrator's own DefenseQuestionBatch with the structural
+    invariants that must survive a Rewrite untouched -- unique question ids,
+    and every question's category/difficulty drawn from the fixed valid
+    sets DefenseSimulatorOrchestrator itself enforces deterministically
+    (_clean_questions). A violation here is a schema failure
+    (schema_ok=False), handled entirely by the pipeline's existing
+    structural-repair path -- no changes to pipeline.py's decision logic
+    were needed for this.
+    """
+
+    @model_validator(mode="after")
+    def _check_structural_invariants(self) -> "DefenseQuestionBatchCandidateSchema":
+        if not self.questions:
+            raise ValueError("questions must not be empty")
+
+        ids = [question.id for question in self.questions]
+
+        if len(ids) != len(set(ids)):
+            raise ValueError(f"question ids are not unique: {ids}")
+
+        for question in self.questions:
+            if question.category not in _DEFENSE_QUESTIONS_VALID_CATEGORIES:
+                raise ValueError(
+                    f"question '{question.id}' has an invalid category: {question.category}"
+                )
+
+            if question.difficulty not in _DEFENSE_QUESTIONS_VALID_DIFFICULTIES:
+                raise ValueError(
+                    f"question '{question.id}' has an invalid difficulty: {question.difficulty}"
+                )
+
+        return self
+
+
+_DEFENSE_EVALUATION_EXTRA_RUBRIC = """
+DEFENSE EVALUATION-SPECIFIC REVIEW CRITERIA (in addition to the standard criteria above):
+- Do NOT invent or imply confirmed project features (security audits,
+  database encryption, ASP.NET Core Identity, completed deployment) unless
+  clearly present in the provided project context; flag as
+  "unsupported_claim".
+- Do not mark a point as missing if the student's answer covers it with
+  different wording; flag an unfair missingPoints entry as category
+  "quality".
+- feedbackSummary and improvedAnswer should be constructive and specific to
+  the actual question and answer, not generic.
+"""
+
+
+def _defense_score_to_level(score: int) -> str:
+    if score >= 90:
+        return "Excellent"
+    if score >= 80:
+        return "Very Good"
+    if score >= 65:
+        return "Good"
+    if score >= 50:
+        return "Average"
+    return "Weak"
+
+
+class DefenseEvaluationCandidateSchema(DefenseEvaluationCandidate):
+    """
+    Wraps the orchestrator's own DefenseEvaluationCandidate with the
+    structural invariant that must survive a Rewrite untouched -- level
+    must equal the deterministic score-to-level mapping
+    DefenseSimulatorOrchestrator._score_to_level already uses (0-100 score,
+    exactly 5 level bands). A violation here is a schema failure
+    (schema_ok=False), handled entirely by the pipeline's existing
+    structural-repair path -- no changes to pipeline.py's decision logic
+    were needed for this.
+    """
+
+    @model_validator(mode="after")
+    def _check_structural_invariants(self) -> "DefenseEvaluationCandidateSchema":
+        if not (0 <= self.score <= 100):
+            raise ValueError(f"score must be between 0 and 100, got {self.score}")
+
+        expected_level = _defense_score_to_level(self.score)
+
+        if self.level != expected_level:
+            raise ValueError(
+                f"level '{self.level}' does not match the deterministic mapping "
+                f"for score {self.score} (expected '{expected_level}')"
+            )
+
+        return self
+
+
 AGENT_REGISTRY: dict[str, AgentReviewConfig] = {
     "FypMentorAgent": AgentReviewConfig(
         schema=FypMentorAnswer,
@@ -689,6 +839,26 @@ AGENT_REGISTRY: dict[str, AgentReviewConfig] = {
         mandatory_fields=["targetSector", "recommendation"],
         max_total_seconds=120.0,
         extra_rubric=_MARKET_NEEDS_EXTRA_RUBRIC,
+    ),
+    "DefenseQuestionAgent": AgentReviewConfig(
+        schema=DefenseQuestionBatchCandidateSchema,
+        max_rewrites=1,
+        url_mode="no_urls_allowed",
+        allow_unreviewed_output=False,
+        known_risky_claims=_DEFENSE_KNOWN_RISKY_CLAIMS,
+        mandatory_fields=["questions"],
+        max_total_seconds=90.0,
+        extra_rubric=_DEFENSE_QUESTIONS_EXTRA_RUBRIC,
+    ),
+    "DefenseEvaluatorAgent": AgentReviewConfig(
+        schema=DefenseEvaluationCandidateSchema,
+        max_rewrites=1,
+        url_mode="no_urls_allowed",
+        allow_unreviewed_output=False,
+        known_risky_claims=_DEFENSE_KNOWN_RISKY_CLAIMS,
+        mandatory_fields=["feedbackSummary", "improvedAnswer"],
+        max_total_seconds=90.0,
+        extra_rubric=_DEFENSE_EVALUATION_EXTRA_RUBRIC,
     ),
 }
 

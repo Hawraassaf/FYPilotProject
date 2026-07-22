@@ -50,8 +50,10 @@ public sealed record DefenseQuestionDto(
     string Question,
     string Category,
     string Difficulty,
+    [property: System.Text.Json.Serialization.JsonPropertyName("expectedAnswerPoints")]
     List<string> ExpectedPoints,
-    string FollowUpQuestion
+    string FollowUpQuestion,
+    string? Id = null
 );
 
 public sealed record DefenseGenerateQuestionsResponse(
@@ -64,7 +66,8 @@ public sealed record DefenseGenerateQuestionsResponse(
     string Message = "",
     string? Provider = null,
     string? ProviderError = null,
-    string? Error = null
+    string? Error = null,
+    AiQualityPassportDto? Review = null
 );
 
 public sealed record DefenseEvaluateAnswerRequest(
@@ -91,5 +94,6 @@ public sealed record DefenseEvaluateAnswerResponse(
     string? OllamaError = null,
     string ModelUsed = "",
     string? Provider = null,
-    string? ProviderError = null
+    string? ProviderError = null,
+    AiQualityPassportDto? Review = null
 );
