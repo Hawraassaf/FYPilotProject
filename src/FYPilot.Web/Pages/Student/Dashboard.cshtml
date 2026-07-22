@@ -1,219 +1,305 @@
 @page
 @model FYPilot.Web.Pages.Student.DashboardModel
 @{
-    ViewData["Title"] = "Student Dashboard";
-    ViewData["Subtitle"] = "Your FYP planning overview";
-
-    var studentName = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "Student";
+    ViewData["Title"] = "Project Dashboard";
+    ViewData["Subtitle"] =
+        "Your active project workspace";
 }
 
 <div class="dashboard-page">
 
-    <section class="row g-3 mb-4 align-items-stretch">
-        <div class="col-12">
-            <div class="row g-3 h-100">
-                @foreach (var s in Model.Stats)
-                {
-                    var note = s.Label switch
-                    {
-                        "Ideas Generated" => Model.HasIdeas ? "Based on your profile" : "Start generating ideas",
-                        "Skills Assessed" => Model.HasSkills ? "Skills saved" : "Assessment pending",
-                        "Roadmaps Created" => Model.HasRoadmaps ? "Execution planning" : "Create your roadmap",
-                        "Selected Project" => Model.HasSelectedProject ? "Project in focus" : "No project selected",
-                        _ => "FYP progress"
-                    };
+    <section class="active-project-panel mb-4">
+        <div class="active-project-main">
+            <div class="active-project-icon">
+                <i class="bi bi-folder2-open"></i>
+            </div>
 
-                    <div class="col-12 col-sm-6 col-xl-3">
-                        <div class="dashboard-stat-card h-100">
-                            <div class="stat-main">
-                                <div class="dashboard-stat-icon">
-                                    <i class="bi bi-@s.Icon"></i>
-                                </div>
+            <div class="min-w-0">
+                <div class="active-project-label">
+                    Current Project
+                </div>
 
-                                <div class="min-w-0">
-                                    <div class="dashboard-stat-label">@s.Label</div>
-                                    <div class="dashboard-stat-value">@s.Value</div>
-                                    <div class="dashboard-stat-note">@note</div>
-                                </div>
+                <h1 title="@Model.ProjectTitle">
+                    @Model.ProjectTitle
+                </h1>
+
+                <div class="active-project-meta">
+                    <span>
+                        <i class="bi bi-person-badge"></i>
+                        @Model.AccessRoleLabel
+                    </span>
+
+                    <span>
+                        <i class="bi bi-circle-fill"></i>
+                        @Model.ProjectStatus
+                    </span>
+
+                    <span>
+                        <i class="bi bi-people"></i>
+                        @Model.ActiveMembersCount
+                        of
+                        @Model.MaximumMembers
+                        members
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <a asp-page="/Student/MyProjects"
+           class="switch-project-button">
+
+            <i class="bi bi-arrow-left-right"></i>
+            Switch Project
+        </a>
+    </section>
+
+    <section class="row g-3 mb-4">
+        @foreach (var stat in Model.Stats)
+        {
+            <div class="col-12 col-sm-6 col-xl-3">
+                <article class="dashboard-stat-card h-100">
+                    <div class="stat-main">
+                        <div class="dashboard-stat-icon">
+                            <i class="bi bi-@stat.Icon"></i>
+                        </div>
+
+                        <div class="min-w-0">
+                            <div class="dashboard-stat-label">
+                                @stat.Label
                             </div>
 
-                            <div class="mini-chart">
-                                <span style="height: 22%"></span>
-                                <span style="height: 42%"></span>
-                                <span style="height: 34%"></span>
-                                <span style="height: 62%"></span>
-                                <span style="height: 54%"></span>
-                                <span style="height: 76%"></span>
-                                <span style="height: 68%"></span>
+                            <div class="dashboard-stat-value">
+                                @stat.Value
+                            </div>
+
+                            <div class="dashboard-stat-note">
+                                @stat.Note
                             </div>
                         </div>
                     </div>
-                }
+                </article>
             </div>
-        </div>
+        }
     </section>
 
     <section class="row g-4">
         <div class="col-xl-7">
-            <div class="dashboard-card h-100">
-                <div class="card-head">
+            <article class="dashboard-card h-100">
+                <header class="card-head">
                     <div>
                         <h2>
                             <i class="bi bi-lightbulb"></i>
-                            Recent Project Ideas
+                            Selected Project Idea
                         </h2>
-                        <p>Latest ideas generated for your FYP journey.</p>
+
+                        <p>
+                            The single shared idea currently connected
+                            to this project.
+                        </p>
                     </div>
 
-                    <a href="/Student/IdeaGenerator" class="card-link">View All</a>
-                </div>
+                    <a asp-page="/Student/IdeaGenerator"
+                       asp-route-projectId="@Model.ProjectId"
+                       class="card-link">
 
-                @if (!Model.Ideas.Any())
+                        @(Model.HasSelectedIdea
+                            ? "Change Idea"
+                            : "Choose Idea")
+                    </a>
+                </header>
+
+                @if (Model.SelectedIdea == null)
                 {
-                    <div class="empty-state">
+                    <div class="empty-state project-empty-state">
                         <div class="empty-icon">
-                            <i class="bi bi-stars"></i>
+                            <i class="bi bi-lightbulb"></i>
                         </div>
 
-                        @if (Model.HasSkills)
-                        {
-                            <h3>No ideas generated yet</h3>
-                            <p>Use your saved skills to generate your first personalized project idea.</p>
+                        <h3>No idea selected for this project</h3>
 
-                            <a href="/Student/IdeaGenerator" class="btn btn-primary-soft mt-2">
-                                Generate Ideas
+                        <p>
+                            This project workspace is ready, but it
+                            does not have a shared project idea yet.
+                        </p>
+
+                        @if (!Model.HasSkills)
+                        {
+                            <a asp-page="/Student/SkillAssessment"
+                               class="btn btn-outline-primary mt-2">
+
+                                <i class="bi bi-bar-chart-line me-1"></i>
+                                Complete Skill Assessment
                             </a>
                         }
                         else
                         {
-                            <h3>Start with your skills</h3>
-                            <p>Complete your skill assessment first so FYPilot can recommend suitable ideas.</p>
+                            <a asp-page="/Student/IdeaGenerator"
+                               asp-route-projectId="@Model.ProjectId"
+                               class="btn btn-primary mt-2">
 
-                            <a href="/Student/SkillAssessment" class="btn btn-primary-soft mt-2">
-                                Assess My Skills
+                                <i class="bi bi-stars me-1"></i>
+                                Choose Project Idea
                             </a>
                         }
                     </div>
                 }
                 else
                 {
-                    <div class="idea-list">
-                        @foreach (var idea in Model.Ideas.Take(5))
-                        {
-                            <a href="/Student/ProjectDetails?id=@idea.Id" class="idea-row">
-                                <div class="idea-row-icon">
-                                    <i class="bi bi-cpu"></i>
-                                </div>
+                    <div class="selected-dashboard-idea">
+                        <div class="selected-idea-heading">
+                            <div class="selected-idea-icon">
+                                <i class="bi bi-cpu"></i>
+                            </div>
 
-                                <div class="min-w-0 flex-grow-1">
-                                    <div class="idea-title text-truncate">@idea.Title</div>
+                            <div class="min-w-0">
+                                <span>
+                                    @Model.SelectedIdea.Domain
+                                </span>
 
-                                    <div class="idea-meta">
-                                        <span>@(string.IsNullOrWhiteSpace(idea.Domain) ? "General" : idea.Domain)</span>
-                                        <span>•</span>
-                                        <span class="text-capitalize">@idea.DifficultyLevel</span>
-                                    </div>
-                                </div>
+                                <h3>
+                                    @Model.SelectedIdea.Title
+                                </h3>
+                            </div>
+                        </div>
 
-                                <div class="text-end flex-shrink-0">
-                                    @if (idea.IsSelected)
-                                    {
-                                        <span class="status-pill selected">Selected</span>
-                                    }
-                                    else
-                                    {
-                                        <span class="status-pill saved">Saved</span>
-                                    }
+                        <p class="selected-idea-problem">
+                            @Model.SelectedIdea.ProblemStatement
+                        </p>
 
-                                    <div class="idea-score">@idea.FeasibilityScore% feasible</div>
-                                </div>
+                        <div class="selected-idea-scores">
+                            <div>
+                                <span>Innovation</span>
+                                <strong>
+                                    @Model.SelectedIdea.InnovationScore%
+                                </strong>
+                            </div>
+
+                            <div>
+                                <span>Feasibility</span>
+                                <strong>
+                                    @Model.SelectedIdea.FeasibilityScore%
+                                </strong>
+                            </div>
+
+                            <div>
+                                <span>Market Fit</span>
+                                <strong>
+                                    @Model.SelectedIdea.MarketDemandScore%
+                                </strong>
+                            </div>
+                        </div>
+
+                        <div class="selected-idea-actions">
+                            <a asp-page="/Student/ProjectDetails"
+                               asp-route-id="@Model.SelectedIdea.Id"
+                               class="btn btn-outline-primary">
+
+                                <i class="bi bi-eye me-1"></i>
+                                View Details
                             </a>
-                        }
-                    </div>
 
-                    <div class="card-footer-action">
-                        <a href="/Student/IdeaGenerator">
-                            Explore More Ideas
-                            <i class="bi bi-arrow-right ms-1"></i>
-                        </a>
+                            <a asp-page="/Student/IdeaGenerator"
+                               asp-route-projectId="@Model.ProjectId"
+                               class="btn btn-primary">
+
+                                <i class="bi bi-arrow-repeat me-1"></i>
+                                Replace Idea
+                            </a>
+                        </div>
                     </div>
                 }
-            </div>
+            </article>
         </div>
 
         <div class="col-xl-5">
-            <div class="dashboard-card h-100">
-                <div class="card-head">
+            <article class="dashboard-card h-100">
+                <header class="card-head">
                     <div>
                         <h2>
                             <i class="bi bi-activity"></i>
                             Project Progress
                         </h2>
-                        <p>Your current FYP readiness path.</p>
-                    </div>
 
-                    <a href="/Student/Roadmap" class="card-link">Roadmap</a>
-                </div>
+                        <p>
+                            Readiness steps for this project.
+                        </p>
+                    </div>
+                </header>
 
                 <div class="progress-timeline">
-                    <div class="timeline-item @(Model.HasSkills ? "done" : "pending")">
+                    <div class="timeline-item
+                        @(Model.HasSkills ? "done" : "pending")">
+
                         <div class="timeline-dot">
-                            <i class="bi @(Model.HasSkills ? "bi-check" : "bi-circle")"></i>
+                            <i class="bi
+                                @(Model.HasSkills
+                                   ? "bi-check"
+                                   : "bi-circle")">
+                            </i>
                         </div>
 
                         <div>
-                            <div class="timeline-title">Skill Assessment</div>
-                            <div class="timeline-text">@(Model.HasSkills ? "Completed" : "Pending")</div>
-                        </div>
-                    </div>
-
-                    <div class="timeline-item @(Model.HasIdeas ? "done" : "pending")">
-                        <div class="timeline-dot">
-                            <i class="bi @(Model.HasIdeas ? "bi-check" : "bi-circle")"></i>
-                        </div>
-
-                        <div>
-                            <div class="timeline-title">Idea Generation</div>
-                            <div class="timeline-text">@(Model.HasIdeas ? "Completed" : "Pending")</div>
-                        </div>
-                    </div>
-
-                    <div class="timeline-item @(Model.HasSelectedProject ? "active" : "pending")">
-                        <div class="timeline-dot">
-                            <i class="bi @(Model.HasSelectedProject ? "bi-check" : "bi-circle")"></i>
-                        </div>
-
-                        <div class="flex-grow-1">
-                            <div class="d-flex align-items-center justify-content-between gap-2">
-                                <div class="timeline-title">Project Selection</div>
-
-                                @if (Model.HasSelectedProject)
-                                {
-                                    <span class="small-status">In Focus</span>
-                                }
+                            <div class="timeline-title">
+                                Skill Assessment
                             </div>
 
                             <div class="timeline-text">
-                                @(Model.HasSelectedProject ? "Selected project is ready" : "Choose your final idea")
+                                @(Model.HasSkills
+                                    ? "Private skills are available"
+                                    : "Assessment pending")
                             </div>
-
-                            @if (Model.HasSelectedProject)
-                            {
-                                <div class="progress mt-2 dashboard-progress">
-                                    <div class="progress-bar" style="width: 60%"></div>
-                                </div>
-                            }
                         </div>
                     </div>
 
-                    <div class="timeline-item @(Model.HasRoadmaps ? "done" : "pending")">
+                    <div class="timeline-item
+                        @(Model.HasSelectedIdea
+                             ? "done"
+                             : "active")">
+
                         <div class="timeline-dot">
-                            <i class="bi @(Model.HasRoadmaps ? "bi-check" : "bi-circle")"></i>
+                            <i class="bi
+                                @(Model.HasSelectedIdea
+                                   ? "bi-check"
+                                   : "bi-circle")">
+                            </i>
                         </div>
 
                         <div>
-                            <div class="timeline-title">Roadmap Planning</div>
-                            <div class="timeline-text">@(Model.HasRoadmaps ? "Created" : "Pending")</div>
+                            <div class="timeline-title">
+                                Project Idea
+                            </div>
+
+                            <div class="timeline-text">
+                                @(Model.HasSelectedIdea
+                                    ? "Shared idea selected"
+                                    : "Choose one idea")
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="timeline-item
+                        @(Model.HasRoadmaps
+                             ? "done"
+                             : "pending")">
+
+                        <div class="timeline-dot">
+                            <i class="bi
+                                @(Model.HasRoadmaps
+                                   ? "bi-check"
+                                   : "bi-circle")">
+                            </i>
+                        </div>
+
+                        <div>
+                            <div class="timeline-title">
+                                Roadmap Planning
+                            </div>
+
+                            <div class="timeline-text">
+                                @(Model.HasRoadmaps
+                                    ? "Roadmap created"
+                                    : "Pending")
+                            </div>
                         </div>
                     </div>
 
@@ -223,30 +309,452 @@
                         </div>
 
                         <div>
-                            <div class="timeline-title">Defense Preparation</div>
-                            <div class="timeline-text">Pending</div>
+                            <div class="timeline-title">
+                                Project Execution
+                            </div>
+
+                            <div class="timeline-text">
+                                Track tasks and milestones
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="timeline-item pending">
+                        <div class="timeline-dot">
+                            <i class="bi bi-circle"></i>
+                        </div>
+
+                        <div>
+                            <div class="timeline-title">
+                                Defense Preparation
+                            </div>
+
+                            <div class="timeline-text">
+                                Pending
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
+            </article>
         </div>
     </section>
 
-    <section class="mt-4">
-        <div class="ai-banner ai-banner-horizontal">
-            <div class="ai-banner-icon">
-                <i class="bi bi-stars"></i>
-            </div>
+    <section class="row g-4 mt-1">
+        <div class="col-xl-7">
+            <article class="dashboard-card h-100">
+                <header class="card-head">
+                    <div>
+                        <h2>
+                            <i class="bi bi-clock-history"></i>
+                            Recent Project Activity
+                        </h2>
 
-            <div class="flex-grow-1">
-                <h3>FYPilot AI Assistant</h3>
-                <p>Ask for guidance, next steps, project feedback, and planning support for your final year project.</p>
-            </div>
+                        <p>
+                            Actions recorded only for this project.
+                        </p>
+                    </div>
+                </header>
 
-            <a href="/Student/MentorChat" class="btn ai-banner-btn">
-                Ask FYPilot
-            </a>
+                @if (Model.RecentActivities.Count == 0)
+                {
+                    <div class="small-dashboard-empty">
+                        <i class="bi bi-clock"></i>
+
+                        <div>
+                            <strong>No activity yet</strong>
+
+                            <span>
+                                Project actions will appear here.
+                            </span>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="dashboard-activity-list">
+                        @foreach (var activity
+                            in Model.RecentActivities)
+                        {
+                            <div class="dashboard-activity-item">
+                                <div class="activity-dot"></div>
+
+                                <div class="min-w-0">
+                                    <strong>
+                                        @activity.Description
+                                    </strong>
+
+                                    <span>
+                                        @activity.CreatedAtUtc
+                                        .ToLocalTime()
+                                        .ToString(
+                                        "MMM d, yyyy · h:mm tt")
+                                    </span>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </article>
+        </div>
+
+        <div class="col-xl-5">
+            <article class="dashboard-card h-100">
+                <header class="card-head">
+                    <div>
+                        <h2>
+                            <i class="bi bi-exclamation-triangle"></i>
+                            Project Alerts
+                        </h2>
+
+                        <p>
+                            Important next actions.
+                        </p>
+                    </div>
+                </header>
+
+                @if (Model.RiskAlarms.Count == 0)
+                {
+                    <div class="small-dashboard-empty">
+                        <i class="bi bi-check-circle"></i>
+
+                        <div>
+                            <strong>No current alerts</strong>
+
+                            <span>
+                                The project setup looks ready.
+                            </span>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="dashboard-alert-list">
+                        @foreach (var alarm
+                            in Model.RiskAlarms)
+                        {
+                            <div class="dashboard-risk
+                                risk-@alarm.Severity">
+
+                                <i class="bi
+                                    @(alarm.Severity == "high"
+                                       ? "bi-exclamation-circle-fill"
+                                       : "bi-info-circle-fill")">
+                                </i>
+
+                                <div>
+                                    <strong>@alarm.Title</strong>
+                                    <p>@alarm.Message</p>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </article>
         </div>
     </section>
-
 </div>
+
+@section Head {
+    <style>
+        .active-project-panel {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 1.25rem 1.35rem;
+            border: 1px solid #cddcf7;
+            border-radius: 18px;
+            color: #fff;
+            background: radial-gradient( circle at 88% 10%, rgba(111, 160, 255, .3), transparent 30%), linear-gradient( 135deg, #071d49, #173e7c);
+            box-shadow: 0 15px 35px rgba(7, 29, 73, .16);
+        }
+
+        .active-project-main {
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            gap: .9rem;
+        }
+
+        .active-project-icon {
+            width: 54px;
+            height: 54px;
+            flex: 0 0 auto;
+            display: grid;
+            place-items: center;
+            border: 1px solid rgba(255,255,255,.18);
+            border-radius: 15px;
+            background: rgba(255,255,255,.11);
+            font-size: 1.35rem;
+        }
+
+        .active-project-label {
+            color: rgba(255,255,255,.63);
+            font-size: .65rem;
+            font-weight: 800;
+            letter-spacing: .1em;
+            text-transform: uppercase;
+        }
+
+        .active-project-panel h1 {
+            margin: .18rem 0 0;
+            overflow: hidden;
+            font-size: 1.35rem;
+            font-weight: 850;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .active-project-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .45rem .8rem;
+            margin-top: .5rem;
+            color: rgba(255,255,255,.76);
+            font-size: .68rem;
+            font-weight: 650;
+        }
+
+            .active-project-meta span {
+                display: inline-flex;
+                align-items: center;
+                gap: .3rem;
+            }
+
+            .active-project-meta .bi-circle-fill {
+                font-size: .4rem;
+            }
+
+        .switch-project-button {
+            min-height: 41px;
+            flex: 0 0 auto;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .4rem;
+            padding: 0 .85rem;
+            border: 1px solid rgba(255,255,255,.3);
+            border-radius: 10px;
+            color: #fff;
+            background: rgba(255,255,255,.1);
+            font-size: .68rem;
+            font-weight: 800;
+            text-decoration: none;
+        }
+
+            .switch-project-button:hover {
+                color: #12336e;
+                background: #fff;
+            }
+
+        .project-empty-state {
+            min-height: 300px;
+        }
+
+        .selected-dashboard-idea {
+            padding: 1rem;
+        }
+
+        .selected-idea-heading {
+            display: grid;
+            grid-template-columns: auto minmax(0,1fr);
+            gap: .75rem;
+            align-items: center;
+        }
+
+        .selected-idea-icon {
+            width: 52px;
+            height: 52px;
+            display: grid;
+            place-items: center;
+            border-radius: 14px;
+            color: #155eef;
+            background: #eaf1ff;
+            font-size: 1.25rem;
+        }
+
+        .selected-idea-heading span {
+            color: #155eef;
+            font-size: .67rem;
+            font-weight: 750;
+        }
+
+        .selected-idea-heading h3 {
+            margin: .18rem 0 0;
+            color: #172033;
+            font-size: 1.08rem;
+            font-weight: 800;
+        }
+
+        .selected-idea-problem {
+            margin: 1rem 0;
+            padding: .85rem;
+            border: 1px solid #e4e9f1;
+            border-radius: 12px;
+            color: #58677c;
+            background: #f8fafc;
+            font-size: .75rem;
+            line-height: 1.6;
+        }
+
+        .selected-idea-scores {
+            display: grid;
+            grid-template-columns: repeat(3,minmax(0,1fr));
+            gap: .65rem;
+        }
+
+            .selected-idea-scores > div {
+                padding: .75rem;
+                border: 1px solid #e1e7ef;
+                border-radius: 11px;
+                background: #fff;
+            }
+
+            .selected-idea-scores span,
+            .selected-idea-scores strong {
+                display: block;
+            }
+
+            .selected-idea-scores span {
+                color: #7c8899;
+                font-size: .63rem;
+                font-weight: 700;
+            }
+
+            .selected-idea-scores strong {
+                margin-top: .2rem;
+                color: #203b67;
+                font-size: 1rem;
+            }
+
+        .selected-idea-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: .55rem;
+            margin-top: 1rem;
+        }
+
+        .small-dashboard-empty {
+            min-height: 145px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: .7rem;
+            color: #7b8798;
+            text-align: left;
+        }
+
+            .small-dashboard-empty > i {
+                font-size: 1.5rem;
+                color: #6d8bc4;
+            }
+
+            .small-dashboard-empty strong,
+            .small-dashboard-empty span {
+                display: block;
+            }
+
+            .small-dashboard-empty strong {
+                color: #334155;
+                font-size: .76rem;
+            }
+
+            .small-dashboard-empty span {
+                margin-top: .15rem;
+                font-size: .66rem;
+            }
+
+        .dashboard-activity-list,
+        .dashboard-alert-list {
+            display: grid;
+            gap: .65rem;
+            padding: .25rem 0;
+        }
+
+        .dashboard-activity-item {
+            display: grid;
+            grid-template-columns: auto minmax(0,1fr);
+            gap: .65rem;
+            align-items: flex-start;
+            padding: .7rem;
+            border-radius: 10px;
+            background: #f8fafc;
+        }
+
+        .activity-dot {
+            width: 8px;
+            height: 8px;
+            margin-top: .35rem;
+            border-radius: 50%;
+            background: #4b7de2;
+        }
+
+        .dashboard-activity-item strong,
+        .dashboard-activity-item span {
+            display: block;
+        }
+
+        .dashboard-activity-item strong {
+            color: #425066;
+            font-size: .68rem;
+            line-height: 1.4;
+        }
+
+        .dashboard-activity-item span {
+            margin-top: .2rem;
+            color: #95a0af;
+            font-size: .57rem;
+        }
+
+        .dashboard-risk {
+            display: grid;
+            grid-template-columns: auto minmax(0,1fr);
+            gap: .65rem;
+            padding: .75rem;
+            border-radius: 11px;
+        }
+
+        .risk-high {
+            border: 1px solid #fecaca;
+            color: #991b1b;
+            background: #fff1f2;
+        }
+
+        .risk-medium {
+            border: 1px solid #f4d7a5;
+            color: #8a5611;
+            background: #fff8e8;
+        }
+
+        .dashboard-risk strong {
+            display: block;
+            font-size: .7rem;
+        }
+
+        .dashboard-risk p {
+            margin: .2rem 0 0;
+            font-size: .63rem;
+            line-height: 1.45;
+        }
+
+        @@media (max-width: 700px) {
+            .active-project-panel {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .switch-project-button {
+                width: 100%;
+            }
+
+            .selected-idea-scores {
+                grid-template-columns: 1fr;
+            }
+
+            .selected-idea-actions {
+                align-items: stretch;
+                flex-direction: column;
+            }
+        }
+    </style>
+}
