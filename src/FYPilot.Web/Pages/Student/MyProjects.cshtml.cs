@@ -254,8 +254,20 @@ public class MyProjectsModel(
 
                 return RedirectToPage();
             }
+            var selectedTeamSize = await db.StudentProfiles
+               .AsNoTracking()
+             .Where(profile =>
+                profile.UserId == user.Id)
+             .Select(profile =>
+              (int?)profile.TeamMembers)
+             .FirstOrDefaultAsync(cancellationToken);
 
+            var projectTeamSize = Math.Clamp(
+                selectedTeamSize ?? 1,
+                1,
+                3);
             var now = DateTime.UtcNow;
+
 
             var project = new Project
             {
@@ -267,7 +279,7 @@ public class MyProjectsModel(
                 Technologies = "",
                 Status = "draft",
                 ProgressPercentage = 0,
-                MaximumMembers = 3,
+                MaximumMembers = projectTeamSize,
                 CreatedAt = now,
                 UpdatedAt = now
             };
@@ -302,10 +314,10 @@ public class MyProjectsModel(
 
             var destination =
                 await activeProjectService
-                    .ActivateProjectAsync(
-                        user.Id,
-                        project.Id,
-                        "/Student/IdeaGenerator",
+                   .ActivateProjectAsync(
+                     user.Id,
+                     project.Id,
+                     "/Student/Dashboard",
                         cancellationToken);
 
             if (destination == null)
@@ -317,8 +329,8 @@ public class MyProjectsModel(
             }
 
             TempData["Success"] =
-                "Your new project was created. "
-                + "Select an idea to begin.";
+    "Your new project was created successfully. "
+    + "Choose an idea from the project Dashboard when you are ready.";
 
             return RedirectToPage(
                 destination.PageName,
@@ -358,12 +370,12 @@ public class MyProjectsModel(
         }
 
         var destination =
-            await activeProjectService
-                .ActivateProjectAsync(
-                    userId.Value,
-                    projectId,
-                    requestedPage: null,
-                    cancellationToken);
+    await activeProjectService
+        .ActivateProjectAsync(
+            userId.Value,
+            projectId,
+            requestedPage: "/Student/Dashboard",
+            cancellationToken);
 
         if (destination == null)
         {
