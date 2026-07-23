@@ -188,7 +188,9 @@
                 </div>
             }
 
-            <form method="post">
+            <form method="post"
+                  asp-page="/Account/Login">
+                @Html.AntiForgeryToken()
                 @if (TempData["PasswordResetMessage"] is string passwordResetMessage)
                 {
                     <div id="passwordResetAlert" class="alert alert-success small mb-3">

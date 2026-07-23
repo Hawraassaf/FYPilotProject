@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
+using FYPilot.Application.Interfaces;
 using FYPilot.Infrastructure.Data;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -9,7 +10,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace FYPilot.Web.Pages.Account;
 
-public class LoginModel(ApplicationDbContext db) : PageModel
+public class LoginModel(
+    ApplicationDbContext db,
+    IActiveProjectService activeProjectService)
+    : PageModel
 {
     [BindProperty]
     public InputModel Input { get; set; } = new();
@@ -30,7 +34,8 @@ public class LoginModel(ApplicationDbContext db) : PageModel
     }
 
     public async Task<IActionResult> OnGetAsync(
-        string? returnUrl = null)
+        string? returnUrl = null,
+        CancellationToken cancellationToken = default)
     {
         ReturnUrl = returnUrl;
 
@@ -39,29 +44,50 @@ public class LoginModel(ApplicationDbContext db) : PageModel
             return Page();
         }
 
-        var userIdValue =
-            User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userIdValue = User.FindFirst(
+            ClaimTypes.NameIdentifier)?.Value;
 
-        if (int.TryParse(userIdValue, out var userId))
+        if (!int.TryParse(
+                userIdValue,
+                out var userId))
         {
-            var currentUser = await db.Users
-                .AsNoTracking()
-                .FirstOrDefaultAsync(u => u.Id == userId);
+            await HttpContext.SignOutAsync(
+                CookieAuthenticationDefaults
+                    .AuthenticationScheme);
 
-            if (currentUser?.MustChangePassword == true)
-            {
-                return RedirectToPage(
-                    "/Account/ForceChangePassword");
-            }
-
-            return RedirectToDashboard(currentUser?.Role);
+            return Page();
         }
 
-        return RedirectToDashboard();
+        var currentUser = await db.Users
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                user => user.Id == userId,
+                cancellationToken);
+
+        if (currentUser == null)
+        {
+            await HttpContext.SignOutAsync(
+                CookieAuthenticationDefaults
+                    .AuthenticationScheme);
+
+            return Page();
+        }
+
+        if (currentUser.MustChangePassword)
+        {
+            return RedirectToPage(
+                "/Account/ForceChangePassword");
+        }
+
+        return await RedirectAfterLoginAsync(
+            currentUser.Id,
+            currentUser.Role,
+            cancellationToken);
     }
 
     public async Task<IActionResult> OnPostAsync(
-        string? returnUrl = null)
+        string? returnUrl = null,
+        CancellationToken cancellationToken = default)
     {
         ReturnUrl = returnUrl;
 
@@ -73,19 +99,24 @@ public class LoginModel(ApplicationDbContext db) : PageModel
             return Page();
         }
 
-        var email =
-            Input.Email.Trim().ToLowerInvariant();
+        var email = Input.Email
+            .Trim()
+            .ToLowerInvariant();
 
         var user = await db.Users
             .FirstOrDefaultAsync(
-                u => u.Email.ToLower() == email);
+                item =>
+                    item.Email.ToLower() == email,
+                cancellationToken);
 
         if (user == null ||
             !BCrypt.Net.BCrypt.Verify(
                 Input.Password,
                 user.PasswordHash))
         {
-            ErrorMessage = "Invalid email or password.";
+            ErrorMessage =
+                "Invalid email or password.";
+
             return Page();
         }
 
@@ -114,12 +145,15 @@ public class LoginModel(ApplicationDbContext db) : PageModel
 
         var identity = new ClaimsIdentity(
             claims,
-            CookieAuthenticationDefaults.AuthenticationScheme);
+            CookieAuthenticationDefaults
+                .AuthenticationScheme);
 
-        var principal = new ClaimsPrincipal(identity);
+        var principal =
+            new ClaimsPrincipal(identity);
 
         await HttpContext.SignInAsync(
-            CookieAuthenticationDefaults.AuthenticationScheme,
+            CookieAuthenticationDefaults
+                .AuthenticationScheme,
             principal,
             new AuthenticationProperties
             {
@@ -127,11 +161,8 @@ public class LoginModel(ApplicationDbContext db) : PageModel
             });
 
         /*
-         * A newly created administrator is redirected immediately
-         * to the forced password-change page.
-         *
-         * This check must happen before processing returnUrl so the
-         * administrator cannot bypass the password-change screen.
+         * Administrators who still use the temporary password
+         * cannot bypass the forced password-change page.
          */
         if (user.MustChangePassword)
         {
@@ -139,31 +170,84 @@ public class LoginModel(ApplicationDbContext db) : PageModel
                 "/Account/ForceChangePassword");
         }
 
+        /*
+         * Preserve valid local return URLs.
+         */
         if (!string.IsNullOrWhiteSpace(returnUrl) &&
             Url.IsLocalUrl(returnUrl))
         {
             return LocalRedirect(returnUrl);
         }
 
-        return RedirectToDashboard(user.Role);
+        return await RedirectAfterLoginAsync(
+            user.Id,
+            user.Role,
+            cancellationToken);
     }
 
-    private IActionResult RedirectToDashboard(
-        string? role = null)
+    private async Task<IActionResult>
+        RedirectAfterLoginAsync(
+            int userId,
+            string? role,
+            CancellationToken cancellationToken)
     {
-        role ??=
-            User.FindFirst(ClaimTypes.Role)?.Value;
+        var normalizedRole =
+            role?.Trim().ToLowerInvariant();
 
-        return role?.ToLowerInvariant() switch
+        if (normalizedRole == "student")
         {
-            "supervisor" =>
-                RedirectToPage("/Supervisor/Dashboard"),
+            /*
+             * Try to resume the student's last valid project.
+             * The service checks membership again before returning
+             * the destination.
+             */
+            var destination =
+                await activeProjectService
+                    .GetResumeDestinationAsync(
+                        userId,
+                        cancellationToken);
 
-            "admin" =>
-                RedirectToPage("/Admin/Dashboard"),
+            if (destination != null)
+            {
+                return RedirectToPage(
+                    destination.PageName,
+                    new
+                    {
+                        projectId =
+                            destination.ProjectId
+                    });
+            }
 
-            _ =>
-                RedirectToPage("/Student/Dashboard")
-        };
+            /*
+             * A student without an active accessible project must
+             * choose or create one first.
+             */
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        if (normalizedRole == "supervisor")
+        {
+            return RedirectToPage(
+                "/Supervisor/Dashboard");
+        }
+
+        if (normalizedRole == "admin")
+        {
+            return RedirectToPage(
+                "/Admin/Dashboard");
+        }
+
+        /*
+         * Unknown roles are not sent to a student page.
+         */
+        await HttpContext.SignOutAsync(
+            CookieAuthenticationDefaults
+                .AuthenticationScheme);
+
+        ErrorMessage =
+            "Your account role could not be recognized.";
+
+        return Page();
     }
 }
