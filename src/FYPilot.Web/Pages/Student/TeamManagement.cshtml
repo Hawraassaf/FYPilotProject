@@ -1,0 +1,689 @@
+﻿@page
+@model FYPilot.Web.Pages.Student.TeamManagementModel
+@{
+    ViewData["Title"] = "Project Team";
+    ViewData["Subtitle"] =
+        "Manage project capacity, members and invitations.";
+}
+
+<div class="team-page">
+
+    @if (!string.IsNullOrWhiteSpace(
+        Model.SuccessMessage))
+    {
+        <div class="alert alert-success">
+            <i class="bi bi-check-circle me-2"></i>
+            @Model.SuccessMessage
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(
+        Model.ErrorMessage))
+    {
+        <div class="alert alert-danger">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            @Model.ErrorMessage
+        </div>
+    }
+
+    <section class="team-project-header">
+        <div>
+            <span>Project Team</span>
+            <h1>@Model.ProjectTitle</h1>
+
+            <p>
+                @(Model.IsOwner
+                    ? "Manage the project capacity and invite registered students."
+                    : "View the owner and active project collaborators.")
+            </p>
+        </div>
+
+        <div class="team-header-actions">
+            <a asp-page="/Student/Dashboard"
+               asp-route-projectId="@Model.ProjectId"
+               class="btn btn-primary">
+
+                <i class="bi bi-grid me-1"></i>
+                Dashboard
+            </a>
+
+            <a asp-page="/Student/MyProjects"
+               class="btn btn-outline-primary">
+
+                <i class="bi bi-arrow-left me-1"></i>
+                My Projects
+            </a>
+        </div>
+    </section>
+
+    <section class="row g-3 mb-4">
+        <div class="col-md-4">
+            <article class="team-stat-card">
+                <i class="bi bi-people"></i>
+
+                <div>
+                    <span>Active Members</span>
+
+                    <strong>
+                        @Model.ActiveMembersCount
+                        of
+                        @Model.MaximumMembers
+                    </strong>
+                </div>
+            </article>
+        </div>
+
+        <div class="col-md-4">
+            <article class="team-stat-card">
+                <i class="bi bi-envelope"></i>
+
+                <div>
+                    <span>Pending Invitations</span>
+                    <strong>
+                        @Model.PendingInvitationsCount
+                    </strong>
+                </div>
+            </article>
+        </div>
+
+        <div class="col-md-4">
+            <article class="team-stat-card">
+                <i class="bi bi-person-plus"></i>
+
+                <div>
+                    <span>Available Positions</span>
+                    <strong>
+                        @Model.AvailablePositions
+                    </strong>
+                </div>
+            </article>
+        </div>
+    </section>
+
+    <div class="row g-4">
+        <div class="col-xl-7">
+            <section class="team-card">
+                <header class="team-card-header">
+                    <div>
+                        <h2>
+                            <i class="bi bi-people-fill"></i>
+                            Active Members
+                        </h2>
+
+                        <p>
+                            Students who currently have access
+                            to this project.
+                        </p>
+                    </div>
+                </header>
+
+                <div class="member-list">
+                    @foreach (var member
+                        in Model.ActiveMembers)
+                    {
+                        <article class="member-row">
+                            <div class="member-avatar">
+                                @member.Initials
+                            </div>
+
+                            <div class="member-copy">
+                                <strong>@member.FullName</strong>
+                                <span>@member.Email</span>
+                            </div>
+
+                            <div class="member-meta">
+                                <span class="member-role">
+                                    @member.Role
+                                </span>
+
+                                <small>
+                                    Joined
+                                    @member.JoinedAt
+                                    .ToLocalTime()
+                                    .ToString("MMM d, yyyy")
+                                </small>
+                            </div>
+                        </article>
+                    }
+                </div>
+            </section>
+
+            @if (Model.IsOwner)
+            {
+                <section class="team-card mt-4">
+                    <header class="team-card-header">
+                        <div>
+                            <h2>
+                                <i class="bi bi-clock-history"></i>
+                                Pending Invitations
+                            </h2>
+
+                            <p>
+                                Pending invitations reserve team
+                                positions until accepted, cancelled,
+                                rejected or expired.
+                            </p>
+                        </div>
+                    </header>
+
+                    @if (Model.PendingInvitations.Count == 0)
+                    {
+                        <div class="team-empty">
+                            <i class="bi bi-envelope-open"></i>
+
+                            <div>
+                                <strong>
+                                    No pending invitations
+                                </strong>
+
+                                <span>
+                                    New invitations will appear here.
+                                </span>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="member-list">
+                            @foreach (var invitation
+                                in Model.PendingInvitations)
+                            {
+                                <article class="member-row">
+                                    <div class="member-avatar
+                                        pending-avatar">
+                                        <i class="bi bi-envelope"></i>
+                                    </div>
+
+                                    <div class="member-copy">
+                                        <strong>
+                                            @invitation.InvitedUserName
+                                        </strong>
+
+                                        <span>
+                                            @invitation.InvitedEmail
+                                        </span>
+                                    </div>
+
+                                    <div class="invitation-actions">
+                                        <small>
+                                            Expires
+                                            @invitation.ExpiresAt
+                                            .ToLocalTime()
+                                            .ToString("MMM d")
+                                        </small>
+
+                                        <form method="post"
+                                              asp-page-handler="CancelInvitation">
+
+                                            @Html.AntiForgeryToken()
+
+                                            <input type="hidden"
+                                                   name="projectId"
+                                                   value="@Model.ProjectId" />
+
+                                            <input type="hidden"
+                                                   name="invitationId"
+                                                   value="@invitation.Id" />
+
+                                            <button type="submit"
+                                                    class="btn btn-sm
+                                                btn-outline-danger">
+                                                Cancel
+                                            </button>
+                                        </form>
+                                    </div>
+                                </article>
+                            }
+                        </div>
+                    }
+                </section>
+            }
+        </div>
+
+        <div class="col-xl-5">
+            @if (Model.IsOwner)
+            {
+                <section class="team-card">
+                    <header class="team-card-header">
+                        <div>
+                            <h2>
+                                <i class="bi bi-sliders"></i>
+                                Team Capacity
+                            </h2>
+
+                            <p>
+                                The owner is included in the selected
+                                number.
+                            </p>
+                        </div>
+                    </header>
+
+                    <form method="post"
+                          asp-page-handler="UpdateCapacity"
+                          class="team-form">
+
+                        @Html.AntiForgeryToken()
+
+                        <input type="hidden"
+                               name="projectId"
+                               value="@Model.ProjectId" />
+
+                        <label for="maximumMembers">
+                            Maximum project members
+                        </label>
+
+                        <select id="maximumMembers"
+                                name="maximumMembers"
+                                class="form-select">
+
+                            <option value="1"
+                                    selected="@(Model.MaximumMembers == 1)">
+                                1 — Individual project
+                            </option>
+
+                            <option value="2"
+                                    selected="@(Model.MaximumMembers == 2)">
+                                2 — Owner + 1 collaborator
+                            </option>
+
+                            <option value="3"
+                                    selected="@(Model.MaximumMembers == 3)">
+                                3 — Owner + 2 collaborators
+                            </option>
+                        </select>
+
+                        <button type="submit"
+                                class="btn btn-primary w-100">
+                            Save Team Size
+                        </button>
+                    </form>
+                </section>
+
+                <section class="team-card mt-4">
+                    <header class="team-card-header">
+                        <div>
+                            <h2>
+                                <i class="bi bi-person-plus"></i>
+                                Invite Collaborator
+                            </h2>
+
+                            <p>
+                                Invite an existing registered student
+                                account.
+                            </p>
+                        </div>
+                    </header>
+
+                    @if (Model.IsIndividualProject)
+                    {
+                        <div class="team-info">
+                            <i class="bi bi-person"></i>
+
+                            <p>
+                                This project is configured for one
+                                member. Change the team capacity to
+                                2 or 3 before sending invitations.
+                            </p>
+                        </div>
+                    }
+                    else if (Model.AvailablePositions == 0)
+                    {
+                        <div class="team-info">
+                            <i class="bi bi-people-fill"></i>
+
+                            <p>
+                                All project positions are currently
+                                occupied or reserved by pending
+                                invitations.
+                            </p>
+                        </div>
+                    }
+                    else
+                    {
+                        <form method="post"
+                              asp-page-handler="Invite"
+                              class="team-form">
+
+                            @Html.AntiForgeryToken()
+
+                            <input type="hidden"
+                                   name="projectId"
+                                   value="@Model.ProjectId" />
+
+                            <label for="invitedEmail">
+                                Student email
+                            </label>
+
+                            <input id="invitedEmail"
+                                   name="invitedEmail"
+                                   type="email"
+                                   class="form-control"
+                                   placeholder="student@example.com"
+                                   required />
+
+                            <small>
+                                @Model.AvailablePositions
+                                collaborator position(s) available.
+                            </small>
+
+                            <button type="submit"
+                                    class="btn btn-primary w-100">
+                                <i class="bi bi-send me-1"></i>
+                                Send Invitation
+                            </button>
+                        </form>
+                    }
+                </section>
+            }
+            else
+            {
+                <section class="team-card">
+                    <header class="team-card-header">
+                        <div>
+                            <h2>
+                                <i class="bi bi-shield-check"></i>
+                                Collaborator Access
+                            </h2>
+
+                            <p>
+                                Your project membership is active.
+                            </p>
+                        </div>
+                    </header>
+
+                    <div class="team-info">
+                        <i class="bi bi-info-circle"></i>
+
+                        <p>
+                            Only the project owner can change the
+                            team capacity or invite other students.
+                        </p>
+                    </div>
+                </section>
+            }
+        </div>
+    </div>
+</div>
+
+@section Head {
+    <style>
+        .team-page {
+            --team-navy: #12336e;
+            --team-blue: #155eef;
+            --team-border: #dfe6ef;
+            --team-muted: #6d7a8d;
+        }
+
+        .team-project-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 1.25rem;
+            padding: 1.35rem;
+            border-radius: 18px;
+            color: #fff;
+            background: linear-gradient(135deg, #071d49, #173e7c);
+            box-shadow: 0 15px 35px rgba(7, 29, 73, .15);
+        }
+
+            .team-project-header span {
+                color: rgba(255, 255, 255, .65);
+                font-size: .68rem;
+                font-weight: 800;
+                letter-spacing: .09em;
+                text-transform: uppercase;
+            }
+
+            .team-project-header h1 {
+                margin: .2rem 0;
+                font-size: 1.35rem;
+                font-weight: 850;
+            }
+
+            .team-project-header p {
+                margin: 0;
+                color: rgba(255, 255, 255, .72);
+                font-size: .72rem;
+            }
+
+        .team-header-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .55rem;
+        }
+
+        .team-stat-card {
+            min-height: 92px;
+            display: flex;
+            align-items: center;
+            gap: .8rem;
+            padding: 1rem;
+            border: 1px solid var(--team-border);
+            border-radius: 14px;
+            background: #fff;
+            box-shadow: 0 8px 22px rgba(24, 49, 82, .055);
+        }
+
+            .team-stat-card > i {
+                width: 42px;
+                height: 42px;
+                display: grid;
+                place-items: center;
+                border-radius: 12px;
+                color: var(--team-blue);
+                background: #edf3ff;
+                font-size: 1.05rem;
+            }
+
+            .team-stat-card span,
+            .team-stat-card strong {
+                display: block;
+            }
+
+            .team-stat-card span {
+                color: var(--team-muted);
+                font-size: .68rem;
+                font-weight: 700;
+            }
+
+            .team-stat-card strong {
+                margin-top: .18rem;
+                color: var(--team-navy);
+                font-size: 1.05rem;
+            }
+
+        .team-card {
+            overflow: hidden;
+            border: 1px solid var(--team-border);
+            border-radius: 16px;
+            background: #fff;
+            box-shadow: 0 10px 28px rgba(24, 49, 82, .055);
+        }
+
+        .team-card-header {
+            padding: 1rem 1.05rem;
+            border-bottom: 1px solid #e8edf4;
+            background: #fafcff;
+        }
+
+            .team-card-header h2 {
+                margin: 0;
+                color: #203b67;
+                font-size: .92rem;
+                font-weight: 800;
+            }
+
+                .team-card-header h2 i {
+                    margin-right: .35rem;
+                    color: #4a73bd;
+                }
+
+            .team-card-header p {
+                margin: .25rem 0 0;
+                color: #7b8798;
+                font-size: .67rem;
+            }
+
+        .member-list {
+            display: grid;
+        }
+
+        .member-row {
+            min-height: 76px;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: .75rem;
+            padding: .85rem 1rem;
+            border-bottom: 1px solid #edf0f4;
+        }
+
+            .member-row:last-child {
+                border-bottom: 0;
+            }
+
+        .member-avatar {
+            width: 43px;
+            height: 43px;
+            display: grid;
+            place-items: center;
+            border-radius: 50%;
+            color: #fff;
+            background: linear-gradient(135deg, #155eef, #6b91ea);
+            font-size: .72rem;
+            font-weight: 850;
+        }
+
+        .pending-avatar {
+            color: #456494;
+            background: #edf3fb;
+        }
+
+        .member-copy {
+            min-width: 0;
+        }
+
+            .member-copy strong,
+            .member-copy span {
+                display: block;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .member-copy strong {
+                color: #2d3e58;
+                font-size: .75rem;
+            }
+
+            .member-copy span {
+                margin-top: .15rem;
+                color: #8792a2;
+                font-size: .63rem;
+            }
+
+        .member-meta,
+        .invitation-actions {
+            display: grid;
+            justify-items: end;
+            gap: .3rem;
+        }
+
+        .member-role {
+            padding: .25rem .5rem;
+            border-radius: 999px;
+            color: #345888;
+            background: #edf3fb;
+            font-size: .6rem;
+            font-weight: 800;
+        }
+
+        .member-meta small,
+        .invitation-actions small {
+            color: #929cab;
+            font-size: .58rem;
+        }
+
+        .team-form {
+            display: grid;
+            gap: .75rem;
+            padding: 1rem;
+        }
+
+            .team-form label {
+                color: #374b68;
+                font-size: .68rem;
+                font-weight: 800;
+            }
+
+            .team-form small {
+                color: #7f8998;
+                font-size: .62rem;
+            }
+
+        .team-empty,
+        .team-info {
+            min-height: 120px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: .7rem;
+            padding: 1rem;
+            color: #78869a;
+        }
+
+            .team-empty > i,
+            .team-info > i {
+                color: #5d7eb4;
+                font-size: 1.35rem;
+            }
+
+            .team-empty strong,
+            .team-empty span {
+                display: block;
+            }
+
+            .team-empty strong {
+                color: #3a4b64;
+                font-size: .74rem;
+            }
+
+            .team-empty span {
+                margin-top: .15rem;
+                font-size: .63rem;
+            }
+
+            .team-info p {
+                max-width: 340px;
+                margin: 0;
+                font-size: .7rem;
+                line-height: 1.5;
+            }
+
+        @@media (max-width: 767px) {
+            .team-project-header {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .team-header-actions {
+                width: 100%;
+            }
+
+                .team-header-actions .btn {
+                    flex: 1;
+                }
+
+            .member-row {
+                grid-template-columns: auto minmax(0, 1fr);
+            }
+
+            .member-meta,
+            .invitation-actions {
+                grid-column: 2;
+                justify-items: start;
+            }
+        }
+    </style>
+}

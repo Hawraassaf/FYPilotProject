@@ -336,9 +336,23 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
                 .HasForeignKey(i => i.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            e.HasOne(i => i.GeneratedForProject)
+                .WithMany(project =>
+                    project.GeneratedCandidateIdeas)
+                .HasForeignKey(i =>
+                    i.GeneratedForProjectId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            e.HasIndex(i => new
+            {
+                i.GeneratedForProjectId,
+                i.CreatedAt
+            });
+
             e.HasOne(i => i.FeasibilityReport)
                 .WithOne(f => f.Idea)
-                .HasForeignKey<FeasibilityReport>(f => f.IdeaId)
+                .HasForeignKey<FeasibilityReport>(
+                    f => f.IdeaId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

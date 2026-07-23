@@ -17,10 +17,16 @@ namespace FYPilot.Web.Pages.Student;
 public class IdeaGeneratorModel(
     ApplicationDbContext db,
     IAiServiceClient aiServiceClient,
+    IProjectAccessService projectAccessService,
+    IActiveProjectService activeProjectService,
     ILogger<IdeaGeneratorModel> logger) : PageModel
 {
     private const int IdeasPerView = 2;
-    private const int IdeasPerBatch = 4;
+    private const int IdeasPerGeneration = 4;
+    private const int SharedCandidatePoolSize = 12;
+
+    private string IdeaGroupSessionKey =>
+        $"IdeaGroupIndex:{ProjectId}";
 
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
@@ -28,7 +34,22 @@ public class IdeaGeneratorModel(
     public InputModel Input { get; set; } = new();
 
     [BindProperty(SupportsGet = true)]
+    public int ProjectId { get; set; }
+
+    [BindProperty(SupportsGet = true)]
     public int? OpenIdeaId { get; set; }
+
+    public Project? CurrentProject { get; private set; }
+
+    public ProjectAccessResult? ProjectAccess { get; private set; }
+    public int CurrentUserId { get; private set; }
+    public int? SelectedIdeaId =>
+        CurrentProject?.ProjectIdeaId;
+
+    public string CurrentProjectTitle =>
+        string.IsNullOrWhiteSpace(CurrentProject?.Title)
+            ? "Untitled Project"
+            : CurrentProject.Title.Trim();
 
     public List<ProjectIdea> GeneratedIdeas { get; private set; } = [];
     public List<StudentSkill> AssessedSkills { get; private set; } = [];
@@ -139,59 +160,220 @@ public class IdeaGeneratorModel(
         [Range(1, 60, ErrorMessage = "Available hours must be between 1 and 60.")]
         public int AvailableHours { get; set; } = 20;
 
-        [Range(1, 6, ErrorMessage = "Team size must be between 1 and 6.")]
+        [Range(
+    1,
+    3,
+    ErrorMessage =
+        "Team size must be between 1 and 3.")]
         public int TeamSize { get; set; } = 1;
     }
 
-    public async Task OnGetAsync()
+    public async Task<IActionResult> OnGetAsync(
+       CancellationToken cancellationToken)
     {
-        SuccessMessage = TempData["Success"] as string;
-        ErrorMessage = TempData["Error"] as string;
+        SuccessMessage =
+            TempData["Success"] as string;
+
+        ErrorMessage =
+            TempData["Error"] as string;
 
         var userId = UserId();
 
+        /*
+         * The Idea Generator must always be opened inside
+         * one specific project.
+         */
+        if (ProjectId <= 0)
+        {
+            TempData["Error"] =
+                "Choose a project before opening "
+                + "the Idea Generator.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        var projectLoaded =
+            await LoadProjectContextAsync(
+                userId,
+                cancellationToken);
+
+        if (!projectLoaded)
+        {
+            TempData["Error"] =
+                "You do not have access to that project.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        /*
+         * Personal profile and skills remain private to
+         * the logged-in student.
+         */
         await LoadProfileIntoInputAsync(userId);
+
+        /*
+         * Team size belongs to this project, so the
+         * project's saved value takes priority over the
+         * general profile value.
+         */
+        Input.TeamSize = Math.Clamp(
+            CurrentProject!.MaximumMembers,
+            1,
+            3);
+
         await LoadPageDataAsync(userId);
+
+        await activeProjectService.RememberPageAsync(
+            userId,
+            ProjectId,
+            "/Student/IdeaGenerator",
+            cancellationToken);
+
+        return Page();
     }
 
-    public async Task<IActionResult> OnPostAsync()
+    public async Task<IActionResult> OnPostAsync(
+    CancellationToken cancellationToken)
     {
         var userId = UserId();
+
+        if (ProjectId <= 0 ||
+            !await LoadProjectContextAsync(
+                userId,
+                cancellationToken))
+        {
+            TempData["Error"] =
+                "Choose a valid project before generating ideas.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
 
         await LoadPageDataAsync(userId);
 
         if (!AssessedSkills.Any())
         {
-            ErrorMessage = "Please complete your Skill Assessment before generating project ideas.";
+            ErrorMessage =
+                "Please complete your Skill Assessment "
+                + "before generating project ideas.";
+
             return Page();
         }
 
         if (!ModelState.IsValid)
         {
-            ErrorMessage = "Please correct the generation inputs before continuing.";
+            ErrorMessage =
+                "Please correct the generation inputs "
+                + "before continuing.";
+
             return Page();
+        }
+
+        var project = await db.Projects
+            .FirstOrDefaultAsync(
+                item => item.Id == ProjectId,
+                cancellationToken);
+
+        if (project == null)
+        {
+            TempData["Error"] =
+                "The selected project could not be found.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        CurrentProject = project;
+
+        var activeMembersCount = await db.ProjectMembers
+            .AsNoTracking()
+            .CountAsync(
+                member =>
+                    member.ProjectId == ProjectId &&
+                    member.Status == "active",
+                cancellationToken);
+
+        if (activeMembersCount > 3)
+        {
+            ErrorMessage =
+                "This project contains more than the "
+                + "supported maximum of three members.";
+
+            return Page();
+        }
+
+        var selectedTeamSize =
+            Math.Clamp(Input.TeamSize, 1, 3);
+
+        /*
+         * Only the owner changes project capacity.
+         * Collaborators use the saved project capacity.
+         */
+        if (ProjectAccess?.IsOwner == true)
+        {
+            if (selectedTeamSize < activeMembersCount)
+            {
+                ModelState.AddModelError(
+                    "Input.TeamSize",
+                    $"This project already has "
+                    + $"{activeMembersCount} active member(s).");
+
+                ErrorMessage =
+                    "Team size cannot be smaller than the "
+                    + "current number of active members.";
+
+                return Page();
+            }
+
+            project.MaximumMembers = selectedTeamSize;
+            project.UpdatedAt = DateTime.UtcNow;
+        }
+        else
+        {
+            selectedTeamSize = Math.Max(
+                Math.Clamp(
+                    project.MaximumMembers,
+                    1,
+                    3),
+                activeMembersCount);
+
+            Input.TeamSize = selectedTeamSize;
         }
 
         var aiRequest = BuildAiRequest(
             regenerate: false,
-            previousIdeaTitles: new List<string>()
-        );
+            previousIdeaTitles: []);
 
-        var aiResponse = await aiServiceClient.GenerateIdeasAsync(aiRequest);
+        var aiResponse =
+            await aiServiceClient.GenerateIdeasAsync(
+                aiRequest);
 
-        if (aiResponse == null || aiResponse.Ideas == null || !aiResponse.Ideas.Any())
+        if (aiResponse?.Ideas == null ||
+            !aiResponse.Ideas.Any())
         {
-            ErrorMessage = "AI service could not generate ideas. Make sure the Python AI service is running.";
+            ErrorMessage =
+                "AI service could not generate ideas. "
+                + "Make sure the Python AI service is running.";
+
             return Page();
         }
 
-        var entities = await SaveGeneratedIdeasAsync(userId, aiResponse.Ideas);
-        await PersistReviewAsync(userId, aiResponse);
+        var entities = await SaveGeneratedIdeasAsync(
+            userId,
+            aiResponse.Ideas);
 
-        HttpContext.Session.SetInt32("IdeaGroupIndex", 0);
+        await PersistReviewAsync(
+            userId,
+            aiResponse);
+
+        HttpContext.Session.SetInt32(
+            IdeaGroupSessionKey,
+            0);
 
         GeneratedIdeas = entities
-            .OrderBy(i => i.Id)
+            .OrderBy(idea => idea.Id)
             .Take(IdeasPerView)
             .ToList();
 
@@ -199,82 +381,158 @@ public class IdeaGeneratorModel(
             ? "using the local AI model"
             : "using the AI fallback engine";
 
-        SuccessMessage = $"{entities.Count} project idea(s) generated and saved successfully {sourceText}.";
+        SuccessMessage =
+            $"{entities.Count} project idea(s) generated "
+            + $"and saved successfully {sourceText}.";
 
         await LoadLatestReviewAsync(userId);
 
+        await activeProjectService.RememberPageAsync(
+            userId,
+            ProjectId,
+            "/Student/IdeaGenerator",
+            cancellationToken);
+
         return Page();
     }
-
-    public async Task<IActionResult> OnPostShuffleAsync()
+    public async Task<IActionResult> OnPostShuffleAsync(
+       CancellationToken cancellationToken)
     {
         var userId = UserId();
 
-        var recentIdeasCount = await db.ProjectIdeas
-            .Where(i => i.UserId == userId)
-            .OrderByDescending(i => i.CreatedAt)
-            .ThenByDescending(i => i.Id)
-            .Take(IdeasPerBatch)
-            .CountAsync();
-
-        if (recentIdeasCount == 0)
+        if (ProjectId <= 0 ||
+            !await LoadProjectContextAsync(
+                userId,
+                cancellationToken))
         {
-            TempData["Error"] = "Generate ideas first before shuffling.";
-            return RedirectToPage();
+            TempData["Error"] =
+                "You do not have access to that project.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
         }
 
-        var currentIndex = HttpContext.Session.GetInt32("IdeaGroupIndex") ?? 0;
-        var maxGroups = Math.Max(1, (int)Math.Ceiling(recentIdeasCount / (double)IdeasPerView));
-        var nextIndex = (currentIndex + 1) % maxGroups;
+        var candidateCount = await db.ProjectIdeas
+            .AsNoTracking()
+            .Where(idea =>
+                idea.GeneratedForProjectId == ProjectId)
+            .OrderByDescending(idea => idea.CreatedAt)
+            .ThenByDescending(idea => idea.Id)
+            .Take(SharedCandidatePoolSize)
+            .CountAsync(cancellationToken);
 
-        HttpContext.Session.SetInt32("IdeaGroupIndex", nextIndex);
+        if (candidateCount == 0)
+        {
+            TempData["Error"] =
+                "Generate ideas first before shuffling.";
 
-        TempData["Success"] = "Showing another group of generated ideas.";
-        return RedirectToPage();
+            return RedirectToGenerator();
+        }
+
+        var currentIndex =
+            HttpContext.Session.GetInt32(
+                IdeaGroupSessionKey) ?? 0;
+
+        var maximumGroups = Math.Max(
+            1,
+            (int)Math.Ceiling(
+                candidateCount /
+                (double)IdeasPerView));
+
+        var nextIndex =
+            (currentIndex + 1) % maximumGroups;
+
+        HttpContext.Session.SetInt32(
+            IdeaGroupSessionKey,
+            nextIndex);
+
+        TempData["Success"] =
+            "Showing another group of project ideas.";
+
+        return RedirectToGenerator();
     }
 
-    public async Task<IActionResult> OnPostRegenerateAsync()
+    public async Task<IActionResult> OnPostRegenerateAsync(
+        CancellationToken cancellationToken)
     {
         var userId = UserId();
 
+        if (ProjectId <= 0 ||
+            !await LoadProjectContextAsync(
+                userId,
+                cancellationToken))
+        {
+            TempData["Error"] =
+                "You do not have access to that project.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
         await LoadProfileIntoInputAsync(userId);
+
+        Input.TeamSize = Math.Clamp(
+            CurrentProject!.MaximumMembers,
+            1,
+            3);
+
         await LoadPageDataAsync(userId);
 
         if (!AssessedSkills.Any())
         {
-            ErrorMessage = "Please complete your Skill Assessment before regenerating project ideas.";
+            ErrorMessage =
+                "Please complete your Skill Assessment "
+                + "before regenerating project ideas.";
+
             return Page();
         }
 
+        /*
+         * Avoid repeating ideas generated by any member
+         * inside this project workspace.
+         */
         var previousTitles = await db.ProjectIdeas
             .AsNoTracking()
-            .Where(i => i.UserId == userId)
-            .OrderByDescending(i => i.CreatedAt)
-            .ThenByDescending(i => i.Id)
+            .Where(idea =>
+                idea.GeneratedForProjectId == ProjectId)
+            .OrderByDescending(idea => idea.CreatedAt)
+            .ThenByDescending(idea => idea.Id)
             .Take(30)
-            .Select(i => i.Title)
-            .ToListAsync();
+            .Select(idea => idea.Title)
+            .ToListAsync(cancellationToken);
 
         var aiRequest = BuildAiRequest(
             regenerate: true,
-            previousIdeaTitles: previousTitles
-        );
+            previousIdeaTitles: previousTitles);
 
-        var aiResponse = await aiServiceClient.GenerateIdeasAsync(aiRequest);
+        var aiResponse =
+            await aiServiceClient.GenerateIdeasAsync(
+                aiRequest);
 
-        if (aiResponse == null || aiResponse.Ideas == null || !aiResponse.Ideas.Any())
+        if (aiResponse?.Ideas == null ||
+            !aiResponse.Ideas.Any())
         {
-            ErrorMessage = "AI service could not regenerate ideas. Make sure the Python AI service is running.";
+            ErrorMessage =
+                "AI service could not regenerate ideas. "
+                + "Make sure the Python AI service is running.";
+
             return Page();
         }
 
-        var entities = await SaveGeneratedIdeasAsync(userId, aiResponse.Ideas);
-        await PersistReviewAsync(userId, aiResponse);
+        var entities = await SaveGeneratedIdeasAsync(
+            userId,
+            aiResponse.Ideas);
 
-        HttpContext.Session.SetInt32("IdeaGroupIndex", 0);
+        await PersistReviewAsync(
+            userId,
+            aiResponse);
+
+        HttpContext.Session.SetInt32(
+            IdeaGroupSessionKey,
+            0);
 
         GeneratedIdeas = entities
-            .OrderBy(i => i.Id)
+            .OrderBy(idea => idea.Id)
             .Take(IdeasPerView)
             .ToList();
 
@@ -282,189 +540,329 @@ public class IdeaGeneratorModel(
             ? "using the local AI model"
             : "using the AI fallback engine";
 
-        SuccessMessage = $"{entities.Count} new project idea(s) regenerated successfully {sourceText}.";
+        SuccessMessage =
+            $"{entities.Count} new project idea(s) "
+            + $"regenerated successfully {sourceText}.";
 
         await LoadLatestReviewAsync(userId);
 
         return Page();
     }
-
-    public async Task<IActionResult> OnPostSelectAsync(int ideaId)
+    public async Task<IActionResult> OnPostSelectAsync(
+     int ideaId,
+     CancellationToken cancellationToken)
     {
         var userId = UserId();
 
+        if (ProjectId <= 0)
+        {
+            TempData["Error"] =
+                "Choose a project before selecting an idea.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        /*
+         * The official shared project idea is selected
+         * by the project owner.
+         */
+        var access =
+            await projectAccessService.GetAccessAsync(
+                ProjectId,
+                userId,
+                "student",
+                cancellationToken);
+
+        if (access == null)
+        {
+            TempData["Error"] =
+                "You do not have access to that project.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        if (!access.IsOwner)
+        {
+            TempData["Error"] =
+                "Only the project owner can select "
+                + "the official project idea.";
+
+            return RedirectToGenerator(ideaId);
+        }
+
         await using var transaction =
             await db.Database.BeginTransactionAsync(
-                System.Data.IsolationLevel.Serializable);
+                System.Data.IsolationLevel.Serializable,
+                cancellationToken);
 
         try
         {
+            /*
+             * During this stage, the owner can select one
+             * of their own generated candidates.
+             *
+             * In the next database stage, candidates will
+             * be scoped to the project so the owner can also
+             * select a collaborator's project candidate.
+             */
             var idea = await db.ProjectIdeas
-                .FirstOrDefaultAsync(i =>
-                    i.Id == ideaId &&
-                    i.UserId == userId);
+     .FirstOrDefaultAsync(
+         item =>
+             item.Id == ideaId &&
+             item.UserId == userId &&
+             item.GeneratedForProjectId ==
+                 ProjectId,
+         cancellationToken);
 
             if (idea == null)
             {
+                await transaction.RollbackAsync(
+                    cancellationToken);
+
                 TempData["Error"] =
-                    "The selected idea was not found or does not belong to your account.";
+    "The selected idea was not found in "
+    + "this project or does not belong "
+    + "to your account.";
 
-                await transaction.RollbackAsync();
-
-                return RedirectToPage();
+                return RedirectToGenerator();
             }
 
             /*
-             * Check whether this idea already has a project.
-             * This prevents duplicate project workspaces when the user
-             * clicks Select Idea more than once.
+             * The same ProjectIdea cannot be connected as
+             * the official idea of two different projects.
              */
-            var existingProject = await db.Projects
-                .Include(project => project.Members)
-                .FirstOrDefaultAsync(project =>
-                    project.ProjectIdeaId == ideaId);
+            var linkedProjectId =
+                await db.Projects
+                    .AsNoTracking()
+                    .Where(project =>
+                        project.ProjectIdeaId == ideaId)
+                    .Select(project =>
+                        (int?)project.Id)
+                    .FirstOrDefaultAsync(
+                        cancellationToken);
 
-            if (existingProject != null)
+            if (linkedProjectId.HasValue &&
+                linkedProjectId.Value != ProjectId)
             {
-                if (existingProject.StudentId != userId)
-                {
-                    TempData["Error"] =
-                        "This project workspace does not belong to your account.";
+                await transaction.RollbackAsync(
+                    cancellationToken);
 
-                    await transaction.RollbackAsync();
+                TempData["Error"] =
+                    "This idea is already connected "
+                    + "to another project.";
 
-                    return RedirectToPage();
-                }
+                return RedirectToGenerator(ideaId);
+            }
 
-                var alreadyActiveMember =
-                    existingProject.Members.Any(member =>
-                        member.UserId == userId &&
-                        member.Status == "active");
+            var project = await db.Projects
+                .Include(item => item.ProjectIdea)
+                .FirstOrDefaultAsync(
+                    item => item.Id == ProjectId,
+                    cancellationToken);
 
-                /*
-                 * Repair an incomplete older project record when the project
-                 * exists but its owner membership was not created.
-                 */
-                if (!alreadyActiveMember)
-                {
-                    existingProject.Members.Add(
-                        new ProjectMember
-                        {
-                            UserId = userId,
-                            Role = "owner",
-                            Status = "active",
-                            JoinedAt = DateTime.UtcNow
-                        });
-                }
+            if (project == null)
+            {
+                await transaction.RollbackAsync(
+                    cancellationToken);
 
-                idea.IsSelected = true;
-                existingProject.UpdatedAt = DateTime.UtcNow;
+                TempData["Error"] =
+                    "The selected project could not be found.";
 
-                await db.SaveChangesAsync();
-                await transaction.CommitAsync();
+                return RedirectToPage(
+                    "/Student/MyProjects");
+            }
+
+            /*
+             * Clicking the already selected idea should not
+             * create another project or duplicate activity.
+             */
+            if (project.ProjectIdeaId == idea.Id)
+            {
+                await transaction.RollbackAsync(
+                    cancellationToken);
 
                 TempData["Success"] =
-                    "This idea already has a project workspace. " +
-                    "Your owner access was confirmed.";
+                    "This idea is already selected "
+                    + "for the project.";
 
-                return RedirectToPage();
+                return RedirectToPage(
+                    "/Student/Dashboard",
+                    new
+                    {
+                        projectId = ProjectId
+                    });
+            }
+
+            var previousIdeaId =
+                project.ProjectIdeaId;
+
+            var previousIdeaTitle =
+                project.ProjectIdea?.Title;
+
+            var now = DateTime.UtcNow;
+
+            /*
+             * This is the essential correction:
+             * update the existing project.
+             *
+             * Do not create a new Project here.
+             */
+            project.ProjectIdeaId = idea.Id;
+
+            if (string.Equals(
+                    project.Status,
+                    "draft",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                project.Status = "planning";
             }
 
             /*
-             * Create one shared project workspace from the selected idea.
+             * Preserve a title manually chosen by the user.
+             * Only replace an empty or automatic title.
              */
-            var project = new Project
+            if (string.IsNullOrWhiteSpace(project.Title) ||
+                string.Equals(
+                    project.Title.Trim(),
+                    "Untitled Project",
+                    StringComparison.OrdinalIgnoreCase))
             {
-                ProjectIdeaId = idea.Id,
+                project.Title = idea.Title;
+            }
 
-                // Temporary compatibility owner field.
-                StudentId = userId,
-
-                SupervisorId = null,
-
-                Title = idea.Title,
-
-                Description =
-                    !string.IsNullOrWhiteSpace(idea.ProblemStatement)
+            if (string.IsNullOrWhiteSpace(
+                    project.Description))
+            {
+                project.Description =
+                    !string.IsNullOrWhiteSpace(
+                        idea.ProblemStatement)
                         ? idea.ProblemStatement
-                        : idea.WhyUseful,
+                        : idea.WhyUseful;
+            }
 
-                Technologies = idea.RequiredTechnologies,
-
-                Status = "planning",
-
-                ProgressPercentage = 0,
-
-                // One owner plus up to two collaborators.
-                MaximumMembers = 3,
-
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
+            if (string.IsNullOrWhiteSpace(
+                    project.Technologies))
+            {
+                project.Technologies =
+                    idea.RequiredTechnologies;
+            }
 
             /*
-             * The project creator automatically becomes the first member
-             * and owner of this specific project.
+             * Keep the existing project-specific capacity.
+             * Do not hardcode it as three.
              */
-            project.Members.Add(
-                new ProjectMember
-                {
-                    UserId = userId,
-                    Role = "owner",
-                    Status = "active",
-                    JoinedAt = DateTime.UtcNow
-                });
+            project.MaximumMembers =
+                Math.Clamp(
+                    project.MaximumMembers,
+                    1,
+                    3);
 
+            project.UpdatedAt = now;
+
+            /*
+             * Temporary compatibility for older pages.
+             * Project.ProjectIdeaId remains the real source
+             * of truth for the current project.
+             */
             idea.IsSelected = true;
 
-            db.Projects.Add(project);
+            var actorName =
+                User.FindFirst(
+                    ClaimTypes.Name)?.Value
+                ?? "The project owner";
 
-            await db.SaveChangesAsync();
-            await transaction.CommitAsync();
+            var replacingIdea =
+                previousIdeaId.HasValue;
 
-            TempData["Success"] =
-                $"The project “{project.Title}” was created successfully. " +
-                "You are now its owner.";
+            db.ProjectActivities.Add(
+                new ProjectActivity
+                {
+                    ProjectId = project.Id,
+                    UserId = userId,
 
-            return RedirectToPage();
+                    ActionType = replacingIdea
+                        ? "idea_replaced"
+                        : "idea_selected",
+
+                    Description = replacingIdea
+                        ? $"{actorName} replaced "
+                          + $"\"{previousIdeaTitle ?? "the previous idea"}\" "
+                          + $"with \"{idea.Title}\"."
+                        : $"{actorName} selected "
+                          + $"\"{idea.Title}\" as the "
+                          + "official project idea.",
+
+                    PreviousIdeaId = previousIdeaId,
+                    NewIdeaId = idea.Id,
+                    CreatedAtUtc = now
+                });
+
+            await db.SaveChangesAsync(
+                cancellationToken);
+
+            await transaction.CommitAsync(
+                cancellationToken);
+
+            await activeProjectService
+                .ActivateProjectAsync(
+                    userId,
+                    ProjectId,
+                    "/Student/Dashboard",
+                    cancellationToken);
+
+            TempData["Success"] = replacingIdea
+                ? "The project idea was replaced successfully."
+                : "The project idea was selected successfully.";
+
+            return RedirectToPage(
+                "/Student/Dashboard",
+                new
+                {
+                    projectId = ProjectId
+                });
         }
         catch (DbUpdateException exception)
         {
-            await transaction.RollbackAsync();
+            await transaction.RollbackAsync(
+                cancellationToken);
 
             logger.LogError(
                 exception,
-                "Failed to create a project from idea {IdeaId} for user {UserId}.",
+                "Failed to select idea {IdeaId} for "
+                + "project {ProjectId}, user {UserId}.",
                 ideaId,
+                ProjectId,
                 userId);
 
             TempData["Error"] =
-                "The project could not be created. Please try again.";
+                "The idea could not be connected "
+                + "to this project.";
 
-            return RedirectToPage();
+            return RedirectToGenerator(ideaId);
         }
         catch (Exception exception)
         {
-            await transaction.RollbackAsync();
+            await transaction.RollbackAsync(
+                cancellationToken);
 
             logger.LogError(
                 exception,
-                "Unexpected error while selecting idea {IdeaId} for user {UserId}.",
+                "Unexpected error while selecting idea "
+                + "{IdeaId} for project {ProjectId}, "
+                + "user {UserId}.",
                 ideaId,
+                ProjectId,
                 userId);
 
             TempData["Error"] =
-                "An unexpected error occurred while creating the project.";
+                "An unexpected error occurred while "
+                + "selecting the project idea.";
 
-            return RedirectToPage();
+            return RedirectToGenerator(ideaId);
         }
     }
-
-    /// <summary>
-    /// Market Insight — Regional Demand Footprint. Runs only when the
-    /// student explicitly clicks "Analyze Regional Demand" (never on page
-    /// load), and reopens the same idea's accordion item after redirect.
-    /// </summary>
     public async Task<IActionResult> OnPostAnalyzeMarketAsync(
         int ideaId,
         CancellationToken cancellationToken)
@@ -796,31 +1194,70 @@ public class IdeaGeneratorModel(
             .FirstOrDefaultAsync();
     }
 
-    private async Task<List<ProjectIdea>> SaveGeneratedIdeasAsync(int userId, List<GeneratedIdeaDto> ideas)
+    private async Task<List<ProjectIdea>>
+     SaveGeneratedIdeasAsync(
+         int userId,
+         List<GeneratedIdeaDto> ideas)
     {
         var entities = new List<ProjectIdea>();
 
-        foreach (var idea in ideas.Take(IdeasPerBatch))
+        foreach (var idea in ideas.Take(
+                     IdeasPerGeneration))
         {
             var entity = new ProjectIdea
             {
+                /*
+                 * UserId identifies the member who generated
+                 * the candidate.
+                 */
                 UserId = userId,
+
+                /*
+                 * GeneratedForProjectId identifies the shared
+                 * project workspace containing the candidate.
+                 */
+                GeneratedForProjectId = ProjectId,
+
                 Title = idea.Title,
                 ProblemStatement = idea.ProblemStatement,
                 TargetUsers = idea.TargetUsers,
                 WhyUseful = idea.WhyUseful,
-                LebaneseMarketRelevance = idea.LebaneseMarketRelevance,
-                RequiredTechnologies = idea.RequiredTechnologies,
+
+                LebaneseMarketRelevance =
+                    idea.LebaneseMarketRelevance,
+
+                RequiredTechnologies =
+                    idea.RequiredTechnologies,
+
                 RequiredSkills = idea.RequiredSkills,
                 MissingSkills = idea.MissingSkills,
-                DifficultyLevel = idea.DifficultyLevel.ToString(),
-                InnovationScore = (int)Math.Round(idea.InnovationScore),
-                FeasibilityScore = (int)Math.Round(idea.FeasibilityScore),
-                MarketDemandScore = (int)Math.Round(idea.MarketDemandScore),
-                ExpectedDurationWeeks = idea.ExpectedDurationWeeks,
-                SupervisorCategory = idea.SupervisorCategory,
+
+                DifficultyLevel =
+                    idea.DifficultyLevel.ToString(),
+
+                InnovationScore =
+                    (int)Math.Round(
+                        idea.InnovationScore),
+
+                FeasibilityScore =
+                    (int)Math.Round(
+                        idea.FeasibilityScore),
+
+                MarketDemandScore =
+                    (int)Math.Round(
+                        idea.MarketDemandScore),
+
+                ExpectedDurationWeeks =
+                    idea.ExpectedDurationWeeks,
+
+                SupervisorCategory =
+                    idea.SupervisorCategory,
+
                 DatasetNeeded = idea.DatasetNeeded,
-                FinalDeliverables = idea.FinalDeliverables,
+
+                FinalDeliverables =
+                    idea.FinalDeliverables,
+
                 Domain = idea.Domain,
                 LebanesesSector = idea.LebaneseSector,
                 IsSelected = false,
@@ -836,82 +1273,138 @@ public class IdeaGeneratorModel(
         return entities;
     }
 
-    private async Task LoadProfileIntoInputAsync(int userId)
+    private async Task LoadProfileIntoInputAsync(
+      int userId)
     {
         var profile = await db.StudentProfiles
             .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.UserId == userId);
+            .FirstOrDefaultAsync(
+                item => item.UserId == userId);
 
+        /*
+         * Even without a student profile, use the current
+         * project's saved team size.
+         */
         if (profile == null)
         {
+            Input.TeamSize = Math.Clamp(
+                CurrentProject?.MaximumMembers ?? 1,
+                1,
+                3);
+
             return;
         }
 
         Input = new InputModel
         {
-            Major = string.IsNullOrWhiteSpace(profile.Major)
-                ? "Computer Science"
-                : profile.Major,
+            Major =
+                string.IsNullOrWhiteSpace(profile.Major)
+                    ? "Computer Science"
+                    : profile.Major,
 
-            ExperienceLevel = string.IsNullOrWhiteSpace(profile.ExperienceLevel)
-                ? "intermediate"
-                : profile.ExperienceLevel.ToLowerInvariant(),
+            ExperienceLevel =
+                string.IsNullOrWhiteSpace(
+                    profile.ExperienceLevel)
+                    ? "intermediate"
+                    : profile.ExperienceLevel
+                        .ToLowerInvariant(),
 
-            PreferredDomain = string.IsNullOrWhiteSpace(profile.PreferredDomain)
-                ? "General Software System"
-                : profile.PreferredDomain,
+            PreferredDomain =
+                string.IsNullOrWhiteSpace(
+                    profile.PreferredDomain)
+                    ? "General Software System"
+                    : profile.PreferredDomain,
 
-            TargetDifficulty = string.IsNullOrWhiteSpace(profile.TargetDifficulty)
-                ? "intermediate"
-                : profile.TargetDifficulty.ToLowerInvariant(),
+            TargetDifficulty =
+                string.IsNullOrWhiteSpace(
+                    profile.TargetDifficulty)
+                    ? "intermediate"
+                    : profile.TargetDifficulty
+                        .ToLowerInvariant(),
 
-            AvailableHours = profile.AvailableHoursPerWeek <= 0
-                ? 20
-                : profile.AvailableHoursPerWeek,
+            AvailableHours =
+                profile.AvailableHoursPerWeek <= 0
+                    ? 20
+                    : profile.AvailableHoursPerWeek,
 
-            TeamSize = profile.TeamMembers <= 0
-                ? 1
-                : profile.TeamMembers
+            /*
+             * Project value has priority.
+             */
+            TeamSize = Math.Clamp(
+                CurrentProject?.MaximumMembers
+                ?? (profile.TeamMembers <= 0
+                    ? 1
+                    : profile.TeamMembers),
+                1,
+                3)
         };
     }
 
-    private async Task LoadPageDataAsync(int userId)
+    private async Task LoadPageDataAsync(
+     int userId)
     {
+        /*
+         * Skills remain private to the logged-in member.
+         */
         AssessedSkills = await db.StudentSkills
             .AsNoTracking()
-            .Where(s => s.UserId == userId)
-            .OrderByDescending(s => s.Rating)
-            .ThenBy(s => s.SkillName)
+            .Where(skill =>
+                skill.UserId == userId)
+            .OrderByDescending(skill =>
+                skill.Rating)
+            .ThenBy(skill =>
+                skill.SkillName)
             .ToListAsync();
 
-        var recentBatch = await db.ProjectIdeas
+        /*
+         * Candidate ideas are shared inside the project.
+         * Do not filter them by the current user's ID.
+         */
+        var recentCandidates = await db.ProjectIdeas
             .AsNoTracking()
-            .Where(i => i.UserId == userId)
-            .OrderByDescending(i => i.CreatedAt)
-            .ThenByDescending(i => i.Id)
-            .Take(IdeasPerBatch)
+            .Include(idea => idea.User)
+            .Where(idea =>
+                idea.GeneratedForProjectId == ProjectId)
+            .OrderByDescending(idea =>
+                idea.CreatedAt)
+            .ThenByDescending(idea =>
+                idea.Id)
+            .Take(SharedCandidatePoolSize)
             .ToListAsync();
 
-        var orderedBatch = recentBatch
-            .OrderBy(i => i.Id)
+        var orderedCandidates = recentCandidates
+            .OrderBy(idea => idea.Id)
             .ToList();
 
-        var groupIndex = HttpContext.Session.GetInt32("IdeaGroupIndex") ?? 0;
-        var maxGroups = Math.Max(1, (int)Math.Ceiling(orderedBatch.Count / (double)IdeasPerView));
+        var groupIndex =
+            HttpContext.Session.GetInt32(
+                IdeaGroupSessionKey) ?? 0;
 
-        if (groupIndex >= maxGroups)
+        var maximumGroups = Math.Max(
+            1,
+            (int)Math.Ceiling(
+                orderedCandidates.Count /
+                (double)IdeasPerView));
+
+        if (groupIndex >= maximumGroups)
         {
             groupIndex = 0;
-            HttpContext.Session.SetInt32("IdeaGroupIndex", groupIndex);
+
+            HttpContext.Session.SetInt32(
+                IdeaGroupSessionKey,
+                groupIndex);
         }
 
-        GeneratedIdeas = orderedBatch
+        GeneratedIdeas = orderedCandidates
             .Skip(groupIndex * IdeasPerView)
             .Take(IdeasPerView)
             .ToList();
 
         await LoadLatestMarketInsightsAsync(userId);
-        await LoadLatestMarketFootprintReviewsAsync(userId);
+
+        await LoadLatestMarketFootprintReviewsAsync(
+            userId);
+
         await LoadLatestReviewAsync(userId);
     }
 
@@ -970,7 +1463,43 @@ public class IdeaGeneratorModel(
             .GroupBy(r => r.ProjectIdeaId!.Value)
             .ToDictionary(group => group.Key, group => group.First());
     }
+    private async Task<bool> LoadProjectContextAsync(
+    int userId,
+    CancellationToken cancellationToken)
+    {
+        CurrentUserId = userId;
+        ProjectAccess =
+            await projectAccessService.GetAccessAsync(
+                ProjectId,
+                userId,
+                "student",
+                cancellationToken);
 
+        if (ProjectAccess == null)
+        {
+            return false;
+        }
+
+        CurrentProject = await db.Projects
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                project => project.Id == ProjectId,
+                cancellationToken);
+
+        return CurrentProject != null;
+    }
+    private RedirectToPageResult RedirectToGenerator(
+    int? openIdeaId = null)
+    {
+        return RedirectToPage(
+            "/Student/IdeaGenerator",
+            new
+            {
+                projectId = ProjectId,
+                openIdeaId
+            });
+    }
+ 
     private int UserId()
     {
         return int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);

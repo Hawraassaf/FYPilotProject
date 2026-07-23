@@ -19,6 +19,7 @@ public class ProjectIdea
 {
     [Key] [Column("id")] public int Id { get; set; }
     [Column("user_id")] public int UserId { get; set; }
+    [Column("generated_for_project_id")] public int? GeneratedForProjectId { get; set; }
     [Column("title")] public string Title { get; set; } = "";
     [Column("problem_statement")] public string ProblemStatement { get; set; } = "";
     [Column("target_users")] public string TargetUsers { get; set; } = "";
@@ -39,7 +40,11 @@ public class ProjectIdea
     [Column("lebanese_sector")] public string LebanesesSector { get; set; } = "";
     [Column("is_selected")] public bool IsSelected { get; set; } = false;
     [Column("created_at")] public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    [ForeignKey(nameof(UserId))] public User? User { get; set; }
+    [ForeignKey(nameof(UserId))]
+    public User? User { get; set; }
+
+    [ForeignKey(nameof(GeneratedForProjectId))]
+    public Project? GeneratedForProject { get; set; }
     public FeasibilityReport? FeasibilityReport { get; set; }
     public Project? Project { get; set; }
 }

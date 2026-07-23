@@ -497,20 +497,20 @@
                                 </button>
                             </form>
 
-                            <button type="button"
-                                    class="team-project-button"
-                                    data-team-notice
-                                    data-team-action="@project.TeamActionText">
+                            <a asp-page="/Student/TeamManagement"
+                               asp-route-projectId="@project.Id"
+                               class="team-project-button"
+                               style="text-decoration: none;">
 
                                 <i class="bi
                                 @(project.Role == "owner"
-                                       ? "bi-person-plus"
-                                       : "bi-people")"></i>
+                                          ? "bi-person-plus"
+                                          : "bi-people")"></i>
 
                                 <span>
                                     @project.TeamActionText
                                 </span>
-                            </button>
+                            </a>
                         </footer>
                     </article>
                 }
