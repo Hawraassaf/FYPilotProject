@@ -54,3 +54,5 @@ Thumbs.db
 
 # ── Node (if any tooling is added) ──────────────────────────
 node_modules/
+
+/src/FYPilot.Web/App_Data/
