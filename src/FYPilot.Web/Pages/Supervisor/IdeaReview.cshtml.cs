@@ -82,10 +82,7 @@ public class IdeaReviewModel(
     }
 
     public async Task OnGetAsync(int? ideaId)
-    {
-        SuccessMessage = TempData["Success"] as string;
-        ErrorMessage = TempData["Error"] as string;
-
+    { 
         await LoadPageAsync(ideaId);
     }
 

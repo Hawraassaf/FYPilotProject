@@ -19,7 +19,12 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
     public DbSet<ProjectActivity> ProjectActivities =>
         Set<ProjectActivity>();
-
+    public DbSet<ProjectDiscussionMessage>
+    ProjectDiscussionMessages =>
+        Set<ProjectDiscussionMessage>();
+    public DbSet<ProjectDiscussionAttachment>
+    ProjectDiscussionAttachments =>
+        Set<ProjectDiscussionAttachment>();
     public DbSet<ProjectInvitation> ProjectInvitations =>
         Set<ProjectInvitation>();
 
@@ -223,6 +228,66 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
             e.HasIndex(activity => activity.UserId);
         });
+        modelBuilder.Entity<ProjectDiscussionMessage>(entity =>
+        {
+            entity.ToTable("project_discussion_messages");
+
+            entity.Property(message => message.Content)
+                .HasMaxLength(1000)
+                .IsRequired();
+
+            entity.HasOne(message => message.Project)
+                .WithMany()
+                .HasForeignKey(message => message.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(message => message.User)
+                .WithMany()
+                .HasForeignKey(message => message.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(message => message.ReplyToMessage)
+                .WithMany(message => message.Replies)
+                .HasForeignKey(message => message.ReplyToMessageId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(message => new
+            {
+                message.ProjectId,
+                message.CreatedAtUtc
+            });
+        });
+
+        modelBuilder.Entity<ProjectDiscussionAttachment>(entity =>
+        {
+            entity.ToTable("project_discussion_attachments");
+
+            entity.Property(attachment =>
+                    attachment.OriginalFileName)
+                .HasMaxLength(255)
+                .IsRequired();
+
+            entity.Property(attachment =>
+                    attachment.StoredFileName)
+                .HasMaxLength(255)
+                .IsRequired();
+
+            entity.Property(attachment =>
+                    attachment.ContentType)
+                .HasMaxLength(150)
+                .IsRequired();
+
+            entity.Property(attachment =>
+                    attachment.RelativePath)
+                .HasMaxLength(500)
+                .IsRequired();
+
+            entity.HasOne(attachment => attachment.Message)
+                .WithMany(message => message.Attachments)
+                .HasForeignKey(attachment =>
+                    attachment.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
         modelBuilder.Entity<ProjectInvitation>(e =>
         {
             e.Property(invitation => invitation.InvitedEmail)
@@ -336,9 +401,23 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
                 .HasForeignKey(i => i.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            e.HasOne(i => i.GeneratedForProject)
+                .WithMany(project =>
+                    project.GeneratedCandidateIdeas)
+                .HasForeignKey(i =>
+                    i.GeneratedForProjectId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            e.HasIndex(i => new
+            {
+                i.GeneratedForProjectId,
+                i.CreatedAt
+            });
+
             e.HasOne(i => i.FeasibilityReport)
                 .WithOne(f => f.Idea)
-                .HasForeignKey<FeasibilityReport>(f => f.IdeaId)
+                .HasForeignKey<FeasibilityReport>(
+                    f => f.IdeaId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

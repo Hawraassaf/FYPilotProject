@@ -216,6 +216,10 @@ app.MapHub<NotificationHub>(
 
 // ── Endpoints ─────────────────────────────────────────────────────────────────
 app.MapHealthChecks("/healthz");
+app.MapHub<ProjectDiscussionHub>(
+    "/hubs/project-discussion");
+
+app.MapRazorPages();
 app.MapRazorPages();
 
 // ── Database Startup ──────────────────────────────────────────────────────────

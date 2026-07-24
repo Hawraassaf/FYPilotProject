@@ -65,10 +65,80 @@ FYPilot.SystemTest = {
     }
 };
 
-document.addEventListener('DOMContentLoaded', function(){
-    document.querySelectorAll('.alert-success.auto-dismiss').forEach(function(el){
-        setTimeout(function(){ el.style.transition='opacity 0.5s'; el.style.opacity='0'; setTimeout(function(){ el.remove(); }, 500); }, 4000);
+document.addEventListener(
+    'DOMContentLoaded',
+    function () {
+
+        document
+            .querySelectorAll(
+                '[data-flash-message]')
+            .forEach(function (alertBox) {
+
+                var delay =
+                    parseInt(
+                        alertBox.getAttribute(
+                            'data-auto-dismiss') ||
+                        '4000',
+                        10);
+
+                if (!Number.isFinite(delay) ||
+                    delay <= 0) {
+                    return;
+                }
+
+                window.setTimeout(
+                    function () {
+
+                        if (!document.body.contains(
+                            alertBox)) {
+                            return;
+                        }
+
+                        alertBox.style.transition =
+                            'opacity 0.35s ease, ' +
+                            'transform 0.35s ease';
+
+                        alertBox.style.opacity =
+                            '0';
+
+                        alertBox.style.transform =
+                            'translateY(-6px)';
+
+                        window.setTimeout(
+                            function () {
+                                alertBox.remove();
+                            },
+                            350);
+                    },
+                    delay);
+            });
+
+        /*
+         * Preserve older page-specific success alerts
+         * that are not standard TempData messages.
+         */
+        document
+            .querySelectorAll(
+                '.alert-success.auto-dismiss' +
+                ':not([data-flash-message])')
+            .forEach(function (alertBox) {
+
+                window.setTimeout(
+                    function () {
+                        alertBox.style.transition =
+                            'opacity 0.5s';
+
+                        alertBox.style.opacity =
+                            '0';
+
+                        window.setTimeout(
+                            function () {
+                                alertBox.remove();
+                            },
+                            500);
+                    },
+                    4000);
+            });
     });
-});
 
 window.FYPilot = FYPilot;

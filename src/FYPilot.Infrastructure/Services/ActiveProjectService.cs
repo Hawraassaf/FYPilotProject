@@ -26,12 +26,14 @@ public sealed class ActiveProjectService(
      * ChangePassword, or SkillAssessment.
      */
     private static readonly HashSet<string>
-        AllowedProjectPages =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            "/Student/Dashboard",
-            "/Student/IdeaGenerator"
-        };
+     AllowedProjectPages =
+     new(StringComparer.OrdinalIgnoreCase)
+     {
+        "/Student/Dashboard",
+        "/Student/IdeaGenerator",
+        "/Student/TeamManagement",
+        "/Student/ProjectWorkspace"
+     };
 
     public bool IsAllowedProjectPage(
         string? pageName)

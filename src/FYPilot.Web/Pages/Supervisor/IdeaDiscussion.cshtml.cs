@@ -46,17 +46,21 @@ public class IdeaDiscussionModel(
         public string? MessageText { get; set; }
     }
 
-    public async Task<IActionResult> OnGetAsync(int ideaId)
+    public async Task<IActionResult> OnGetAsync(
+      int ideaId)
     {
-        SuccessMessage = TempData["Success"] as string;
-        ErrorMessage = TempData["Error"] as string;
-
-        await LoadDiscussionAsync(ideaId);
+        await LoadDiscussionAsync(
+            ideaId);
 
         if (Idea == null)
         {
-            TempData["Error"] = "The selected idea was not found or it does not belong to one of your assigned students.";
-            return RedirectToPage("/Supervisor/IdeaReview");
+            TempData["Error"] =
+                "The selected idea was not found "
+                + "or it does not belong to one of "
+                + "your assigned students.";
+
+            return RedirectToPage(
+                "/Supervisor/IdeaReview");
         }
 
         return Page();

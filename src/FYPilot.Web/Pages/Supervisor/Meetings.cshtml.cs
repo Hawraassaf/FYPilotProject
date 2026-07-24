@@ -53,9 +53,6 @@ public class MeetingsModel(
 
     public async Task OnGetAsync(int? meetingId)
     {
-        SuccessMessage = TempData["Success"] as string;
-        ErrorMessage = TempData["Error"] as string;
-
         GoogleCalendarConnected =
       await googleCalendar.IsConnectedAsync(SupervisorId());
 

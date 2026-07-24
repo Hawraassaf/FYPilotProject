@@ -28,6 +28,7 @@ public class Project
     public ProjectIdea? ProjectIdea { get; set; }
 
     public ICollection<ProjectMember> Members { get; set; } = [];
+    public ICollection<ProjectIdea> GeneratedCandidateIdeas { get;  set;  } = [];
 
     public ICollection<ProjectInvitation> Invitations { get; set; } = [];
 
