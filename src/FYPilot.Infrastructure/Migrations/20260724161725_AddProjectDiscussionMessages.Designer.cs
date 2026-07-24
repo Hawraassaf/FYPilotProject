@@ -3,6 +3,7 @@ using System;
 using FYPilot.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FYPilot.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260724161725_AddProjectDiscussionMessages")]
+    partial class AddProjectDiscussionMessages
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1505,58 +1508,6 @@ namespace FYPilot.Infrastructure.Migrations
                     b.ToTable("project_activities");
                 });
 
-            modelBuilder.Entity("FYPilot.Domain.Entities.ProjectDiscussionAttachment", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("ContentType")
-                        .IsRequired()
-                        .HasMaxLength(150)
-                        .HasColumnType("character varying(150)")
-                        .HasColumnName("content_type");
-
-                    b.Property<int>("MessageId")
-                        .HasColumnType("integer")
-                        .HasColumnName("message_id");
-
-                    b.Property<string>("OriginalFileName")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
-                        .HasColumnName("original_file_name");
-
-                    b.Property<string>("RelativePath")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)")
-                        .HasColumnName("relative_path");
-
-                    b.Property<long>("SizeBytes")
-                        .HasColumnType("bigint")
-                        .HasColumnName("size_bytes");
-
-                    b.Property<string>("StoredFileName")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
-                        .HasColumnName("stored_file_name");
-
-                    b.Property<DateTime>("UploadedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("uploaded_at_utc");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("MessageId");
-
-                    b.ToTable("project_discussion_attachments", (string)null);
-                });
-
             modelBuilder.Entity("FYPilot.Domain.Entities.ProjectDiscussionMessage", b =>
                 {
                     b.Property<int>("Id")
@@ -1576,29 +1527,9 @@ namespace FYPilot.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at_utc");
 
-                    b.Property<DateTime?>("DeletedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("deleted_at_utc");
-
-                    b.Property<DateTime?>("EditedAtUtc")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("edited_at_utc");
-
-                    b.Property<bool>("IsDeleted")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_deleted");
-
-                    b.Property<bool>("IsEdited")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_edited");
-
                     b.Property<int>("ProjectId")
                         .HasColumnType("integer")
                         .HasColumnName("project_id");
-
-                    b.Property<int?>("ReplyToMessageId")
-                        .HasColumnType("integer")
-                        .HasColumnName("reply_to_message_id");
 
                     b.Property<int>("UserId")
                         .HasColumnType("integer")
@@ -1606,13 +1537,11 @@ namespace FYPilot.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ReplyToMessageId");
-
                     b.HasIndex("UserId");
 
                     b.HasIndex("ProjectId", "CreatedAtUtc");
 
-                    b.ToTable("project_discussion_messages", (string)null);
+                    b.ToTable("project_discussion_messages");
                 });
 
             modelBuilder.Entity("FYPilot.Domain.Entities.ProjectDocumentation", b =>
@@ -2964,17 +2893,6 @@ namespace FYPilot.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("FYPilot.Domain.Entities.ProjectDiscussionAttachment", b =>
-                {
-                    b.HasOne("FYPilot.Domain.Entities.ProjectDiscussionMessage", "Message")
-                        .WithMany("Attachments")
-                        .HasForeignKey("MessageId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Message");
-                });
-
             modelBuilder.Entity("FYPilot.Domain.Entities.ProjectDiscussionMessage", b =>
                 {
                     b.HasOne("FYPilot.Domain.Entities.Project", "Project")
@@ -2983,11 +2901,6 @@ namespace FYPilot.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("FYPilot.Domain.Entities.ProjectDiscussionMessage", "ReplyToMessage")
-                        .WithMany("Replies")
-                        .HasForeignKey("ReplyToMessageId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("FYPilot.Domain.Entities.User", "User")
                         .WithMany()
                         .HasForeignKey("UserId")
@@ -2995,8 +2908,6 @@ namespace FYPilot.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Project");
-
-                    b.Navigation("ReplyToMessage");
 
                     b.Navigation("User");
                 });
@@ -3300,13 +3211,6 @@ namespace FYPilot.Infrastructure.Migrations
                     b.Navigation("Tasks");
 
                     b.Navigation("TeammateRequests");
-                });
-
-            modelBuilder.Entity("FYPilot.Domain.Entities.ProjectDiscussionMessage", b =>
-                {
-                    b.Navigation("Attachments");
-
-                    b.Navigation("Replies");
                 });
 
             modelBuilder.Entity("FYPilot.Domain.Entities.ProjectIdea", b =>
