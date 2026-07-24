@@ -20,7 +20,13 @@ from app.agents.fyp_mentor_agent import FypMentorAnswer
 from app.agents.project_dna_agent import ProjectDNAResponse
 from app.agents.project_idea_agent import IDEAS_PER_BATCH, ProjectIdea
 from app.agents.project_idea_comparison import IdeaComparisonResponse
-from app.agents.project_roadmap_agent import ProjectRoadmapResponse
+from app.agents import roadmap_scheduler
+from app.agents.project_roadmap_agent import (
+    ProjectRoadmapResponse,
+    RoadmapDeferredTask,
+    RoadmapPhaseSummary,
+    RoadmapPlanningSummary,
+)
 from app.agents.se_documentation.se_documentation_orchestrator import SEDocumentationDto
 from app.models.market_footprint_models import MarketFootprintResponse
 from app.models.market_needs_models import MarketNeedsResponse
@@ -109,6 +115,37 @@ ROADMAP-SPECIFIC REVIEW CRITERIA (in addition to the standard criteria above):
   deterministically by the platform and are correct by construction. Only
   flag the narrative content (task wording, phase names, risk/checkpoint
   text, goal text).
+- Do NOT suggest changing phase durations, phase/task IDs, estimated hours,
+  team assignments, or any workload/capacity figure -- these are all
+  recomputed deterministically from task text and are correct by
+  construction (category "quality" if the LLM's own draft narrative
+  contradicts them, e.g. a task description implying far more or less work
+  than a reasonable reader would expect).
+- Project specificity: flag (category "quality") any phase name or task
+  that could describe almost any software project (e.g. "Work on backend",
+  "Develop system", "Test application") rather than naming a real feature,
+  screen, entity, endpoint, or technology from this specific idea.
+- Duration realism: flag (category "quality") if a phase's or task's
+  narrative content clearly implies much more or much less work than its
+  duration/hours suggest for this team size and weekly capacity.
+- Team usage: when teamSize > 1, flag (category "quality") if the
+  narrative (teamStrategy, task descriptions) does not reflect multiple
+  people working, or implies one person doing everything despite a larger
+  team being available.
+- Do not invent a project feature, external dependency, or completed step
+  that was not part of the original idea/request -- flag as
+  "unverified_claim" per the standard criteria above.
+- Overload resolution: flag (category "quality") if the roadmap's narrative
+  (teamStrategy, finalAdvice, task/phase text) claims the plan comfortably
+  fits within capacity while planningSummary.scheduleFeasibility is
+  "over_capacity", or claims a feature was cut/deferred when
+  planningSummary.deferredHours is 0 -- the narrative must match the actual
+  feasibility state.
+- Do NOT suggest changing memberAllocations, allocationPercentage,
+  allocatedHours, totalPlannedHours, capacityHours, deferredHours,
+  scheduleFeasibility, recommendedAdditionalWeeks, or weeklyCapacity --
+  these are all recomputed deterministically and are correct by
+  construction.
 """
 
 
@@ -120,6 +157,17 @@ class RoadmapCandidateSchema(ProjectRoadmapResponse):
     across weeks. A violation here is a schema failure (schema_ok=False),
     handled entirely by the pipeline's existing structural-repair path --
     no changes to pipeline.py's decision logic were needed for this.
+
+    Also deterministically REBUILDS `phases` and `planningSummary` from
+    `weeks`/`totalWeeks`/`teamSize`/`hoursPerWeekPerMember` on every single
+    validation pass -- the Writer's first candidate AND every Rewrite pass
+    alike -- via roadmap_scheduler.build_phases_and_summary(). Because this
+    always recomputes from scratch rather than trusting whatever the
+    candidate carried in those fields, a Rewrite's LLM call can change task
+    *wording* (which may shift that task's deterministically-derived hours)
+    but can never independently alter phase durations, task IDs, hour
+    totals, team assignments, or workload figures without also changing the
+    underlying task text that drives them.
     """
 
     @model_validator(mode="after")
@@ -146,7 +194,186 @@ class RoadmapCandidateSchema(ProjectRoadmapResponse):
                 f"{sorted(responsibility_counts)}"
             )
 
+        phases, planning_summary, deferred_tasks = roadmap_scheduler.build_phases_and_summary(
+            weeks=[week.model_dump() for week in self.weeks],
+            total_weeks=self.totalWeeks,
+            team_size=self.teamSize,
+            hours_per_week_per_member=self.hoursPerWeekPerMember,
+        )
+
+        # Re-parse through the declared field types rather than assigning
+        # raw dicts, so a shape mismatch surfaces as a validation error here
+        # instead of silently reaching the router/response.
+        self.phases = [RoadmapPhaseSummary.model_validate(p) for p in phases]
+        self.planningSummary = RoadmapPlanningSummary.model_validate(planning_summary)
+        self.deferredTasks = [RoadmapDeferredTask.model_validate(d) for d in deferred_tasks]
+
+        self._check_schedule_invariants()
+
         return self
+
+    def _check_schedule_invariants(self) -> None:
+        """
+        Defensive re-verification of the invariants roadmap_scheduler is
+        supposed to guarantee by construction -- catches a future change to
+        the scheduler that accidentally breaks one of them, rather than
+        silently shipping bad data.
+        """
+        phase_ids = [phase.phaseId for phase in self.phases]
+        if len(phase_ids) != len(set(phase_ids)):
+            raise ValueError(f"phase ids are not unique: {phase_ids}")
+
+        task_ids: list[str] = []
+        all_tasks = []
+        for phase in self.phases:
+            if phase.durationWeeks <= 0:
+                raise ValueError(f"phase '{phase.phaseId}' has non-positive durationWeeks")
+
+            if phase.endWeek != phase.startWeek + phase.durationWeeks - 1:
+                raise ValueError(
+                    f"phase '{phase.phaseId}' endWeek is inconsistent with "
+                    f"startWeek/durationWeeks"
+                )
+
+            if phase.endWeek > self.totalWeeks:
+                raise ValueError(
+                    f"phase '{phase.phaseId}' extends beyond totalWeeks "
+                    f"({phase.endWeek} > {self.totalWeeks})"
+                )
+
+            for task in phase.tasks:
+                task_ids.append(task.taskId)
+                all_tasks.append(task)
+
+                for member in task.assignedMembers:
+                    try:
+                        member_index = int(member.replace("Member", "").strip())
+                    except ValueError:
+                        raise ValueError(f"task '{task.taskId}' has an unlabeled member '{member}'")
+
+                    if not (1 <= member_index <= self.teamSize):
+                        raise ValueError(
+                            f"task '{task.taskId}' assigned member index "
+                            f"{member_index} exceeds teamSize ({self.teamSize})"
+                        )
+
+                if not task.memberAllocations:
+                    raise ValueError(f"task '{task.taskId}' has no memberAllocations")
+
+                allocation_percentage_total = sum(
+                    allocation.allocationPercentage for allocation in task.memberAllocations
+                )
+                if allocation_percentage_total != 100:
+                    raise ValueError(
+                        f"task '{task.taskId}' allocationPercentage total "
+                        f"({allocation_percentage_total}) is not exactly 100"
+                    )
+
+                allocated_hours_total = sum(
+                    allocation.allocatedHours for allocation in task.memberAllocations
+                )
+                if allocated_hours_total != task.estimatedHours:
+                    raise ValueError(
+                        f"task '{task.taskId}' memberAllocations hours total "
+                        f"({allocated_hours_total}) does not equal "
+                        f"estimatedHours ({task.estimatedHours}) -- effort "
+                        "must not be double-counted across collaborators"
+                    )
+
+                expected_days = roadmap_scheduler.compute_working_days(task.estimatedHours)
+                if task.estimatedWorkingDays != expected_days:
+                    raise ValueError(
+                        f"task '{task.taskId}' estimatedWorkingDays "
+                        f"({task.estimatedWorkingDays}) is inconsistent with "
+                        f"estimatedHours ({task.estimatedHours}); expected "
+                        f"{expected_days}"
+                    )
+
+        if len(task_ids) != len(set(task_ids)):
+            raise ValueError(f"task ids are not unique: {task_ids}")
+
+        valid_ids = set(task_ids) | {phase.phaseId for phase in self.phases}
+        for task in all_tasks:
+            for dependency in task.dependencies:
+                if dependency == task.taskId:
+                    raise ValueError(f"task '{task.taskId}' depends on itself")
+                if dependency not in valid_ids:
+                    raise ValueError(
+                        f"task '{task.taskId}' has a dangling dependency '{dependency}'"
+                    )
+
+        if roadmap_scheduler.has_dependency_cycle([task.model_dump() for task in all_tasks]):
+            raise ValueError("task dependency graph contains a cycle")
+
+        if self.planningSummary is not None:
+            planned_from_tasks = sum(task.estimatedHours for task in all_tasks)
+            if planned_from_tasks != self.planningSummary.totalPlannedHours:
+                raise ValueError(
+                    "planningSummary.totalPlannedHours "
+                    f"({self.planningSummary.totalPlannedHours}) does not match "
+                    f"the sum of task estimatedHours ({planned_from_tasks})"
+                )
+
+            # Exact reconciliation (not merely ">="): a task's effort must
+            # never be counted twice just because two members collaborate
+            # on it -- see roadmap_scheduler.allocate_task_hours, which
+            # always splits (never adds) a task's hours across
+            # collaborators.
+            workload_hours_total = sum(
+                member.assignedHours for member in self.planningSummary.workloadByMember
+            )
+            if workload_hours_total != planned_from_tasks:
+                raise ValueError(
+                    "workloadByMember hours total "
+                    f"({workload_hours_total}) does not exactly equal total "
+                    f"planned hours ({planned_from_tasks}) -- collaboration "
+                    "accounting must split, not duplicate, task effort"
+                )
+
+            if (
+                self.planningSummary.scheduleFeasibility == "over_capacity"
+                and self.planningSummary.overloadHours <= 0
+            ):
+                raise ValueError(
+                    "scheduleFeasibility is 'over_capacity' but overloadHours "
+                    "is not positive"
+                )
+
+            if (
+                self.planningSummary.scheduleFeasibility != "over_capacity"
+                and self.planningSummary.overloadHours > 0
+            ):
+                raise ValueError(
+                    "planned hours still exceed capacity but "
+                    f"scheduleFeasibility is '{self.planningSummary.scheduleFeasibility}' "
+                    "instead of 'over_capacity' -- an overloaded roadmap must "
+                    "never be labeled feasible"
+                )
+
+            if self.planningSummary.scheduleFeasibility == "over_capacity":
+                expected_weeks = -(
+                    -self.planningSummary.overloadHours
+                    // max(1, self.hoursPerWeekPerMember * self.teamSize)
+                )  # ceiling division
+                if self.planningSummary.recommendedAdditionalWeeks != expected_weeks:
+                    raise ValueError(
+                        "recommendedAdditionalWeeks "
+                        f"({self.planningSummary.recommendedAdditionalWeeks}) does "
+                        f"not match the expected ceiling division ({expected_weeks})"
+                    )
+
+            # No active task may depend on a deferred one -- deferred tasks
+            # have no taskId of their own (they were removed from `phases`
+            # entirely, not just flagged), so a dangling-dependency check
+            # already covers this structurally. This check additionally
+            # verifies no deferred task's title reappears as if still active.
+            deferred_titles = {task.title for task in self.deferredTasks}
+            for task in all_tasks:
+                if task.title in deferred_titles:
+                    raise ValueError(
+                        f"task '{task.taskId}' duplicates a deferred task's title "
+                        f"'{task.title}' -- it should have been removed"
+                    )
 
 
 # SE Documentation-specific overclaiming to watch for -- the same forbidden

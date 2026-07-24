@@ -448,7 +448,93 @@ public record ProjectRoadmapDto(
     string DifficultyLevel,
     string TeamStrategy,
     List<ProjectRoadmapWeekDto> Weeks,
-    string FinalAdvice
+    string FinalAdvice,
+    int TeamSize = 1,
+    int HoursPerWeekPerMember = 10,
+    List<RoadmapPhaseSummaryDto>? Phases = null,
+    RoadmapPlanningSummaryDto? PlanningSummary = null,
+    List<RoadmapDeferredTaskDto>? DeferredTasks = null
+);
+
+public record RoadmapMemberAllocationDto(
+    string MemberId,
+    int AllocationPercentage,
+    int AllocatedHours
+);
+
+public record RoadmapTaskDto(
+    string TaskId,
+    string Title,
+    int EstimatedHours,
+    int EstimatedWorkingDays,
+    int StartWeek,
+    int EndWeek,
+    List<string>? Dependencies = null,
+    List<string>? RequiredSkills = null,
+    // Kept as plain member labels for backward compatibility with any
+    // already-rendered view expecting strings; MemberAllocations adds the
+    // exact, non-double-counted hour split per member.
+    List<string>? AssignedMembers = null,
+    List<RoadmapMemberAllocationDto>? MemberAllocations = null,
+    string Complexity = "medium",
+    string Priority = "medium"
+);
+
+public record RoadmapPhaseSummaryDto(
+    string PhaseId,
+    string Name,
+    string Objective,
+    int DurationWeeks,
+    int StartWeek,
+    int EndWeek,
+    List<string>? Deliverables = null,
+    List<string>? Dependencies = null,
+    List<RoadmapTaskDto>? Tasks = null
+);
+
+public record RoadmapMemberWorkloadDto(
+    string Member,
+    int AssignedTaskCount,
+    int AssignedHours,
+    double UtilizationPercentage
+);
+
+public record RoadmapWeeklyCapacityDto(
+    int Week,
+    int PlannedHours,
+    int CapacityHours,
+    double UtilizationPercentage
+);
+
+public record RoadmapDeferredTaskDto(
+    string Title,
+    string Description,
+    int EstimatedHours,
+    string ReasonDeferred,
+    string OriginalPhase,
+    string Priority
+);
+
+public record RoadmapPlanningSummaryDto(
+    int TotalWeeks,
+    int TeamSize,
+    int HoursPerWeekPerMember,
+    int TotalCapacityHours,
+    int TotalPlannedHours,
+    double UtilizationPercentage,
+    int NumberOfPhases,
+    int NumberOfTasks,
+    List<RoadmapMemberWorkloadDto>? WorkloadByMember = null,
+    List<string>? Warnings = null,
+    List<string>? SchedulingAssumptions = null,
+    string ScheduleFeasibility = "feasible",
+    int OriginalPlannedHours = 0,
+    int AdjustedPlannedHours = 0,
+    int CapacityHours = 0,
+    int DeferredHours = 0,
+    int OverloadHours = 0,
+    int RecommendedAdditionalWeeks = 0,
+    List<RoadmapWeeklyCapacityDto>? WeeklyCapacity = null
 );
 
 public record ProjectRoadmapWeekDto(

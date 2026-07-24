@@ -38,6 +38,7 @@ from app.review.context import ReviewContext  # noqa: E402
 from app.review.hard_rules import HardRuleSpec, apply_hard_rules  # noqa: E402
 from app.review.models import ReviewerFindings, ReviewerIssue  # noqa: E402
 from app.review.pipeline import ReviewPipeline  # noqa: E402
+from app.review.response import build_review_response  # noqa: E402
 from app.review.registry import (  # noqa: E402
     AgentReviewConfig,
     DefenseEvaluationCandidateSchema,
@@ -1009,6 +1010,190 @@ class RoadmapPipelineTests(unittest.TestCase):
         # never be the one shown to the user.
         if result.usable and result.output:
             self.assertEqual(len(result.output.get("weeks", [])), result.output.get("totalWeeks"))
+
+
+class RoadmapDynamicSchedulingTests(unittest.TestCase):
+    """
+    Covers the Roadmap dynamic-scheduling improvement's integration with
+    ReviewPipeline specifically: backward compatibility with the pre-
+    improvement candidate shape, the "Rewrite cannot change locked
+    schedule values/assignments" guarantee (enforced by
+    RoadmapCandidateSchema recomputing phases/planningSummary from scratch
+    on every validation pass -- see app/review/registry.py), reviewer
+    failure never being labeled approved, and Quality Passport building
+    successfully with the new response fields present.
+    """
+
+    def _pipeline(self, *, reviewer_results, rewrite_results=None):
+        return ReviewPipeline(
+            "ProjectRoadmapAgent",
+            reviewer_agent=_FakeReviewerAgent(reviewer_results),
+            rewrite_agent=_FakeRewriteAgent(rewrite_results),
+        )
+
+    def test_old_shape_candidate_gets_schedule_fields_populated(self):
+        # _roadmap_candidate() is the pre-improvement fixture: no teamSize,
+        # hoursPerWeekPerMember, phases, or planningSummary fields at all --
+        # existing endpoint compatibility means this must still validate
+        # AND come out with a real, non-empty computed schedule.
+        candidate = RoadmapCandidateSchema.model_validate(_roadmap_candidate(total_weeks=3))
+        self.assertGreater(len(candidate.phases), 0)
+        self.assertIsNotNone(candidate.planningSummary)
+        self.assertEqual(candidate.planningSummary.totalWeeks, 3)
+        self.assertEqual(candidate.teamSize, 1)  # default, unchanged existing behavior
+
+    def test_rewrite_cannot_change_locked_phase_durations(self):
+        # The rewrite tries to smuggle in a bogus phase list (wrong
+        # durationWeeks, doesn't sum to totalWeeks) alongside otherwise
+        # valid weeks -- RoadmapCandidateSchema must discard it and
+        # recompute the real phases from `weeks` regardless.
+        tampered = _roadmap_candidate(total_weeks=3)
+        tampered["phases"] = [{
+            "phaseId": "FAKE", "name": "Fake Phase", "objective": "",
+            "durationWeeks": 999, "startWeek": 1, "endWeek": 999,
+            "deliverables": [], "dependencies": [], "tasks": [],
+        }]
+        issue = _issue(severity="medium", requires_correction=True, category="quality")
+        pipeline = self._pipeline(
+            reviewer_results=[_reviewer_ok(issues=[issue]), _reviewer_ok(issues=[])],
+            rewrite_results=[_ok(tampered)],
+        )
+        result = pipeline.run(
+            lambda: _ok(_roadmap_candidate(total_weeks=3)),
+            _context(),
+            writer_trusted_parts={}, writer_untrusted_parts={},
+        )
+        self.assertTrue(result.usable)
+        durations = [phase["durationWeeks"] for phase in result.output.get("phases", [])]
+        self.assertNotIn(999, durations)
+        self.assertEqual(sum(durations), result.output.get("totalWeeks"))
+
+    def test_rewrite_cannot_change_assignments(self):
+        # The rewrite tries to smuggle in a bogus assignedMembers list on a
+        # real task -- the recompute pass always reassigns via the
+        # deterministic lowest-workload algorithm, ignoring whatever the
+        # rewrite carried in for that field.
+        base = _roadmap_candidate(total_weeks=2, weeks=[
+            _roadmap_week(1, resp_count=1, tasks=["Implement feature X"]),
+            _roadmap_week(2, resp_count=1, tasks=["Test feature X"]),
+        ])
+        validated_once = RoadmapCandidateSchema.model_validate(base).model_dump()
+
+        tampered = dict(validated_once)
+        for phase in tampered["phases"]:
+            for task in phase["tasks"]:
+                task["assignedMembers"] = ["Member 99"]
+
+        issue = _issue(severity="medium", requires_correction=True, category="quality")
+        pipeline = self._pipeline(
+            reviewer_results=[_reviewer_ok(issues=[issue]), _reviewer_ok(issues=[])],
+            rewrite_results=[_ok(tampered)],
+        )
+        result = pipeline.run(
+            lambda: _ok(base),
+            _context(),
+            writer_trusted_parts={}, writer_untrusted_parts={},
+        )
+        self.assertTrue(result.usable)
+        all_members = {
+            member
+            for phase in result.output.get("phases", [])
+            for task in phase["tasks"]
+            for member in task["assignedMembers"]
+        }
+        self.assertNotIn("Member 99", all_members)
+
+    def test_reviewer_failure_is_not_labeled_approved(self):
+        pipeline = self._pipeline(reviewer_results=[])  # reviewer exhausted immediately
+        result = pipeline.run(
+            lambda: _ok(_roadmap_candidate()),
+            _context(),
+            writer_trusted_parts={}, writer_untrusted_parts={},
+        )
+        self.assertNotIn(result.status, ("approved", "approved_with_minor_warnings"))
+
+    def test_quality_passport_builds_successfully_with_new_fields(self):
+        pipeline = self._pipeline(reviewer_results=[_reviewer_ok(issues=[])])
+        result = pipeline.run(
+            lambda: _ok(_roadmap_candidate()),
+            _context(),
+            writer_trusted_parts={}, writer_untrusted_parts={},
+        )
+        passport = build_review_response(result)
+        self.assertEqual(passport["status"], "approved")
+        self.assertIn("reviewRunId", passport)
+        self.assertIn("attempts", passport)
+
+    def test_rewrite_cannot_change_member_allocations_or_hours(self):
+        # The rewrite tries to smuggle in bogus memberAllocations/hours on a
+        # real task -- recompute must discard them and restore values
+        # derived fresh from the task's own text.
+        base = _roadmap_candidate(total_weeks=2, weeks=[
+            _roadmap_week(1, resp_count=1, tasks=["Implement feature X"]),
+            _roadmap_week(2, resp_count=1, tasks=["Test feature X"]),
+        ])
+        validated_once = RoadmapCandidateSchema.model_validate(base).model_dump()
+
+        tampered = dict(validated_once)
+        for phase in tampered["phases"]:
+            for task in phase["tasks"]:
+                task["estimatedHours"] = 99999
+                task["memberAllocations"] = [
+                    {"memberId": "Member 1", "allocationPercentage": 50, "allocatedHours": 99999},
+                ]
+
+        issue = _issue(severity="medium", requires_correction=True, category="quality")
+        pipeline = self._pipeline(
+            reviewer_results=[_reviewer_ok(issues=[issue]), _reviewer_ok(issues=[])],
+            rewrite_results=[_ok(tampered)],
+        )
+        result = pipeline.run(
+            lambda: _ok(base),
+            _context(),
+            writer_trusted_parts={}, writer_untrusted_parts={},
+        )
+        self.assertTrue(result.usable)
+        for phase in result.output.get("phases", []):
+            for task in phase["tasks"]:
+                self.assertNotEqual(task["estimatedHours"], 99999)
+                total_allocated = sum(a["allocatedHours"] for a in task["memberAllocations"])
+                self.assertEqual(total_allocated, task["estimatedHours"])
+
+    def test_rewrite_cannot_relabel_over_capacity_as_feasible(self):
+        # A genuinely over-capacity roadmap (tiny hours/week, real critical
+        # work) -- the rewrite tries to relabel scheduleFeasibility as
+        # "feasible" while leaving the same overloaded weeks in place;
+        # recompute must restore the honest over_capacity state.
+        base = _roadmap_candidate(total_weeks=1, weeks=[
+            _roadmap_week(1, resp_count=1, tasks=[
+                "Implement core backend booking logic",
+                "Design the database schema for bookings",
+                "Implement authentication and login",
+            ]),
+        ])
+        base["teamSize"] = 1
+        base["hoursPerWeekPerMember"] = 1
+        validated_once = RoadmapCandidateSchema.model_validate(base).model_dump()
+        self.assertEqual(validated_once["planningSummary"]["scheduleFeasibility"], "over_capacity")
+
+        tampered = dict(validated_once)
+        tampered["planningSummary"] = dict(tampered["planningSummary"])
+        tampered["planningSummary"]["scheduleFeasibility"] = "feasible"
+        tampered["planningSummary"]["overloadHours"] = 0
+
+        issue = _issue(severity="medium", requires_correction=True, category="quality")
+        pipeline = self._pipeline(
+            reviewer_results=[_reviewer_ok(issues=[issue]), _reviewer_ok(issues=[])],
+            rewrite_results=[_ok(tampered)],
+        )
+        result = pipeline.run(
+            lambda: _ok(base),
+            _context(),
+            writer_trusted_parts={}, writer_untrusted_parts={},
+        )
+        self.assertTrue(result.usable)
+        self.assertEqual(result.output["planningSummary"]["scheduleFeasibility"], "over_capacity")
+        self.assertGreater(result.output["planningSummary"]["overloadHours"], 0)
 
 
 def _sedoc_requirement(id_):

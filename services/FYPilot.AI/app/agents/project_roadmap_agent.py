@@ -26,6 +26,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from app.agents import roadmap_scheduler
 from app.services.llm_provider import LLMResult, ProviderChain
 
 logger = logging.getLogger("fypilot-roadmap-agent")
@@ -65,6 +66,91 @@ class RoadmapWeek(BaseModel):
     checkpoint: str
 
 
+class RoadmapMemberAllocation(BaseModel):
+    memberId: str
+    allocationPercentage: int
+    allocatedHours: int
+
+
+class RoadmapTask(BaseModel):
+    taskId: str
+    title: str
+    estimatedHours: int
+    estimatedWorkingDays: int
+    startWeek: int
+    endWeek: int
+    dependencies: list[str] = Field(default_factory=list)
+    requiredSkills: list[str] = Field(default_factory=list)
+    # Kept as plain member labels for backward compatibility with anything
+    # that already reads assignedMembers as strings; memberAllocations adds
+    # the exact, non-double-counted hour split per member.
+    assignedMembers: list[str] = Field(default_factory=list)
+    memberAllocations: list[RoadmapMemberAllocation] = Field(default_factory=list)
+    complexity: str = "medium"
+    priority: str = "medium"
+
+
+class RoadmapPhaseSummary(BaseModel):
+    phaseId: str
+    name: str
+    objective: str = ""
+    durationWeeks: int
+    startWeek: int
+    endWeek: int
+    deliverables: list[str] = Field(default_factory=list)
+    dependencies: list[str] = Field(default_factory=list)
+    tasks: list[RoadmapTask] = Field(default_factory=list)
+
+
+class RoadmapMemberWorkload(BaseModel):
+    member: str
+    assignedTaskCount: int
+    assignedHours: int
+    utilizationPercentage: float
+
+
+class RoadmapWeeklyCapacity(BaseModel):
+    week: int
+    plannedHours: int
+    capacityHours: int
+    utilizationPercentage: float
+
+
+class RoadmapDeferredTask(BaseModel):
+    title: str
+    description: str = ""
+    estimatedHours: int
+    reasonDeferred: str
+    originalPhase: str
+    priority: str = "optional"
+
+
+class RoadmapPlanningSummary(BaseModel):
+    totalWeeks: int
+    teamSize: int
+    hoursPerWeekPerMember: int
+    totalCapacityHours: int
+    totalPlannedHours: int
+    utilizationPercentage: float
+    numberOfPhases: int
+    numberOfTasks: int
+    workloadByMember: list[RoadmapMemberWorkload] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    schedulingAssumptions: list[str] = Field(default_factory=list)
+
+    # Overload-resolution fields (Roadmap stabilization batch). All
+    # defaulted so pre-stabilization candidates/tests without them still
+    # validate.
+    scheduleFeasibility: str = "feasible"
+    originalPlannedHours: int = 0
+    adjustedPlannedHours: int = 0
+    capacityHours: int = 0
+    deferredHours: int = 0
+    overloadHours: int = 0
+    recommendedAdditionalWeeks: int = 0
+    weeklyCapacity: list[RoadmapWeeklyCapacity] = Field(default_factory=list)
+
+
 class ProjectRoadmapResponse(BaseModel):
     roadmapTitle: str
     totalWeeks: int
@@ -72,6 +158,21 @@ class ProjectRoadmapResponse(BaseModel):
     teamStrategy: str
     weeks: list[RoadmapWeek]
     finalAdvice: str
+
+    # Additive fields (Roadmap dynamic-scheduling improvement). Existing
+    # clients/tests that construct this model without them still work --
+    # every new field has a safe default. teamSize/hoursPerWeekPerMember
+    # simply echo the request so RoadmapCandidateSchema's validator can
+    # deterministically recompute phases/planningSummary from the
+    # candidate alone, without needing the original request.
+    teamSize: int = 1
+    hoursPerWeekPerMember: int = 10
+    phases: list[RoadmapPhaseSummary] = Field(default_factory=list)
+    planningSummary: RoadmapPlanningSummary | None = None
+    # Optional/medium-priority tasks deferred by the overload-resolution
+    # pass -- never silently deleted, always listed here even though
+    # they're removed from `phases`.
+    deferredTasks: list[RoadmapDeferredTask] = Field(default_factory=list)
 
 
 # =============================================================================
@@ -434,9 +535,9 @@ Return exactly this JSON structure:
         plan: _RoadmapPlan,
         total_weeks: int,
     ) -> ProjectRoadmapResponse:
-        phases = plan.phases
-        durations = self._normalize_phase_durations(
-            proposed=[phase.weeks for phase in phases],
+        phases = self._merge_phases_to_fit(plan.phases, total_weeks)
+        durations = roadmap_scheduler.allocate_phase_durations(
+            weights=[phase.weeks for phase in phases],
             total_weeks=total_weeks,
         )
 
@@ -482,6 +583,13 @@ Return exactly this JSON structure:
 
                 week_number += 1
 
+        phases_summary, planning_summary, deferred_tasks = roadmap_scheduler.build_phases_and_summary(
+            weeks=[week.model_dump() for week in weeks],
+            total_weeks=total_weeks,
+            team_size=request.teamSize,
+            hours_per_week_per_member=request.availableHoursPerWeek,
+        )
+
         return ProjectRoadmapResponse(
             roadmapTitle=self._clean_text(
                 plan.roadmapTitle,
@@ -501,55 +609,60 @@ Return exactly this JSON structure:
                     "advanced features before the core workflow is stable."
                 ),
             ),
+            teamSize=request.teamSize,
+            hoursPerWeekPerMember=request.availableHoursPerWeek,
+            phases=phases_summary,
+            planningSummary=planning_summary,
+            deferredTasks=deferred_tasks,
         )
 
-    def _normalize_phase_durations(
+    def _merge_phases_to_fit(
         self,
-        proposed: list[int],
+        phases: list[_PhasePlan],
         total_weeks: int,
-    ) -> list[int]:
+    ) -> list[_PhasePlan]:
         """
-        Scale the LLM-proposed phase durations so they sum EXACTLY to
-        total_weeks, preserving their relative weights (largest-remainder
-        method), with a minimum of 1 week per phase.
+        When the LLM proposes more phases than there are total weeks
+        available, merge the lowest-weighted adjacent phases (concatenating
+        their tasks/deliverables/skillsToLearn) until every remaining phase
+        can have at least 1 week without exceeding total_weeks.
+
+        Replaces the previous behavior, which silently forced every single
+        phase to exactly one week whenever proposed phase count >= total
+        weeks (and could even let the total exceed the declared totalWeeks)
+        -- this was the dominant real-world cause of "every phase is one
+        week", since the prompt itself asks for 4-7 phases and short
+        projects easily fall into that case.
         """
-        count = len(proposed)
+        merged = list(phases)
 
-        if count == 0:
-            return []
+        while len(merged) > total_weeks and len(merged) > 1:
+            best_index = 0
+            best_combined: int | None = None
 
-        if count >= total_weeks:
-            # One week per phase for the first total_weeks phases.
-            return [1] * total_weeks + [0] * 0 if count == total_weeks else [1] * count
+            for i in range(len(merged) - 1):
+                combined = (merged[i].weeks or 1) + (merged[i + 1].weeks or 1)
+                if best_combined is None or combined < best_combined:
+                    best_combined = combined
+                    best_index = i
 
-        cleaned = [max(1, int(value or 1)) for value in proposed]
-        proposed_total = sum(cleaned)
+            first, second = merged[best_index], merged[best_index + 1]
+            first.name = f"{first.name} & {second.name}"[:120]
+            first.weeks = max(1, (first.weeks or 1) + (second.weeks or 1) - 1)
+            first.goal = first.goal or second.goal
+            first.tasks = (first.tasks + second.tasks)[:14]
+            first.deliverables = list(
+                dict.fromkeys(first.deliverables + second.deliverables)
+            )[:4]
+            first.skillsToLearn = list(
+                dict.fromkeys(first.skillsToLearn + second.skillsToLearn)
+            )[:4]
+            first.riskWarning = first.riskWarning or second.riskWarning
+            first.checkpoint = second.checkpoint or first.checkpoint
 
-        # Ideal (fractional) durations preserving relative weights.
-        ideal = [value * total_weeks / proposed_total for value in cleaned]
+            merged.pop(best_index + 1)
 
-        # Floor with minimum 1, then distribute the remainder by largest
-        # fractional part.
-        floors = [max(1, int(value)) for value in ideal]
-        remainder = total_weeks - sum(floors)
-
-        if remainder > 0:
-            fractional = sorted(
-                range(count),
-                key=lambda i: ideal[i] - int(ideal[i]),
-                reverse=True,
-            )
-            for i in range(remainder):
-                floors[fractional[i % count]] += 1
-        elif remainder < 0:
-            # Took too much because of the min-1 rule: shrink the largest
-            # phases first, never below 1.
-            for _ in range(-remainder):
-                largest = max(range(count), key=lambda i: floors[i])
-                if floors[largest] > 1:
-                    floors[largest] -= 1
-
-        return floors
+        return merged
 
     def _chunk_tasks(self, tasks: list[str], duration: int) -> list[list[str]]:
         """Split a phase's tasks across its weeks in order (contiguous
@@ -742,6 +855,13 @@ Return exactly this JSON structure:
                 self._complete_week(request, raw_week, index + 1)
             )
 
+        phases_summary, planning_summary, deferred_tasks = roadmap_scheduler.build_phases_and_summary(
+            weeks=[week.model_dump() for week in completed_weeks],
+            total_weeks=total_weeks,
+            team_size=request.teamSize,
+            hours_per_week_per_member=request.availableHoursPerWeek,
+        )
+
         return ProjectRoadmapResponse(
             roadmapTitle=self._clean_text(
                 raw.get("roadmapTitle"),
@@ -764,6 +884,11 @@ Return exactly this JSON structure:
                     "advanced features before the core workflow is stable."
                 ),
             ),
+            teamSize=request.teamSize,
+            hoursPerWeekPerMember=request.availableHoursPerWeek,
+            phases=phases_summary,
+            planningSummary=planning_summary,
+            deferredTasks=deferred_tasks,
         )
 
     def _complete_week(
@@ -844,8 +969,8 @@ Return exactly this JSON structure:
         request: ProjectRoadmapRequest,
         week_number: int,
     ) -> dict[str, Any]:
-        phases = self._phase_names(self._normalize_weeks(request.expectedDurationWeeks))
-        phase = phases[min(week_number - 1, len(phases) - 1)]
+        total_weeks = self._normalize_weeks(request.expectedDurationWeeks)
+        phase = self._phase_for_week(total_weeks, week_number)
 
         return {
             "weekNumber": week_number,
@@ -859,13 +984,89 @@ Return exactly this JSON structure:
             "checkpoint": f"Supervisor reviews the {phase.lower()} progress.",
         }
 
-    def _normalize_weeks(self, weeks: int) -> int:
-        try:
-            value = int(weeks)
-        except Exception:
-            value = 10
+    # Relative effort weight per canonical fallback phase -- drives dynamic,
+    # non-uniform phase durations in the safe-fallback path (used only when
+    # every AI provider is unavailable).
+    _FALLBACK_PHASE_WEIGHTS = {
+        "Requirements and Scope Definition": 1.0,
+        "UI/UX Design and User Flow": 1.0,
+        "Database Design and Architecture": 1.0,
+        "Authentication and Core Setup": 1.0,
+        "Core Feature Development": 3.0,
+        "AI/API Service Integration": 2.0,
+        "Dashboard and Reports": 1.5,
+        "Testing and Bug Fixing": 2.0,
+        "Documentation and User Guide": 1.0,
+        "Final Demo and Presentation Preparation": 1.0,
+        "Supervisor Feedback Improvements": 1.0,
+        "Final Deployment and Submission": 1.0,
+    }
 
-        return max(6, min(value, 12))
+    # When a short project can't fit all 12 canonical phases, this decides
+    # which to keep -- the essentials (requirements, core work, testing,
+    # deployment) always survive; polish phases (dashboard, demo prep,
+    # supervisor-feedback pass) are dropped first.
+    _FALLBACK_INCLUSION_PRIORITY = [
+        "Requirements and Scope Definition",
+        "Core Feature Development",
+        "Testing and Bug Fixing",
+        "Final Deployment and Submission",
+        "Database Design and Architecture",
+        "Authentication and Core Setup",
+        "AI/API Service Integration",
+        "UI/UX Design and User Flow",
+        "Documentation and User Guide",
+        "Dashboard and Reports",
+        "Final Demo and Presentation Preparation",
+        "Supervisor Feedback Improvements",
+    ]
+
+    def _dynamic_phase_ranges(self, total_weeks: int) -> list[tuple[str, int, int]]:
+        """
+        Select as many canonical fallback phases as fit total_weeks
+        (essentials first, see _FALLBACK_INCLUSION_PRIORITY), restore their
+        natural dependency order, then allocate dynamic, weighted week
+        ranges via roadmap_scheduler -- replacing the previous one-phase-
+        per-week-index mapping, which was the fallback path's own copy of
+        the "every phase is one week" bug.
+        """
+        base_order = self._phase_names(len(self._FALLBACK_INCLUSION_PRIORITY))
+        # Reserve a little slack below total_weeks so weighting has room to
+        # matter -- with phase count == total_weeks, every phase is forced
+        # to exactly 1 week (the minimum) with zero remainder to distribute,
+        # which would silently reproduce a "one week per phase" outcome
+        # even though it's no longer the static bug (see the 16-week case
+        # above, where slack naturally exists and durations do vary).
+        selected_count = min(len(base_order), max(4, total_weeks - 3))
+        selected_names = set(self._FALLBACK_INCLUSION_PRIORITY[:selected_count])
+        names = [name for name in base_order if name in selected_names]
+
+        weights = [self._FALLBACK_PHASE_WEIGHTS.get(name, 1.0) for name in names]
+        durations = roadmap_scheduler.allocate_phase_durations(weights, total_weeks)
+
+        ranges: list[tuple[str, int, int]] = []
+        week = 1
+        for name, duration in zip(names, durations):
+            ranges.append((name, week, week + duration - 1))
+            week += duration
+
+        return ranges
+
+    def _phase_for_week(self, total_weeks: int, week_number: int) -> str:
+        for name, start_week, end_week in self._dynamic_phase_ranges(total_weeks):
+            if start_week <= week_number <= end_week:
+                return name
+
+        return self._FALLBACK_INCLUSION_PRIORITY[0]
+
+    def _normalize_weeks(self, weeks: int) -> int:
+        # Reuses the caller's real requested duration (roadmap_scheduler
+        # only guards against non-numeric/pathological values) -- this used
+        # to collapse every project into a fixed [6, 12] band regardless of
+        # what was actually requested, which was the primary cause of every
+        # phase ending up with a static one-week duration for any project
+        # whose real duration fell outside that band.
+        return roadmap_scheduler.normalize_total_weeks(weeks)
 
     def _phase_names(self, total_weeks: int) -> list[str]:
         base = [

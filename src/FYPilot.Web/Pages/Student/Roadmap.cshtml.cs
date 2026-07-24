@@ -11,11 +11,93 @@ using Microsoft.EntityFrameworkCore;
 
 namespace FYPilot.Web.Pages.Student;
 
+/// <summary>
+/// Display-only view of one task inside a persisted RoadmapPhase.TasksJson
+/// blob. Parsed defensively: TasksJson may hold either the new structured
+/// task shape (RoadmapTaskDto[]) or, for roadmaps saved before this
+/// improvement, a plain string[] -- ParseTasks below handles both so old
+/// saved roadmaps keep rendering instead of erroring.
+/// </summary>
+public sealed record RoadmapTaskView(
+    string Title,
+    int? EstimatedHours,
+    int? EstimatedWorkingDays,
+    List<string> AssignedMembers,
+    List<string> Dependencies,
+    string? Complexity,
+    string? Priority,
+    List<RoadmapMemberAllocationDto> MemberAllocations
+);
+
+public sealed record RoadmapMemberWorkloadView(
+    string Member,
+    int AssignedTaskCount,
+    int AssignedHours,
+    double UtilizationPercentage
+);
+
+/// <summary>
+/// Optional/medium-priority task deferred by the overload-resolution pass
+/// at generation time, persisted inside a synthetic RoadmapPhase (see
+/// RoadmapModel.DeferredScopePhaseMarker) so no migration is needed and no
+/// task is ever silently deleted.
+/// </summary>
+public sealed record RoadmapDeferredTaskView(
+    string Title,
+    string Description,
+    int EstimatedHours,
+    string ReasonDeferred,
+    string OriginalPhase,
+    string Priority
+);
+
+public sealed record RoadmapWorkloadSummaryView(
+    int TotalWeeks,
+    int TeamSize,
+    int HoursPerWeekPerMember,
+    int TotalCapacityHours,
+    int TotalPlannedHours,
+    double UtilizationPercentage,
+    List<RoadmapMemberWorkloadView> WorkloadByMember,
+    List<string> Warnings,
+    string ScheduleFeasibility,
+    int OriginalPlannedHours,
+    int AdjustedPlannedHours,
+    int DeferredHours,
+    int OverloadHours,
+    int RecommendedAdditionalWeeks
+);
+
 [Authorize(Roles = "student")]
 public class RoadmapModel(ApplicationDbContext db, IAiServiceClient aiService) : PageModel
 {
+    /// <summary>
+    /// Marks the one synthetic RoadmapPhase row (if any) that holds
+    /// deferred/future-enhancement tasks instead of a real project phase --
+    /// reuses the existing Name/TasksJson/EstimatedWeeks(=0) columns so no
+    /// migration is needed. Never shown as a normal phase card; excluded
+    /// from Phases and surfaced instead via DeferredTasks.
+    /// </summary>
+    public const string DeferredScopePhaseMarker = "__DEFERRED_SCOPE__";
+
     public ProjectIdea? Idea { get; private set; }
     public List<RoadmapPhase> Phases { get; private set; } = [];
+
+    /// <summary>
+    /// Tasks the overload-resolution pass deferred to keep the plan within
+    /// team capacity -- never silently deleted, parsed from the synthetic
+    /// deferred-scope phase's TasksJson.
+    /// </summary>
+    public List<RoadmapDeferredTaskView> DeferredTasks { get; private set; } = [];
+
+    /// <summary>
+    /// Recomputed on every page load from the persisted per-task JSON
+    /// already stored in each phase's TasksJson (hours + assignedMembers),
+    /// combined with the student's current team size/available hours --
+    /// deliberately NOT persisted as its own column, so no migration is
+    /// needed and the figures always reflect the student's latest profile.
+    /// </summary>
+    public RoadmapWorkloadSummaryView? WorkloadSummary { get; private set; }
 
     public string? ErrorMessage { get; private set; }
     public bool LlmUsed { get; private set; }
@@ -139,7 +221,8 @@ public class RoadmapModel(ApplicationDbContext db, IAiServiceClient aiService) :
 
         await db.SaveChangesAsync();
 
-        TempData["Success"] = $"AI roadmap with {phases.Count} phases generated.";
+        var realPhaseCount = phases.Count(p => p.Name != DeferredScopePhaseMarker);
+        TempData["Success"] = $"AI roadmap with {realPhaseCount} phases generated.";
         return RedirectToPage(new { ideaId });
     }
 
@@ -208,9 +291,203 @@ public class RoadmapModel(ApplicationDbContext db, IAiServiceClient aiService) :
             .Include(r => r.Phases)
             .FirstOrDefaultAsync(r => r.IdeaId == Idea.Id && r.UserId == userId);
 
-        Phases = roadmap?.Phases
+        var allPhases = roadmap?.Phases
             .OrderBy(p => p.PhaseNumber)
             .ToList() ?? [];
+
+        var deferredPhase = allPhases.FirstOrDefault(p => p.Name == DeferredScopePhaseMarker);
+        Phases = allPhases.Where(p => p.Name != DeferredScopePhaseMarker).ToList();
+        DeferredTasks = deferredPhase != null ? ParseDeferredTasks(deferredPhase.TasksJson) : [];
+
+        if (Phases.Count > 0)
+        {
+            var profile = await db.StudentProfiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.UserId == userId);
+
+            WorkloadSummary = ComputeWorkloadSummary(Idea, profile, Phases, DeferredTasks);
+        }
+    }
+
+    /// <summary>
+    /// Parses one phase's TasksJson defensively: the new structured shape
+    /// (object per task, with hours/assignedMembers) if present, otherwise
+    /// falls back to the old plain string[] shape used by roadmaps saved
+    /// before this improvement -- so old saved roadmaps keep rendering
+    /// instead of throwing on deserialize.
+    /// </summary>
+    public static List<RoadmapTaskView> ParseTasks(string tasksJson)
+    {
+        if (string.IsNullOrWhiteSpace(tasksJson) || tasksJson == "[]")
+        {
+            return [];
+        }
+
+        try
+        {
+            var structured = JsonSerializer.Deserialize<List<RoadmapTaskDto>>(
+                tasksJson,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (structured is { Count: > 0 } && structured[0].Title is { Length: > 0 })
+            {
+                return structured
+                    .Select(t => new RoadmapTaskView(
+                        t.Title,
+                        t.EstimatedHours,
+                        t.EstimatedWorkingDays,
+                        t.AssignedMembers ?? [],
+                        t.Dependencies ?? [],
+                        t.Complexity,
+                        t.Priority,
+                        t.MemberAllocations ?? []))
+                    .ToList();
+            }
+        }
+        catch (JsonException)
+        {
+            // Falls through to the plain-string-list parse below.
+        }
+
+        var plain = JsonSerializer.Deserialize<List<string>>(tasksJson) ?? [];
+        return plain
+            .Select(title => new RoadmapTaskView(title, null, null, [], [], null, null, []))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Parses the synthetic deferred-scope phase's TasksJson (a
+    /// RoadmapDeferredTaskDto[] blob, a different shape from a normal
+    /// phase's task list). Defensive: an empty/malformed blob just yields
+    /// no deferred tasks rather than throwing.
+    /// </summary>
+    public static List<RoadmapDeferredTaskView> ParseDeferredTasks(string tasksJson)
+    {
+        if (string.IsNullOrWhiteSpace(tasksJson) || tasksJson == "[]")
+        {
+            return [];
+        }
+
+        try
+        {
+            var structured = JsonSerializer.Deserialize<List<RoadmapDeferredTaskDto>>(
+                tasksJson,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
+
+            return structured
+                .Select(t => new RoadmapDeferredTaskView(
+                    t.Title, t.Description, t.EstimatedHours, t.ReasonDeferred,
+                    t.OriginalPhase, t.Priority))
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static RoadmapWorkloadSummaryView ComputeWorkloadSummary(
+        ProjectIdea idea,
+        StudentProfile? profile,
+        List<RoadmapPhase> phases,
+        List<RoadmapDeferredTaskView> deferredTasks
+    )
+    {
+        var teamSize = Math.Max(1, profile?.TeamMembers ?? 1);
+        var hoursPerWeek = Math.Max(1, profile?.AvailableHoursPerWeek ?? 10);
+        var totalWeeks = Math.Max(1, idea.ExpectedDurationWeeks > 0 ? idea.ExpectedDurationWeeks : 10);
+
+        // `phases` here already excludes the deferred-scope phase (see
+        // LoadPageDataAsync), so totalPlannedHours below is naturally the
+        // ADJUSTED (post-deferral) figure -- what's actually still in the
+        // plan -- while originalPlannedHours adds the deferred hours back
+        // for comparison.
+        var allTasks = phases.SelectMany(p => ParseTasks(p.TasksJson)).ToList();
+        var adjustedPlannedHours = allTasks.Sum(t => t.EstimatedHours ?? 0);
+        var deferredHours = deferredTasks.Sum(t => t.EstimatedHours);
+        var originalPlannedHours = adjustedPlannedHours + deferredHours;
+
+        var totalCapacityHours = totalWeeks * hoursPerWeek * teamSize;
+        var utilization = totalCapacityHours > 0
+            ? Math.Round(adjustedPlannedHours * 100.0 / totalCapacityHours, 1)
+            : 0.0;
+
+        var memberCapacity = totalWeeks * hoursPerWeek;
+        var workloadByMember = new List<RoadmapMemberWorkloadView>();
+
+        for (var i = 1; i <= teamSize; i++)
+        {
+            var label = $"Member {i}";
+            var memberTasks = allTasks.Where(t => t.AssignedMembers.Contains(label)).ToList();
+            // Use this member's own allocated share (MemberAllocations),
+            // never the task's full EstimatedHours -- a collaborative task
+            // lists BOTH members in AssignedMembers, so summing full hours
+            // per member here would double-count exactly like the bug this
+            // batch fixed on the Python side (see roadmap_scheduler.
+            // allocate_task_hours). Falls back to full hours only for
+            // roadmaps saved before MemberAllocations existed.
+            var memberHours = memberTasks.Sum(t =>
+            {
+                var allocation = t.MemberAllocations.FirstOrDefault(a => a.MemberId == label);
+                return allocation?.AllocatedHours ?? (t.EstimatedHours ?? 0);
+            });
+            var memberUtilization = memberCapacity > 0
+                ? Math.Round(memberHours * 100.0 / memberCapacity, 1)
+                : 0.0;
+
+            workloadByMember.Add(new RoadmapMemberWorkloadView(
+                label, memberTasks.Count, memberHours, memberUtilization));
+        }
+
+        var overloadHours = Math.Max(0, adjustedPlannedHours - totalCapacityHours);
+        string scheduleFeasibility;
+        int recommendedAdditionalWeeks;
+
+        if (overloadHours > 0)
+        {
+            scheduleFeasibility = "over_capacity";
+            var teamWeeklyCapacity = Math.Max(1, hoursPerWeek * teamSize);
+            recommendedAdditionalWeeks = (int)Math.Ceiling(overloadHours / (double)teamWeeklyCapacity);
+        }
+        else if (deferredHours > 0)
+        {
+            scheduleFeasibility = "feasible_after_scope_reduction";
+            recommendedAdditionalWeeks = 0;
+        }
+        else
+        {
+            scheduleFeasibility = "feasible";
+            recommendedAdditionalWeeks = 0;
+        }
+
+        var warnings = new List<string>();
+        if (allTasks.Count > 0)
+        {
+            if (scheduleFeasibility == "over_capacity")
+            {
+                warnings.Add(
+                    $"Essential project scope exceeds available capacity by {overloadHours}h " +
+                    $"even after deferring optional work -- add approximately " +
+                    $"{recommendedAdditionalWeeks} more week(s) or reduce the mandatory scope.");
+            }
+            else if (scheduleFeasibility == "feasible_after_scope_reduction")
+            {
+                warnings.Add(
+                    $"{deferredTasks.Count} optional task(s) totalling {deferredHours}h were " +
+                    "deferred to future enhancements to fit the available capacity.");
+            }
+            else if (utilization < 30)
+            {
+                warnings.Add(
+                    $"Planned work only uses {utilization}% of available capacity.");
+            }
+        }
+
+        return new RoadmapWorkloadSummaryView(
+            totalWeeks, teamSize, hoursPerWeek, totalCapacityHours,
+            adjustedPlannedHours, utilization, workloadByMember, warnings,
+            scheduleFeasibility, originalPlannedHours, adjustedPlannedHours,
+            deferredHours, overloadHours, recommendedAdditionalWeeks);
     }
 
     private static ProjectRoadmapRequest BuildRoadmapRequest(
@@ -260,6 +537,70 @@ public class RoadmapModel(ApplicationDbContext db, IAiServiceClient aiService) :
         string requiredTechnologies
     )
     {
+        if (roadmap.Phases is { Count: > 0 })
+        {
+            var weeksByNumber = roadmap.Weeks.ToDictionary(w => w.WeekNumber);
+
+            var phases = roadmap.Phases
+                .Select((phase, index) =>
+                {
+                    // The last week within this phase's span still carries
+                    // the risk/checkpoint narrative -- phases[] itself
+                    // doesn't repeat those per-phase, so borrow them from
+                    // weeks[] for display continuity.
+                    weeksByNumber.TryGetValue(phase.EndWeek, out var lastWeek);
+
+                    return new RoadmapPhase
+                    {
+                        PhaseNumber = index + 1,
+                        Name = phase.Name,
+                        Objective = phase.Objective,
+                        TasksJson = JsonSerializer.Serialize(phase.Tasks ?? []),
+                        ExpectedOutput = string.Join("; ", phase.Deliverables ?? []),
+                        ToolsNeeded = requiredTechnologies,
+                        // The real per-phase duration computed by
+                        // roadmap_scheduler -- no longer hardcoded to 1.
+                        EstimatedWeeks = phase.DurationWeeks,
+                        Dependencies = phase.Dependencies is { Count: > 0 }
+                            ? string.Join(", ", phase.Dependencies)
+                            : "None",
+                        Risks = lastWeek?.RiskWarning ?? "",
+                        SuccessCriteria = lastWeek?.Checkpoint ?? "",
+                        IsCompleted = false
+                    };
+                })
+                .ToList();
+
+            // Persist deferred tasks as one synthetic phase reusing the
+            // existing Name/TasksJson/EstimatedWeeks(=0) columns -- no
+            // migration needed, and tasks are never silently dropped.
+            // RoadmapModel excludes this from the normal phase list and
+            // parses it separately via ParseDeferredTasks.
+            if (roadmap.DeferredTasks is { Count: > 0 })
+            {
+                phases.Add(new RoadmapPhase
+                {
+                    PhaseNumber = phases.Count + 1,
+                    Name = RoadmapModel.DeferredScopePhaseMarker,
+                    Objective = "",
+                    TasksJson = JsonSerializer.Serialize(roadmap.DeferredTasks),
+                    ExpectedOutput = "",
+                    ToolsNeeded = requiredTechnologies,
+                    EstimatedWeeks = 0,
+                    Dependencies = "None",
+                    Risks = "",
+                    SuccessCriteria = "",
+                    IsCompleted = false
+                });
+            }
+
+            return phases;
+        }
+
+        // Backward-compatible fallback: only reachable if the AI service
+        // response somehow lacks structured `phases` (older cached
+        // response shape) -- keeps existing saved-roadmap replay safe
+        // without assuming the new field is always present.
         return roadmap.Weeks
             .OrderBy(w => w.WeekNumber)
             .Select(week => new RoadmapPhase

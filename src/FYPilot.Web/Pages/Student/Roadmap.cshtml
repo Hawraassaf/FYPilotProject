@@ -2,741 +2,2513 @@
 @model FYPilot.Web.Pages.Student.RoadmapModel
 @{
     ViewData["Title"] = "Project Roadmap";
-    ViewData["Subtitle"] = "Evidence-based execution plan for your FYP";
+    ViewData["Subtitle"] = "Plan, schedule, and execute your FYP with confidence";
 
-    var done = Model.Phases.Count(p => p.IsCompleted);
-    var total = Model.Phases.Count;
-    var pct = total > 0 ? (int)(done * 100.0 / total) : 0;
+    var orderedPhases = Model.Phases.OrderBy(p => p.PhaseNumber).ToList();
+    var done = orderedPhases.Count(p => p.IsCompleted);
+    var total = orderedPhases.Count;
+    var pct = total > 0 ? (int)Math.Round(done * 100.0 / total) : 0;
+    var currentPhase = orderedPhases.FirstOrDefault(p => !p.IsCompleted);
+    var selectedPhase = currentPhase ?? orderedPhases.FirstOrDefault();
+
+    var fallbackWeeks = Model.Idea?.ExpectedDurationWeeks
+        ?? Math.Max(orderedPhases.Sum(p => Math.Max(1, p.EstimatedWeeks)), 1);
+
+    var totalWeeks = Model.WorkloadSummary?.TotalWeeks > 0
+        ? Model.WorkloadSummary.TotalWeeks
+        : Math.Max(fallbackWeeks, 1);
+
+    var phaseRanges =
+        new System.Collections.Generic.Dictionary<string, (int StartWeek, int EndWeek, int Duration)>();
+
+    var weekCursor = 1;
+
+    foreach (var phase in orderedPhases)
+    {
+        var key = Convert.ToString(phase.Id) ?? phase.PhaseNumber.ToString();
+        var duration = Math.Max(1, phase.EstimatedWeeks);
+        var startWeek = Math.Min(weekCursor, totalWeeks);
+        var endWeek = Math.Min(totalWeeks, startWeek + duration - 1);
+
+        phaseRanges[key] = (startWeek, endWeek, Math.Max(1, endWeek - startWeek + 1));
+        weekCursor = endWeek + 1;
+    }
+
+    string FeasibilityLabel(string? value) => value switch
+    {
+        "feasible" => "Feasible",
+        "feasible_after_scope_reduction" => "Feasible after scope reduction",
+        "over_capacity" => "Over capacity",
+        _ => string.IsNullOrWhiteSpace(value) ? "Not evaluated" : value.Replace("_", " ")
+    };
+
+    string FeasibilityClass(string? value) => value switch
+    {
+        "feasible" => "is-feasible",
+        "feasible_after_scope_reduction" => "is-adjusted",
+        "over_capacity" => "is-over",
+        _ => "is-neutral"
+    };
 }
 
 @if (Model.Idea == null)
 {
-    <div class="empty-dna-layout">
-        <div class="empty-dna-card">
-            <div class="empty-dna-content">
-                <div class="empty-dna-icon">
-                    <i class="bi bi-map"></i>
-                </div>
-
-                <h1>No project idea selected yet</h1>
-
-                <p>
-                    Select one idea first, then return here to generate its project roadmap.
-                    The roadmap will stay empty until an idea is selected.
-                </p>
-
-                <div class="empty-dna-actions">
-                    <a class="btn btn-primary" asp-page="/Student/IdeaComparison">
-                        <i class="bi bi-check2-circle me-2"></i>
-                        Choose an Idea
-                    </a>
-
-                    <a class="btn btn-outline-secondary" asp-page="/Student/IdeaGenerator">
-                        <i class="bi bi-stars me-2"></i>
-                        Generate Ideas
-                    </a>
-                </div>
+    <main class="roadmap-empty-page">
+        <section class="roadmap-empty-card" aria-labelledby="roadmap-empty-title">
+            <div class="roadmap-empty-icon" aria-hidden="true">
+                <i class="bi bi-signpost-split"></i>
             </div>
-        </div>
-    </div>
+
+            <div class="roadmap-eyebrow">Project planning</div>
+            <h1 id="roadmap-empty-title">Choose a project idea first</h1>
+
+            <p>
+                Your roadmap is created from the selected idea, project difficulty, available weeks,
+                weekly capacity, and team size.
+            </p>
+
+            <div class="roadmap-empty-actions">
+                <a class="btn roadmap-btn-primary" asp-page="/Student/IdeaComparison">
+                    <i class="bi bi-check2-circle"></i>
+                    Choose an Idea
+                </a>
+
+                <a class="btn roadmap-btn-secondary" asp-page="/Student/IdeaGenerator">
+                    <i class="bi bi-stars"></i>
+                    Generate Ideas
+                </a>
+            </div>
+        </section>
+    </main>
 }
 else
 {
-    <section class="rm-page">
+    <main class="roadmap-control">
 
         @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
         {
-            <div class="alert alert-warning rm-alert">
-                <i class="bi bi-exclamation-triangle me-2"></i>
-                @Model.ErrorMessage
+            <div class="roadmap-alert roadmap-alert-warning" role="alert">
+                <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+                <span>@Model.ErrorMessage</span>
             </div>
         }
 
-        @if (Model.LatestReview != null)
-        {
-            var (badgeClass, badgeLabel) = Model.DescribeReview(Model.LatestReview);
+        <header class="roadmap-command-header">
+            <div class="roadmap-command-main">
+                <div class="roadmap-command-icon" aria-hidden="true">
+                    <i class="bi bi-kanban"></i>
+                </div>
 
-            <div class="mb-3">
-                <span class="badge @badgeClass" title="@Model.LatestReview.DecisionReason">
-                    <i class="bi bi-shield-check"></i> @badgeLabel
-                </span>
-            </div>
-        }
+                <div class="roadmap-command-copy">
+                    <div class="roadmap-eyebrow">Project Roadmap</div>
 
-        <div class="rm-hero-grid">
-            <div class="rm-project-card">
-                <div class="rm-project-head">
-                    <div class="rm-project-icon">
-                        <i class="bi bi-map"></i>
-                    </div>
-
-                    <div class="rm-project-title">
-                        <div class="rm-kicker">Selected Project</div>
+                    <div class="roadmap-title-line">
                         <h1>@Model.Idea.Title</h1>
 
-                        <div class="rm-chip-row">
-                            <span>@Model.Idea.Domain</span>
-                            <span class="text-capitalize">@Model.Idea.DifficultyLevel</span>
-                            <span>@Model.Idea.ExpectedDurationWeeks weeks total</span>
-                        </div>
+                        @if (Model.LatestReview != null)
+                        {
+                            var (badgeClass, badgeLabel) = Model.DescribeReview(Model.LatestReview);
+
+                            <span class="badge @badgeClass roadmap-review-badge"
+                                  title="@Model.LatestReview.DecisionReason">
+                                <i class="bi bi-shield-check" aria-hidden="true"></i>
+                                @badgeLabel
+                            </span>
+                        }
+                    </div>
+
+                    <div class="roadmap-project-meta">
+                        <span>@Model.Idea.Domain</span>
+                        <span class="text-capitalize">@Model.Idea.DifficultyLevel</span>
+                        <span>@totalWeeks weeks</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="roadmap-command-actions">
+                <form method="post" asp-page-handler="Generate" id="rmGenerateForm">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="ideaId" value="@Model.Idea.Id" />
+
+                    <button type="submit"
+                            class="btn @(Model.Phases.Any() ? "roadmap-btn-secondary" : "roadmap-btn-primary")">
+                        <i class="bi @(Model.Phases.Any() ? "bi-arrow-clockwise" : "bi-magic")"
+                           aria-hidden="true"></i>
+                        @(Model.Phases.Any() ? "Regenerate" : "Generate Roadmap")
+                    </button>
+                </form>
+
+                <a href="/Student/ProjectDNA?ideaId=@Model.Idea.Id"
+                   class="btn roadmap-btn-secondary">
+                    <i class="bi bi-fingerprint" aria-hidden="true"></i>
+                    Project DNA
+                </a>
+            </div>
+
+            <div class="roadmap-header-progress" aria-label="@pct percent complete">
+                <div class="roadmap-header-progress-copy">
+                    <span>@done of @total phases completed</span>
+                    <strong>@pct%</strong>
+                </div>
+
+                <div class="roadmap-progress-track">
+                    <div class="roadmap-progress-fill" style="width:@pct%"></div>
+                </div>
+            </div>
+        </header>
+
+        @if (!Model.Phases.Any())
+        {
+            <section class="roadmap-start-panel" aria-labelledby="roadmap-start-title">
+                <div class="roadmap-start-copy">
+                    <div class="roadmap-start-icon" aria-hidden="true">
+                        <i class="bi bi-diagram-3"></i>
+                    </div>
+
+                    <div>
+                        <div class="roadmap-eyebrow">Ready to plan</div>
+                        <h2 id="roadmap-start-title">Generate a project-specific execution plan</h2>
+
+                        <p>
+                            FYPilot will create dynamic phases, estimate task effort, distribute team workload,
+                            check capacity, and review the final roadmap before showing it.
+                        </p>
                     </div>
                 </div>
 
-                <p class="rm-project-desc">
-                    @Model.Idea.ProblemStatement
-                </p>
-
-                <div class="rm-project-actions">
-                    @if (!Model.Phases.Any())
-                    {
-                        <form method="post" asp-page-handler="Generate" id="rmGenerateForm">
-                            @Html.AntiForgeryToken()
-                            <input type="hidden" name="ideaId" value="@Model.Idea.Id" />
-
-                            <button type="submit" class="btn rm-primary-btn">
-                                <i class="bi bi-magic me-1"></i>
-                                Generate AI Roadmap
-                            </button>
-                        </form>
-                    }
-                    else
-                    {
-                        <form method="post" asp-page-handler="Generate" id="rmGenerateForm">
-                            @Html.AntiForgeryToken()
-                            <input type="hidden" name="ideaId" value="@Model.Idea.Id" />
-
-                            <button type="submit" class="btn rm-outline-btn">
-                                <i class="bi bi-arrow-clockwise me-1"></i>
-                                Regenerate Roadmap
-                            </button>
-                        </form>
-                    }
-
-                    <a href="/Student/ProjectDNA?ideaId=@Model.Idea.Id" class="btn rm-outline-btn">
-                        <i class="bi bi-fingerprint me-1"></i>
-                        View Project DNA
-                    </a>
-                </div>
-            </div>
-
-            <div class="rm-progress-card">
-                <div class="rm-progress-ring">
-                    <strong>@pct%</strong>
-                    <span>Done</span>
+                <div class="roadmap-start-features">
+                    <div>
+                        <i class="bi bi-calendar-range"></i>
+                        <span>Dynamic phase scheduling</span>
+                    </div>
+                    <div>
+                        <i class="bi bi-hourglass-split"></i>
+                        <span>Realistic effort estimates</span>
+                    </div>
+                    <div>
+                        <i class="bi bi-people"></i>
+                        <span>Team workload allocation</span>
+                    </div>
+                    <div>
+                        <i class="bi bi-speedometer2"></i>
+                        <span>Capacity validation</span>
+                    </div>
                 </div>
 
-                <div>
-                    <div class="rm-kicker">Roadmap Progress</div>
-                    <h2>@done / @total phases complete</h2>
-                    <p>
-                        Mark phases as done when you complete their tasks and checkpoints.
-                    </p>
-                </div>
+                <form method="post" asp-page-handler="Generate" id="rmGenerateFormEmpty">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="ideaId" value="@Model.Idea.Id" />
 
-                <div class="rm-progress-line">
-                    <div style="width:@pct%"></div>
-                </div>
-            </div>
-        </div>
-
-        @if (Model.Phases.Any())
+                    <button type="submit" class="btn roadmap-btn-primary roadmap-btn-large">
+                        <i class="bi bi-magic"></i>
+                        Generate AI Roadmap
+                    </button>
+                </form>
+            </section>
+        }
+        else
         {
-            var orderedPhases = Model.Phases.OrderBy(p => p.PhaseNumber).ToList();
-            var currentPhase = orderedPhases.FirstOrDefault(p => !p.IsCompleted);
+            var summary = Model.WorkloadSummary;
 
-            <div class="snake-ai-banner">
-                <div class="snake-ai-glow"></div>
-
-                <div class="snake-ai-icon">
-                    <i class="bi bi-stars"></i>
+            <section class="roadmap-summary-strip" aria-label="Roadmap summary">
+                <div class="roadmap-summary-item">
+                    <span>Current phase</span>
+                    <strong>@(currentPhase?.Name ?? "All completed")</strong>
                 </div>
 
-                <div class="snake-ai-copy">
-                    <span class="snake-ai-kicker">
-                        <i class="bi bi-cpu"></i>
-                        AI-Generated Roadmap
-                    </span>
-
-                    <h2>A personalized execution path built for this exact project</h2>
-
-                    <p>
-                        Every phase below was generated by FYPilot's AI from your selected idea, skills,
-                        team size, and available hours — a real plan, not a generic template.
-                    </p>
+                <div class="roadmap-summary-item">
+                    <span>Total duration</span>
+                    <strong>@totalWeeks weeks</strong>
                 </div>
 
-                <div class="snake-ai-ring">
-                    <strong>@pct%</strong>
-                    <span>Complete</span>
+                <div class="roadmap-summary-item">
+                    <span>Progress</span>
+                    <strong>@done / @total phases</strong>
                 </div>
-            </div>
 
-            <div class="snake-track-container" id="snakeTrackContainer">
-                <svg class="snake-svg" id="snakeSvg" preserveAspectRatio="none">
-                    <defs>
-                        <linearGradient id="snakeGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stop-color="#28385E"></stop>
-                            <stop offset="100%" stop-color="#516C8D"></stop>
-                        </linearGradient>
-                    </defs>
-                    <path class="snake-track-line" id="snakeTrackLine"></path>
-                    <path class="snake-progress-line" id="snakeProgressLine"></path>
-                </svg>
+                <div class="roadmap-summary-item">
+                    <span>Team</span>
+                    <strong>@(summary?.TeamSize ?? 1) member(s)</strong>
+                </div>
 
-                <div class="snake-flow-dot" id="snakeFlowDot"></div>
+                <div class="roadmap-summary-item">
+                    <span>Planned effort</span>
+                    <strong>@(summary?.AdjustedPlannedHours ?? 0)h</strong>
+                </div>
 
-                <div class="snake-nodes">
-                    @for (var i = 0; i < orderedPhases.Count; i++)
-                    {
-                        var phase = orderedPhases[i];
-                        var pos = "pos-" + (i % 3);
-                        var state = phase.IsCompleted
-                            ? "is-done"
-                            : (currentPhase != null && phase.Id == currentPhase.Id ? "is-current" : "is-future");
-                        var isOpenByDefault = state == "is-current";
-                        var detailId = $"snakeDetail-{phase.Id}";
+                <div class="roadmap-summary-item">
+                    <span>Capacity</span>
+                    <strong>@(summary?.TotalCapacityHours ?? 0)h</strong>
+                </div>
 
-                        <div class="snake-stop @pos @state" style="--d:@i">
-                            <div class="snake-node">
-                                <div class="snake-node-dot">
+                <div class="roadmap-summary-item">
+                    <span>Utilization</span>
+                    <strong>@(summary?.UtilizationPercentage ?? 0)%</strong>
+                </div>
+
+                <div class="roadmap-summary-item roadmap-summary-feasibility">
+                    <span>Schedule</span>
+                    <strong class="roadmap-feasibility-pill @FeasibilityClass(summary?.ScheduleFeasibility)">
+                        @FeasibilityLabel(summary?.ScheduleFeasibility)
+                    </strong>
+                </div>
+            </section>
+
+            <section class="roadmap-workspace">
+                <aside class="roadmap-phase-nav" aria-label="Roadmap phases">
+                    <div class="roadmap-panel-heading">
+                        <div>
+                            <span>Navigation</span>
+                            <h2>Project phases</h2>
+                        </div>
+
+                        <span class="roadmap-count-badge">@total</span>
+                    </div>
+
+                    <div class="roadmap-phase-list" role="tablist" aria-orientation="vertical">
+                        @foreach (var phase in orderedPhases)
+                        {
+                            var phaseKey = Convert.ToString(phase.Id) ?? phase.PhaseNumber.ToString();
+                            var range = phaseRanges[phaseKey];
+                            var isSelected = selectedPhase != null &&
+                                Convert.ToString(selectedPhase.Id) == phaseKey;
+                            var stateClass = phase.IsCompleted
+                                ? "is-completed"
+                                : (currentPhase != null && Convert.ToString(currentPhase.Id) == phaseKey
+                                    ? "is-current"
+                                    : "is-upcoming");
+
+                            <button type="button"
+                                    class="roadmap-phase-tab @stateClass @(isSelected ? "is-selected" : "")"
+                                    data-phase-select="@phaseKey"
+                                    role="tab"
+                                    aria-selected="@(isSelected ? "true" : "false")"
+                                    aria-controls="phase-panel-@phaseKey">
+                                <span class="roadmap-phase-tab-number">
                                     @if (phase.IsCompleted)
                                     {
-                                        <i class="bi bi-check-lg"></i>
+                                        <i class="bi bi-check-lg" aria-hidden="true"></i>
                                     }
                                     else
                                     {
                                         @phase.PhaseNumber
                                     }
-                                </div>
+                                </span>
 
-                                @if (state == "is-current")
-                                {
-                                    <div class="snake-node-pulse"></div>
-                                }
+                                <span class="roadmap-phase-tab-copy">
+                                    <strong>@phase.Name</strong>
+                                    <small>
+                                        Week @range.StartWeek@(range.EndWeek > range.StartWeek ? $"–{range.EndWeek}" : "")
+                                        · @range.Duration week(s)
+                                    </small>
+                                </span>
+
+                                <i class="bi bi-chevron-right roadmap-phase-tab-arrow" aria-hidden="true"></i>
+                            </button>
+                        }
+                    </div>
+                </aside>
+
+                <div class="roadmap-main-column">
+                    <section class="roadmap-gantt-card" aria-labelledby="gantt-title">
+                        <div class="roadmap-panel-heading roadmap-gantt-heading">
+                            <div>
+                                <span>Schedule</span>
+                                <h2 id="gantt-title">Weekly timeline</h2>
                             </div>
 
-                            <button type="button"
-                                    class="snake-chip"
-                                    data-snake-toggle="@detailId"
-                                    aria-expanded="@(isOpenByDefault ? "true" : "false")">
-                                <span class="snake-chip-index">Phase @phase.PhaseNumber</span>
-                                <span class="snake-chip-title">@phase.Name</span>
-
-                                @if (state == "is-current")
-                                {
-                                    <span class="snake-chip-flag">
-                                        <i class="bi bi-flag-fill"></i>
-                                        You are here
-                                    </span>
-                                }
-
-                                <span class="snake-chip-caret">
-                                    <i class="bi bi-chevron-down"></i>
-                                </span>
-                            </button>
-
-                            <div class="snake-detail @(isOpenByDefault ? "is-open" : "")" id="@detailId">
-                                <div class="snake-detail-inner">
-                                    <article class="snake-card">
-                                        <div class="rm-phase-head">
-                                            <div>
-                                                <span class="rm-phase-number">Phase @phase.PhaseNumber</span>
-                                                <h3>@phase.Name</h3>
-
-                                                <div class="rm-phase-meta">
-                                                    <span>
-                                                        <i class="bi bi-calendar-week"></i>
-                                                        @phase.EstimatedWeeks week(s)
-                                                    </span>
-
-                                                    @if (!string.IsNullOrWhiteSpace(phase.Dependencies))
-                                                    {
-                                                        <span>
-                                                            <i class="bi bi-link-45deg"></i>
-                                                            @phase.Dependencies
-                                                        </span>
-                                                    }
-                                                </div>
-                                            </div>
-
-                                            <div class="rm-phase-status">
-                                                @if (phase.IsCompleted)
-                                                {
-                                                    <span class="rm-completed-badge">
-                                                        <i class="bi bi-check-circle me-1"></i>
-                                                        Completed
-                                                    </span>
-                                                }
-                                                else
-                                                {
-                                                    <form method="post" asp-page-handler="Complete">
-                                                        @Html.AntiForgeryToken()
-
-                                                        <input type="hidden"
-                                                               name="phaseId"
-                                                               value="@phase.Id" />
-
-                                                        <input type="hidden"
-                                                               name="ideaId"
-                                                               value="@Model.Idea!.Id" />
-
-                                                        <button type="submit"
-                                                                class="btn rm-done-btn">
-                                                            Mark Done
-                                                        </button>
-                                                    </form>
-                                                }
-                                            </div>
-                                        </div>
-
-                                        <p class="rm-objective">
-                                            @phase.Objective
-                                        </p>
-
-                                        @if (!string.IsNullOrWhiteSpace(phase.TasksJson) && phase.TasksJson != "[]")
-                                        {
-                                            var tasks = System.Text.Json.JsonSerializer.Deserialize<List<string>>(phase.TasksJson) ?? [];
-
-                                            <div class="rm-task-block">
-                                                <div class="rm-block-title">
-                                                    <i class="bi bi-list-check"></i>
-                                                    Tasks
-                                                </div>
-
-                                                <div class="rm-task-grid">
-                                                    @foreach (var task in tasks)
-                                                    {
-                                                        <div class="rm-task-item">
-                                                            <i class="bi bi-check2"></i>
-                                                            <span>@task</span>
-                                                        </div>
-                                                    }
-                                                </div>
-                                            </div>
-                                        }
-
-                                        <div class="rm-detail-grid">
-                                            @if (!string.IsNullOrWhiteSpace(phase.ExpectedOutput))
-                                            {
-                                                <div class="rm-detail-box">
-                                                    <label>Expected Output</label>
-                                                    <p>@phase.ExpectedOutput</p>
-                                                </div>
-                                            }
-
-                                            @if (!string.IsNullOrWhiteSpace(phase.SuccessCriteria))
-                                            {
-                                                <div class="rm-detail-box">
-                                                    <label>Success Criteria</label>
-                                                    <p>@phase.SuccessCriteria</p>
-                                                </div>
-                                            }
-
-                                            @if (!string.IsNullOrWhiteSpace(phase.Risks))
-                                            {
-                                                <div class="rm-detail-box rm-risk-box">
-                                                    <label>
-                                                        <i class="bi bi-exclamation-triangle me-1"></i>
-                                                        Risk Warning
-                                                    </label>
-                                                    <p>@phase.Risks</p>
-                                                </div>
-                                            }
-                                        </div>
-                                    </article>
-                                </div>
+                            <div class="roadmap-gantt-legend" aria-label="Timeline legend">
+                                <span><i class="legend-dot completed"></i>Completed</span>
+                                <span><i class="legend-dot current"></i>Current</span>
+                                <span><i class="legend-dot upcoming"></i>Upcoming</span>
                             </div>
                         </div>
+
+                        <div class="roadmap-gantt-scroll">
+                            <div class="roadmap-gantt" style="--week-count:@totalWeeks;">
+                                <div class="roadmap-gantt-corner">Phase</div>
+
+                                <div class="roadmap-gantt-weeks" style="--week-count:@totalWeeks;">
+                                    @for (var week = 1; week <= totalWeeks; week++)
+                                    {
+                                        <div class="roadmap-gantt-week">W@week</div>
+                                    }
+                                </div>
+
+                                @foreach (var phase in orderedPhases)
+                                {
+                                    var phaseKey = Convert.ToString(phase.Id) ?? phase.PhaseNumber.ToString();
+                                    var range = phaseRanges[phaseKey];
+                                    var tasks = FYPilot.Web.Pages.Student.RoadmapModel.ParseTasks(phase.TasksJson);
+                                    var stateClass = phase.IsCompleted
+                                        ? "is-completed"
+                                        : (currentPhase != null && Convert.ToString(currentPhase.Id) == phaseKey
+                                            ? "is-current"
+                                            : "is-upcoming");
+
+                                    <button type="button"
+                                            class="roadmap-gantt-label"
+                                            data-phase-select="@phaseKey"
+                                            aria-label="Open @phase.Name">
+                                        <span>@phase.PhaseNumber</span>
+                                        <strong>@phase.Name</strong>
+                                    </button>
+
+                                    <div class="roadmap-gantt-track" style="--week-count:@totalWeeks;">
+                                        <button type="button"
+                                                class="roadmap-gantt-bar @stateClass"
+                                                style="grid-column:@range.StartWeek / span @range.Duration;"
+                                                data-phase-select="@phaseKey"
+                                                title="@phase.Name: week @range.StartWeek to @range.EndWeek">
+                                            <strong>@range.Duration wk</strong>
+                                            <span>@tasks.Count task(s)</span>
+                                        </button>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="roadmap-details-card" aria-labelledby="phase-details-title">
+                        <div class="roadmap-panel-heading">
+                            <div>
+                                <span>Execution</span>
+                                <h2 id="phase-details-title">Selected phase details</h2>
+                            </div>
+                        </div>
+
+                        @foreach (var phase in orderedPhases)
+                        {
+                            var phaseKey = Convert.ToString(phase.Id) ?? phase.PhaseNumber.ToString();
+                            var range = phaseRanges[phaseKey];
+                            var isSelected = selectedPhase != null &&
+                                Convert.ToString(selectedPhase.Id) == phaseKey;
+                            var tasks = FYPilot.Web.Pages.Student.RoadmapModel.ParseTasks(phase.TasksJson);
+
+                            <article id="phase-panel-@phaseKey"
+                                     class="roadmap-detail-panel @(isSelected ? "is-active" : "")"
+                                     data-phase-panel="@phaseKey"
+                                     role="tabpanel"
+                                     aria-hidden="@(isSelected ? "false" : "true")">
+
+                                <div class="roadmap-detail-header">
+                                    <div>
+                                        <div class="roadmap-detail-kicker">
+                                            Phase @phase.PhaseNumber
+                                            <span>
+                                                Week @range.StartWeek@(range.EndWeek > range.StartWeek ? $"–{range.EndWeek}" : "")
+                                            </span>
+                                        </div>
+
+                                        <h3>@phase.Name</h3>
+                                        <p>@phase.Objective</p>
+                                    </div>
+
+                                    <div class="roadmap-detail-actions">
+                                        @if (phase.IsCompleted)
+                                        {
+                                            <span class="roadmap-complete-badge">
+                                                <i class="bi bi-check-circle-fill"></i>
+                                                Completed
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <form method="post" asp-page-handler="Complete">
+                                                @Html.AntiForgeryToken()
+                                                <input type="hidden" name="phaseId" value="@phase.Id" />
+                                                <input type="hidden" name="ideaId" value="@Model.Idea.Id" />
+
+                                                <button type="submit" class="btn roadmap-btn-success">
+                                                    <i class="bi bi-check2"></i>
+                                                    Mark phase done
+                                                </button>
+                                            </form>
+                                        }
+                                    </div>
+                                </div>
+
+                                <div class="roadmap-phase-facts">
+                                    <div>
+                                        <span>Duration</span>
+                                        <strong>@range.Duration week(s)</strong>
+                                    </div>
+
+                                    <div>
+                                        <span>Tasks</span>
+                                        <strong>@tasks.Count</strong>
+                                    </div>
+
+                                    <div>
+                                        <span>Dependencies</span>
+                                        <strong>
+                                            @(string.IsNullOrWhiteSpace(phase.Dependencies)
+                                                ? "None"
+                                                : phase.Dependencies)
+                                        </strong>
+                                    </div>
+                                </div>
+
+                                @if (tasks.Any())
+                                {
+                                    <div class="roadmap-task-table-wrap">
+                                        <table class="roadmap-task-table">
+                                            <thead>
+                                                <tr>
+                                                    <th scope="col">Task</th>
+                                                    <th scope="col">Effort</th>
+                                                    <th scope="col">Ownership</th>
+                                                    <th scope="col">Allocation</th>
+                                                    <th scope="col">Sequence</th>
+                                                </tr>
+                                            </thead>
+
+                                            <tbody>
+                                                @{
+                                                    var taskNumber = 0;
+                                                }
+
+                                                @foreach (var task in tasks)
+                                                {
+                                                    taskNumber++;
+
+                                                    <tr>
+                                                        <td data-label="Task">
+                                                            <div class="roadmap-task-title">
+                                                                <span>@taskNumber</span>
+                                                                <strong>@task.Title</strong>
+                                                            </div>
+                                                        </td>
+
+                                                        <td data-label="Effort">
+                                                            @(task.EstimatedHours.HasValue
+                                                                ? $"{task.EstimatedHours}h"
+                                                                : "Not specified")
+                                                        </td>
+
+                                                        <td data-label="Ownership">
+                                                            @if (task.AssignedMembers.Count > 0)
+                                                            {
+                                                                <div class="roadmap-owner-list">
+                                                                    @foreach (var member in task.AssignedMembers)
+                                                                    {
+                                                                        <span>@member</span>
+                                                                    }
+                                                                </div>
+                                                            }
+                                                            else
+                                                            {
+                                                                <span class="roadmap-muted">Unassigned</span>
+                                                            }
+                                                        </td>
+
+                                                        <td data-label="Allocation">
+                                                            @if (task.MemberAllocations.Count > 0)
+                                                            {
+                                                                <div class="roadmap-allocation-list">
+                                                                    @foreach (var allocation in task.MemberAllocations)
+                                                                    {
+                                                                        <span>
+                                                                            <strong>@allocation.MemberId</strong>
+                                                                            @allocation.AllocationPercentage%
+                                                                            · @allocation.AllocatedHours h
+                                                                        </span>
+                                                                    }
+                                                                </div>
+                                                            }
+                                                            else
+                                                            {
+                                                                <span class="roadmap-muted">Single-owner task</span>
+                                                            }
+                                                        </td>
+
+                                                        <td data-label="Sequence">
+                                                            <span class="roadmap-sequence-chip">Task @taskNumber</span>
+                                                        </td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="roadmap-inline-empty">
+                                        <i class="bi bi-list-check"></i>
+                                        No task details are available for this phase.
+                                    </div>
+                                }
+
+                                <div class="roadmap-detail-grid">
+                                    @if (!string.IsNullOrWhiteSpace(phase.ExpectedOutput))
+                                    {
+                                        <section class="roadmap-info-box">
+                                            <div class="roadmap-info-icon">
+                                                <i class="bi bi-box-arrow-in-down"></i>
+                                            </div>
+                                            <div>
+                                                <span>Expected output</span>
+                                                <p>@phase.ExpectedOutput</p>
+                                            </div>
+                                        </section>
+                                    }
+
+                                    @if (!string.IsNullOrWhiteSpace(phase.SuccessCriteria))
+                                    {
+                                        <section class="roadmap-info-box">
+                                            <div class="roadmap-info-icon">
+                                                <i class="bi bi-bullseye"></i>
+                                            </div>
+                                            <div>
+                                                <span>Success criteria</span>
+                                                <p>@phase.SuccessCriteria</p>
+                                            </div>
+                                        </section>
+                                    }
+
+                                    @if (!string.IsNullOrWhiteSpace(phase.Risks))
+                                    {
+                                        <section class="roadmap-info-box roadmap-info-risk">
+                                            <div class="roadmap-info-icon">
+                                                <i class="bi bi-exclamation-triangle"></i>
+                                            </div>
+                                            <div>
+                                                <span>Risk warning</span>
+                                                <p>@phase.Risks</p>
+                                            </div>
+                                        </section>
+                                    }
+                                </div>
+                            </article>
+                        }
+                    </section>
+                </div>
+
+                <aside class="roadmap-capacity-panel">
+                    <section class="roadmap-side-section">
+                        <div class="roadmap-side-heading">
+                            <span>Current focus</span>
+                            <i class="bi bi-crosshair"></i>
+                        </div>
+
+                        <h3>@(currentPhase?.Name ?? "Roadmap completed")</h3>
+                        <p>
+                            @(currentPhase?.Objective
+                                ?? "All roadmap phases are marked as complete.")
+                        </p>
+
+                        <div class="roadmap-side-metric">
+                            <span>Remaining phases</span>
+                            <strong>@orderedPhases.Count(p => !p.IsCompleted)</strong>
+                        </div>
+                    </section>
+
+                    @if (summary != null)
+                    {
+                        <section class="roadmap-side-section">
+                            <div class="roadmap-side-heading">
+                                <span>Capacity</span>
+                                <i class="bi bi-speedometer2"></i>
+                            </div>
+
+                            <div class="roadmap-capacity-number">
+                                <strong>@summary.UtilizationPercentage%</strong>
+                                <span>utilization</span>
+                            </div>
+
+                            <div class="roadmap-meter">
+                                @{
+                                    var utilizationWidth = Math.Min(Math.Max(summary.UtilizationPercentage, 0), 100);
+                                }
+                                <div class="@FeasibilityClass(summary.ScheduleFeasibility)"
+                                     style="width:@utilizationWidth%"></div>
+                            </div>
+
+                            <dl class="roadmap-side-stats">
+                                <div>
+                                    <dt>Adjusted plan</dt>
+                                    <dd>@summary.AdjustedPlannedHours h</dd>
+                                </div>
+                                <div>
+                                    <dt>Available capacity</dt>
+                                    <dd>@summary.TotalCapacityHours h</dd>
+                                </div>
+                                <div>
+                                    <dt>Team size</dt>
+                                    <dd>@summary.TeamSize</dd>
+                                </div>
+                                <div>
+                                    <dt>Weekly/member</dt>
+                                    <dd>@summary.HoursPerWeekPerMember h</dd>
+                                </div>
+                            </dl>
+
+                            @if (summary.OriginalPlannedHours != summary.AdjustedPlannedHours)
+                            {
+                                <div class="roadmap-scope-adjustment">
+                                    <i class="bi bi-scissors"></i>
+                                    <span>
+                                        Scope adjusted from <strong>@summary.OriginalPlannedHours h</strong>
+                                        to <strong>@summary.AdjustedPlannedHours h</strong>.
+                                    </span>
+                                </div>
+                            }
+                        </section>
+
+                        @if (summary.WorkloadByMember.Any())
+                        {
+                            <section class="roadmap-side-section">
+                                <div class="roadmap-side-heading">
+                                    <span>Team workload</span>
+                                    <i class="bi bi-people"></i>
+                                </div>
+
+                                <div class="roadmap-member-load-list">
+                                    @foreach (var member in summary.WorkloadByMember)
+                                    {
+                                        var memberWidth = Math.Min(Math.Max(member.UtilizationPercentage, 0), 100);
+
+                                        <div class="roadmap-member-load">
+                                            <div class="roadmap-member-load-copy">
+                                                <strong>@member.Member</strong>
+                                                <span>@member.AssignedHours h · @member.UtilizationPercentage%</span>
+                                            </div>
+
+                                            <div class="roadmap-member-load-track">
+                                                <div style="width:@memberWidth%"></div>
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            </section>
+                        }
+
+                        @if (summary.Warnings.Any() ||
+                             (summary.ScheduleFeasibility == "over_capacity" &&
+                              summary.RecommendedAdditionalWeeks > 0))
+                        {
+                            <section class="roadmap-side-section roadmap-warning-section">
+                                <div class="roadmap-side-heading">
+                                    <span>Schedule alerts</span>
+                                    <i class="bi bi-exclamation-triangle"></i>
+                                </div>
+
+                                @if (summary.ScheduleFeasibility == "over_capacity" &&
+                                     summary.RecommendedAdditionalWeeks > 0)
+                                {
+                                    <div class="roadmap-warning-item is-critical">
+                                        <i class="bi bi-calendar-plus"></i>
+                                        <span>
+                                            Add approximately
+                                            <strong>@summary.RecommendedAdditionalWeeks week(s)</strong>
+                                            or reduce mandatory scope.
+                                        </span>
+                                    </div>
+                                }
+
+                                @foreach (var warning in summary.Warnings)
+                                {
+                                    <div class="roadmap-warning-item">
+                                        <i class="bi bi-info-circle"></i>
+                                        <span>@warning</span>
+                                    </div>
+                                }
+                            </section>
+                        }
                     }
-                </div>
-            </div>
-        }
-        else
-        {
-            <section class="rm-start-card">
-                <div class="rm-start-icon">
-                    <i class="bi bi-magic"></i>
-                </div>
-
-                <h2>Generate your AI Roadmap</h2>
-
-                <p>
-                    Click <strong>Generate AI Roadmap</strong> above. FYPilot will use your selected idea,
-                    skills, team size, available hours, and project scope to build a weekly execution plan.
-                </p>
-
-                <div class="rm-start-preview">
-                    <div>
-                        <i class="bi bi-1-circle"></i>
-                        Scope and requirements
-                    </div>
-
-                    <div>
-                        <i class="bi bi-2-circle"></i>
-                        Weekly phases and tasks
-                    </div>
-
-                    <div>
-                        <i class="bi bi-3-circle"></i>
-                        Outputs, checkpoints, and risks
-                    </div>
-                </div>
+                </aside>
             </section>
+
+            @if (Model.DeferredTasks.Any())
+            {
+                <section class="roadmap-deferred-card" aria-labelledby="deferred-title">
+                    <details>
+                        <summary>
+                            <span>
+                                <i class="bi bi-archive"></i>
+                                <strong id="deferred-title">Future Enhancements</strong>
+                                <small>Excluded from the current delivery plan</small>
+                            </span>
+
+                            <span class="roadmap-deferred-count">@Model.DeferredTasks.Count task(s)</span>
+                        </summary>
+
+                        <div class="roadmap-deferred-table-wrap">
+                            <table class="roadmap-deferred-table">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Task</th>
+                                        <th scope="col">Original phase</th>
+                                        <th scope="col">Effort</th>
+                                        <th scope="col">Priority</th>
+                                        <th scope="col">Reason deferred</th>
+                                    </tr>
+                                </thead>
+
+                                <tbody>
+                                    @foreach (var task in Model.DeferredTasks)
+                                    {
+                                        <tr>
+                                            <td data-label="Task"><strong>@task.Title</strong></td>
+                                            <td data-label="Original phase">@task.OriginalPhase</td>
+                                            <td data-label="Effort">@task.EstimatedHours h</td>
+                                            <td data-label="Priority">
+                                                <span class="roadmap-priority-chip">@task.Priority</span>
+                                            </td>
+                                            <td data-label="Reason">@task.ReasonDeferred</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </details>
+                </section>
+            }
         }
 
-        <div class="rm-loading-overlay d-none" id="rmLoadingOverlay">
-            <div class="rm-loading-card">
-                <div class="rm-loader-ring"></div>
-
-                <h2>Generating AI Roadmap</h2>
-
-                <p>
-                    FYPilot is sending your selected project to the Python AI service and building your roadmap.
-                </p>
-
-                <div class="rm-loading-steps">
-                    <div class="active">
-                        <i class="bi bi-check2-circle"></i>
-                        Reading selected idea
-                    </div>
+        <div class="roadmap-loading-overlay d-none"
+             id="rmLoadingOverlay"
+             role="status"
+             aria-live="polite"
+             aria-label="Generating project roadmap">
+            <div class="roadmap-loading-panel">
+                <div class="roadmap-loading-top">
+                    <div class="roadmap-loading-spinner" aria-hidden="true"></div>
 
                     <div>
-                        <i class="bi bi-cpu"></i>
-                        Calling ProjectRoadmapAgent
-                    </div>
-
-                    <div>
-                        <i class="bi bi-calendar-week"></i>
-                        Creating weekly phases
-                    </div>
-
-                    <div>
-                        <i class="bi bi-shield-exclamation"></i>
-                        Adding risks and checkpoints
+                        <div class="roadmap-eyebrow">AI processing</div>
+                        <h2>Building your project roadmap</h2>
+                        <p>
+                            Keep this page open while FYPilot generates, schedules, validates, and reviews the plan.
+                        </p>
                     </div>
                 </div>
+
+                <div class="roadmap-loading-progress">
+                    <div></div>
+                </div>
+
+                <ol class="roadmap-loading-steps">
+                    <li class="is-active">
+                        <i class="bi bi-folder2-open"></i>
+                        Reading project context
+                    </li>
+                    <li>
+                        <i class="bi bi-diagram-3"></i>
+                        Generating project-specific phases
+                    </li>
+                    <li>
+                        <i class="bi bi-hourglass-split"></i>
+                        Estimating tasks and effort
+                    </li>
+                    <li>
+                        <i class="bi bi-people"></i>
+                        Allocating team workload
+                    </li>
+                    <li>
+                        <i class="bi bi-shield-check"></i>
+                        Reviewing roadmap quality
+                    </li>
+                </ol>
             </div>
         </div>
-    </section>
+    </main>
 }
+
 @section Head {
     <style>
-        .empty-dna-layout {
+        :root {
+            --roadmap-navy: #1f2f4d;
+            --roadmap-navy-2: #2f466a;
+            --roadmap-blue: #5579a6;
+            --roadmap-blue-soft: #edf3f9;
+            --roadmap-surface: #ffffff;
+            --roadmap-bg: #f4f6f9;
+            --roadmap-border: #e2e7ee;
+            --roadmap-muted: #667085;
+            --roadmap-text: #182230;
+            --roadmap-success: #198754;
+            --roadmap-success-soft: #eaf7f0;
+            --roadmap-warning: #b7791f;
+            --roadmap-warning-soft: #fff7e6;
+            --roadmap-danger: #c24141;
+            --roadmap-danger-soft: #fff0f0;
+            --roadmap-radius: 18px;
+        }
+
+        .roadmap-control,
+        .roadmap-empty-page {
+            color: var(--roadmap-text);
+            background: var(--roadmap-bg);
+        }
+
+        .roadmap-control {
+            display: grid;
+            gap: 1rem;
+            padding-bottom: 2rem;
+        }
+
+        .roadmap-empty-page {
             min-height: calc(100vh - 170px);
             display: grid;
             place-items: center;
-            padding: 1.5rem;
+            padding: 1.25rem;
         }
 
-        .empty-dna-card {
-            width: min(760px, 100%);
-            min-height: 670px;
-            display: grid;
-            place-items: center;
+        .roadmap-empty-card {
+            width: min(620px, 100%);
+            padding: clamp(1.5rem, 4vw, 2.5rem);
             text-align: center;
-            background: #ffffff;
-            border: 1px solid #E8ECF2;
-            border-radius: 28px;
-            box-shadow: 0 24px 55px rgba(15, 23, 42, .08);
-            padding: 2.5rem;
+            background: var(--roadmap-surface);
+            border: 1px solid var(--roadmap-border);
+            border-radius: 24px;
+            box-shadow: 0 18px 46px rgba(31, 47, 77, .08);
         }
 
-        .empty-dna-content {
-            max-width: 560px;
-            margin: 0 auto;
-        }
-
-        .empty-dna-icon {
-            width: 78px;
-            height: 78px;
+        .roadmap-empty-icon,
+        .roadmap-start-icon,
+        .roadmap-command-icon {
             display: grid;
             place-items: center;
-            margin: 0 auto 1.35rem;
-            border-radius: 26px;
-            color: #516C8D;
-            background: #EEF2F6;
-            font-size: 2rem;
+            color: var(--roadmap-navy);
+            background: var(--roadmap-blue-soft);
         }
 
-        .empty-dna-content h1,
-        .empty-dna-content h2 {
-            margin: 0;
-            color: #111827;
-            font-size: clamp(1.9rem, 3vw, 2.55rem);
-            line-height: 1.12;
+        .roadmap-empty-icon {
+            width: 68px;
+            height: 68px;
+            margin: 0 auto 1rem;
+            border-radius: 20px;
+            font-size: 1.7rem;
+        }
+
+        .roadmap-eyebrow {
+            color: var(--roadmap-blue);
+            font-size: .72rem;
             font-weight: 800;
-            letter-spacing: -0.05em;
+            letter-spacing: .13em;
+            text-transform: uppercase;
         }
 
-        .empty-dna-content p {
-            max-width: 540px;
-            margin: 0.9rem auto 0;
-            color: #64748B;
-            font-size: 1rem;
-            line-height: 1.65;
+        .roadmap-empty-card h1,
+        .roadmap-start-panel h2,
+        .roadmap-command-header h1,
+        .roadmap-panel-heading h2,
+        .roadmap-detail-panel h3,
+        .roadmap-capacity-panel h3,
+        .roadmap-loading-panel h2 {
+            color: var(--roadmap-text);
+            letter-spacing: -.025em;
         }
 
-        .empty-dna-actions {
+        .roadmap-empty-card h1 {
+            margin: .4rem 0 .7rem;
+            font-size: clamp(1.75rem, 4vw, 2.35rem);
+            font-weight: 800;
+        }
+
+        .roadmap-empty-card p {
+            max-width: 500px;
+            margin: 0 auto;
+            color: var(--roadmap-muted);
+            line-height: 1.7;
+        }
+
+        .roadmap-empty-actions,
+        .roadmap-command-actions {
             display: flex;
-            justify-content: center;
             flex-wrap: wrap;
             gap: .65rem;
+        }
+
+        .roadmap-empty-actions {
+            justify-content: center;
             margin-top: 1.35rem;
         }
 
-            .empty-dna-actions .btn,
-            .empty-dna-actions a {
-                border-radius: 14px;
-                padding: .72rem 1rem;
-                font-size: .82rem;
-                font-weight: 700;
+        .roadmap-btn-primary,
+        .roadmap-btn-secondary,
+        .roadmap-btn-success {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .45rem;
+            min-height: 42px;
+            border-radius: 11px;
+            padding: .62rem .9rem;
+            font-size: .82rem;
+            font-weight: 750;
+            box-shadow: none !important;
+        }
+
+        .roadmap-btn-primary {
+            color: #fff !important;
+            background: var(--roadmap-navy) !important;
+            border: 1px solid var(--roadmap-navy) !important;
+        }
+
+        .roadmap-btn-primary:hover {
+            background: var(--roadmap-navy-2) !important;
+            border-color: var(--roadmap-navy-2) !important;
+        }
+
+        .roadmap-btn-secondary {
+            color: var(--roadmap-navy) !important;
+            background: #fff !important;
+            border: 1px solid var(--roadmap-border) !important;
+        }
+
+        .roadmap-btn-secondary:hover {
+            background: var(--roadmap-blue-soft) !important;
+            border-color: #cfd9e5 !important;
+        }
+
+        .roadmap-btn-success {
+            color: #fff !important;
+            background: var(--roadmap-success) !important;
+            border: 1px solid var(--roadmap-success) !important;
+        }
+
+        .roadmap-btn-large {
+            min-height: 48px;
+            padding-inline: 1.2rem;
+        }
+
+        .roadmap-alert {
+            display: flex;
+            align-items: flex-start;
+            gap: .65rem;
+            padding: .85rem 1rem;
+            border-radius: 12px;
+            font-size: .9rem;
+        }
+
+        .roadmap-alert-warning {
+            color: #7a5411;
+            background: var(--roadmap-warning-soft);
+            border: 1px solid #f1d69e;
+        }
+
+        .roadmap-command-header,
+        .roadmap-start-panel,
+        .roadmap-summary-strip,
+        .roadmap-phase-nav,
+        .roadmap-gantt-card,
+        .roadmap-details-card,
+        .roadmap-capacity-panel,
+        .roadmap-deferred-card {
+            background: var(--roadmap-surface);
+            border: 1px solid var(--roadmap-border);
+            box-shadow: 0 8px 24px rgba(31, 47, 77, .045);
+        }
+
+        .roadmap-command-header {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 1rem 1.5rem;
+            padding: 1.15rem 1.25rem;
+            border-radius: var(--roadmap-radius);
+        }
+
+        .roadmap-command-main {
+            display: flex;
+            align-items: flex-start;
+            gap: .9rem;
+            min-width: 0;
+        }
+
+        .roadmap-command-icon {
+            flex: 0 0 auto;
+            width: 44px;
+            height: 44px;
+            border-radius: 13px;
+            font-size: 1.2rem;
+        }
+
+        .roadmap-command-copy {
+            min-width: 0;
+        }
+
+        .roadmap-title-line {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: .65rem;
+            margin-top: .15rem;
+        }
+
+        .roadmap-title-line h1 {
+            min-width: 0;
+            margin: 0;
+            font-size: clamp(1.3rem, 2.2vw, 1.85rem);
+            font-weight: 800;
+            overflow-wrap: anywhere;
+        }
+
+        .roadmap-review-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: .3rem;
+            border-radius: 999px;
+            font-size: .7rem;
+        }
+
+        .roadmap-project-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .4rem;
+            margin-top: .5rem;
+        }
+
+        .roadmap-project-meta span {
+            padding: .27rem .52rem;
+            color: #526071;
+            background: #f6f8fa;
+            border: 1px solid var(--roadmap-border);
+            border-radius: 999px;
+            font-size: .72rem;
+            font-weight: 700;
+        }
+
+        .roadmap-command-actions {
+            justify-content: flex-end;
+            align-items: flex-start;
+        }
+
+        .roadmap-header-progress {
+            grid-column: 1 / -1;
+        }
+
+        .roadmap-header-progress-copy {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: .35rem;
+            color: var(--roadmap-muted);
+            font-size: .75rem;
+        }
+
+        .roadmap-header-progress-copy strong {
+            color: var(--roadmap-navy);
+        }
+
+        .roadmap-progress-track,
+        .roadmap-meter,
+        .roadmap-member-load-track {
+            overflow: hidden;
+            background: #edf0f4;
+            border-radius: 999px;
+        }
+
+        .roadmap-progress-track {
+            height: 6px;
+        }
+
+        .roadmap-progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--roadmap-navy), var(--roadmap-blue));
+            border-radius: inherit;
+            transition: width .25s ease;
+        }
+
+        .roadmap-start-panel {
+            display: grid;
+            grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr) auto;
+            align-items: center;
+            gap: 1.5rem;
+            padding: clamp(1.25rem, 3vw, 2rem);
+            border-radius: var(--roadmap-radius);
+        }
+
+        .roadmap-start-copy {
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+
+        .roadmap-start-icon {
+            flex: 0 0 auto;
+            width: 50px;
+            height: 50px;
+            border-radius: 15px;
+            font-size: 1.3rem;
+        }
+
+        .roadmap-start-panel h2 {
+            margin: .2rem 0 .45rem;
+            font-size: clamp(1.35rem, 2.4vw, 1.9rem);
+            font-weight: 800;
+        }
+
+        .roadmap-start-panel p {
+            margin: 0;
+            color: var(--roadmap-muted);
+            line-height: 1.65;
+        }
+
+        .roadmap-start-features {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: .55rem;
+        }
+
+        .roadmap-start-features div {
+            display: flex;
+            align-items: center;
+            gap: .45rem;
+            padding: .65rem .7rem;
+            color: #435066;
+            background: #f7f9fb;
+            border: 1px solid var(--roadmap-border);
+            border-radius: 11px;
+            font-size: .76rem;
+            font-weight: 700;
+        }
+
+        .roadmap-start-features i {
+            color: var(--roadmap-blue);
+        }
+
+        .roadmap-summary-strip {
+            display: grid;
+            grid-template-columns: repeat(8, minmax(0, 1fr));
+            overflow: hidden;
+            border-radius: 15px;
+        }
+
+        .roadmap-summary-item {
+            min-width: 0;
+            padding: .85rem .9rem;
+            border-right: 1px solid var(--roadmap-border);
+        }
+
+        .roadmap-summary-item:last-child {
+            border-right: 0;
+        }
+
+        .roadmap-summary-item span {
+            display: block;
+            margin-bottom: .25rem;
+            color: var(--roadmap-muted);
+            font-size: .68rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+        }
+
+        .roadmap-summary-item strong {
+            display: block;
+            color: var(--roadmap-text);
+            font-size: .82rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .roadmap-feasibility-pill {
+            width: fit-content;
+            max-width: 100%;
+            padding: .3rem .5rem;
+            border-radius: 999px;
+            font-size: .68rem !important;
+            text-transform: none !important;
+            white-space: normal !important;
+        }
+
+        .roadmap-feasibility-pill.is-feasible,
+        .roadmap-meter > .is-feasible {
+            color: #157347;
+            background: var(--roadmap-success-soft);
+        }
+
+        .roadmap-feasibility-pill.is-adjusted,
+        .roadmap-meter > .is-adjusted {
+            color: #8a5c12;
+            background: var(--roadmap-warning-soft);
+        }
+
+        .roadmap-feasibility-pill.is-over,
+        .roadmap-meter > .is-over {
+            color: #a83232;
+            background: var(--roadmap-danger-soft);
+        }
+
+        .roadmap-feasibility-pill.is-neutral,
+        .roadmap-meter > .is-neutral {
+            color: #5f6b7b;
+            background: #eef1f5;
+        }
+
+        .roadmap-workspace {
+            display: grid;
+            grid-template-columns: minmax(220px, .72fr) minmax(0, 2.25fr) minmax(250px, .85fr);
+            align-items: start;
+            gap: 1rem;
+        }
+
+        .roadmap-phase-nav,
+        .roadmap-gantt-card,
+        .roadmap-details-card,
+        .roadmap-capacity-panel {
+            border-radius: var(--roadmap-radius);
+        }
+
+        .roadmap-phase-nav {
+            overflow: hidden;
+        }
+
+        .roadmap-panel-heading {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 1rem 1.05rem;
+            border-bottom: 1px solid var(--roadmap-border);
+        }
+
+        .roadmap-panel-heading span {
+            color: var(--roadmap-blue);
+            font-size: .66rem;
+            font-weight: 800;
+            letter-spacing: .1em;
+            text-transform: uppercase;
+        }
+
+        .roadmap-panel-heading h2 {
+            margin: .1rem 0 0;
+            font-size: .98rem;
+            font-weight: 800;
+        }
+
+        .roadmap-count-badge,
+        .roadmap-deferred-count {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 27px;
+            padding: .25rem .5rem;
+            color: var(--roadmap-navy) !important;
+            background: var(--roadmap-blue-soft);
+            border-radius: 999px;
+            font-size: .7rem !important;
+            letter-spacing: 0 !important;
+            text-transform: none !important;
+        }
+
+        .roadmap-phase-list {
+            display: grid;
+            padding: .45rem;
+        }
+
+        .roadmap-phase-tab {
+            width: 100%;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: .65rem;
+            padding: .72rem .65rem;
+            color: inherit;
+            text-align: left;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 11px;
+            cursor: pointer;
+        }
+
+        .roadmap-phase-tab:hover,
+        .roadmap-phase-tab.is-selected {
+            background: var(--roadmap-blue-soft);
+            border-color: #d9e4ef;
+        }
+
+        .roadmap-phase-tab.is-current {
+            box-shadow: inset 3px 0 0 var(--roadmap-blue);
+        }
+
+        .roadmap-phase-tab-number {
+            width: 29px;
+            height: 29px;
+            display: grid;
+            place-items: center;
+            color: var(--roadmap-muted);
+            background: #f1f3f6;
+            border-radius: 9px;
+            font-size: .74rem;
+            font-weight: 800;
+        }
+
+        .roadmap-phase-tab.is-completed .roadmap-phase-tab-number {
+            color: var(--roadmap-success);
+            background: var(--roadmap-success-soft);
+        }
+
+        .roadmap-phase-tab.is-current .roadmap-phase-tab-number {
+            color: #fff;
+            background: var(--roadmap-blue);
+        }
+
+        .roadmap-phase-tab-copy {
+            min-width: 0;
+        }
+
+        .roadmap-phase-tab-copy strong,
+        .roadmap-phase-tab-copy small {
+            display: block;
+        }
+
+        .roadmap-phase-tab-copy strong {
+            font-size: .78rem;
+            overflow-wrap: anywhere;
+        }
+
+        .roadmap-phase-tab-copy small {
+            margin-top: .16rem;
+            color: var(--roadmap-muted);
+            font-size: .66rem;
+        }
+
+        .roadmap-phase-tab-arrow {
+            color: #98a2b3;
+            font-size: .75rem;
+        }
+
+        .roadmap-main-column {
+            min-width: 0;
+            display: grid;
+            gap: 1rem;
+        }
+
+        .roadmap-gantt-heading {
+            flex-wrap: wrap;
+        }
+
+        .roadmap-gantt-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .75rem;
+        }
+
+        .roadmap-gantt-legend span {
+            display: inline-flex;
+            align-items: center;
+            gap: .32rem;
+            color: var(--roadmap-muted);
+            font-size: .66rem;
+            font-weight: 700;
+            letter-spacing: 0;
+            text-transform: none;
+        }
+
+        .legend-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .legend-dot.completed {
+            background: var(--roadmap-success);
+        }
+
+        .legend-dot.current {
+            background: var(--roadmap-blue);
+        }
+
+        .legend-dot.upcoming {
+            background: #c8ced7;
+        }
+
+        .roadmap-gantt-scroll {
+            overflow-x: auto;
+            padding: .9rem;
+        }
+
+        .roadmap-gantt {
+            min-width: max(760px, calc(var(--week-count) * 52px + 180px));
+            display: grid;
+            grid-template-columns: 175px minmax(0, 1fr);
+            align-items: stretch;
+            border: 1px solid var(--roadmap-border);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .roadmap-gantt-corner {
+            display: flex;
+            align-items: center;
+            padding: .65rem .75rem;
+            color: var(--roadmap-muted);
+            background: #f7f9fb;
+            border-right: 1px solid var(--roadmap-border);
+            border-bottom: 1px solid var(--roadmap-border);
+            font-size: .66rem;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .roadmap-gantt-weeks {
+            display: grid;
+            grid-template-columns: repeat(var(--week-count), minmax(42px, 1fr));
+            background: #f7f9fb;
+            border-bottom: 1px solid var(--roadmap-border);
+        }
+
+        .roadmap-gantt-week {
+            display: grid;
+            place-items: center;
+            min-height: 38px;
+            color: var(--roadmap-muted);
+            border-right: 1px solid var(--roadmap-border);
+            font-size: .62rem;
+            font-weight: 800;
+        }
+
+        .roadmap-gantt-week:last-child {
+            border-right: 0;
+        }
+
+        .roadmap-gantt-label {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            align-items: center;
+            gap: .5rem;
+            min-height: 48px;
+            padding: .55rem .65rem;
+            color: inherit;
+            text-align: left;
+            background: #fff;
+            border: 0;
+            border-right: 1px solid var(--roadmap-border);
+            border-bottom: 1px solid var(--roadmap-border);
+            cursor: pointer;
+        }
+
+        .roadmap-gantt-label span {
+            width: 24px;
+            height: 24px;
+            display: grid;
+            place-items: center;
+            color: var(--roadmap-navy);
+            background: var(--roadmap-blue-soft);
+            border-radius: 7px;
+            font-size: .65rem;
+            font-weight: 800;
+        }
+
+        .roadmap-gantt-label strong {
+            font-size: .7rem;
+            line-height: 1.25;
+            overflow-wrap: anywhere;
+        }
+
+        .roadmap-gantt-track {
+            position: relative;
+            display: grid;
+            grid-template-columns: repeat(var(--week-count), minmax(42px, 1fr));
+            align-items: center;
+            min-height: 48px;
+            background-image:
+                repeating-linear-gradient(
+                    to right,
+                    transparent,
+                    transparent calc((100% / var(--week-count)) - 1px),
+                    var(--roadmap-border) calc((100% / var(--week-count)) - 1px),
+                    var(--roadmap-border) calc(100% / var(--week-count))
+                );
+            border-bottom: 1px solid var(--roadmap-border);
+        }
+
+        .roadmap-gantt-bar {
+            min-width: 0;
+            height: 30px;
+            margin: 0 4px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .35rem;
+            padding: 0 .55rem;
+            color: #fff;
+            background: #a8b1bd;
+            border: 0;
+            border-radius: 8px;
+            cursor: pointer;
+            overflow: hidden;
+        }
+
+        .roadmap-gantt-bar strong,
+        .roadmap-gantt-bar span {
+            white-space: nowrap;
+            font-size: .62rem;
+        }
+
+        .roadmap-gantt-bar.is-completed {
+            background: var(--roadmap-success);
+        }
+
+        .roadmap-gantt-bar.is-current {
+            background: var(--roadmap-blue);
+        }
+
+        .roadmap-gantt-bar.is-upcoming {
+            color: #435066;
+            background: #dfe4ea;
+        }
+
+        .roadmap-details-card {
+            overflow: hidden;
+        }
+
+        .roadmap-detail-panel {
+            display: none;
+            padding: 1.05rem;
+        }
+
+        .roadmap-detail-panel.is-active {
+            display: block;
+        }
+
+        .roadmap-detail-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--roadmap-border);
+        }
+
+        .roadmap-detail-kicker {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: .45rem;
+            color: var(--roadmap-blue);
+            font-size: .7rem;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .roadmap-detail-kicker span {
+            padding: .18rem .4rem;
+            color: var(--roadmap-muted);
+            background: #f4f6f8;
+            border-radius: 999px;
+            font-size: .62rem;
+            text-transform: none;
+        }
+
+        .roadmap-detail-panel h3 {
+            margin: .25rem 0 .35rem;
+            font-size: clamp(1.2rem, 2vw, 1.55rem);
+            font-weight: 800;
+        }
+
+        .roadmap-detail-panel > .roadmap-detail-header p {
+            max-width: 720px;
+            margin: 0;
+            color: var(--roadmap-muted);
+            line-height: 1.6;
+        }
+
+        .roadmap-complete-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: .35rem;
+            padding: .5rem .65rem;
+            color: var(--roadmap-success);
+            background: var(--roadmap-success-soft);
+            border-radius: 10px;
+            font-size: .76rem;
+            font-weight: 800;
+        }
+
+        .roadmap-phase-facts {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: .6rem;
+            margin: 1rem 0;
+        }
+
+        .roadmap-phase-facts div {
+            min-width: 0;
+            padding: .7rem .75rem;
+            background: #f7f9fb;
+            border: 1px solid var(--roadmap-border);
+            border-radius: 11px;
+        }
+
+        .roadmap-phase-facts span,
+        .roadmap-info-box span {
+            display: block;
+            margin-bottom: .2rem;
+            color: var(--roadmap-muted);
+            font-size: .66rem;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .roadmap-phase-facts strong {
+            display: block;
+            font-size: .76rem;
+            overflow-wrap: anywhere;
+        }
+
+        .roadmap-task-table-wrap,
+        .roadmap-deferred-table-wrap {
+            overflow-x: auto;
+            border: 1px solid var(--roadmap-border);
+            border-radius: 12px;
+        }
+
+        .roadmap-task-table,
+        .roadmap-deferred-table {
+            width: 100%;
+            min-width: 760px;
+            border-collapse: collapse;
+        }
+
+        .roadmap-task-table th,
+        .roadmap-task-table td,
+        .roadmap-deferred-table th,
+        .roadmap-deferred-table td {
+            padding: .7rem .75rem;
+            text-align: left;
+            vertical-align: top;
+            border-bottom: 1px solid var(--roadmap-border);
+        }
+
+        .roadmap-task-table th,
+        .roadmap-deferred-table th {
+            color: var(--roadmap-muted);
+            background: #f7f9fb;
+            font-size: .65rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: .04em;
+        }
+
+        .roadmap-task-table td,
+        .roadmap-deferred-table td {
+            font-size: .73rem;
+            line-height: 1.45;
+        }
+
+        .roadmap-task-table tr:last-child td,
+        .roadmap-deferred-table tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .roadmap-task-title {
+            display: flex;
+            align-items: flex-start;
+            gap: .45rem;
+        }
+
+        .roadmap-task-title > span {
+            flex: 0 0 auto;
+            width: 22px;
+            height: 22px;
+            display: grid;
+            place-items: center;
+            color: var(--roadmap-navy);
+            background: var(--roadmap-blue-soft);
+            border-radius: 6px;
+            font-size: .62rem;
+            font-weight: 800;
+        }
+
+        .roadmap-owner-list,
+        .roadmap-allocation-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .3rem;
+        }
+
+        .roadmap-owner-list span,
+        .roadmap-sequence-chip,
+        .roadmap-priority-chip {
+            display: inline-flex;
+            width: fit-content;
+            padding: .23rem .38rem;
+            color: #40506a;
+            background: #eef2f6;
+            border-radius: 999px;
+            font-size: .62rem;
+            font-weight: 750;
+        }
+
+        .roadmap-allocation-list {
+            display: grid;
+        }
+
+        .roadmap-allocation-list span {
+            color: var(--roadmap-muted);
+            font-size: .68rem;
+        }
+
+        .roadmap-muted {
+            color: var(--roadmap-muted);
+        }
+
+        .roadmap-inline-empty {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: .5rem;
+            min-height: 100px;
+            color: var(--roadmap-muted);
+            background: #f8fafb;
+            border: 1px dashed #cfd7e2;
+            border-radius: 12px;
+            font-size: .78rem;
+        }
+
+        .roadmap-detail-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: .7rem;
+            margin-top: 1rem;
+        }
+
+        .roadmap-info-box {
+            display: flex;
+            align-items: flex-start;
+            gap: .65rem;
+            padding: .8rem;
+            background: #f8fafb;
+            border: 1px solid var(--roadmap-border);
+            border-radius: 12px;
+        }
+
+        .roadmap-info-icon {
+            flex: 0 0 auto;
+            width: 31px;
+            height: 31px;
+            display: grid;
+            place-items: center;
+            color: var(--roadmap-blue);
+            background: var(--roadmap-blue-soft);
+            border-radius: 9px;
+        }
+
+        .roadmap-info-box p {
+            margin: 0;
+            color: #4a5667;
+            font-size: .74rem;
+            line-height: 1.55;
+        }
+
+        .roadmap-info-risk {
+            background: #fff9f1;
+            border-color: #f1dcc0;
+        }
+
+        .roadmap-info-risk .roadmap-info-icon {
+            color: var(--roadmap-warning);
+            background: var(--roadmap-warning-soft);
+        }
+
+        .roadmap-capacity-panel {
+            position: sticky;
+            top: 1rem;
+            overflow: hidden;
+        }
+
+        .roadmap-side-section {
+            padding: 1rem;
+            border-bottom: 1px solid var(--roadmap-border);
+        }
+
+        .roadmap-side-section:last-child {
+            border-bottom: 0;
+        }
+
+        .roadmap-side-heading {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: .75rem;
+            color: var(--roadmap-blue);
+        }
+
+        .roadmap-side-heading span {
+            font-size: .68rem;
+            font-weight: 800;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+        }
+
+        .roadmap-capacity-panel h3 {
+            margin: 0 0 .35rem;
+            font-size: .98rem;
+            font-weight: 800;
+        }
+
+        .roadmap-capacity-panel p {
+            margin: 0;
+            color: var(--roadmap-muted);
+            font-size: .74rem;
+            line-height: 1.55;
+        }
+
+        .roadmap-side-metric {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: .8rem;
+            padding-top: .7rem;
+            border-top: 1px solid var(--roadmap-border);
+            font-size: .73rem;
+        }
+
+        .roadmap-capacity-number {
+            display: flex;
+            align-items: baseline;
+            gap: .35rem;
+        }
+
+        .roadmap-capacity-number strong {
+            color: var(--roadmap-navy);
+            font-size: 1.7rem;
+            line-height: 1;
+        }
+
+        .roadmap-capacity-number span {
+            color: var(--roadmap-muted);
+            font-size: .72rem;
+        }
+
+        .roadmap-meter {
+            height: 7px;
+            margin: .65rem 0 .8rem;
+        }
+
+        .roadmap-meter > div {
+            height: 100%;
+            border-radius: inherit;
+        }
+
+        .roadmap-meter > .is-feasible {
+            background: var(--roadmap-success);
+        }
+
+        .roadmap-meter > .is-adjusted {
+            background: var(--roadmap-warning);
+        }
+
+        .roadmap-meter > .is-over {
+            background: var(--roadmap-danger);
+        }
+
+        .roadmap-meter > .is-neutral {
+            background: #98a2b3;
+        }
+
+        .roadmap-side-stats {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: .5rem;
+            margin: 0;
+        }
+
+        .roadmap-side-stats div {
+            padding: .55rem;
+            background: #f7f9fb;
+            border: 1px solid var(--roadmap-border);
+            border-radius: 9px;
+        }
+
+        .roadmap-side-stats dt {
+            color: var(--roadmap-muted);
+            font-size: .61rem;
+            font-weight: 700;
+        }
+
+        .roadmap-side-stats dd {
+            margin: .12rem 0 0;
+            font-size: .73rem;
+            font-weight: 800;
+        }
+
+        .roadmap-scope-adjustment {
+            display: flex;
+            align-items: flex-start;
+            gap: .45rem;
+            margin-top: .7rem;
+            padding: .55rem;
+            color: #7a5411;
+            background: var(--roadmap-warning-soft);
+            border-radius: 9px;
+            font-size: .69rem;
+            line-height: 1.45;
+        }
+
+        .roadmap-member-load-list {
+            display: grid;
+            gap: .65rem;
+        }
+
+        .roadmap-member-load-copy {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .5rem;
+            margin-bottom: .28rem;
+        }
+
+        .roadmap-member-load-copy strong {
+            font-size: .72rem;
+        }
+
+        .roadmap-member-load-copy span {
+            color: var(--roadmap-muted);
+            font-size: .64rem;
+        }
+
+        .roadmap-member-load-track {
+            height: 6px;
+        }
+
+        .roadmap-member-load-track div {
+            height: 100%;
+            background: var(--roadmap-blue);
+            border-radius: inherit;
+        }
+
+        .roadmap-warning-section {
+            background: #fffdfa;
+        }
+
+        .roadmap-warning-item {
+            display: flex;
+            align-items: flex-start;
+            gap: .45rem;
+            padding: .55rem 0;
+            color: #6f551e;
+            border-bottom: 1px solid #f1e6cf;
+            font-size: .69rem;
+            line-height: 1.45;
+        }
+
+        .roadmap-warning-item:last-child {
+            padding-bottom: 0;
+            border-bottom: 0;
+        }
+
+        .roadmap-warning-item.is-critical {
+            color: #a83232;
+        }
+
+        .roadmap-deferred-card {
+            overflow: hidden;
+            border-radius: var(--roadmap-radius);
+        }
+
+        .roadmap-deferred-card details > summary {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 1rem 1.1rem;
+            cursor: pointer;
+            list-style: none;
+        }
+
+        .roadmap-deferred-card details > summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .roadmap-deferred-card summary > span:first-child {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: .45rem;
+        }
+
+        .roadmap-deferred-card summary i {
+            color: var(--roadmap-blue);
+        }
+
+        .roadmap-deferred-card summary strong {
+            font-size: .9rem;
+        }
+
+        .roadmap-deferred-card summary small {
+            color: var(--roadmap-muted);
+            font-size: .7rem;
+        }
+
+        .roadmap-deferred-table-wrap {
+            margin: 0 1rem 1rem;
+        }
+
+        .roadmap-priority-chip {
+            text-transform: capitalize;
+        }
+
+        .roadmap-loading-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 2000;
+            display: grid;
+            place-items: center;
+            padding: 1rem;
+            background: rgba(20, 31, 49, .48);
+            backdrop-filter: blur(5px);
+        }
+
+        .roadmap-loading-panel {
+            width: min(620px, 100%);
+            padding: 1.25rem;
+            background: #fff;
+            border: 1px solid var(--roadmap-border);
+            border-radius: 18px;
+            box-shadow: 0 24px 70px rgba(20, 31, 49, .22);
+        }
+
+        .roadmap-loading-top {
+            display: flex;
+            align-items: flex-start;
+            gap: .9rem;
+        }
+
+        .roadmap-loading-spinner {
+            flex: 0 0 auto;
+            width: 38px;
+            height: 38px;
+            border: 4px solid #e4e9ef;
+            border-top-color: var(--roadmap-blue);
+            border-radius: 50%;
+            animation: roadmapSpin .8s linear infinite;
+        }
+
+        .roadmap-loading-panel h2 {
+            margin: .15rem 0 .25rem;
+            font-size: 1.2rem;
+            font-weight: 800;
+        }
+
+        .roadmap-loading-panel p {
+            margin: 0;
+            color: var(--roadmap-muted);
+            font-size: .78rem;
+            line-height: 1.5;
+        }
+
+        .roadmap-loading-progress {
+            height: 6px;
+            margin: 1rem 0;
+            overflow: hidden;
+            background: #edf1f5;
+            border-radius: 999px;
+        }
+
+        .roadmap-loading-progress div {
+            width: 38%;
+            height: 100%;
+            background: linear-gradient(90deg, var(--roadmap-navy), var(--roadmap-blue));
+            border-radius: inherit;
+            animation: roadmapLoading 1.5s ease-in-out infinite;
+        }
+
+        .roadmap-loading-steps {
+            display: grid;
+            gap: .35rem;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .roadmap-loading-steps li {
+            display: flex;
+            align-items: center;
+            gap: .5rem;
+            padding: .55rem .65rem;
+            color: var(--roadmap-muted);
+            background: #f8fafb;
+            border: 1px solid transparent;
+            border-radius: 9px;
+            font-size: .73rem;
+        }
+
+        .roadmap-loading-steps li.is-active {
+            color: var(--roadmap-navy);
+            background: var(--roadmap-blue-soft);
+            border-color: #d8e3ef;
+            font-weight: 800;
+        }
+
+        @@keyframes roadmapSpin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        @@keyframes roadmapLoading {
+            0% {
+                transform: translateX(-105%);
             }
 
-        @@media (max-width: 767px) {
-            .empty-dna-layout {
-                min-height: calc(100vh - 140px);
+            100% {
+                transform: translateX(270%);
+            }
+        }
+
+        .roadmap-phase-tab:focus-visible,
+        .roadmap-gantt-label:focus-visible,
+        .roadmap-gantt-bar:focus-visible,
+        .roadmap-btn-primary:focus-visible,
+        .roadmap-btn-secondary:focus-visible,
+        .roadmap-btn-success:focus-visible,
+        .roadmap-deferred-card summary:focus-visible {
+            outline: 3px solid rgba(85, 121, 166, .35);
+            outline-offset: 2px;
+        }
+
+        @@media (max-width: 1280px) {
+            .roadmap-summary-strip {
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+            }
+
+            .roadmap-summary-item:nth-child(4) {
+                border-right: 0;
+            }
+
+            .roadmap-summary-item:nth-child(-n + 4) {
+                border-bottom: 1px solid var(--roadmap-border);
+            }
+
+            .roadmap-workspace {
+                grid-template-columns: minmax(210px, .7fr) minmax(0, 2fr);
+            }
+
+            .roadmap-capacity-panel {
+                position: static;
+                grid-column: 1 / -1;
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+
+            .roadmap-side-section {
+                border-right: 1px solid var(--roadmap-border);
+                border-bottom: 0;
+            }
+
+            .roadmap-side-section:last-child {
+                border-right: 0;
+            }
+        }
+
+        @@media (max-width: 980px) {
+            .roadmap-command-header {
+                grid-template-columns: 1fr;
+            }
+
+            .roadmap-command-actions {
+                justify-content: flex-start;
+            }
+
+            .roadmap-start-panel {
+                grid-template-columns: 1fr;
+            }
+
+            .roadmap-workspace {
+                grid-template-columns: 1fr;
+            }
+
+            .roadmap-phase-nav {
+                overflow-x: auto;
+            }
+
+            .roadmap-phase-list {
+                grid-auto-flow: column;
+                grid-auto-columns: minmax(220px, 1fr);
+                overflow-x: auto;
+            }
+
+            .roadmap-capacity-panel {
+                grid-column: auto;
+            }
+
+            .roadmap-detail-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @@media (max-width: 740px) {
+            .roadmap-control {
+                gap: .75rem;
+            }
+
+            .roadmap-command-header,
+            .roadmap-start-panel {
                 padding: 1rem;
             }
 
-            .empty-dna-card {
-                min-height: 540px;
-                padding: 1.5rem;
+            .roadmap-command-main {
+                align-items: flex-start;
+            }
+
+            .roadmap-command-icon {
+                width: 40px;
+                height: 40px;
+            }
+
+            .roadmap-command-actions {
+                display: grid;
+                grid-template-columns: 1fr;
+            }
+
+            .roadmap-command-actions form,
+            .roadmap-command-actions .btn {
+                width: 100%;
+            }
+
+            .roadmap-summary-strip {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .roadmap-summary-item {
+                border-right: 1px solid var(--roadmap-border) !important;
+                border-bottom: 1px solid var(--roadmap-border);
+            }
+
+            .roadmap-summary-item:nth-child(even) {
+                border-right: 0 !important;
+            }
+
+            .roadmap-summary-item:nth-last-child(-n + 2) {
+                border-bottom: 0;
+            }
+
+            .roadmap-start-copy {
+                display: grid;
+            }
+
+            .roadmap-start-features {
+                grid-template-columns: 1fr;
+            }
+
+            .roadmap-phase-facts {
+                grid-template-columns: 1fr;
+            }
+
+            .roadmap-detail-header {
+                display: grid;
+            }
+
+            .roadmap-detail-actions .btn,
+            .roadmap-detail-actions form {
+                width: 100%;
+            }
+
+            .roadmap-task-table-wrap,
+            .roadmap-deferred-table-wrap {
+                overflow: visible;
+                border: 0;
+            }
+
+            .roadmap-task-table,
+            .roadmap-task-table thead,
+            .roadmap-task-table tbody,
+            .roadmap-task-table tr,
+            .roadmap-task-table th,
+            .roadmap-task-table td,
+            .roadmap-deferred-table,
+            .roadmap-deferred-table thead,
+            .roadmap-deferred-table tbody,
+            .roadmap-deferred-table tr,
+            .roadmap-deferred-table th,
+            .roadmap-deferred-table td {
+                display: block;
+                width: 100%;
+                min-width: 0;
+            }
+
+            .roadmap-task-table thead,
+            .roadmap-deferred-table thead {
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                overflow: hidden;
+                clip: rect(0, 0, 0, 0);
+            }
+
+            .roadmap-task-table tr,
+            .roadmap-deferred-table tr {
+                margin-bottom: .65rem;
+                padding: .75rem;
+                background: #fff;
+                border: 1px solid var(--roadmap-border);
+                border-radius: 11px;
+            }
+
+            .roadmap-task-table td,
+            .roadmap-deferred-table td {
+                display: grid;
+                grid-template-columns: 105px minmax(0, 1fr);
+                gap: .55rem;
+                padding: .42rem 0;
+                border: 0;
+            }
+
+            .roadmap-task-table td::before,
+            .roadmap-deferred-table td::before {
+                content: attr(data-label);
+                color: var(--roadmap-muted);
+                font-size: .64rem;
+                font-weight: 800;
+                text-transform: uppercase;
+            }
+
+            .roadmap-capacity-panel {
+                display: block;
+            }
+
+            .roadmap-side-section {
+                border-right: 0;
+                border-bottom: 1px solid var(--roadmap-border);
+            }
+
+            .roadmap-side-section:last-child {
+                border-bottom: 0;
             }
         }
 
-        .empty-dna-actions .btn-primary,
-        .empty-dna-actions a.btn-primary {
-            color: #ffffff !important;
-            background: #28385E !important;
-            border-color: #28385E !important;
-            box-shadow: none !important;
-        }
-
-            .empty-dna-actions .btn-primary:hover,
-            .empty-dna-actions a.btn-primary:hover {
-                color: #ffffff !important;
-                background: #304163 !important;
-                border-color: #304163 !important;
+        @@media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                scroll-behavior: auto !important;
             }
 
-        .empty-dna-actions .btn-outline-secondary,
-        .empty-dna-actions a.btn-outline-secondary {
-            color: #28385E !important;
-            background: #ffffff !important;
-            border: 1px solid #E8ECF2 !important;
-            box-shadow: none !important;
-        }
-
-            .empty-dna-actions .btn-outline-secondary:hover,
-            .empty-dna-actions a.btn-outline-secondary:hover {
-                color: #28385E !important;
-                background: #EEF2F6 !important;
-                border-color: #D8DEE9 !important;
+            .roadmap-progress-fill,
+            .roadmap-loading-spinner,
+            .roadmap-loading-progress div {
+                animation: none !important;
+                transition: none !important;
             }
+        }
     </style>
 }
+
 @section Scripts {
     <script>
-        const roadmapForm = document.getElementById("rmGenerateForm");
-        const roadmapOverlay = document.getElementById("rmLoadingOverlay");
-
-        if (roadmapForm && roadmapOverlay) {
-            roadmapForm.addEventListener("submit", function () {
-                roadmapOverlay.classList.remove("d-none");
-
-                const steps = roadmapOverlay.querySelectorAll(".rm-loading-steps div");
-                let currentStep = 0;
-
-                setInterval(function () {
-                    steps.forEach(step => step.classList.remove("active"));
-
-                    if (steps[currentStep]) {
-                        steps[currentStep].classList.add("active");
-                    }
-
-                    currentStep = (currentStep + 1) % steps.length;
-                }, 900);
-            });
-        }
-
-        // ── Snake roadmap path ──────────────────────────────────────────────
-        // Draws a real winding curve through each phase node's actual measured
-        // center, so it stays correct regardless of how tall each phase card
-        // renders (variable task counts, wrapped text, expanded details, etc.).
         (function () {
-            const container = document.getElementById("snakeTrackContainer");
-            const svg = document.getElementById("snakeSvg");
-            const trackLine = document.getElementById("snakeTrackLine");
-            const progressLine = document.getElementById("snakeProgressLine");
-            const flowDot = document.getElementById("snakeFlowDot");
+            const phaseButtons = document.querySelectorAll("[data-phase-select]");
+            const phasePanels = document.querySelectorAll("[data-phase-panel]");
 
-            if (!container || !svg || !trackLine || !progressLine) {
+            function selectPhase(phaseId, moveFocus) {
+                phasePanels.forEach(function (panel) {
+                    const isActive = panel.getAttribute("data-phase-panel") === phaseId;
+                    panel.classList.toggle("is-active", isActive);
+                    panel.setAttribute("aria-hidden", isActive ? "false" : "true");
+                });
+
+                phaseButtons.forEach(function (button) {
+                    const isActive = button.getAttribute("data-phase-select") === phaseId;
+
+                    if (button.getAttribute("role") === "tab") {
+                        button.classList.toggle("is-selected", isActive);
+                        button.setAttribute("aria-selected", isActive ? "true" : "false");
+                    }
+                });
+
+                if (moveFocus) {
+                    const selector = `[data-phase-panel="${phaseId.replace(/"/g, '\\"')}"]`;
+                    const panel = document.querySelector(selector);
+
+                    if (panel) {
+                        panel.scrollIntoView({
+                            behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+                                ? "auto"
+                                : "smooth",
+                            block: "start"
+                        });
+                    }
+                }
+            }
+
+            phaseButtons.forEach(function (button) {
+                button.addEventListener("click", function () {
+                    const phaseId = button.getAttribute("data-phase-select");
+
+                    if (phaseId) {
+                        selectPhase(phaseId, button.getAttribute("role") !== "tab");
+                    }
+                });
+
+                if (button.getAttribute("role") === "tab") {
+                    button.addEventListener("keydown", function (event) {
+                        const tabs = Array.from(document.querySelectorAll('[role="tab"][data-phase-select]'));
+                        const index = tabs.indexOf(button);
+                        let nextIndex = -1;
+
+                        if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+                            nextIndex = (index + 1) % tabs.length;
+                        } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+                            nextIndex = (index - 1 + tabs.length) % tabs.length;
+                        } else if (event.key === "Home") {
+                            nextIndex = 0;
+                        } else if (event.key === "End") {
+                            nextIndex = tabs.length - 1;
+                        }
+
+                        if (nextIndex >= 0) {
+                            event.preventDefault();
+                            tabs[nextIndex].focus();
+
+                            const phaseId = tabs[nextIndex].getAttribute("data-phase-select");
+
+                            if (phaseId) {
+                                selectPhase(phaseId, false);
+                            }
+                        }
+                    });
+                }
+            });
+        })();
+
+        (function () {
+            const overlay = document.getElementById("rmLoadingOverlay");
+            const forms = [
+                document.getElementById("rmGenerateForm"),
+                document.getElementById("rmGenerateFormEmpty")
+            ].filter(Boolean);
+
+            if (!overlay || forms.length === 0) {
                 return;
             }
 
-            const supportsOffsetPath =
-                flowDot && typeof flowDot.animate === "function" && CSS.supports("offset-path", "path('M0 0')");
+            const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            const steps = Array.from(overlay.querySelectorAll(".roadmap-loading-steps li"));
+            let timerId = null;
 
-            let lastPathData = "";
-            let lastFraction = 0;
-            let flowAnimation = null;
+            forms.forEach(function (form) {
+                form.addEventListener("submit", function () {
+                    overlay.classList.remove("d-none");
 
-            function buildSmoothPath(points) {
-                if (points.length === 0) {
-                    return "";
-                }
-
-                if (points.length === 1) {
-                    return `M ${points[0].x} ${points[0].y}`;
-                }
-
-                let d = `M ${points[0].x} ${points[0].y}`;
-
-                for (let i = 0; i < points.length - 1; i++) {
-                    const current = points[i];
-                    const next = points[i + 1];
-                    const midY = (current.y + next.y) / 2;
-
-                    d += ` C ${current.x} ${midY}, ${next.x} ${midY}, ${next.x} ${next.y}`;
-                }
-
-                return d;
-            }
-
-            function updateFlowDot(fraction) {
-                if (!supportsOffsetPath) {
-                    return;
-                }
-
-                if (fraction <= 0) {
-                    flowDot.style.opacity = "0";
-
-                    if (flowAnimation) {
-                        flowAnimation.cancel();
-                        flowAnimation = null;
-                    }
-
-                    return;
-                }
-
-                flowDot.style.opacity = "1";
-                flowDot.style.offsetPath = `path('${lastPathData}')`;
-
-                if (flowAnimation) {
-                    flowAnimation.cancel();
-                }
-
-                const travelPercent = Math.max(fraction * 100, 4);
-
-                flowAnimation = flowDot.animate(
-                    [
-                        { offsetDistance: "0%" },
-                        { offsetDistance: `${travelPercent}%` },
-                        { offsetDistance: "0%" }
-                    ],
-                    {
-                        duration: 3200,
-                        iterations: Infinity,
-                        easing: "ease-in-out"
-                    }
-                );
-            }
-
-            function draw() {
-                const containerRect = container.getBoundingClientRect();
-                const width = containerRect.width;
-                const height = container.scrollHeight;
-
-                if (width === 0 || height === 0) {
-                    return;
-                }
-
-                svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-                svg.setAttribute("width", width);
-                svg.setAttribute("height", height);
-
-                const dots = container.querySelectorAll(".snake-node-dot");
-                const points = Array.from(dots).map(function (dot) {
-                    const rect = dot.getBoundingClientRect();
-
-                    return {
-                        x: rect.left + rect.width / 2 - containerRect.left,
-                        y: rect.top + rect.height / 2 - containerRect.top
-                    };
-                });
-
-                const path = buildSmoothPath(points);
-
-                trackLine.setAttribute("d", path);
-                progressLine.setAttribute("d", path);
-                lastPathData = path;
-
-                const doneCount = container.querySelectorAll(".snake-stop.is-done").length;
-                const totalCount = dots.length;
-                const fraction = totalCount > 0 ? doneCount / totalCount : 0;
-
-                const totalLength = progressLine.getTotalLength();
-                progressLine.style.strokeDasharray = `${totalLength}`;
-                progressLine.style.strokeDashoffset = `${totalLength * (1 - fraction)}`;
-
-                if (fraction !== lastFraction || !flowAnimation) {
-                    lastFraction = fraction;
-                    updateFlowDot(fraction);
-                } else {
-                    lastFraction = fraction;
-                }
-            }
-
-            // Redraws continuously for the duration of the accordion's CSS
-            // transition so the winding path visibly reflows as a detail
-            // panel opens or closes, instead of jumping at the end.
-            function redrawDuring(durationMs) {
-                const start = performance.now();
-
-                function tick(now) {
-                    draw();
-
-                    if (now - start < durationMs) {
-                        window.requestAnimationFrame(tick);
-                    }
-                }
-
-                window.requestAnimationFrame(tick);
-            }
-
-            let resizeTimer = null;
-            function scheduleRedraw() {
-                window.clearTimeout(resizeTimer);
-                resizeTimer = window.setTimeout(draw, 120);
-            }
-
-            window.addEventListener("load", draw);
-            window.addEventListener("resize", scheduleRedraw);
-
-            if (document.fonts && document.fonts.ready) {
-                document.fonts.ready.then(draw);
-            }
-
-            draw();
-            window.setTimeout(draw, 250);
-
-            // ── Expand / collapse phase details ──────────────────────────────
-            container.querySelectorAll("[data-snake-toggle]").forEach(function (chip) {
-                chip.addEventListener("click", function () {
-                    const targetId = chip.getAttribute("data-snake-toggle");
-                    const panel = document.getElementById(targetId);
-
-                    if (!panel) {
+                    if (reduceMotion || steps.length === 0) {
                         return;
                     }
 
-                    const willOpen = !panel.classList.contains("is-open");
+                    let currentIndex = 0;
 
-                    panel.classList.toggle("is-open", willOpen);
-                    chip.setAttribute("aria-expanded", willOpen ? "true" : "false");
+                    timerId = window.setInterval(function () {
+                        steps.forEach(function (step, index) {
+                            step.classList.toggle("is-active", index === currentIndex);
+                        });
 
-                    redrawDuring(420);
+                        currentIndex = (currentIndex + 1) % steps.length;
+                    }, 1300);
                 });
+            });
+
+            window.addEventListener("pageshow", function () {
+                overlay.classList.add("d-none");
+
+                if (timerId) {
+                    window.clearInterval(timerId);
+                    timerId = null;
+                }
             });
         })();
     </script>
