@@ -18,6 +18,10 @@ public class MyProjectsModel(
     ILogger<MyProjectsModel> logger) : PageModel
 {
     public List<ProjectCardViewModel> Projects { get; private set; } = [];
+    public List<PendingInvitationViewModel> PendingInvitations {  get;  private set;} = [];
+
+    public int PendingInvitationsCount =>
+        PendingInvitations.Count;
 
     public int TotalProjects => Projects.Count;
 
@@ -55,10 +59,11 @@ public class MyProjectsModel(
         var currentUser = await db.Users
             .AsNoTracking()
             .Where(user => user.Id == userId.Value)
-            .Select(user => new
-            {
-                user.LastActiveProjectId
-            })
+           .Select(user => new
+           {
+               user.LastActiveProjectId,
+               user.Email
+           })
             .FirstOrDefaultAsync(cancellationToken);
 
         if (currentUser == null)
@@ -66,6 +71,80 @@ public class MyProjectsModel(
             return RedirectToPage("/Account/Login");
         }
 
+        var now = DateTime.UtcNow;
+
+        var normalizedEmail = currentUser.Email
+            .Trim()
+            .ToLowerInvariant();
+
+        var pendingInvitationEntities =
+            await db.ProjectInvitations
+                .AsNoTracking()
+                .Where(invitation =>
+                    invitation.Status == "pending" &&
+                    invitation.ExpiresAt > now &&
+                    (
+                        invitation.InvitedUserId ==
+                            userId.Value ||
+                        (
+                            invitation.InvitedUserId == null &&
+                            invitation.InvitedEmail.ToLower() ==
+                                normalizedEmail
+                        )
+                    ))
+                .Include(invitation =>
+                    invitation.Project)
+                .ThenInclude(project =>
+                    project!.Members)
+                .Include(invitation =>
+                    invitation.InvitedByUser)
+                .AsSplitQuery()
+                .OrderByDescending(invitation =>
+                    invitation.CreatedAt)
+                .ToListAsync(cancellationToken);
+
+        PendingInvitations = pendingInvitationEntities
+            .Where(invitation =>
+                invitation.Project != null)
+            .Select(invitation =>
+                new PendingInvitationViewModel(
+                    Id: invitation.Id,
+
+                    ProjectId:
+                        invitation.ProjectId,
+
+                    ProjectTitle:
+                        string.IsNullOrWhiteSpace(
+                            invitation.Project!.Title)
+                            ? "Untitled Project"
+                            : invitation.Project.Title.Trim(),
+
+                    InvitedByName:
+                        SafeName(
+                            invitation.InvitedByUser
+                                ?.FullName),
+
+                    InvitedByEmail:
+                        invitation.InvitedByUser
+                            ?.Email ?? "",
+
+                    ActiveMembersCount:
+                        invitation.Project.Members.Count(
+                            member =>
+                                member.Status == "active"),
+
+                    MaximumMembers:
+                        Math.Clamp(
+                            invitation.Project.MaximumMembers,
+                            1,
+                            3),
+
+                    CreatedAt:
+                        invitation.CreatedAt,
+
+                    ExpiresAt:
+                        invitation.ExpiresAt))
+            .ToList();
         var projects = await db.Projects
             .AsNoTracking()
             .Where(project =>
@@ -533,7 +612,443 @@ public class MyProjectsModel(
             return RedirectToPage();
         }
     }
+    public async Task<IActionResult>
+    OnPostAcceptInvitationAsync(
+        int invitationId,
+        CancellationToken cancellationToken)
+    {
+        var userId = CurrentUserId();
 
+        if (userId == null)
+        {
+            return RedirectToPage(
+                "/Account/Login");
+        }
+
+        await using var transaction =
+            await db.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
+        try
+        {
+            var currentUser = await db.Users
+                .FirstOrDefaultAsync(
+                    user =>
+                        user.Id == userId.Value,
+                    cancellationToken);
+
+            var invitation =
+                await db.ProjectInvitations
+                    .Include(item =>
+                        item.Project)
+                    .FirstOrDefaultAsync(
+                        item =>
+                            item.Id == invitationId,
+                        cancellationToken);
+
+            if (currentUser == null ||
+                invitation == null ||
+                !IsInvitationRecipient(
+                    invitation,
+                    currentUser))
+            {
+                await transaction.RollbackAsync(
+                    cancellationToken);
+
+                TempData["Error"] =
+                    "The invitation could not be found "
+                    + "or does not belong to your account.";
+
+                return RedirectToPage();
+            }
+
+            if (!string.Equals(
+                    invitation.Status,
+                    "pending",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                await transaction.RollbackAsync(
+                    cancellationToken);
+
+                TempData["Error"] =
+                    "This invitation has already been "
+                    + "processed.";
+
+                return RedirectToPage();
+            }
+
+            var now = DateTime.UtcNow;
+
+            if (invitation.ExpiresAt <= now)
+            {
+                invitation.Status = "expired";
+                invitation.RespondedAt = now;
+
+                await db.SaveChangesAsync(
+                    cancellationToken);
+
+                await transaction.CommitAsync(
+                    cancellationToken);
+
+                TempData["Error"] =
+                    "This invitation has expired. Ask the "
+                    + "project owner to send a new one.";
+
+                return RedirectToPage();
+            }
+
+            var project = invitation.Project;
+
+            if (project == null)
+            {
+                await transaction.RollbackAsync(
+                    cancellationToken);
+
+                TempData["Error"] =
+                    "The invited project could not be found.";
+
+                return RedirectToPage();
+            }
+
+            var existingMembership =
+                await db.ProjectMembers
+                    .FirstOrDefaultAsync(
+                        member =>
+                            member.ProjectId ==
+                                project.Id &&
+                            member.UserId ==
+                                userId.Value,
+                        cancellationToken);
+
+            /*
+             * Safely handle duplicated button submissions
+             * or an invitation sent to an existing member.
+             */
+            if (existingMembership != null &&
+                string.Equals(
+                    existingMembership.Status,
+                    "active",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                invitation.Status = "accepted";
+                invitation.RespondedAt = now;
+
+                currentUser.LastActiveProjectId =
+                    project.Id;
+
+                currentUser.LastProjectPage =
+                    "/Student/Dashboard";
+
+                currentUser.LastProjectVisitedAtUtc =
+                    now;
+
+                await db.SaveChangesAsync(
+                    cancellationToken);
+
+                await transaction.CommitAsync(
+                    cancellationToken);
+
+                TempData["Success"] =
+                    "You are already an active member of "
+                    + $"{SafeProjectTitle(project.Title)}.";
+
+                return RedirectToPage();
+            }
+
+            var maximumMembers = Math.Clamp(
+                project.MaximumMembers,
+                1,
+                3);
+
+            var activeMembersCount =
+                await db.ProjectMembers.CountAsync(
+                    member =>
+                        member.ProjectId ==
+                            project.Id &&
+                        member.Status == "active",
+                    cancellationToken);
+
+            /*
+             * Capacity is checked again during acceptance,
+             * not only when the invitation was created.
+             */
+            if (activeMembersCount >= maximumMembers)
+            {
+                await transaction.RollbackAsync(
+                    cancellationToken);
+
+                TempData["Error"] =
+                    "This project has reached its maximum "
+                    + "team capacity. Contact the project "
+                    + "owner.";
+
+                return RedirectToPage();
+            }
+
+            /*
+             * The unique ProjectId + UserId database index
+             * means a removed member must be reactivated
+             * instead of inserting a duplicate row.
+             */
+            if (existingMembership == null)
+            {
+                db.ProjectMembers.Add(
+                    new ProjectMember
+                    {
+                        ProjectId = project.Id,
+                        UserId = userId.Value,
+                        Role = "collaborator",
+                        Status = "active",
+                        JoinedAt = now,
+                        LeftAt = null
+                    });
+            }
+            else
+            {
+                existingMembership.Role =
+                    "collaborator";
+
+                existingMembership.Status =
+                    "active";
+
+                existingMembership.JoinedAt =
+                    now;
+
+                existingMembership.LeftAt =
+                    null;
+            }
+
+            invitation.Status = "accepted";
+            invitation.RespondedAt = now;
+
+            project.UpdatedAt = now;
+
+            currentUser.LastActiveProjectId =
+                project.Id;
+
+            currentUser.LastProjectPage =
+                "/Student/Dashboard";
+
+            currentUser.LastProjectVisitedAtUtc =
+                now;
+
+            db.ProjectActivities.Add(
+                new ProjectActivity
+                {
+                    ProjectId = project.Id,
+                    UserId = userId.Value,
+                    ActionType = "member_joined",
+
+                    Description =
+                        $"{SafeName(currentUser.FullName)} "
+                        + "accepted the invitation and "
+                        + "joined the project.",
+
+                    CreatedAtUtc = now
+                });
+
+            await db.SaveChangesAsync(
+                cancellationToken);
+
+            await transaction.CommitAsync(
+                cancellationToken);
+
+            TempData["Success"] =
+                "Invitation accepted. You are now a "
+                + "collaborator on "
+                + $"{SafeProjectTitle(project.Title)}.";
+
+            return RedirectToPage();
+        }
+        catch (Exception exception)
+        {
+            await transaction.RollbackAsync(
+                cancellationToken);
+
+            logger.LogError(
+                exception,
+                "Failed to accept invitation "
+                + "{InvitationId} for user {UserId}.",
+                invitationId,
+                userId.Value);
+
+            TempData["Error"] =
+                "The invitation could not be accepted. "
+                + "Please try again.";
+
+            return RedirectToPage();
+        }
+    }
+    public async Task<IActionResult>
+    OnPostRejectInvitationAsync(
+        int invitationId,
+        CancellationToken cancellationToken)
+    {
+        var userId = CurrentUserId();
+
+        if (userId == null)
+        {
+            return RedirectToPage(
+                "/Account/Login");
+        }
+
+        await using var transaction =
+            await db.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
+        try
+        {
+            var currentUser = await db.Users
+                .FirstOrDefaultAsync(
+                    user =>
+                        user.Id == userId.Value,
+                    cancellationToken);
+
+            var invitation =
+                await db.ProjectInvitations
+                    .Include(item =>
+                        item.Project)
+                    .FirstOrDefaultAsync(
+                        item =>
+                            item.Id == invitationId,
+                        cancellationToken);
+
+            if (currentUser == null ||
+                invitation == null ||
+                !IsInvitationRecipient(
+                    invitation,
+                    currentUser))
+            {
+                await transaction.RollbackAsync(
+                    cancellationToken);
+
+                TempData["Error"] =
+                    "The invitation could not be found "
+                    + "or does not belong to your account.";
+
+                return RedirectToPage();
+            }
+
+            if (!string.Equals(
+                    invitation.Status,
+                    "pending",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                await transaction.RollbackAsync(
+                    cancellationToken);
+
+                TempData["Error"] =
+                    "This invitation has already been "
+                    + "processed.";
+
+                return RedirectToPage();
+            }
+
+            var now = DateTime.UtcNow;
+            var expired =
+                invitation.ExpiresAt <= now;
+
+            invitation.Status = expired
+                ? "expired"
+                : "rejected";
+
+            invitation.RespondedAt = now;
+
+            if (invitation.Project != null)
+            {
+                invitation.Project.UpdatedAt = now;
+            }
+
+            if (!expired)
+            {
+                db.ProjectActivities.Add(
+                    new ProjectActivity
+                    {
+                        ProjectId =
+                            invitation.ProjectId,
+
+                        UserId =
+                            userId.Value,
+
+                        ActionType =
+                            "invitation_rejected",
+
+                        Description =
+                            $"{SafeName(currentUser.FullName)} "
+                            + "rejected the project "
+                            + "invitation.",
+
+                        CreatedAtUtc =
+                            now
+                    });
+            }
+
+            await db.SaveChangesAsync(
+                cancellationToken);
+
+            await transaction.CommitAsync(
+                cancellationToken);
+
+            TempData[
+                expired ? "Error" : "Success"] =
+                expired
+                    ? "This invitation had already expired."
+                    : "The project invitation was rejected.";
+
+            return RedirectToPage();
+        }
+        catch (Exception exception)
+        {
+            await transaction.RollbackAsync(
+                cancellationToken);
+
+            logger.LogError(
+                exception,
+                "Failed to reject invitation "
+                + "{InvitationId} for user {UserId}.",
+                invitationId,
+                userId.Value);
+
+            TempData["Error"] =
+                "The invitation could not be rejected. "
+                + "Please try again.";
+
+            return RedirectToPage();
+        }
+    }
+    private static bool IsInvitationRecipient(
+    ProjectInvitation invitation,
+    User currentUser)
+    {
+        /*
+         * New invitations are connected directly
+         * through InvitedUserId.
+         */
+        if (invitation.InvitedUserId.HasValue)
+        {
+            return invitation.InvitedUserId.Value ==
+                   currentUser.Id;
+        }
+
+        /*
+         * Email fallback supports older invitation
+         * records that may not contain InvitedUserId.
+         */
+        return string.Equals(
+            invitation.InvitedEmail?.Trim(),
+            currentUser.Email?.Trim(),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string SafeProjectTitle(
+        string? title)
+    {
+        return string.IsNullOrWhiteSpace(title)
+            ? "Untitled Project"
+            : title.Trim();
+    }
     private int? CurrentUserId()
     {
         var value = User.FindFirst(
@@ -736,7 +1251,16 @@ public class MyProjectsModel(
                 utcDateTime)
             .ToUnixTimeMilliseconds();
     }
-
+    public sealed record PendingInvitationViewModel(
+    int Id,
+    int ProjectId,
+    string ProjectTitle,
+    string InvitedByName,
+    string InvitedByEmail,
+    int ActiveMembersCount,
+    int MaximumMembers,
+    DateTime CreatedAt,
+    DateTime ExpiresAt);
     public sealed record ProjectCardViewModel(
         int Id,
         int? ProjectIdeaId,

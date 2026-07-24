@@ -1,9 +1,11 @@
 using System.Data;
+using System.Net;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using FYPilot.Application.Interfaces;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
+using FYPilot.Web.Services.Notifications;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -15,6 +17,7 @@ namespace FYPilot.Web.Pages.Student;
 public class TeamManagementModel(
     ApplicationDbContext db,
     IProjectAccessService projectAccessService,
+    INotificationService notificationService,
     ILogger<TeamManagementModel> logger)
     : PageModel
 {
@@ -347,7 +350,8 @@ public class TeamManagementModel(
         }
         catch (Exception exception)
         {
-            await transaction.RollbackAsync(
+            await SafeRollbackAsync(
+                transaction,
                 cancellationToken);
 
             logger.LogError(
@@ -506,6 +510,19 @@ public class TeamManagementModel(
                 return RedirectToTeamPage();
             }
 
+            /*
+             * The owner's name will be used in both
+             * the in-app notification and the email.
+             */
+            var ownerName = await db.Users
+                .AsNoTracking()
+                .Where(user =>
+                    user.Id == userId.Value)
+                .Select(user =>
+                    user.FullName)
+                .FirstOrDefaultAsync(
+                    cancellationToken);
+
             var alreadyActive =
                 await db.ProjectMembers.AnyAsync(
                     member =>
@@ -631,10 +648,12 @@ public class TeamManagementModel(
                         normalizedEmail,
                     TokenHash =
                         CreateTokenHash(),
-                    Status = "pending",
+                    Status =
+                        "pending",
                     Source =
                         "student_invite",
-                    CreatedAt = now,
+                    CreatedAt =
+                        now,
                     ExpiresAt =
                         now.AddDays(7)
                 };
@@ -645,34 +664,54 @@ public class TeamManagementModel(
             db.ProjectActivities.Add(
                 new ProjectActivity
                 {
-                    ProjectId = ProjectId,
-                    UserId = userId.Value,
+                    ProjectId =
+                        ProjectId,
+                    UserId =
+                        userId.Value,
                     ActionType =
                         "member_invited",
                     Description =
                         $"{SafeName(invitedUser.FullName)} "
                         + "was invited to join "
                         + "the project.",
-                    CreatedAtUtc = now
+                    CreatedAtUtc =
+                        now
                 });
 
-            project.UpdatedAt = now;
+            project.UpdatedAt =
+                now;
 
+            /*
+             * Save and commit the invitation before
+             * trying to send an email.
+             *
+             * An SMTP or notification error must not
+             * remove the invitation from the database.
+             */
             await db.SaveChangesAsync(
                 cancellationToken);
 
             await transaction.CommitAsync(
                 cancellationToken);
 
+            await SendInvitationCommunicationAsync(
+                invitedUser,
+                ownerName,
+                project,
+                invitation.Id);
+
             TempData["Success"] =
                 $"Invitation sent to "
-                + $"{SafeName(invitedUser.FullName)}.";
+                + $"{SafeName(invitedUser.FullName)}. "
+                + "The student can review it from "
+                + "the My Projects page.";
 
             return RedirectToTeamPage();
         }
         catch (Exception exception)
         {
-            await transaction.RollbackAsync(
+            await SafeRollbackAsync(
+                transaction,
                 cancellationToken);
 
             logger.LogError(
@@ -755,7 +794,8 @@ public class TeamManagementModel(
                 return RedirectToTeamPage();
             }
 
-            var now = DateTime.UtcNow;
+            var now =
+                DateTime.UtcNow;
 
             invitation.Status =
                 "cancelled";
@@ -766,8 +806,10 @@ public class TeamManagementModel(
             db.ProjectActivities.Add(
                 new ProjectActivity
                 {
-                    ProjectId = ProjectId,
-                    UserId = userId.Value,
+                    ProjectId =
+                        ProjectId,
+                    UserId =
+                        userId.Value,
                     ActionType =
                         "invitation_cancelled",
                     Description =
@@ -777,7 +819,8 @@ public class TeamManagementModel(
                                 ?.FullName
                             ?? invitation.InvitedEmail)} "
                         + "was cancelled.",
-                    CreatedAtUtc = now
+                    CreatedAtUtc =
+                        now
                 });
 
             await db.SaveChangesAsync(
@@ -793,7 +836,8 @@ public class TeamManagementModel(
         }
         catch (Exception exception)
         {
-            await transaction.RollbackAsync(
+            await SafeRollbackAsync(
+                transaction,
                 cancellationToken);
 
             logger.LogError(
@@ -811,10 +855,223 @@ public class TeamManagementModel(
         }
     }
 
+    private async Task SendInvitationCommunicationAsync(
+        User invitedUser,
+        string? ownerName,
+        Project project,
+        int invitationId)
+    {
+        var projectTitle =
+            SafeProjectTitle(
+                project.Title);
+
+        var displayOwnerName =
+            string.IsNullOrWhiteSpace(ownerName)
+                ? "The project owner"
+                : ownerName.Trim();
+
+        var displayStudentName =
+            SafeName(
+                invitedUser.FullName);
+
+        /*
+         * During local testing this will be a localhost
+         * URL. In production it will use the public
+         * website address.
+         */
+        var myProjectsUrl =
+            Url.Page(
+                "/Student/MyProjects",
+                pageHandler: null,
+                values: null,
+                protocol: Request.Scheme)
+            ?? "/Student/MyProjects";
+
+        var safeStudentName =
+            WebUtility.HtmlEncode(
+                displayStudentName);
+
+        var safeOwnerName =
+            WebUtility.HtmlEncode(
+                displayOwnerName);
+
+        var safeProjectTitle =
+            WebUtility.HtmlEncode(
+                projectTitle);
+
+        var safeMyProjectsUrl =
+            WebUtility.HtmlEncode(
+                myProjectsUrl);
+
+        var emailSubjectProjectTitle =
+            SanitizeEmailSubjectPart(
+                projectTitle);
+
+        var emailBody = $"""
+<div style="
+    margin:0;
+    padding:32px 18px;
+    background:#f4f7fb;
+    font-family:Arial,sans-serif;
+">
+    <div style="
+        max-width:620px;
+        margin:auto;
+        padding:30px;
+        border:1px solid #dfe6ef;
+        border-radius:18px;
+        background:#ffffff;
+    ">
+        <div style="
+            margin-bottom:22px;
+            color:#155eef;
+            font-size:14px;
+            font-weight:700;
+        ">
+            FYPilot
+        </div>
+
+        <h2 style="
+            margin:0 0 18px;
+            color:#173463;
+            font-size:23px;
+        ">
+            Project collaboration invitation
+        </h2>
+
+        <p style="
+            color:#475569;
+            font-size:15px;
+            line-height:1.7;
+        ">
+            Hello {safeStudentName},
+        </p>
+
+        <p style="
+            color:#475569;
+            font-size:15px;
+            line-height:1.7;
+        ">
+            <strong>{safeOwnerName}</strong>
+            invited you to become a collaborator
+            on the project:
+        </p>
+
+        <div style="
+            margin:22px 0;
+            padding:18px;
+            border-left:4px solid #155eef;
+            border-radius:10px;
+            background:#f3f7ff;
+            color:#173463;
+            font-size:17px;
+            font-weight:700;
+        ">
+            {safeProjectTitle}
+        </div>
+
+        <p style="
+            color:#475569;
+            font-size:15px;
+            line-height:1.7;
+        ">
+            Log in to FYPilot and open your
+            <strong>My Projects</strong> page to
+            accept or reject this invitation.
+        </p>
+
+        <p style="margin:26px 0;">
+            <a href="{safeMyProjectsUrl}"
+               style="
+                   display:inline-block;
+                   padding:12px 20px;
+                   border-radius:10px;
+                   background:#155eef;
+                   color:#ffffff;
+                   font-size:14px;
+                   font-weight:700;
+                   text-decoration:none;
+               ">
+                Review Invitation
+            </a>
+        </p>
+
+        <p style="
+            margin-top:26px;
+            color:#94a3b8;
+            font-size:12px;
+            line-height:1.5;
+        ">
+            This invitation expires in 7 days.
+            You must log in using the invited student
+            account to accept or reject it.
+        </p>
+
+        <p style="
+            margin-top:12px;
+            color:#94a3b8;
+            font-size:12px;
+            line-height:1.5;
+        ">
+            This is an automated message from FYPilot.
+        </p>
+    </div>
+</div>
+""";
+
+        try
+        {
+            await notificationService.NotifyUserAsync(
+                recipientUserId:
+                    invitedUser.Id,
+
+                title:
+                    "Project collaboration invitation",
+
+                message:
+                    $"{displayOwnerName} invited you "
+                    + $"to collaborate on "
+                    + $"\"{projectTitle}\". Open My "
+                    + "Projects to accept or reject.",
+
+                type:
+                    "project_invitation",
+
+                url:
+                    "/Student/MyProjects",
+
+                sendEmail:
+                    true,
+
+                emailSubject:
+                    "You are invited to collaborate on "
+                    + emailSubjectProjectTitle,
+
+                emailHtmlBody:
+                    emailBody);
+        }
+        catch (Exception notificationException)
+        {
+            /*
+             * The invitation is already committed.
+             * Notification failure is logged, but the
+             * invitation remains available in My Projects.
+             */
+            logger.LogError(
+                notificationException,
+                "Invitation {InvitationId} was created, "
+                + "but notification delivery failed for "
+                + "user {InvitedUserId}.",
+                invitationId,
+                invitedUser.Id);
+        }
+    }
+
     private async Task<bool> LoadPageDataAsync(
         CancellationToken cancellationToken)
     {
-        var now = DateTime.UtcNow;
+        var now =
+            DateTime.UtcNow;
 
         var project = await db.Projects
             .AsNoTracking()
@@ -941,6 +1198,27 @@ public class TeamManagementModel(
             : null;
     }
 
+    private static async Task SafeRollbackAsync(
+        Microsoft.EntityFrameworkCore.Storage
+            .IDbContextTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await transaction.RollbackAsync(
+                cancellationToken);
+        }
+        catch
+        {
+            /*
+             * The transaction may already have been
+             * committed or rolled back. Do not replace
+             * the original exception with a rollback
+             * exception.
+             */
+        }
+    }
+
     private static string CreateTokenHash()
     {
         var randomBytes =
@@ -958,6 +1236,30 @@ public class TeamManagementModel(
             value)
                 ? "The student"
                 : value.Trim();
+    }
+
+    private static string SafeProjectTitle(
+        string? title)
+    {
+        return string.IsNullOrWhiteSpace(
+            title)
+                ? "Untitled Project"
+                : title.Trim();
+    }
+
+    private static string SanitizeEmailSubjectPart(
+        string? value)
+    {
+        return SafeProjectTitle(value)
+            .Replace(
+                "\r",
+                " ",
+                StringComparison.Ordinal)
+            .Replace(
+                "\n",
+                " ",
+                StringComparison.Ordinal)
+            .Trim();
     }
 
     private static string Normalize(

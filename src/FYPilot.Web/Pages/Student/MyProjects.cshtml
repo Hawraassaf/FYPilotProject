@@ -144,7 +144,136 @@
             </div>
         </article>
     </div>
+    @if (Model.PendingInvitations.Any())
+    {
+        <section class="pending-invitations-section">
+            <header class="pending-invitations-header">
+                <div class="pending-invitations-heading">
+                    <span class="pending-invitations-icon">
+                        <i class="bi bi-envelope-paper-fill"></i>
+                    </span>
 
+                    <div>
+                        <span class="page-eyebrow">
+                            Collaboration requests
+                        </span>
+
+                        <h2>Pending Project Invitations</h2>
+
+                        <p>
+                            Review projects that other students
+                            invited you to join.
+                        </p>
+                    </div>
+                </div>
+
+                <span class="pending-invitations-count">
+                    @Model.PendingInvitationsCount
+                    @(Model.PendingInvitationsCount == 1
+                        ? "invitation"
+                        : "invitations")
+                </span>
+            </header>
+
+            <div class="pending-invitations-list">
+                @foreach (var invitation
+                    in Model.PendingInvitations)
+                {
+                    <article class="pending-invitation-card">
+                        <div class="pending-invitation-main">
+                            <div class="pending-project-icon">
+                                <i class="bi bi-folder2-open"></i>
+                            </div>
+
+                            <div class="pending-invitation-copy">
+                                <h3>@invitation.ProjectTitle</h3>
+
+                                <p>
+                                    Invited by
+                                    <strong>
+                                        @invitation.InvitedByName
+                                    </strong>
+
+                                    @if (!string.IsNullOrWhiteSpace(
+                                        invitation.InvitedByEmail))
+                                    {
+                                        <span>
+                                            (@invitation.InvitedByEmail)
+                                        </span>
+                                    }
+                                </p>
+
+                                <div class="pending-invitation-meta">
+                                    <span>
+                                        <i class="bi bi-people"></i>
+
+                                        @invitation.ActiveMembersCount
+                                        of
+                                        @invitation.MaximumMembers
+                                        active members
+                                    </span>
+
+                                    <span>
+                                        <i class="bi bi-calendar3"></i>
+
+                                        Invited
+                                        @invitation.CreatedAt
+                                        .ToLocalTime()
+                                        .ToString("MMM d, yyyy")
+                                    </span>
+
+                                    <span>
+                                        <i class="bi bi-clock"></i>
+
+                                        Expires
+                                        @invitation.ExpiresAt
+                                        .ToLocalTime()
+                                        .ToString("MMM d, yyyy")
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="pending-invitation-actions">
+                            <form method="post"
+                                  asp-page-handler="RejectInvitation">
+
+                                @Html.AntiForgeryToken()
+
+                                <input type="hidden"
+                                       name="invitationId"
+                                       value="@invitation.Id" />
+
+                                <button type="submit"
+                                        class="pending-reject-button">
+
+                                    <i class="bi bi-x-lg"></i>
+                                    Reject
+                                </button>
+                            </form>
+
+                            <form method="post"
+                                  asp-page-handler="AcceptInvitation">
+
+                                @Html.AntiForgeryToken()
+
+                                <input type="hidden"
+                                       name="invitationId"
+                                       value="@invitation.Id" />
+
+                                <button type="submit"
+                                        class="pending-accept-button">
+
+                                    <i class="bi bi-check-lg"></i>
+                                    Accept Invitation
+                                </button>
+                            </form>
+                        </div>
+                    </article>
+                }
+            </div>
+        </section>
+    }
     <section class="projects-section">
         <div class="projects-section-heading">
             <div>
@@ -618,22 +747,7 @@
     </section>
 </div>
 
-<div class="project-toast"
-     id="teamFeatureToast"
-     role="status"
-     aria-live="polite">
 
-    <i class="bi bi-info-circle-fill"></i>
-
-    <div>
-        <strong>Collaboration setup</strong>
-
-        <span>
-            Email invitations and team management are connected
-            in the next collaboration stage.
-        </span>
-    </div>
-</div>
 
 @section Head {
     <style>
@@ -656,6 +770,224 @@
             margin: 0 auto;
             padding-bottom: 2.5rem;
             color: #111827;
+        }
+
+        .pending-invitations-section {
+            margin-bottom: 1rem;
+            overflow: hidden;
+            border: 1px solid #d8e2f0;
+            border-radius: 18px;
+            background: #fff;
+            box-shadow: 0 12px 30px rgba(25, 49, 84, .07);
+        }
+
+        .pending-invitations-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            padding: 1.15rem 1.25rem;
+            border-bottom: 1px solid #e7edf5;
+            background: radial-gradient( circle at 100% 0%, rgba(21, 94, 239, .09), transparent 36% ), #f9fbff;
+        }
+
+        .pending-invitations-heading {
+            display: flex;
+            align-items: center;
+            gap: .85rem;
+        }
+
+        .pending-invitations-icon {
+            width: 46px;
+            height: 46px;
+            display: grid;
+            flex: 0 0 auto;
+            place-items: center;
+            border-radius: 14px;
+            color: #155eef;
+            background: #eaf1ff;
+            font-size: 1.08rem;
+        }
+
+        .pending-invitations-header h2 {
+            margin: .12rem 0 0;
+            color: #173463;
+            font-size: 1rem;
+            font-weight: 850;
+        }
+
+        .pending-invitations-header p {
+            margin: .2rem 0 0;
+            color: #718096;
+            font-size: .7rem;
+        }
+
+        .pending-invitations-count {
+            padding: .42rem .7rem;
+            border: 1px solid #cfdcf0;
+            border-radius: 999px;
+            color: #31547f;
+            background: #eef4fc;
+            font-size: .67rem;
+            font-weight: 800;
+            white-space: nowrap;
+        }
+
+        .pending-invitations-list {
+            display: grid;
+        }
+
+        .pending-invitation-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1.2rem;
+            padding: 1rem 1.2rem;
+            border-bottom: 1px solid #edf1f6;
+        }
+
+            .pending-invitation-card:last-child {
+                border-bottom: 0;
+            }
+
+        .pending-invitation-main {
+            display: flex;
+            align-items: center;
+            min-width: 0;
+            gap: .85rem;
+        }
+
+        .pending-project-icon {
+            width: 44px;
+            height: 44px;
+            display: grid;
+            flex: 0 0 auto;
+            place-items: center;
+            border-radius: 13px;
+            color: #456994;
+            background: #eff4fa;
+            font-size: 1rem;
+        }
+
+        .pending-invitation-copy {
+            min-width: 0;
+        }
+
+            .pending-invitation-copy h3 {
+                margin: 0;
+                overflow: hidden;
+                color: #243b5a;
+                font-size: .82rem;
+                font-weight: 820;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .pending-invitation-copy > p {
+                margin: .22rem 0 0;
+                color: #748196;
+                font-size: .66rem;
+            }
+
+                .pending-invitation-copy > p strong {
+                    color: #425b7e;
+                }
+
+                .pending-invitation-copy > p span {
+                    color: #8b96a6;
+                }
+
+        .pending-invitation-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .45rem;
+            margin-top: .55rem;
+        }
+
+            .pending-invitation-meta span {
+                padding: .28rem .48rem;
+                border: 1px solid #e0e7f0;
+                border-radius: 8px;
+                color: #6c7a8e;
+                background: #f8fafc;
+                font-size: .6rem;
+                font-weight: 650;
+            }
+
+            .pending-invitation-meta i {
+                margin-right: .2rem;
+                color: #607fa8;
+            }
+
+        .pending-invitation-actions {
+            display: flex;
+            flex: 0 0 auto;
+            align-items: center;
+            gap: .5rem;
+        }
+
+            .pending-invitation-actions form {
+                margin: 0;
+            }
+
+        .pending-reject-button,
+        .pending-accept-button {
+            min-height: 38px;
+            padding: .55rem .75rem;
+            border-radius: 10px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .35rem;
+            font-size: .68rem;
+            font-weight: 760;
+            transition: transform .16s ease, background .16s ease, border-color .16s ease;
+        }
+
+        .pending-reject-button {
+            border: 1px solid #e2b8bc;
+            color: #a53b43;
+            background: #fff;
+        }
+
+            .pending-reject-button:hover {
+                border-color: #d99da3;
+                background: #fff5f5;
+                transform: translateY(-1px);
+            }
+
+        .pending-accept-button {
+            border: 1px solid #155eef;
+            color: #fff;
+            background: #155eef;
+            box-shadow: 0 7px 16px rgba(21, 94, 239, .18);
+        }
+
+            .pending-accept-button:hover {
+                border-color: #0b4dd8;
+                background: #0b4dd8;
+                transform: translateY(-1px);
+            }
+
+        @@media (max-width: 767px) {
+            .pending-invitations-header,
+            .pending-invitation-card {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .pending-invitation-actions {
+                width: 100%;
+            }
+
+                .pending-invitation-actions form {
+                    flex: 1;
+                }
+
+            .pending-reject-button,
+            .pending-accept-button {
+                width: 100%;
+            }
         }
 
         .projects-alert {
@@ -2101,6 +2433,14 @@
                         closeRenameModal);
                 });
 
+            renameModal?.addEventListener(
+                "click",
+                event => {
+                    if (event.target === renameModal) {
+                        closeRenameModal();
+                    }
+                });
+
             document.addEventListener(
                 "keydown",
                 event => {
@@ -2109,41 +2449,53 @@
                     }
                 });
 
-            const teamFeatureToast =
-                document.getElementById(
-                    "teamFeatureToast");
-
-            let toastTimer = null;
-
             document
                 .querySelectorAll(
-                    "[data-team-notice]")
-                .forEach(button => {
-                    button.addEventListener(
-                        "click",
+                    ".pending-invitation-actions form")
+                .forEach(form => {
+                    form.addEventListener(
+                        "submit",
                         () => {
-                            if (!teamFeatureToast) {
+                            const buttons =
+                                form
+                                    .closest(
+                                        ".pending-invitation-actions")
+                                    ?.querySelectorAll(
+                                        "button");
+
+                            buttons?.forEach(button => {
+                                button.disabled = true;
+                            });
+
+                            const submittedButton =
+                                form.querySelector(
+                                    "button[type='submit']");
+
+                            if (!submittedButton) {
                                 return;
                             }
 
-                            teamFeatureToast
-                                .classList.add(
-                                    "is-visible");
+                            const isAcceptButton =
+                                submittedButton.classList
+                                    .contains(
+                                        "pending-accept-button");
 
-                            if (toastTimer) {
-                                window.clearTimeout(
-                                    toastTimer);
-                            }
-
-                            toastTimer =
-                                window.setTimeout(
-                                    () => {
-                                        teamFeatureToast
-                                            .classList
-                                            .remove(
-                                                "is-visible");
-                                    },
-                                    4500);
+                            submittedButton.innerHTML =
+                                isAcceptButton
+                                    ? `
+                                        <span class="spinner-border
+                                                     spinner-border-sm"
+                                              aria-hidden="true">
+                                        </span>
+                                        Accepting...
+                                      `
+                                    : `
+                                        <span class="spinner-border
+                                                     spinner-border-sm"
+                                              aria-hidden="true">
+                                        </span>
+                                        Rejecting...
+                                      `;
                         });
                 });
         })();
