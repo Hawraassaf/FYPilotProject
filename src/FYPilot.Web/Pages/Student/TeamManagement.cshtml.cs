@@ -728,7 +728,255 @@ public class TeamManagementModel(
             return RedirectToTeamPage();
         }
     }
+    public async Task<IActionResult>
+    OnPostRemoveCollaboratorAsync(
+        int projectId,
+        int memberUserId,
+        CancellationToken cancellationToken)
+    {
+        ProjectId = projectId;
 
+        var ownerUserId = CurrentUserId();
+
+        if (ownerUserId == null)
+        {
+            return RedirectToPage(
+                "/Account/Login");
+        }
+
+        if (memberUserId <= 0)
+        {
+            TempData["Error"] =
+                "Choose a valid collaborator.";
+
+            return RedirectToTeamPage();
+        }
+
+        if (memberUserId == ownerUserId.Value)
+        {
+            TempData["Error"] =
+                "The project owner cannot remove themselves.";
+
+            return RedirectToTeamPage();
+        }
+
+        var access =
+            await projectAccessService.GetAccessAsync(
+                ProjectId,
+                ownerUserId.Value,
+                "student",
+                cancellationToken);
+
+        if (access == null ||
+            !access.IsOwner)
+        {
+            TempData["Error"] =
+                "Only the project owner can remove "
+                + "a collaborator.";
+
+            return RedirectToTeamPage();
+        }
+
+        await using var transaction =
+            await db.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
+        try
+        {
+            var ownerStillActive =
+                await IsActiveOwnerAsync(
+                    ownerUserId.Value,
+                    cancellationToken);
+
+            if (!ownerStillActive)
+            {
+                await transaction.RollbackAsync(
+                    cancellationToken);
+
+                TempData["Error"] =
+                    "You are no longer the active owner "
+                    + "of this project.";
+
+                return RedirectToTeamPage();
+            }
+
+            var project = await db.Projects
+                .FirstOrDefaultAsync(
+                    item => item.Id == ProjectId,
+                    cancellationToken);
+
+            if (project == null)
+            {
+                await transaction.RollbackAsync(
+                    cancellationToken);
+
+                TempData["Error"] =
+                    "The selected project could not be found.";
+
+                return RedirectToPage(
+                    "/Student/MyProjects");
+            }
+
+            var membership = await db.ProjectMembers
+                .Include(member => member.User)
+                .FirstOrDefaultAsync(
+                    member =>
+                        member.ProjectId == ProjectId &&
+                        member.UserId == memberUserId &&
+                        member.Status == "active",
+                    cancellationToken);
+
+            if (membership == null)
+            {
+                await transaction.RollbackAsync(
+                    cancellationToken);
+
+                TempData["Error"] =
+                    "This student is not an active "
+                    + "collaborator on the project.";
+
+                return RedirectToTeamPage();
+            }
+
+            if (Normalize(membership.Role) == "owner")
+            {
+                await transaction.RollbackAsync(
+                    cancellationToken);
+
+                TempData["Error"] =
+                    "The project owner cannot be removed.";
+
+                return RedirectToTeamPage();
+            }
+
+            var now = DateTime.UtcNow;
+
+            var collaboratorName =
+                SafeName(
+                    membership.User?.FullName);
+
+            /*
+             * Preserve the membership row for history and
+             * possible safe re-invitation later.
+             */
+            membership.Status =
+                "removed";
+
+            membership.LeftAt =
+                now;
+
+            /*
+             * Do not let the removed user resume this
+             * project as their last active project.
+             */
+            if (membership.User != null &&
+                membership.User.LastActiveProjectId ==
+                    ProjectId)
+            {
+                membership.User.LastActiveProjectId =
+                    null;
+
+                membership.User.LastProjectPage =
+                    "/Student/MyProjects";
+
+                membership.User.LastProjectVisitedAtUtc =
+                    now;
+            }
+
+            project.UpdatedAt =
+                now;
+
+            db.ProjectActivities.Add(
+                new ProjectActivity
+                {
+                    ProjectId =
+                        ProjectId,
+
+                    UserId =
+                        ownerUserId.Value,
+
+                    ActionType =
+                        "member_removed",
+
+                    Description =
+                        $"{collaboratorName} was removed "
+                        + "from the project by the owner.",
+
+                    CreatedAtUtc =
+                        now
+                });
+
+            await db.SaveChangesAsync(
+                cancellationToken);
+
+            await transaction.CommitAsync(
+                cancellationToken);
+
+            /*
+             * The membership change is already committed.
+             * Notification failure must not undo removal.
+             */
+            try
+            {
+                await notificationService.NotifyUserAsync(
+                    recipientUserId:
+                        memberUserId,
+
+                    title:
+                        "Project access removed",
+
+                    message:
+                        $"You are no longer a collaborator "
+                        + $"on \"{SafeProjectTitle(project.Title)}\".",
+
+                    type:
+                        "project_membership_removed",
+
+                    url:
+                        "/Student/MyProjects",
+
+                    sendEmail:
+                        false);
+            }
+            catch (Exception notificationException)
+            {
+                logger.LogWarning(
+                    notificationException,
+                    "Collaborator {UserId} was removed "
+                    + "from project {ProjectId}, but the "
+                    + "notification could not be delivered.",
+                    memberUserId,
+                    ProjectId);
+            }
+
+            TempData["Success"] =
+                $"{collaboratorName} was removed from "
+                + "the project.";
+
+            return RedirectToTeamPage();
+        }
+        catch (Exception exception)
+        {
+            await SafeRollbackAsync(
+                transaction,
+                cancellationToken);
+
+            logger.LogError(
+                exception,
+                "Failed to remove collaborator "
+                + "{MemberUserId} from project "
+                + "{ProjectId} by owner {OwnerUserId}.",
+                memberUserId,
+                ProjectId,
+                ownerUserId.Value);
+
+            TempData["Error"] =
+                "The collaborator could not be removed.";
+
+            return RedirectToTeamPage();
+        }
+    }
     public async Task<IActionResult>
         OnPostCancelInvitationAsync(
             int projectId,

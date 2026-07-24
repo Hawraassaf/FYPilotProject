@@ -131,17 +131,49 @@
                                 <span>@member.Email</span>
                             </div>
 
-                            <div class="member-meta">
-                                <span class="member-role">
-                                    @member.Role
-                                </span>
+                            <div class="member-actions">
+                                <div class="member-meta">
+                                    <span class="member-role">
+                                        @member.Role
+                                    </span>
 
-                                <small>
-                                    Joined
-                                    @member.JoinedAt
-                                    .ToLocalTime()
-                                    .ToString("MMM d, yyyy")
-                                </small>
+                                    <small>
+                                        Joined
+                                        @member.JoinedAt
+                                        .ToLocalTime()
+                                        .ToString("MMM d, yyyy")
+                                    </small>
+                                </div>
+
+                                @if (Model.IsOwner &&
+                                     !string.Equals(
+                                         member.Role,
+                                         "Owner",
+                                         StringComparison.OrdinalIgnoreCase))
+                                {
+                                    <form method="post"
+                                          asp-page-handler="RemoveCollaborator"
+                                          class="remove-member-form"
+                                          data-remove-member-form
+                                          data-member-name="@member.FullName">
+
+                                        @Html.AntiForgeryToken()
+
+                                        <input type="hidden"
+                                               name="projectId"
+                                               value="@Model.ProjectId" />
+
+                                        <input type="hidden"
+                                               name="memberUserId"
+                                               value="@member.UserId" />
+
+                                        <button type="submit"
+                                                class="remove-member-button">
+                                            <i class="bi bi-person-x"></i>
+                                            Remove
+                                        </button>
+                                    </form>
+                                }
                             </div>
                         </article>
                     }
@@ -583,12 +615,53 @@
                 font-size: .63rem;
             }
 
+        .member-actions {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: .65rem;
+        }
+
         .member-meta,
         .invitation-actions {
             display: grid;
             justify-items: end;
             gap: .3rem;
         }
+
+        .remove-member-form {
+            margin: 0;
+        }
+
+        .remove-member-button {
+            min-height: 34px;
+            padding: .45rem .65rem;
+            border: 1px solid #e4b7bb;
+            border-radius: 9px;
+            color: #a33b44;
+            background: #fff;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .32rem;
+            font-size: .62rem;
+            font-weight: 780;
+            white-space: nowrap;
+            transition: background .16s ease, border-color .16s ease, transform .16s ease;
+        }
+
+            .remove-member-button:hover {
+                border-color: #d99ca2;
+                color: #8f3038;
+                background: #fff5f5;
+                transform: translateY(-1px);
+            }
+
+            .remove-member-button:disabled {
+                cursor: wait;
+                opacity: .7;
+                transform: none;
+            }
 
         .member-role {
             padding: .25rem .5rem;
@@ -679,11 +752,54 @@
                 grid-template-columns: auto minmax(0, 1fr);
             }
 
-            .member-meta,
+            .member-actions,
             .invitation-actions {
                 grid-column: 2;
+            }
+
+            .member-actions {
+                align-items: flex-start;
+                justify-content: flex-start;
+                flex-wrap: wrap;
+            }
+
+            .member-meta,
+            .invitation-actions {
                 justify-items: start;
             }
         }
     </style>
+}
+
+@section Scripts {
+    <script>
+        (() => {
+            document
+                .querySelectorAll(
+                    "[data-remove-member-form]")
+                .forEach(form => {
+                    form.addEventListener(
+                        "submit",
+                        () => {
+                            const button =
+                                form.querySelector(
+                                    "button[type='submit']");
+
+                            if (!button) {
+                                return;
+                            }
+
+                            button.disabled = true;
+
+                            button.innerHTML = `
+                                <span class="spinner-border
+                                             spinner-border-sm"
+                                      aria-hidden="true">
+                                </span>
+                                Removing...
+                            `;
+                        });
+                });
+        })();
+    </script>
 }
