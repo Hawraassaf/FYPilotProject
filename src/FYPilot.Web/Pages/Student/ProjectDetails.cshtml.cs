@@ -20,8 +20,7 @@ public class ProjectDetailsModel(ApplicationDbContext db) : PageModel
 
     public async Task<IActionResult> OnGetAsync(int? id, int? ideaId)
     {
-        SuccessMessage = TempData["Success"] as string;
-        ErrorMessage = TempData["Error"] as string;
+      
 
         var userId = UserId();
         var selectedIdeaId = id ?? ideaId;

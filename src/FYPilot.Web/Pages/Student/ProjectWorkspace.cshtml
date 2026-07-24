@@ -1,0 +1,2579 @@
+﻿@page
+@model FYPilot.Web.Pages.Student.ProjectWorkspaceModel
+@{
+    ViewData["Title"] = "Project Workspace";
+    ViewData["Subtitle"] =
+        "Real-time collaboration for your shared project.";
+}
+
+<div class="pw-page"
+     id="projectWorkspace"
+     data-project-id="@Model.ProjectId"
+     data-current-user-id="@Model.CurrentUserId"
+     data-is-owner="@Model.IsOwner.ToString().ToLowerInvariant()">
+
+    <header class="pw-hero">
+        <div class="pw-hero-main">
+            <a asp-page="/Student/MyProjects"
+               class="pw-back-link">
+                <i class="bi bi-arrow-left"></i>
+                My Projects
+            </a>
+
+            <div class="pw-project-heading">
+                <span class="pw-project-mark">
+                    <i class="bi bi-grid-1x2-fill"></i>
+                </span>
+
+                <div>
+                    <span class="pw-eyebrow">
+                        Shared Project Workspace
+                    </span>
+
+                    <h1>@Model.ProjectTitle</h1>
+
+                    <div class="pw-project-meta">
+                        <span>
+                            <i class="bi bi-circle-fill"></i>
+                            @Model.ProjectStatus
+                        </span>
+
+                        <span>
+                            <i class="bi bi-people"></i>
+                            @Model.ActiveMembersCount
+                            of
+                            @Model.MaximumMembers
+                            members
+                        </span>
+
+                        <span>
+                            <i class="bi bi-lightbulb"></i>
+                            @Model.SelectedIdeaTitle
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="pw-member-stack"
+             aria-label="Active project members">
+            @foreach (var member in Model.Members.Take(3))
+            {
+                <span title="@member.FullName — @member.Role">
+                    @member.Initials
+                </span>
+            }
+
+            @if (Model.Members.Count > 3)
+            {
+                <span>
+                    +@(Model.Members.Count - 3)
+                </span>
+            }
+        </div>
+    </header>
+
+    @if (!string.IsNullOrWhiteSpace(
+        Model.ErrorMessage))
+    {
+        <div class="pw-alert pw-alert-error">
+            <i class="bi bi-exclamation-triangle"></i>
+            <span>@Model.ErrorMessage</span>
+        </div>
+    }
+
+    <div id="workspaceAlert"
+         class="pw-alert pw-alert-error"
+         hidden>
+        <i class="bi bi-exclamation-triangle"></i>
+        <span id="workspaceAlertText"></span>
+    </div>
+
+    <div class="pw-shell">
+        <aside class="pw-nav">
+            <div class="pw-nav-label">
+                Project spaces
+            </div>
+
+            <a asp-page="/Student/Dashboard"
+               asp-route-projectId="@Model.ProjectId">
+                <i class="bi bi-speedometer2"></i>
+                <span>Overview</span>
+            </a>
+
+            <a asp-page="/Student/IdeaGenerator"
+               asp-route-projectId="@Model.ProjectId">
+                <i class="bi bi-stars"></i>
+                <span>Ideas</span>
+            </a>
+
+            <a asp-page="/Student/TeamManagement"
+               asp-route-projectId="@Model.ProjectId">
+                <i class="bi bi-people"></i>
+                <span>Team</span>
+            </a>
+
+            <a class="is-active"
+               aria-current="page">
+                <i class="bi bi-chat-square-dots-fill"></i>
+                <span>Discussion</span>
+            </a>
+
+            <div class="pw-nav-team">
+                <strong>Active now</strong>
+
+                @foreach (var member in Model.Members)
+                {
+                    <div class="pw-mini-member">
+                        <span>@member.Initials</span>
+
+                        <div>
+                            <b>@member.FullName</b>
+                            <small>@member.Role</small>
+                        </div>
+                    </div>
+                }
+            </div>
+        </aside>
+
+        <main class="pw-chat-card">
+            <header class="pw-chat-header">
+                <div>
+                    <h2>
+                        <i class="bi bi-chat-dots-fill"></i>
+                        Team Discussion
+                    </h2>
+
+                    <p>
+                        Reply, edit, share files and collaborate
+                        instantly with active project members.
+                    </p>
+                </div>
+
+                <div class="pw-connection-status"
+                     id="connectionStatus"
+                     data-state="connecting">
+                    <i class="bi bi-circle-fill"></i>
+                    <span>Connecting…</span>
+                </div>
+            </header>
+
+            <div class="pw-messages"
+                 id="workspaceMessages">
+
+                <div class="pw-empty"
+                     id="workspaceEmptyState"
+                     hidden="@Model.Messages.Any()">
+                    <span>
+                        <i class="bi bi-chat-heart"></i>
+                    </span>
+
+                    <h3>Start the project conversation</h3>
+
+                    <p>
+                        Share updates, files and decisions with
+                        your team in real time.
+                    </p>
+                </div>
+
+                @foreach (var message in Model.Messages)
+                {
+                    <article class="pw-message
+                        @(message.UserId == Model.CurrentUserId
+                                 ? "is-own"
+                                 : "")
+                        @(message.IsDeleted
+                                 ? "is-deleted"
+                                 : "")"
+                             data-message-id="@message.Id"
+                             data-user-id="@message.UserId">
+
+                        <div class="pw-avatar">
+                            @message.Initials
+                        </div>
+
+                        <div class="pw-message-body">
+                            <header class="pw-message-header">
+                                <div>
+                                    <strong class="pw-message-author">
+                                        @(message.UserId ==
+                                          Model.CurrentUserId
+                                            ? "You"
+                                            : message.FullName)
+                                    </strong>
+
+                                    <time>
+                                        @message.CreatedAtUtc
+                                        .ToLocalTime()
+                                        .ToString(
+                                        "MMM d, yyyy h:mm tt")
+                                    </time>
+
+                                    @if (message.IsEdited &&
+                                         !message.IsDeleted)
+                                    {
+                                        <span class="pw-edited-label">
+                                            edited
+                                        </span>
+                                    }
+                                </div>
+
+                                @if (!message.IsDeleted)
+                                {
+                                    <div class="pw-message-actions">
+                                        <button type="button"
+                                                data-action="reply"
+                                                title="Reply">
+                                            <i class="bi bi-reply"></i>
+                                        </button>
+
+                                        @if (message.CanEdit)
+                                        {
+                                            <button type="button"
+                                                    data-action="edit"
+                                                    title="Edit">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                        }
+
+                                        @if (message.CanDelete)
+                                        {
+                                            <button type="button"
+                                                    data-action="delete"
+                                                    title="Delete">
+                                                <i class="bi bi-trash3"></i>
+                                            </button>
+                                        }
+                                    </div>
+                                }
+                            </header>
+
+                            @if (message.ReplyTo != null)
+                            {
+                                <div class="pw-reply-block">
+                                    <strong>
+                                        @message.ReplyTo.FullName
+                                    </strong>
+
+                                    <span>
+                                        @message.ReplyTo.Content
+                                    </span>
+                                </div>
+                            }
+
+                            <p class="pw-message-text">
+                                @(message.IsDeleted
+                                    ? "This message was deleted."
+                                    : message.Content)
+                            </p>
+
+                            @if (!message.IsDeleted &&
+                                 message.Attachments.Any())
+                            {
+                                <div class="pw-attachments">
+                                    @foreach (var attachment
+                                        in message.Attachments)
+                                    {
+                                        <a href="@attachment.DownloadUrl"
+                                           class="pw-attachment"
+                                           target="_blank"
+                                           rel="noopener noreferrer">
+
+                                            <span>
+                                                <i class="bi
+                                                @(attachment.IsImage
+                                                       ? "bi-image"
+                                                       : "bi-file-earmark")"></i>
+                                            </span>
+
+                                            <div>
+                                                <strong>
+                                                    @attachment.OriginalFileName
+                                                </strong>
+
+                                                <small>
+                                                    @FormatBytes(
+                                                        attachment.SizeBytes)
+                                                </small>
+                                            </div>
+
+                                            <i class="bi bi-download"></i>
+                                        </a>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </article>
+                }
+            </div>
+
+            <div class="pw-typing"
+                 id="typingIndicator"
+                 hidden>
+                <span></span>
+                <span></span>
+                <span></span>
+                <b id="typingText">Someone is typing</b>
+            </div>
+
+            <section class="pw-compose-area">
+                <div class="pw-compose-context"
+                     id="composeContext"
+                     hidden>
+                    <div>
+                        <i id="composeContextIcon"
+                           class="bi bi-reply"></i>
+
+                        <span>
+                            <strong id="composeContextTitle"></strong>
+                            <small id="composeContextText"></small>
+                        </span>
+                    </div>
+
+                    <button type="button"
+                            id="clearComposeContext"
+                            aria-label="Cancel">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+
+                <div class="pw-selected-files"
+                     id="selectedFiles"
+                     hidden>
+                </div>
+
+                <form method="post"
+                      id="workspaceComposer"
+                      class="pw-composer"
+                      enctype="multipart/form-data">
+
+                    @Html.AntiForgeryToken()
+
+                    <input type="hidden"
+                           name="projectId"
+                           value="@Model.ProjectId" />
+
+                    <input type="hidden"
+                           name="replyToMessageId"
+                           id="replyToMessageId" />
+
+                    <input type="file"
+                           id="workspaceFileInput"
+                           name="files"
+                           multiple
+                           accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.png,.jpg,.jpeg,.webp,.zip"
+                           hidden />
+
+                    <button type="button"
+                            id="attachmentButton"
+                            class="pw-attach-button"
+                            title="Attach files"
+                            aria-label="Attach files">
+                        <i class="bi bi-plus-lg"></i>
+                    </button>
+
+                    <div class="pw-textarea-wrap">
+                        <textarea name="content"
+                                  id="workspaceInput"
+                                  maxlength="1000"
+                                  rows="1"
+                                  placeholder="Message your project team…"></textarea>
+
+                        <span id="workspaceCharacterCount">
+                            0 / 1000
+                        </span>
+                    </div>
+
+                    <button type="submit"
+                            id="workspaceSendButton"
+                            class="pw-send-button"
+                            aria-label="Send message">
+                        <i class="bi bi-arrow-up"></i>
+                    </button>
+                </form>
+
+                <p class="pw-compose-note">
+                    Up to 5 files, 10 MB each. PDF, Office,
+                    CSV, text, images and ZIP are supported.
+                </p>
+            </section>
+        </main>
+    </div>
+</div>
+
+@functions {
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes >= 1024 * 1024)
+        {
+            return $"{bytes / (1024d * 1024d):0.#} MB";
+        }
+
+        if (bytes >= 1024)
+        {
+            return $"{bytes / 1024d:0.#} KB";
+        }
+
+        return $"{bytes} B";
+    }
+}
+
+@section Head {
+    <style>
+        .pw-page {
+            --pw-navy: #172f59;
+            --pw-blue: #155eef;
+            --pw-border: #e2e8f1;
+            --pw-muted: #708096;
+            max-width: 1440px;
+            margin: 0 auto;
+            padding-bottom: 1.5rem;
+        }
+
+        .pw-hero {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            padding: 1.2rem 1.3rem;
+            border-radius: 24px;
+            color: #fff;
+            background: radial-gradient( circle at 90% 10%, rgba(255,255,255,.18), transparent 28%), linear-gradient( 135deg, #071c48, #173f7e 62%, #5b78a5);
+            box-shadow: 0 20px 44px rgba(15, 43, 86, .17);
+        }
+
+        .pw-back-link {
+            margin-bottom: .75rem;
+            color: rgba(255,255,255,.76);
+            display: inline-flex;
+            align-items: center;
+            gap: .35rem;
+            font-size: .68rem;
+            font-weight: 760;
+            text-decoration: none;
+        }
+
+            .pw-back-link:hover {
+                color: #fff;
+            }
+
+        .pw-project-heading {
+            display: flex;
+            align-items: center;
+            gap: .85rem;
+        }
+
+        .pw-project-mark {
+            width: 58px;
+            height: 58px;
+            border: 1px solid rgba(255,255,255,.18);
+            border-radius: 18px;
+            background: rgba(255,255,255,.12);
+            display: grid;
+            flex: 0 0 auto;
+            place-items: center;
+            font-size: 1.25rem;
+        }
+
+        .pw-eyebrow {
+            color: rgba(255,255,255,.65);
+            font-size: .62rem;
+            font-weight: 850;
+            letter-spacing: .1em;
+            text-transform: uppercase;
+        }
+
+        .pw-project-heading h1 {
+            margin: .12rem 0 .42rem;
+            font-size: 1.28rem;
+            font-weight: 850;
+        }
+
+        .pw-project-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .5rem;
+        }
+
+            .pw-project-meta span {
+                color: rgba(255,255,255,.77);
+                display: inline-flex;
+                align-items: center;
+                gap: .28rem;
+                font-size: .62rem;
+            }
+
+            .pw-project-meta .bi-circle-fill {
+                color: #58df8b;
+                font-size: .38rem;
+            }
+
+        .pw-member-stack {
+            display: flex;
+            padding-right: .3rem;
+        }
+
+            .pw-member-stack span {
+                width: 38px;
+                height: 38px;
+                margin-right: -.45rem;
+                border: 3px solid #1b437d;
+                border-radius: 50%;
+                color: #1d477d;
+                background: #fff;
+                display: grid;
+                place-items: center;
+                font-size: .62rem;
+                font-weight: 850;
+            }
+
+        .pw-alert {
+            margin-bottom: .85rem;
+            padding: .75rem .85rem;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            gap: .5rem;
+            font-size: .7rem;
+        }
+
+        .pw-alert-error {
+            border: 1px solid #efc6c9;
+            color: #963c45;
+            background: #fff7f7;
+        }
+
+        .pw-shell {
+            display: grid;
+            grid-template-columns: 210px minmax(0, 1fr);
+            min-height: 680px;
+            overflow: hidden;
+            border: 1px solid var(--pw-border);
+            border-radius: 22px;
+            background: #fff;
+            box-shadow: 0 15px 40px rgba(25, 48, 82, .075);
+        }
+
+        .pw-nav {
+            padding: 1rem .75rem;
+            border-right: 1px solid var(--pw-border);
+            background: #f8faff;
+        }
+
+        .pw-nav-label {
+            margin: .2rem .55rem .65rem;
+            color: #8a96a7;
+            font-size: .58rem;
+            font-weight: 850;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+        }
+
+        .pw-nav > a {
+            min-height: 42px;
+            margin-bottom: .28rem;
+            padding: .62rem .7rem;
+            border-radius: 11px;
+            color: #617087;
+            display: flex;
+            align-items: center;
+            gap: .6rem;
+            font-size: .7rem;
+            font-weight: 720;
+            text-decoration: none;
+        }
+
+            .pw-nav > a i {
+                width: 18px;
+                color: #6d84aa;
+                text-align: center;
+            }
+
+            .pw-nav > a:hover {
+                color: #294c7d;
+                background: #eef3fb;
+            }
+
+            .pw-nav > a.is-active {
+                color: #fff;
+                background: linear-gradient( 135deg, #155eef, #416fca);
+                box-shadow: 0 8px 18px rgba(21,94,239,.18);
+            }
+
+                .pw-nav > a.is-active i {
+                    color: #fff;
+                }
+
+        .pw-nav-team {
+            margin-top: 1rem;
+            padding-top: .85rem;
+            border-top: 1px solid #e3e9f1;
+        }
+
+            .pw-nav-team > strong {
+                margin: 0 .5rem .5rem;
+                color: #7c899b;
+                display: block;
+                font-size: .59rem;
+                text-transform: uppercase;
+            }
+
+        .pw-mini-member {
+            padding: .42rem .5rem;
+            display: flex;
+            align-items: center;
+            gap: .5rem;
+        }
+
+            .pw-mini-member > span {
+                width: 30px;
+                height: 30px;
+                border-radius: 50%;
+                color: #fff;
+                background: linear-gradient( 135deg, #3267b8, #7c99c5);
+                display: grid;
+                flex: 0 0 auto;
+                place-items: center;
+                font-size: .54rem;
+                font-weight: 850;
+            }
+
+            .pw-mini-member div {
+                min-width: 0;
+            }
+
+            .pw-mini-member b,
+            .pw-mini-member small {
+                display: block;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .pw-mini-member b {
+                color: #40536e;
+                font-size: .62rem;
+            }
+
+            .pw-mini-member small {
+                margin-top: .08rem;
+                color: #95a0ae;
+                font-size: .53rem;
+            }
+
+        .pw-chat-card {
+            min-width: 0;
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr) auto auto;
+            background: #fff;
+        }
+
+        .pw-chat-header {
+            padding: .9rem 1.05rem;
+            border-bottom: 1px solid var(--pw-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+            .pw-chat-header h2 {
+                margin: 0;
+                color: var(--pw-navy);
+                font-size: .92rem;
+                font-weight: 820;
+            }
+
+                .pw-chat-header h2 i {
+                    margin-right: .35rem;
+                    color: #4d72ae;
+                }
+
+            .pw-chat-header p {
+                margin: .18rem 0 0;
+                color: var(--pw-muted);
+                font-size: .62rem;
+            }
+
+        .pw-connection-status {
+            padding: .34rem .58rem;
+            border: 1px solid #dfe6ee;
+            border-radius: 999px;
+            color: #778599;
+            background: #f8fafc;
+            display: inline-flex;
+            align-items: center;
+            gap: .3rem;
+            font-size: .58rem;
+            font-weight: 800;
+        }
+
+            .pw-connection-status i {
+                font-size: .38rem;
+            }
+
+            .pw-connection-status[data-state="online"] {
+                border-color: #cbe6d4;
+                color: #317748;
+                background: #f0faf3;
+            }
+
+                .pw-connection-status[data-state="online"] i {
+                    color: #35aa5c;
+                }
+
+            .pw-connection-status[data-state="offline"] {
+                border-color: #edd4d6;
+                color: #9e4a51;
+                background: #fff6f6;
+            }
+
+        .pw-messages {
+            min-height: 0;
+            max-height: 570px;
+            padding: 1.1rem;
+            overflow-y: auto;
+            background: radial-gradient( circle at 0 0, rgba(78,115,174,.035), transparent 24%), #fbfcfe;
+        }
+
+        .pw-empty {
+            min-height: 430px;
+            color: #8693a5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            text-align: center;
+        }
+
+            .pw-empty > span {
+                width: 58px;
+                height: 58px;
+                margin-bottom: .65rem;
+                border-radius: 18px;
+                color: #5877a4;
+                background: #edf3fa;
+                display: grid;
+                place-items: center;
+                font-size: 1.25rem;
+            }
+
+            .pw-empty h3 {
+                margin: 0;
+                color: #42556e;
+                font-size: .83rem;
+            }
+
+            .pw-empty p {
+                max-width: 340px;
+                margin: .3rem 0 0;
+                font-size: .65rem;
+                line-height: 1.5;
+            }
+
+        .pw-message {
+            max-width: 78%;
+            margin-bottom: .9rem;
+            display: flex;
+            align-items: flex-start;
+            gap: .55rem;
+        }
+
+            .pw-message.is-own {
+                margin-left: auto;
+                flex-direction: row-reverse;
+            }
+
+        .pw-avatar {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            color: #fff;
+            background: linear-gradient( 135deg, #3465ad, #7d9bc7);
+            display: grid;
+            flex: 0 0 auto;
+            place-items: center;
+            font-size: .55rem;
+            font-weight: 850;
+        }
+
+        .pw-message.is-own .pw-avatar {
+            background: linear-gradient( 135deg, #17417e, #376aaa);
+        }
+
+        .pw-message-body {
+            min-width: 0;
+            padding: .68rem .75rem;
+            border: 1px solid #e0e7ef;
+            border-radius: 4px 15px 15px 15px;
+            background: #fff;
+            box-shadow: 0 6px 16px rgba(26, 48, 79, .045);
+        }
+
+        .pw-message.is-own .pw-message-body {
+            border-color: #ccd9ed;
+            border-radius: 15px 4px 15px 15px;
+            background: #eef4ff;
+        }
+
+        .pw-message.is-deleted .pw-message-body {
+            border-style: dashed;
+            background: #f7f8fa;
+        }
+
+        .pw-message-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: .8rem;
+            margin-bottom: .3rem;
+        }
+
+            .pw-message-header > div:first-child {
+                display: flex;
+                align-items: center;
+                flex-wrap: wrap;
+                gap: .35rem;
+            }
+
+        .pw-message-author {
+            color: #365170;
+            font-size: .62rem;
+        }
+
+        .pw-message-header time,
+        .pw-edited-label {
+            color: #98a2b0;
+            font-size: .52rem;
+        }
+
+        .pw-message-actions {
+            display: flex;
+            gap: .18rem;
+            opacity: 0;
+            transition: opacity .15s ease;
+        }
+
+        .pw-message:hover .pw-message-actions {
+            opacity: 1;
+        }
+
+        .pw-message-actions button {
+            width: 25px;
+            height: 25px;
+            padding: 0;
+            border: 0;
+            border-radius: 7px;
+            color: #6f7e92;
+            background: transparent;
+            display: grid;
+            place-items: center;
+            font-size: .65rem;
+        }
+
+            .pw-message-actions button:hover {
+                color: #284d7e;
+                background: #e8eef7;
+            }
+
+        .pw-reply-block {
+            margin-bottom: .45rem;
+            padding: .45rem .55rem;
+            border-left: 3px solid #7290bd;
+            border-radius: 6px;
+            background: rgba(104,135,182,.09);
+        }
+
+            .pw-reply-block strong,
+            .pw-reply-block span {
+                display: block;
+            }
+
+            .pw-reply-block strong {
+                color: #4b668a;
+                font-size: .56rem;
+            }
+
+            .pw-reply-block span {
+                margin-top: .12rem;
+                overflow: hidden;
+                color: #758299;
+                font-size: .58rem;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+        .pw-message-text {
+            margin: 0;
+            color: #46566d;
+            font-size: .7rem;
+            line-height: 1.55;
+            overflow-wrap: anywhere;
+            white-space: pre-wrap;
+        }
+
+        .pw-message.is-deleted .pw-message-text {
+            color: #9099a6;
+            font-style: italic;
+        }
+
+        .pw-attachments {
+            display: grid;
+            gap: .4rem;
+            margin-top: .6rem;
+        }
+
+        .pw-attachment {
+            min-width: 220px;
+            padding: .5rem .55rem;
+            border: 1px solid #dfe6ef;
+            border-radius: 10px;
+            color: #445b79;
+            background: rgba(255,255,255,.72);
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: .45rem;
+            text-decoration: none;
+        }
+
+            .pw-attachment > span {
+                width: 31px;
+                height: 31px;
+                border-radius: 8px;
+                color: #4c6d99;
+                background: #edf3fa;
+                display: grid;
+                place-items: center;
+            }
+
+            .pw-attachment div {
+                min-width: 0;
+            }
+
+            .pw-attachment strong,
+            .pw-attachment small {
+                display: block;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .pw-attachment strong {
+                font-size: .6rem;
+            }
+
+            .pw-attachment small {
+                margin-top: .1rem;
+                color: #8a96a6;
+                font-size: .52rem;
+            }
+
+        .pw-typing {
+            min-height: 28px;
+            padding: .35rem 1.1rem;
+            border-top: 1px solid #edf0f5;
+            color: #78869a;
+            background: #fbfcfe;
+            display: flex;
+            align-items: center;
+            gap: .2rem;
+            font-size: .58rem;
+        }
+
+            .pw-typing span {
+                width: 4px;
+                height: 4px;
+                border-radius: 50%;
+                background: #7891b7;
+                animation: pwTyping 1s infinite ease-in-out;
+            }
+
+                .pw-typing span:nth-child(2) {
+                    animation-delay: .15s;
+                }
+
+                .pw-typing span:nth-child(3) {
+                    animation-delay: .3s;
+                }
+
+            .pw-typing b {
+                margin-left: .3rem;
+                font-weight: 650;
+            }
+
+        @@keyframes pwTyping {
+            0%, 60%, 100% {
+                transform: translateY(0);
+                opacity: .45;
+            }
+
+            30% {
+                transform: translateY(-3px);
+                opacity: 1;
+            }
+        }
+
+        .pw-compose-area {
+            border-top: 1px solid var(--pw-border);
+            background: #fff;
+        }
+
+        .pw-compose-context {
+            padding: .55rem .8rem;
+            border-bottom: 1px solid #e8edf4;
+            background: #f8faff;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .7rem;
+        }
+
+            .pw-compose-context > div {
+                min-width: 0;
+                display: flex;
+                align-items: center;
+                gap: .5rem;
+            }
+
+                .pw-compose-context > div > i {
+                    color: #5477aa;
+                }
+
+            .pw-compose-context span {
+                min-width: 0;
+            }
+
+            .pw-compose-context strong,
+            .pw-compose-context small {
+                display: block;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .pw-compose-context strong {
+                color: #425c7e;
+                font-size: .6rem;
+            }
+
+            .pw-compose-context small {
+                margin-top: .1rem;
+                color: #7f8b9c;
+                font-size: .55rem;
+            }
+
+            .pw-compose-context button {
+                border: 0;
+                color: #7a8799;
+                background: transparent;
+            }
+
+        .pw-selected-files {
+            padding: .55rem .8rem 0;
+            display: flex;
+            flex-wrap: wrap;
+            gap: .4rem;
+        }
+
+        .pw-file-chip {
+            max-width: 220px;
+            padding: .34rem .45rem;
+            border: 1px solid #dce4ee;
+            border-radius: 9px;
+            color: #52647e;
+            background: #f7f9fc;
+            display: inline-flex;
+            align-items: center;
+            gap: .35rem;
+            font-size: .56rem;
+        }
+
+            .pw-file-chip span {
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .pw-file-chip button {
+                padding: 0;
+                border: 0;
+                color: #8b96a5;
+                background: transparent;
+            }
+
+        .pw-composer {
+            padding: .75rem .8rem .45rem;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: end;
+            gap: .55rem;
+        }
+
+        .pw-attach-button,
+        .pw-send-button {
+            width: 42px;
+            height: 42px;
+            padding: 0;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+        }
+
+        .pw-attach-button {
+            border: 1px solid #d9e1ec;
+            color: #4d6382;
+            background: #f8fafc;
+        }
+
+            .pw-attach-button:hover {
+                color: #264e83;
+                background: #edf3fb;
+            }
+
+        .pw-send-button {
+            border: 1px solid var(--pw-blue);
+            color: #fff;
+            background: var(--pw-blue);
+            box-shadow: 0 8px 18px rgba(21,94,239,.2);
+        }
+
+            .pw-send-button:disabled,
+            .pw-attach-button:disabled {
+                cursor: wait;
+                opacity: .6;
+            }
+
+        .pw-textarea-wrap {
+            position: relative;
+            min-width: 0;
+        }
+
+            .pw-textarea-wrap textarea {
+                width: 100%;
+                min-height: 44px;
+                max-height: 150px;
+                padding: .68rem .75rem 1.25rem;
+                resize: none;
+                border: 1px solid #d9e1eb;
+                border-radius: 16px;
+                color: #344760;
+                outline: none;
+                font-size: .7rem;
+                line-height: 1.45;
+            }
+
+                .pw-textarea-wrap textarea:focus {
+                    border-color: #90add7;
+                    box-shadow: 0 0 0 3px rgba(21,94,239,.09);
+                }
+
+        #workspaceCharacterCount {
+            position: absolute;
+            right: .7rem;
+            bottom: .35rem;
+            color: #96a0ae;
+            font-size: .52rem;
+        }
+
+        .pw-compose-note {
+            margin: 0;
+            padding: 0 .9rem .65rem 3.75rem;
+            color: #98a1ae;
+            font-size: .52rem;
+        }
+
+        @@media (max-width: 991px) {
+            .pw-shell {
+                grid-template-columns: 1fr;
+            }
+
+            .pw-nav {
+                padding: .6rem;
+                overflow-x: auto;
+                border-right: 0;
+                border-bottom: 1px solid var(--pw-border);
+                display: flex;
+                gap: .3rem;
+            }
+
+            .pw-nav-label,
+            .pw-nav-team {
+                display: none;
+            }
+
+            .pw-nav > a {
+                flex: 0 0 auto;
+                margin: 0;
+            }
+
+            .pw-messages {
+                max-height: 520px;
+            }
+        }
+
+        @@media (max-width: 767px) {
+            .pw-hero {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .pw-member-stack {
+                padding-left: .35rem;
+            }
+
+            .pw-message {
+                max-width: 94%;
+            }
+
+            .pw-chat-header {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .pw-message-actions {
+                opacity: 1;
+            }
+        }
+
+        @@media (max-width: 575px) {
+            .pw-project-heading {
+                align-items: flex-start;
+            }
+
+            .pw-project-mark {
+                width: 48px;
+                height: 48px;
+                border-radius: 15px;
+            }
+
+            .pw-project-meta span:last-child {
+                width: 100%;
+            }
+
+            .pw-shell {
+                border-radius: 16px;
+            }
+
+            .pw-messages {
+                padding: .75rem;
+            }
+
+            .pw-composer {
+                padding-left: .55rem;
+                padding-right: .55rem;
+            }
+
+            .pw-compose-note {
+                padding-left: .65rem;
+            }
+        }
+    </style>
+}
+
+@section Scripts {
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+
+    <script>
+        (() => {
+        const root =
+        document.getElementById(
+        "projectWorkspace");
+
+        if (!root) {
+        return;
+        }
+
+        const projectId =
+        Number(root.dataset.projectId);
+
+        const currentUserId =
+        Number(root.dataset.currentUserId);
+
+        const isOwner =
+        root.dataset.isOwner === "true";
+
+        const messages =
+        document.getElementById(
+        "workspaceMessages");
+
+        const emptyState =
+        document.getElementById(
+        "workspaceEmptyState");
+
+        const composer =
+        document.getElementById(
+        "workspaceComposer");
+
+        const input =
+        document.getElementById(
+        "workspaceInput");
+
+        const characterCount =
+        document.getElementById(
+        "workspaceCharacterCount");
+
+        const sendButton =
+        document.getElementById(
+        "workspaceSendButton");
+
+        const attachmentButton =
+        document.getElementById(
+        "attachmentButton");
+
+        const fileInput =
+        document.getElementById(
+        "workspaceFileInput");
+
+        const selectedFilesContainer =
+        document.getElementById(
+        "selectedFiles");
+
+        const replyInput =
+        document.getElementById(
+        "replyToMessageId");
+
+        const composeContext =
+        document.getElementById(
+        "composeContext");
+
+        const composeContextTitle =
+        document.getElementById(
+        "composeContextTitle");
+
+        const composeContextText =
+        document.getElementById(
+        "composeContextText");
+
+        const composeContextIcon =
+        document.getElementById(
+        "composeContextIcon");
+
+        const clearComposeContext =
+        document.getElementById(
+        "clearComposeContext");
+
+        const connectionStatus =
+        document.getElementById(
+        "connectionStatus");
+
+        const typingIndicator =
+        document.getElementById(
+        "typingIndicator");
+
+        const typingText =
+        document.getElementById(
+        "typingText");
+
+        const workspaceAlert =
+        document.getElementById(
+        "workspaceAlert");
+
+        const workspaceAlertText =
+        document.getElementById(
+        "workspaceAlertText");
+
+        let selectedFiles = [];
+        let editMessageId = null;
+        let typingTimer = null;
+        let typingStopTimer = null;
+        const typingUsers = new Map();
+
+        const connection =
+        new signalR.HubConnectionBuilder()
+        .withUrl(
+        "/hubs/project-discussion")
+        .withAutomaticReconnect(
+        [0, 2000, 5000, 10000])
+        .build();
+
+        function showError(message) {
+        if (!workspaceAlert ||
+        !workspaceAlertText) {
+        return;
+        }
+
+        workspaceAlertText.textContent =
+        message ||
+        "Something went wrong.";
+
+        workspaceAlert.hidden =
+        false;
+
+        window.clearTimeout(
+        showError.timer);
+
+        showError.timer =
+        window.setTimeout(
+        () => {
+        workspaceAlert.hidden =
+        true;
+        },
+        4500);
+        }
+
+        function setConnectionState(
+        state,
+        label) {
+        if (!connectionStatus) {
+        return;
+        }
+
+        connectionStatus.dataset.state =
+        state;
+
+        const text =
+        connectionStatus
+        .querySelector("span");
+
+        if (text) {
+        text.textContent =
+        label;
+        }
+        }
+
+        function scrollToLatest() {
+        if (!messages) {
+        return;
+        }
+
+        messages.scrollTop =
+        messages.scrollHeight;
+        }
+
+        function hideEmptyState() {
+        if (emptyState) {
+        emptyState.hidden =
+        true;
+        }
+        }
+
+        function formatBytes(bytes) {
+        if (bytes >= 1024 * 1024) {
+        return (
+        bytes /
+        (1024 * 1024)
+        ).toFixed(1) + " MB";
+        }
+
+        if (bytes >= 1024) {
+        return (
+        bytes /
+        1024
+        ).toFixed(1) + " KB";
+        }
+
+        return bytes + " B";
+        }
+
+        function shortText(
+        value,
+        maximum = 120) {
+        const clean =
+        (value || "").trim();
+
+        return clean.length <= maximum
+        ? clean
+        : clean.slice(
+        0,
+        maximum) + "…";
+        }
+
+        function createActionButton(
+        action,
+        icon,
+        title) {
+        const button =
+        document.createElement(
+        "button");
+
+        button.type =
+        "button";
+
+        button.dataset.action =
+        action;
+
+        button.title =
+        title;
+
+        const iconElement =
+        document.createElement(
+        "i");
+
+        iconElement.className =
+        `bi ${icon}`;
+
+        button.appendChild(
+        iconElement);
+
+        return button;
+        }
+
+        function createAttachment(
+        attachment) {
+        const link =
+        document.createElement("a");
+
+        link.className =
+        "pw-attachment";
+
+        link.href =
+        attachment.downloadUrl;
+
+        link.target =
+        "_blank";
+
+        link.rel =
+        "noopener noreferrer";
+
+        const iconBox =
+        document.createElement("span");
+
+        const icon =
+        document.createElement("i");
+
+        icon.className =
+        attachment.isImage
+        ? "bi bi-image"
+        : "bi bi-file-earmark";
+
+        iconBox.appendChild(icon);
+
+        const copy =
+        document.createElement("div");
+
+        const name =
+        document.createElement("strong");
+
+        name.textContent =
+        attachment.originalFileName;
+
+        const size =
+        document.createElement("small");
+
+        size.textContent =
+        formatBytes(
+        Number(
+        attachment.sizeBytes));
+
+        copy.append(
+        name,
+        size);
+
+        const download =
+        document.createElement("i");
+
+        download.className =
+        "bi bi-download";
+
+        link.append(
+        iconBox,
+        copy,
+        download);
+
+        return link;
+        }
+
+        function addMessage(message) {
+        if (!messages ||
+        document.querySelector(
+        `[data-message-id="${message.id}"]`)) {
+        return;
+        }
+
+        hideEmptyState();
+
+        const isOwn =
+        Number(message.userId) ===
+        currentUserId;
+
+        const article =
+        document.createElement(
+        "article");
+
+        article.className =
+        "pw-message" +
+        (isOwn
+        ? " is-own"
+        : "");
+
+        article.dataset.messageId =
+        String(message.id);
+
+        article.dataset.userId =
+        String(message.userId);
+
+        const avatar =
+        document.createElement(
+        "div");
+
+        avatar.className =
+        "pw-avatar";
+
+        avatar.textContent =
+        message.initials ||
+        "ST";
+
+        const body =
+        document.createElement(
+        "div");
+
+        body.className =
+        "pw-message-body";
+
+        const header =
+        document.createElement(
+        "header");
+
+        header.className =
+        "pw-message-header";
+
+        const metadata =
+        document.createElement(
+        "div");
+
+        const author =
+        document.createElement(
+        "strong");
+
+        author.className =
+        "pw-message-author";
+
+        author.textContent =
+        isOwn
+        ? "You"
+        : message.fullName;
+
+        const time =
+        document.createElement(
+        "time");
+
+        time.textContent =
+        message.createdAtDisplay;
+
+        metadata.append(
+        author,
+        time);
+
+        if (message.isEdited) {
+        const edited =
+        document.createElement(
+        "span");
+
+        edited.className =
+        "pw-edited-label";
+
+        edited.textContent =
+        "edited";
+
+        metadata.appendChild(
+        edited);
+        }
+
+        const actions =
+        document.createElement(
+        "div");
+
+        actions.className =
+        "pw-message-actions";
+
+        actions.appendChild(
+        createActionButton(
+        "reply",
+        "bi-reply",
+        "Reply"));
+
+        if (isOwn) {
+        actions.appendChild(
+        createActionButton(
+        "edit",
+        "bi-pencil",
+        "Edit"));
+        }
+
+        if (isOwn || isOwner) {
+        actions.appendChild(
+        createActionButton(
+        "delete",
+        "bi-trash3",
+        "Delete"));
+        }
+
+        header.append(
+        metadata,
+        actions);
+
+        body.appendChild(
+        header);
+
+        if (message.replyTo) {
+        const reply =
+        document.createElement(
+        "div");
+
+        reply.className =
+        "pw-reply-block";
+
+        const replyAuthor =
+        document.createElement(
+        "strong");
+
+        replyAuthor.textContent =
+        message.replyTo.fullName;
+
+        const replyText =
+        document.createElement(
+        "span");
+
+        replyText.textContent =
+        message.replyTo.content;
+
+        reply.append(
+        replyAuthor,
+        replyText);
+
+        body.appendChild(
+        reply);
+        }
+
+        const paragraph =
+        document.createElement(
+        "p");
+
+        paragraph.className =
+        "pw-message-text";
+
+        paragraph.textContent =
+        message.content || "";
+
+        body.appendChild(
+        paragraph);
+
+        if (Array.isArray(
+        message.attachments) &&
+        message.attachments.length > 0) {
+        const attachmentList =
+        document.createElement(
+        "div");
+
+        attachmentList.className =
+        "pw-attachments";
+
+        message.attachments.forEach(
+        attachment => {
+        attachmentList.appendChild(
+        createAttachment(
+        attachment));
+        });
+
+        body.appendChild(
+        attachmentList);
+        }
+
+        article.append(
+        avatar,
+        body);
+
+        messages.appendChild(
+        article);
+
+        scrollToLatest();
+        }
+
+        function updateMessage(message) {
+        const article =
+        document.querySelector(
+        `[data-message-id="${message.id}"]`);
+
+        if (!article) {
+        return;
+        }
+
+        const text =
+        article.querySelector(
+        ".pw-message-text");
+
+        if (text) {
+        text.textContent =
+        message.content;
+        }
+
+        const metadata =
+        article.querySelector(
+        ".pw-message-header > div");
+
+        if (metadata &&
+        !metadata.querySelector(
+        ".pw-edited-label")) {
+        const edited =
+        document.createElement(
+        "span");
+
+        edited.className =
+        "pw-edited-label";
+
+        edited.textContent =
+        "edited";
+
+        metadata.appendChild(
+        edited);
+        }
+        }
+
+        function deleteMessage(message) {
+        const article =
+        document.querySelector(
+        `[data-message-id="${message.id}"]`);
+
+        if (!article) {
+        return;
+        }
+
+        article.classList.add(
+        "is-deleted");
+
+        const text =
+        article.querySelector(
+        ".pw-message-text");
+
+        if (text) {
+        text.textContent =
+        "This message was deleted.";
+        }
+
+        article
+        .querySelector(
+        ".pw-message-actions")
+        ?.remove();
+
+        article
+        .querySelector(
+        ".pw-attachments")
+        ?.remove();
+        }
+
+        function updateCharacterCount() {
+        if (!input ||
+        !characterCount) {
+        return;
+        }
+
+        characterCount.textContent =
+        `${input.value.length} / 1000`;
+
+        input.style.height =
+        "auto";
+
+        input.style.height =
+        Math.min(
+        input.scrollHeight,
+        150) + "px";
+        }
+
+        function resetComposeContext() {
+        editMessageId =
+        null;
+
+        if (replyInput) {
+        replyInput.value =
+        "";
+        }
+
+        if (composeContext) {
+        composeContext.hidden =
+        true;
+        }
+
+        if (composeContextTitle) {
+        composeContextTitle.textContent =
+        "";
+        }
+
+        if (composeContextText) {
+        composeContextText.textContent =
+        "";
+        }
+
+        if (composeContextIcon) {
+        composeContextIcon.className =
+        "bi bi-reply";
+        }
+
+        if (attachmentButton) {
+        attachmentButton.disabled =
+        false;
+        }
+
+        if (sendButton) {
+        sendButton.innerHTML =
+        '<i class="bi bi-arrow-up"></i>';
+        }
+        }
+
+        function setReplyContext(
+        article) {
+        resetComposeContext();
+
+        const id =
+        article.dataset.messageId;
+
+        const author =
+        article.querySelector(
+        ".pw-message-author")
+        ?.textContent || "Student";
+
+        const text =
+        article.querySelector(
+        ".pw-message-text")
+        ?.textContent || "";
+
+        if (replyInput) {
+        replyInput.value =
+        id;
+        }
+
+        if (composeContextTitle) {
+        composeContextTitle.textContent =
+        `Replying to ${author}`;
+        }
+
+        if (composeContextText) {
+        composeContextText.textContent =
+        shortText(text);
+        }
+
+        if (composeContextIcon) {
+        composeContextIcon.className =
+        "bi bi-reply";
+        }
+
+        if (composeContext) {
+        composeContext.hidden =
+        false;
+        }
+
+        input?.focus();
+        }
+
+        function setEditContext(
+        article) {
+        resetComposeContext();
+        clearSelectedFiles();
+
+        editMessageId =
+        Number(
+        article.dataset.messageId);
+
+        const text =
+        article.querySelector(
+        ".pw-message-text")
+        ?.textContent || "";
+
+        if (input) {
+        input.value =
+        text;
+
+        updateCharacterCount();
+        }
+
+        if (composeContextTitle) {
+        composeContextTitle.textContent =
+        "Editing message";
+        }
+
+        if (composeContextText) {
+        composeContextText.textContent =
+        shortText(text);
+        }
+
+        if (composeContextIcon) {
+        composeContextIcon.className =
+        "bi bi-pencil";
+        }
+
+        if (composeContext) {
+        composeContext.hidden =
+        false;
+        }
+
+        if (attachmentButton) {
+        attachmentButton.disabled =
+        true;
+        }
+
+        if (sendButton) {
+        sendButton.innerHTML =
+        '<i class="bi bi-check-lg"></i>';
+        }
+
+        input?.focus();
+        }
+
+        function clearSelectedFiles() {
+        selectedFiles =
+        [];
+
+        if (fileInput) {
+        fileInput.value =
+        "";
+        }
+
+        renderSelectedFiles();
+        }
+
+        function renderSelectedFiles() {
+        if (!selectedFilesContainer) {
+        return;
+        }
+
+        selectedFilesContainer.innerHTML =
+        "";
+
+        if (selectedFiles.length === 0) {
+        selectedFilesContainer.hidden =
+        true;
+
+        return;
+        }
+
+        selectedFilesContainer.hidden =
+        false;
+
+        selectedFiles.forEach(
+        (file, index) => {
+        const chip =
+        document.createElement(
+        "div");
+
+        chip.className =
+        "pw-file-chip";
+
+        const icon =
+        document.createElement(
+        "i");
+
+        icon.className =
+        "bi bi-paperclip";
+
+        const name =
+        document.createElement(
+        "span");
+
+        name.textContent =
+        `${file.name} (${formatBytes(file.size)})`;
+
+        const remove =
+        document.createElement(
+        "button");
+
+        remove.type =
+        "button";
+
+        remove.dataset.fileIndex =
+        String(index);
+
+        remove.innerHTML =
+        '<i class="bi bi-x-lg"></i>';
+
+        chip.append(
+        icon,
+        name,
+        remove);
+
+        selectedFilesContainer.appendChild(
+        chip);
+        });
+        }
+
+        function setSending(
+        sending) {
+        if (sendButton) {
+        sendButton.disabled =
+        sending;
+        }
+
+        if (attachmentButton) {
+        attachmentButton.disabled =
+        sending ||
+        editMessageId !== null;
+        }
+
+        if (input) {
+        input.disabled =
+        sending;
+        }
+        }
+
+        function clearComposer() {
+        if (input) {
+        input.value =
+        "";
+
+        updateCharacterCount();
+        }
+
+        clearSelectedFiles();
+        resetComposeContext();
+        }
+
+        function updateTypingIndicator() {
+        const names =
+        Array.from(
+        typingUsers.values());
+
+        if (!typingIndicator ||
+        !typingText) {
+        return;
+        }
+
+        if (names.length === 0) {
+        typingIndicator.hidden =
+        true;
+
+        return;
+        }
+
+        typingIndicator.hidden =
+        false;
+
+        typingText.textContent =
+        names.length === 1
+        ? `${names[0]} is typing`
+        : `${names.length} people are typing`;
+        }
+
+        function registerTypingUser(
+        data) {
+        if (Number(data.userId) ===
+        currentUserId) {
+        return;
+        }
+
+        typingUsers.set(
+        Number(data.userId),
+        data.fullName || "Student");
+
+        updateTypingIndicator();
+
+        window.setTimeout(
+        () => {
+        typingUsers.delete(
+        Number(data.userId));
+
+        updateTypingIndicator();
+        },
+        2500);
+        }
+
+        async function startConnection() {
+        try {
+        await connection.start();
+
+        await connection.invoke(
+        "JoinProject",
+        projectId);
+
+        setConnectionState(
+        "online",
+        "Live");
+        }
+        catch (error) {
+        setConnectionState(
+        "offline",
+        "Offline");
+
+        window.setTimeout(
+        startConnection,
+        5000);
+        }
+        }
+
+        connection.on(
+        "MessageCreated",
+        addMessage);
+
+        connection.on(
+        "MessageUpdated",
+        updateMessage);
+
+        connection.on(
+        "MessageDeleted",
+        deleteMessage);
+
+        connection.on(
+        "UserTyping",
+        registerTypingUser);
+
+        connection.on(
+        "UserStoppedTyping",
+        data => {
+        typingUsers.delete(
+        Number(data.userId));
+
+        updateTypingIndicator();
+        });
+
+        connection.onreconnecting(
+        () => {
+        setConnectionState(
+        "connecting",
+        "Reconnecting…");
+        });
+
+        connection.onreconnected(
+        async () => {
+        try {
+        await connection.invoke(
+        "JoinProject",
+        projectId);
+
+        setConnectionState(
+        "online",
+        "Live");
+        }
+        catch {
+        window.location.href =
+        "/Student/MyProjects";
+        }
+        });
+
+        connection.onclose(
+        () => {
+        setConnectionState(
+        "offline",
+        "Offline");
+        });
+
+        attachmentButton?.addEventListener(
+        "click",
+        () => {
+        if (editMessageId === null) {
+        fileInput?.click();
+        }
+        });
+
+        fileInput?.addEventListener(
+        "change",
+        () => {
+        const newFiles =
+        Array.from(
+        fileInput.files || []);
+
+        if (newFiles.length > 5) {
+        showError(
+        "You can attach at most 5 files.");
+
+        fileInput.value =
+        "";
+
+        return;
+        }
+
+        const tooLarge =
+        newFiles.find(
+        file =>
+        file.size >
+        10 * 1024 * 1024);
+
+        if (tooLarge) {
+        showError(
+        `${tooLarge.name} is larger than 10 MB.`);
+
+        fileInput.value =
+        "";
+
+        return;
+        }
+
+        selectedFiles =
+        newFiles;
+
+        renderSelectedFiles();
+        });
+
+        selectedFilesContainer
+        ?.addEventListener(
+        "click",
+        event => {
+        const button =
+        event.target.closest(
+        "[data-file-index]");
+
+        if (!button) {
+        return;
+        }
+
+        selectedFiles.splice(
+        Number(
+        button.dataset.fileIndex),
+        1);
+
+        renderSelectedFiles();
+        });
+
+        clearComposeContext
+        ?.addEventListener(
+        "click",
+        () => {
+        if (editMessageId !== null &&
+        input) {
+        input.value =
+        "";
+
+        updateCharacterCount();
+        }
+
+        resetComposeContext();
+        });
+
+        messages?.addEventListener(
+        "click",
+        async event => {
+        const button =
+        event.target.closest(
+        "[data-action]");
+
+        if (!button) {
+        return;
+        }
+
+        const article =
+        button.closest(
+        "[data-message-id]");
+
+        if (!article) {
+        return;
+        }
+
+        const action =
+        button.dataset.action;
+
+        if (action === "reply") {
+        setReplyContext(
+        article);
+
+        return;
+        }
+
+        if (action === "edit") {
+        setEditContext(
+        article);
+
+        return;
+        }
+
+        if (action === "delete") {
+        try {
+        button.disabled =
+        true;
+
+        await connection.invoke(
+        "DeleteMessage",
+        projectId,
+        Number(
+        article.dataset.messageId));
+        }
+        catch (error) {
+        button.disabled =
+        false;
+
+        showError(
+        error.message);
+        }
+        }
+        });
+
+        input?.addEventListener(
+        "input",
+        () => {
+        updateCharacterCount();
+
+        if (connection.state !==
+        signalR.HubConnectionState
+        .Connected) {
+        return;
+        }
+
+        window.clearTimeout(
+        typingTimer);
+
+        typingTimer =
+        window.setTimeout(
+        () => {
+        connection.invoke(
+        "Typing",
+        projectId)
+        .catch(() => {});
+        },
+        180);
+
+        window.clearTimeout(
+        typingStopTimer);
+
+        typingStopTimer =
+        window.setTimeout(
+        () => {
+        connection.invoke(
+        "StopTyping",
+        projectId)
+        .catch(() => {});
+        },
+        1300);
+        });
+
+        input?.addEventListener(
+        "keydown",
+        event => {
+        if (event.key === "Enter" &&
+        !event.shiftKey) {
+        event.preventDefault();
+        composer?.requestSubmit();
+        }
+        });
+
+        composer?.addEventListener(
+        "submit",
+        async event => {
+        event.preventDefault();
+
+        const cleanContent =
+        input?.value.trim() || "";
+
+        if (editMessageId !== null) {
+        if (!cleanContent) {
+        showError(
+        "The edited message cannot be empty.");
+
+        return;
+        }
+
+        try {
+        setSending(true);
+
+        await connection.invoke(
+        "EditMessage",
+        projectId,
+        editMessageId,
+        cleanContent);
+
+        clearComposer();
+        }
+        catch (error) {
+        showError(
+        error.message);
+        }
+        finally {
+        setSending(false);
+        }
+
+        return;
+        }
+
+        if (!cleanContent &&
+        selectedFiles.length === 0) {
+        showError(
+        "Write a message or attach a file.");
+
+        input?.focus();
+        return;
+        }
+
+        const formData =
+        new FormData();
+
+        const token =
+        composer.querySelector(
+        'input[name="__RequestVerificationToken"]')
+        ?.value;
+
+        formData.append(
+        "__RequestVerificationToken",
+        token || "");
+
+        formData.append(
+        "projectId",
+        String(projectId));
+
+        formData.append(
+        "content",
+        cleanContent);
+
+        if (replyInput?.value) {
+        formData.append(
+        "replyToMessageId",
+        replyInput.value);
+        }
+
+        selectedFiles.forEach(
+        file => {
+        formData.append(
+        "files",
+        file);
+        });
+
+        try {
+        setSending(true);
+
+        const response =
+        await fetch(
+        `${window.location.pathname}?handler=SendMessage`,
+        {
+        method: "POST",
+        body: formData,
+        headers: {
+        "X-Requested-With":
+        "XMLHttpRequest"
+        }
+        });
+
+        if (response.status === 401 ||
+        response.status === 403) {
+        window.location.href =
+        "/Student/MyProjects";
+        return;
+        }
+
+        const result =
+        await response.json();
+
+        if (!response.ok ||
+        !result.success) {
+        throw new Error(
+        result.message ||
+        "The message could not be sent.");
+        }
+
+        addMessage(
+        result.message);
+
+        clearComposer();
+        }
+        catch (error) {
+        showError(
+        error.message);
+        }
+        finally {
+        setSending(false);
+        }
+        });
+
+        window.addEventListener(
+        "beforeunload",
+        () => {
+        if (connection.state ===
+        signalR.HubConnectionState
+        .Connected) {
+        connection.invoke(
+        "LeaveProject",
+        projectId)
+        .catch(() => {});
+        }
+        });
+
+        updateCharacterCount();
+        scrollToLatest();
+        startConnection();
+        })();
+    </script>
+}

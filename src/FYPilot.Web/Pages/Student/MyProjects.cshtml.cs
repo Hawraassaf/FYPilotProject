@@ -53,8 +53,7 @@ public class MyProjectsModel(
             return RedirectToPage("/Account/Login");
         }
 
-        SuccessMessage = TempData["Success"] as string;
-        ErrorMessage = TempData["Error"] as string;
+        
 
         var currentUser = await db.Users
             .AsNoTracking()

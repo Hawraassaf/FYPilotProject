@@ -314,25 +314,8 @@
                         }
                     </div>
                 </header>
-
                 <main class="app-content flex-grow-1 overflow-auto">
-                    @if (TempData["Success"] is string sMsg)
-                    {
-                        <div class="alert alert-success alert-dismissible fade show app-alert auto-dismiss-alert" data-auto-dismiss="2000">
-                            <i class="bi bi-check-circle me-2"></i>
-                            @sMsg
-                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                        </div>
-                    }
-
-                    @if (TempData["Error"] is string eMsg)
-                    {
-                        <div class="alert alert-danger alert-dismissible fade show app-alert" data-auto-dismiss="5000">
-                            <i class="bi bi-exclamation-triangle me-2"></i>
-                            @eMsg
-                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                        </div>
-                    }
+                    <partial name="_FlashMessages" />
 
                     @RenderBody()
                 </main>
@@ -347,23 +330,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script src="~/js/site.js" asp-append-version="true"></script>
 
-    <script>
-        document.addEventListener("DOMContentLoaded", function () {
-        document.querySelectorAll(".auto-dismiss-alert").forEach(function (alertBox) {
-        const delay = parseInt(alertBox.getAttribute("data-auto-dismiss") || "2000", 10);
-
-        setTimeout(function () {
-        alertBox.style.transition = "opacity 0.35s ease, transform 0.35s ease";
-        alertBox.style.opacity = "0";
-        alertBox.style.transform = "translateY(-6px)";
-
-        setTimeout(function () {
-        alertBox.remove();
-        }, 350);
-        }, delay);
-        });
-        });
-    </script>
+  
 
     @await RenderSectionAsync("Scripts", required: false)
 </body>

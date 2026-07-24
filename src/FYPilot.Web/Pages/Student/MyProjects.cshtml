@@ -411,8 +411,8 @@
                 {
                     <article class="project-card
                         @(project.IsActiveProject
-                                 ? "active-project-card"
-                                 : "")"
+                                      ? "active-project-card"
+                                      : "")"
                              data-project-card
                              data-name="@project.Title.ToLowerInvariant()"
                              data-idea="@project.SelectedIdeaTitle.ToLowerInvariant()"
@@ -463,13 +463,13 @@
                         <div class="project-badges">
                             <span class="role-badge
                                 @(project.Role == "owner"
-                                      ? "owner-badge"
-                                      : "collaborator-badge")">
+                                        ? "owner-badge"
+                                        : "collaborator-badge")">
 
                                 <i class="bi
                                 @(project.Role == "owner"
-                                       ? "bi-crown-fill"
-                                       : "bi-people-fill")"></i>
+                                          ? "bi-crown-fill"
+                                          : "bi-people-fill")"></i>
 
                                 @project.RoleLabel
                             </span>
@@ -479,8 +479,8 @@
 
                                 <i class="bi
                                 @(project.Status == "active"
-                                       ? "bi-circle-fill"
-                                       : "bi-clock")"></i>
+                                          ? "bi-circle-fill"
+                                          : "bi-clock")"></i>
 
                                 @project.StatusLabel
                             </span>
@@ -488,14 +488,14 @@
 
                         <div class="selected-idea-panel
                             @(project.HasSelectedIdea
-                                 ? "idea-selected"
-                                 : "idea-missing")">
+                                  ? "idea-selected"
+                                  : "idea-missing")">
 
                             <div class="selected-idea-icon">
                                 <i class="bi
                                 @(project.HasSelectedIdea
-                                       ? "bi-lightbulb-fill"
-                                       : "bi-lightbulb")"></i>
+                                          ? "bi-lightbulb-fill"
+                                          : "bi-lightbulb")"></i>
                             </div>
 
                             <div>
@@ -603,6 +603,32 @@
                         }
 
                         <footer class="project-card-actions">
+                            @if (project.MaximumMembers > 1)
+                            {
+                                <a asp-page="/Student/ProjectWorkspace"
+                                   asp-route-projectId="@project.Id"
+                                   class="workspace-project-button">
+
+                                    <span class="workspace-project-icon">
+                                        <i class="bi bi-grid-1x2-fill"></i>
+                                    </span>
+
+                                    <span class="workspace-project-copy">
+                                        <strong>Open Shared Workspace</strong>
+                                        <small>
+                                            Real-time discussion, replies and project files
+                                        </small>
+                                    </span>
+
+                                    <span class="workspace-project-status">
+                                        <i class="bi bi-circle-fill"></i>
+                                        Live
+                                    </span>
+
+                                    <i class="bi bi-arrow-up-right workspace-project-arrow"></i>
+                                </a>
+                            }
+
                             <form method="post"
                                   asp-page-handler="OpenProject">
 
@@ -621,20 +647,19 @@
 
                                     <i class="bi
                                     @(project.IsActiveProject
-                                           ? "bi-arrow-right"
-                                           : "bi-box-arrow-up-right")"></i>
+                                              ? "bi-arrow-right"
+                                              : "bi-box-arrow-up-right")"></i>
                                 </button>
                             </form>
 
                             <a asp-page="/Student/TeamManagement"
                                asp-route-projectId="@project.Id"
-                               class="team-project-button"
-                               style="text-decoration: none;">
+                               class="team-project-button">
 
                                 <i class="bi
                                 @(project.Role == "owner"
-                                          ? "bi-person-plus"
-                                          : "bi-people")"></i>
+                                             ? "bi-person-plus"
+                                             : "bi-people")"></i>
 
                                 <span>
                                     @project.TeamActionText
@@ -1777,6 +1802,91 @@
                 display: flex;
             }
 
+        .workspace-project-button {
+            grid-column: 1 / -1;
+            min-height: 58px;
+            padding: .62rem .68rem;
+            overflow: hidden;
+            border: 1px solid #c8d8f5;
+            border-radius: 12px;
+            color: #173463;
+            background: radial-gradient( circle at 100% 0%, rgba(21, 94, 239, .12), transparent 34%), linear-gradient( 135deg, #f7faff, #eef4ff);
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto auto;
+            align-items: center;
+            gap: .58rem;
+            box-shadow: 0 8px 20px rgba(21, 94, 239, .075);
+            text-decoration: none;
+            transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+        }
+
+            .workspace-project-button:hover {
+                border-color: #9dbaf1;
+                color: #12366c;
+                transform: translateY(-1px);
+                box-shadow: 0 11px 24px rgba(21, 94, 239, .12);
+            }
+
+        .workspace-project-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 11px;
+            color: #fff;
+            background: linear-gradient( 135deg, #155eef, #527fd8);
+            display: grid;
+            place-items: center;
+            box-shadow: 0 7px 14px rgba(21, 94, 239, .18);
+        }
+
+        .workspace-project-copy {
+            min-width: 0;
+        }
+
+            .workspace-project-copy strong,
+            .workspace-project-copy small {
+                display: block;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .workspace-project-copy strong {
+                color: #173463;
+                font-size: .67rem;
+                font-weight: 850;
+            }
+
+            .workspace-project-copy small {
+                margin-top: .18rem;
+                color: #718096;
+                font-size: .54rem;
+                font-weight: 650;
+            }
+
+        .workspace-project-status {
+            padding: .28rem .48rem;
+            border: 1px solid #c9e7d3;
+            border-radius: 999px;
+            color: #2e7b49;
+            background: #effaf3;
+            display: inline-flex;
+            align-items: center;
+            gap: .28rem;
+            font-size: .54rem;
+            font-weight: 820;
+            white-space: nowrap;
+        }
+
+            .workspace-project-status i {
+                color: #36aa5c;
+                font-size: .35rem;
+            }
+
+        .workspace-project-arrow {
+            color: #5877a5;
+            font-size: .78rem;
+        }
+
         .open-project-button,
         .team-project-button {
             width: 100%;
@@ -1789,6 +1899,7 @@
             font-size: .63rem;
             font-weight: 800;
             white-space: nowrap;
+            text-decoration: none;
             transition: .15s ease;
         }
 
@@ -2179,6 +2290,15 @@
 
             .project-card-actions {
                 grid-template-columns: 1fr;
+            }
+
+            .workspace-project-button {
+                grid-column: auto;
+                grid-template-columns: auto minmax(0, 1fr) auto;
+            }
+
+            .workspace-project-status {
+                display: none;
             }
 
             .modal-actions {

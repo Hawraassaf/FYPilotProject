@@ -113,11 +113,6 @@ public class TeamManagementModel(
                 "/Account/Login");
         }
 
-        SuccessMessage =
-            TempData["Success"] as string;
-
-        ErrorMessage =
-            TempData["Error"] as string;
 
         if (ProjectId <= 0)
         {

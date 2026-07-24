@@ -171,11 +171,7 @@ public class IdeaGeneratorModel(
     public async Task<IActionResult> OnGetAsync(
        CancellationToken cancellationToken)
     {
-        SuccessMessage =
-            TempData["Success"] as string;
-
-        ErrorMessage =
-            TempData["Error"] as string;
+       
 
         var userId = UserId();
 

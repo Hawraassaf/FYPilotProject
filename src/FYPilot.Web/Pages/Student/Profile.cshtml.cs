@@ -69,7 +69,6 @@ public class ProfileModel(ApplicationDbContext db, IWebHostEnvironment env) : Pa
 
     public async Task<IActionResult> OnGetAsync()
     {
-        ErrorMessage = TempData["Error"] as string;
 
         var userId = GetCurrentUserId();
 

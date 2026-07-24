@@ -77,11 +77,11 @@ public class MarketDemandModel(
         Analysis?.YearlyPoints.Count ?? 0;
 
     public async Task<IActionResult> OnGetAsync(
-        CancellationToken cancellationToken)
+    CancellationToken cancellationToken)
     {
-        SuccessMessage = TempData["Success"] as string;
-        ErrorMessage = TempData["Error"] as string;
-        return await LoadPageAsync(UserId(), cancellationToken);
+        return await LoadPageAsync(
+            UserId(),
+            cancellationToken);
     }
 
     public async Task<IActionResult> OnPostAnalyzeAsync(
