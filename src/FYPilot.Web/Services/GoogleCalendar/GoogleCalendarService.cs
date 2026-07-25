@@ -1,7 +1,4 @@
-﻿using System;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using System.Net.Mail;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
 using FYPilot.Web.Configuration;
@@ -34,14 +31,19 @@ public class GoogleCalendarService(
         var flow = CreateFlow();
 
         AuthorizationCodeRequestUrl request =
-            flow.CreateAuthorizationCodeRequest(_settings.RedirectUri);
+            flow.CreateAuthorizationCodeRequest(
+                _settings.RedirectUri);
 
         request.State = state;
 
-        var authorizationUrl = request.Build().AbsoluteUri;
-        var separator = authorizationUrl.Contains('?') ? "&" : "?";
+        var authorizationUrl =
+            request.Build().AbsoluteUri;
 
-        // Helps Google return a refresh token during testing.
+        var separator =
+            authorizationUrl.Contains('?')
+                ? "&"
+                : "?";
+
         return authorizationUrl
                + separator
                + "prompt=consent";
@@ -54,77 +56,110 @@ public class GoogleCalendarService(
     {
         var flow = CreateFlow();
 
-        var token = await flow.ExchangeCodeForTokenAsync(
-            $"supervisor-{supervisorId}",
-            authorizationCode,
-            _settings.RedirectUri,
-            cancellationToken);
-
-        var existing = await db.GoogleCalendarTokens
-            .FirstOrDefaultAsync(
-                x => x.SupervisorId == supervisorId,
+        var token =
+            await flow.ExchangeCodeForTokenAsync(
+                $"supervisor-{supervisorId}",
+                authorizationCode,
+                _settings.RedirectUri,
                 cancellationToken);
 
-        var expiration = CalculateExpiration(token);
+        var existing =
+            await db.GoogleCalendarTokens
+                .FirstOrDefaultAsync(
+                    item =>
+                        item.SupervisorId ==
+                            supervisorId,
+                    cancellationToken);
+
+        var expiration =
+            CalculateExpiration(token);
 
         if (existing == null)
         {
-            existing = new GoogleCalendarToken
-            {
-                SupervisorId = supervisorId,
-                AccessToken = token.AccessToken ?? "",
-                RefreshToken = token.RefreshToken ?? "",
-                Expiration = expiration,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
+            existing =
+                new GoogleCalendarToken
+                {
+                    SupervisorId =
+                        supervisorId,
 
-            db.GoogleCalendarTokens.Add(existing);
+                    AccessToken =
+                        token.AccessToken ?? "",
+
+                    RefreshToken =
+                        token.RefreshToken ?? "",
+
+                    Expiration =
+                        expiration,
+
+                    CreatedAt =
+                        DateTime.UtcNow,
+
+                    UpdatedAt =
+                        DateTime.UtcNow
+                };
+
+            db.GoogleCalendarTokens.Add(
+                existing);
         }
         else
         {
             existing.AccessToken =
-                token.AccessToken ?? existing.AccessToken;
+                token.AccessToken
+                ?? existing.AccessToken;
 
-            if (!string.IsNullOrWhiteSpace(token.RefreshToken))
+            if (!string.IsNullOrWhiteSpace(
+                    token.RefreshToken))
             {
-                existing.RefreshToken = token.RefreshToken;
+                existing.RefreshToken =
+                    token.RefreshToken;
             }
 
-            existing.Expiration = expiration;
-            existing.UpdatedAt = DateTime.UtcNow;
+            existing.Expiration =
+                expiration;
+
+            existing.UpdatedAt =
+                DateTime.UtcNow;
         }
 
-        await db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(
+            cancellationToken);
     }
 
     public Task<bool> IsConnectedAsync(
         int supervisorId,
         CancellationToken cancellationToken = default)
     {
-        return db.GoogleCalendarTokens.AnyAsync(
-            x => x.SupervisorId == supervisorId &&
-                 x.RefreshToken != "",
-            cancellationToken);
+        return db.GoogleCalendarTokens
+            .AnyAsync(
+                item =>
+                    item.SupervisorId ==
+                        supervisorId &&
+                    item.RefreshToken != "",
+                cancellationToken);
     }
 
     public async Task DisconnectAsync(
         int supervisorId,
         CancellationToken cancellationToken = default)
     {
-        var token = await db.GoogleCalendarTokens
-            .FirstOrDefaultAsync(
-                x => x.SupervisorId == supervisorId,
-                cancellationToken);
+        var token =
+            await db.GoogleCalendarTokens
+                .FirstOrDefaultAsync(
+                    item =>
+                        item.SupervisorId ==
+                            supervisorId,
+                    cancellationToken);
 
         if (token == null)
         {
             return;
         }
 
-        db.GoogleCalendarTokens.Remove(token);
+        db.GoogleCalendarTokens.Remove(
+            token);
 
-        await db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(
+            cancellationToken);
     }
 
     public async Task<bool> HasConflictAsync(
@@ -139,7 +174,8 @@ public class GoogleCalendarService(
                 supervisorId,
                 cancellationToken);
 
-        var request = calendar.Events.List("primary");
+        var request =
+            calendar.Events.List("primary");
 
         request.TimeMinDateTimeOffset =
             new DateTimeOffset(
@@ -153,68 +189,154 @@ public class GoogleCalendarService(
                     endUtc,
                     DateTimeKind.Utc));
 
-        request.SingleEvents = true;
-        request.ShowDeleted = false;
-        request.MaxResults = 50;
+        request.SingleEvents =
+            true;
+
+        request.ShowDeleted =
+            false;
+
+        request.MaxResults =
+            50;
 
         var response =
-            await request.ExecuteAsync(cancellationToken);
+            await request.ExecuteAsync(
+                cancellationToken);
 
         await SaveRefreshedTokenAsync(
             tokenRow,
             credential.Token,
             cancellationToken);
 
-        return response.Items?.Any(calendarEvent =>
-            calendarEvent.Status != "cancelled" &&
-            calendarEvent.Id != excludedGoogleEventId) == true;
+        return response.Items?.Any(
+            calendarEvent =>
+                calendarEvent.Status !=
+                    "cancelled" &&
+                calendarEvent.Id !=
+                    excludedGoogleEventId) == true;
     }
 
-    public async Task<GoogleCalendarSyncResult> CreateEventAsync(
-        int supervisorId,
-        Meeting meeting,
-        string studentEmail,
-        CancellationToken cancellationToken = default)
+    public async Task<GoogleCalendarSyncResult>
+        CreateEventAsync(
+            int supervisorId,
+            Meeting meeting,
+            IReadOnlyCollection<string> attendeeEmails,
+            CancellationToken cancellationToken = default)
     {
+        var normalizedEmails =
+            NormalizeAttendeeEmails(
+                attendeeEmails);
+
+        if (normalizedEmails.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "The project has no valid attendee "
+                + "email addresses.");
+        }
+
         var (calendar, credential, tokenRow) =
             await CreateCalendarClientAsync(
                 supervisorId,
                 cancellationToken);
 
-        var needsGoogleMeet = RequiresGoogleMeet(meeting);
+        var needsGoogleMeet =
+            RequiresGoogleMeet(meeting);
 
-        var googleEvent = BuildGoogleEvent(
-            meeting,
-            studentEmail,
-            requestMeetLink: needsGoogleMeet);
+        var googleEvent =
+            BuildGoogleEvent(
+                meeting,
+                normalizedEmails,
+                requestMeetLink:
+                    needsGoogleMeet);
 
-        var request = calendar.Events.Insert(
-            googleEvent,
-            "primary");
+        /*
+         * First create the event silently.
+         *
+         * Invitations are sent only after the Google
+         * Meet link is ready. Therefore, a Meet
+         * generation failure cannot cause both a Google
+         * invitation and a FYPilot fallback email.
+         */
+        var insertRequest =
+            calendar.Events.Insert(
+                googleEvent,
+                "primary");
 
-        request.SendUpdates =
-            EventsResource.InsertRequest.SendUpdatesEnum.All;
+        insertRequest.SendUpdates =
+            EventsResource.InsertRequest
+                .SendUpdatesEnum.None;
 
         if (needsGoogleMeet)
         {
-            // Required. Without version 1, Google ignores
-            // ConferenceData.CreateRequest.
-            request.ConferenceDataVersion = 1;
+            insertRequest.ConferenceDataVersion =
+                1;
         }
 
         var created =
-            await request.ExecuteAsync(cancellationToken);
-
-        if (needsGoogleMeet)
-        {
-            // Meet creation can initially be pending.
-            // Fetch the event again until Google returns the link.
-            created = await WaitForMeetLinkAsync(
-                calendar,
-                "primary",
-                created.Id,
+            await insertRequest.ExecuteAsync(
                 cancellationToken);
+
+        try
+        {
+            if (needsGoogleMeet)
+            {
+                created =
+                    await WaitForMeetLinkAsync(
+                        calendar,
+                        "primary",
+                        created.Id,
+                        cancellationToken);
+            }
         }
+        catch
+        {
+            /*
+             * The event has not notified attendees yet.
+             * Remove the silent draft before allowing
+             * FYPilot to send its fallback email.
+             */
+            try
+            {
+                var cleanup =
+                    calendar.Events.Delete(
+                        "primary",
+                        created.Id);
+
+                cleanup.SendUpdates =
+                    EventsResource.DeleteRequest
+                        .SendUpdatesEnum.None;
+
+                await cleanup.ExecuteAsync(
+                    cancellationToken);
+            }
+            catch
+            {
+                // Preserve the original synchronization
+                // exception.
+            }
+
+            throw;
+        }
+
+        /*
+         * This final update is the one official Google
+         * invitation sent to every active member.
+         */
+        var invitationRequest =
+            calendar.Events.Update(
+                created,
+                "primary",
+                created.Id);
+
+        invitationRequest.SendUpdates =
+            EventsResource.UpdateRequest
+                .SendUpdatesEnum.All;
+
+        invitationRequest.ConferenceDataVersion =
+            1;
+
+        created =
+            await invitationRequest.ExecuteAsync(
+                cancellationToken);
 
         await SaveRefreshedTokenAsync(
             tokenRow,
@@ -227,19 +349,31 @@ public class GoogleCalendarService(
             GetMeetLink(created));
     }
 
-    public async Task<GoogleCalendarSyncResult> UpdateEventAsync(
-        int supervisorId,
-        Meeting meeting,
-        string studentEmail,
-        CancellationToken cancellationToken = default)
+    public async Task<GoogleCalendarSyncResult>
+        UpdateEventAsync(
+            int supervisorId,
+            Meeting meeting,
+            IReadOnlyCollection<string> attendeeEmails,
+            CancellationToken cancellationToken = default)
     {
+        var normalizedEmails =
+            NormalizeAttendeeEmails(
+                attendeeEmails);
+
+        if (normalizedEmails.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "The project has no valid attendee "
+                + "email addresses.");
+        }
+
         if (string.IsNullOrWhiteSpace(
                 meeting.GoogleCalendarEventId))
         {
             return await CreateEventAsync(
                 supervisorId,
                 meeting,
-                studentEmail,
+                normalizedEmails,
                 cancellationToken);
         }
 
@@ -248,75 +382,113 @@ public class GoogleCalendarService(
                 supervisorId,
                 cancellationToken);
 
-        var existing = await calendar.Events
-            .Get(
-                "primary",
-                meeting.GoogleCalendarEventId)
-            .ExecuteAsync(cancellationToken);
+        var existing =
+            await calendar.Events
+                .Get(
+                    "primary",
+                    meeting.GoogleCalendarEventId)
+                .ExecuteAsync(
+                    cancellationToken);
 
-        var needsGoogleMeet = RequiresGoogleMeet(meeting);
+        var needsGoogleMeet =
+            RequiresGoogleMeet(meeting);
 
-        // A previous Meet request may still be pending.
-        // Wait for it before creating another request.
         if (needsGoogleMeet &&
             string.IsNullOrWhiteSpace(
                 GetMeetLink(existing)) &&
             IsMeetCreationPending(existing))
         {
-            existing = await WaitForMeetLinkAsync(
-                calendar,
-                "primary",
-                meeting.GoogleCalendarEventId,
-                cancellationToken);
+            existing =
+                await WaitForMeetLinkAsync(
+                    calendar,
+                    "primary",
+                    meeting.GoogleCalendarEventId,
+                    cancellationToken);
         }
 
-        var existingMeetLink = GetMeetLink(existing);
+        var existingMeetLink =
+            GetMeetLink(existing);
 
-        // Request a new Meet only when this is an online/hybrid
-        // meeting and the Google event does not already have one.
-        var shouldCreateMeet =
+        var needsConferencePreparation =
             needsGoogleMeet &&
-            string.IsNullOrWhiteSpace(existingMeetLink);
+            string.IsNullOrWhiteSpace(
+                existingMeetLink);
 
-        var updatedEvent = BuildGoogleEvent(
-            meeting,
-            studentEmail,
-            requestMeetLink: shouldCreateMeet);
+        if (needsConferencePreparation)
+        {
+            /*
+             * Prepare the new Meet silently first.
+             * Attendee update emails are delayed until
+             * the Meet link exists.
+             */
+            var preparationEvent =
+                BuildGoogleEvent(
+                    meeting,
+                    normalizedEmails,
+                    requestMeetLink:
+                        true);
 
-        // Preserve the existing Meet when updating the meeting.
+            var preparationRequest =
+                calendar.Events.Update(
+                    preparationEvent,
+                    "primary",
+                    meeting.GoogleCalendarEventId);
+
+            preparationRequest.SendUpdates =
+                EventsResource.UpdateRequest
+                    .SendUpdatesEnum.None;
+
+            preparationRequest.ConferenceDataVersion =
+                1;
+
+            var prepared =
+                await preparationRequest.ExecuteAsync(
+                    cancellationToken);
+
+            existing =
+                await WaitForMeetLinkAsync(
+                    calendar,
+                    "primary",
+                    prepared.Id,
+                    cancellationToken);
+        }
+
+        var finalEvent =
+            BuildGoogleEvent(
+                meeting,
+                normalizedEmails,
+                requestMeetLink:
+                    false);
+
         if (needsGoogleMeet &&
-            !shouldCreateMeet &&
             existing.ConferenceData != null)
         {
-            updatedEvent.ConferenceData =
+            finalEvent.ConferenceData =
                 existing.ConferenceData;
         }
 
-        var request = calendar.Events.Update(
-            updatedEvent,
-            "primary",
-            meeting.GoogleCalendarEventId);
+        /*
+         * Google sends exactly one official update to
+         * current attendees. Attendees removed from the
+         * project are removed from the event by this
+         * attendee replacement.
+         */
+        var updateRequest =
+            calendar.Events.Update(
+                finalEvent,
+                "primary",
+                meeting.GoogleCalendarEventId);
 
-        request.SendUpdates =
-            EventsResource.UpdateRequest.SendUpdatesEnum.All;
+        updateRequest.SendUpdates =
+            EventsResource.UpdateRequest
+                .SendUpdatesEnum.All;
 
-        // Required for preserving an existing Meet and for
-        // generating a new Meet.
-        request.ConferenceDataVersion = 1;
+        updateRequest.ConferenceDataVersion =
+            1;
 
         var updated =
-            await request.ExecuteAsync(cancellationToken);
-
-        if (needsGoogleMeet &&
-            string.IsNullOrWhiteSpace(
-                GetMeetLink(updated)))
-        {
-            updated = await WaitForMeetLinkAsync(
-                calendar,
-                "primary",
-                updated.Id,
+            await updateRequest.ExecuteAsync(
                 cancellationToken);
-        }
 
         await SaveRefreshedTokenAsync(
             tokenRow,
@@ -339,14 +511,21 @@ public class GoogleCalendarService(
                 supervisorId,
                 cancellationToken);
 
-        var request = calendar.Events.Delete(
-            "primary",
-            googleEventId);
+        var request =
+            calendar.Events.Delete(
+                "primary",
+                googleEventId);
 
+        /*
+         * Google sends one official cancellation to
+         * every attendee.
+         */
         request.SendUpdates =
-            EventsResource.DeleteRequest.SendUpdatesEnum.All;
+            EventsResource.DeleteRequest
+                .SendUpdatesEnum.All;
 
-        await request.ExecuteAsync(cancellationToken);
+        await request.ExecuteAsync(
+            cancellationToken);
 
         await SaveRefreshedTokenAsync(
             tokenRow,
@@ -357,14 +536,21 @@ public class GoogleCalendarService(
     private GoogleAuthorizationCodeFlow CreateFlow()
     {
         return new GoogleAuthorizationCodeFlow(
-            new GoogleAuthorizationCodeFlow.Initializer
+            new GoogleAuthorizationCodeFlow
+                .Initializer
             {
-                ClientSecrets = new ClientSecrets
-                {
-                    ClientId = _settings.ClientId,
-                    ClientSecret = _settings.ClientSecret
-                },
-                Scopes = Scopes
+                ClientSecrets =
+                    new ClientSecrets
+                    {
+                        ClientId =
+                            _settings.ClientId,
+
+                        ClientSecret =
+                            _settings.ClientSecret
+                    },
+
+                Scopes =
+                    Scopes
             });
     }
 
@@ -376,10 +562,13 @@ public class GoogleCalendarService(
             int supervisorId,
             CancellationToken cancellationToken)
     {
-        var tokenRow = await db.GoogleCalendarTokens
-            .FirstOrDefaultAsync(
-                x => x.SupervisorId == supervisorId,
-                cancellationToken);
+        var tokenRow =
+            await db.GoogleCalendarTokens
+                .FirstOrDefaultAsync(
+                    item =>
+                        item.SupervisorId ==
+                            supervisorId,
+                    cancellationToken);
 
         if (tokenRow == null ||
             string.IsNullOrWhiteSpace(
@@ -389,40 +578,57 @@ public class GoogleCalendarService(
                 "Google Calendar is not connected.");
         }
 
-        var tokenResponse = new TokenResponse
-        {
-            AccessToken = tokenRow.AccessToken,
-            RefreshToken = tokenRow.RefreshToken,
-            IssuedUtc = DateTime.UtcNow,
+        var tokenResponse =
+            new TokenResponse
+            {
+                AccessToken =
+                    tokenRow.AccessToken,
 
-            ExpiresInSeconds = Math.Max(
-                0,
-                (long)(
-                    tokenRow.Expiration -
-                    DateTime.UtcNow
-                ).TotalSeconds)
-        };
+                RefreshToken =
+                    tokenRow.RefreshToken,
 
-        var credential = new UserCredential(
-            CreateFlow(),
-            $"supervisor-{supervisorId}",
-            tokenResponse);
+                IssuedUtc =
+                    DateTime.UtcNow,
+
+                ExpiresInSeconds =
+                    Math.Max(
+                        0,
+                        (long)(
+                            tokenRow.Expiration -
+                            DateTime.UtcNow
+                        ).TotalSeconds)
+            };
+
+        var credential =
+            new UserCredential(
+                CreateFlow(),
+                $"supervisor-{supervisorId}",
+                tokenResponse);
 
         if (credential.Token.IsExpired(
-                Google.Apis.Util.SystemClock.Default))
+                Google.Apis.Util.SystemClock
+                    .Default))
         {
             await credential.RefreshTokenAsync(
                 cancellationToken);
         }
 
-        var calendar = new CalendarService(
-            new BaseClientService.Initializer
-            {
-                HttpClientInitializer = credential,
-                ApplicationName = "FYPilot"
-            });
+        var calendar =
+            new CalendarService(
+                new BaseClientService
+                    .Initializer
+                {
+                    HttpClientInitializer =
+                        credential,
 
-        return (calendar, credential, tokenRow);
+                    ApplicationName =
+                        "FYPilot"
+                });
+
+        return (
+            calendar,
+            credential,
+            tokenRow);
     }
 
     private async Task SaveRefreshedTokenAsync(
@@ -431,99 +637,131 @@ public class GoogleCalendarService(
         CancellationToken cancellationToken)
     {
         row.AccessToken =
-            token.AccessToken ?? row.AccessToken;
+            token.AccessToken
+            ?? row.AccessToken;
 
         if (!string.IsNullOrWhiteSpace(
                 token.RefreshToken))
         {
-            row.RefreshToken = token.RefreshToken;
+            row.RefreshToken =
+                token.RefreshToken;
         }
 
-        row.Expiration = CalculateExpiration(token);
-        row.UpdatedAt = DateTime.UtcNow;
+        row.Expiration =
+            CalculateExpiration(token);
 
-        await db.SaveChangesAsync(cancellationToken);
+        row.UpdatedAt =
+            DateTime.UtcNow;
+
+        await db.SaveChangesAsync(
+            cancellationToken);
     }
 
     private static DateTime CalculateExpiration(
         TokenResponse token)
     {
-        var issued = token.IssuedUtc == default
-            ? DateTime.UtcNow
-            : token.IssuedUtc;
+        var issued =
+            token.IssuedUtc == default
+                ? DateTime.UtcNow
+                : token.IssuedUtc;
 
         return issued.AddSeconds(
-            token.ExpiresInSeconds ?? 3600);
+            token.ExpiresInSeconds
+            ?? 3600);
     }
 
     private static Event BuildGoogleEvent(
         Meeting meeting,
-        string studentEmail,
+        IReadOnlyCollection<string> attendeeEmails,
         bool requestMeetLink)
     {
-        var startUtc = DateTime.SpecifyKind(
-            meeting.ScheduledAt,
-            DateTimeKind.Utc);
+        var startUtc =
+            DateTime.SpecifyKind(
+                meeting.ScheduledAt,
+                DateTimeKind.Utc);
 
-        var endUtc = startUtc.AddMinutes(
-            meeting.DurationMinutes);
+        var endUtc =
+            startUtc.AddMinutes(
+                meeting.DurationMinutes);
 
-        var googleEvent = new Event
-        {
-            Summary = meeting.Title,
-            Description = BuildDescription(meeting),
-
-            Location = string.Equals(
-                meeting.MeetingMode,
-                "in_person",
-                StringComparison.OrdinalIgnoreCase)
-                    ? meeting.LocationOrLink
-                    : null,
-
-            Start = new EventDateTime
+        var googleEvent =
+            new Event
             {
-                DateTimeDateTimeOffset =
-                    new DateTimeOffset(startUtc),
+                Summary =
+                    meeting.Title,
 
-                TimeZone = "UTC"
-            },
+                Description =
+                    BuildDescription(meeting),
 
-            End = new EventDateTime
-            {
-                DateTimeDateTimeOffset =
-                    new DateTimeOffset(endUtc),
+                Location =
+                    string.Equals(
+                        meeting.MeetingMode,
+                        "in_person",
+                        StringComparison
+                            .OrdinalIgnoreCase)
+                        ? meeting.LocationOrLink
+                        : null,
 
-                TimeZone = "UTC"
-            },
-
-            Attendees =
-            [
-                new EventAttendee
-                {
-                    Email = studentEmail
-                }
-            ],
-
-            Reminders = new Event.RemindersData
-            {
-                UseDefault = false,
-
-                Overrides =
-                [
-                    new EventReminder
+                Start =
+                    new EventDateTime
                     {
-                        Method = "email",
-                        Minutes = 24 * 60
+                        DateTimeDateTimeOffset =
+                            new DateTimeOffset(
+                                startUtc),
+
+                        TimeZone =
+                            "UTC"
                     },
 
-                    new EventReminder
+                End =
+                    new EventDateTime
                     {
-                        Method = "popup",
-                        Minutes = 30
+                        DateTimeDateTimeOffset =
+                            new DateTimeOffset(
+                                endUtc),
+
+                        TimeZone =
+                            "UTC"
+                    },
+
+                Attendees =
+                    attendeeEmails
+                        .Select(email =>
+                            new EventAttendee
+                            {
+                                Email =
+                                    email
+                            })
+                        .ToList(),
+
+                Reminders =
+                    new Event.RemindersData
+                    {
+                        UseDefault =
+                            false,
+
+                        Overrides =
+                        [
+                            new EventReminder
+                            {
+                                Method =
+                                    "email",
+
+                                Minutes =
+                                    24 * 60
+                            },
+
+                            new EventReminder
+                            {
+                                Method =
+                                    "popup",
+
+                                Minutes =
+                                    30
+                            }
+                        ]
                     }
-                ]
-            }
-        };
+            };
 
         if (requestMeetLink)
         {
@@ -533,22 +771,54 @@ public class GoogleCalendarService(
                     CreateRequest =
                         new CreateConferenceRequest
                         {
-                            // Must be unique for every
-                            // conference-generation request.
                             RequestId =
-                                $"fypilot-{meeting.Id}-" +
-                                $"{Guid.NewGuid():N}",
+                                $"fypilot-{meeting.Id}-"
+                                + $"{Guid.NewGuid():N}",
 
                             ConferenceSolutionKey =
                                 new ConferenceSolutionKey
                                 {
-                                    Type = "hangoutsMeet"
+                                    Type =
+                                        "hangoutsMeet"
                                 }
                         }
                 };
         }
 
         return googleEvent;
+    }
+
+    private static List<string>
+        NormalizeAttendeeEmails(
+            IReadOnlyCollection<string>? attendeeEmails)
+    {
+        if (attendeeEmails == null ||
+            attendeeEmails.Count == 0)
+        {
+            return [];
+        }
+
+        return attendeeEmails
+            .Where(email =>
+                !string.IsNullOrWhiteSpace(
+                    email))
+            .Select(email =>
+                email.Trim())
+            .Where(IsValidEmail)
+            .Distinct(
+                StringComparer.OrdinalIgnoreCase)
+            .OrderBy(email =>
+                email,
+                StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static bool IsValidEmail(
+        string email)
+    {
+        return MailAddress.TryCreate(
+            email,
+            out _);
     }
 
     private static bool RequiresGoogleMeet(
@@ -567,14 +837,12 @@ public class GoogleCalendarService(
     private static string? GetMeetLink(
         Event googleEvent)
     {
-        // Google normally places the Meet URL here.
         if (!string.IsNullOrWhiteSpace(
                 googleEvent.HangoutLink))
         {
             return googleEvent.HangoutLink;
         }
 
-        // Fallback: retrieve the video conference entry point.
         return googleEvent.ConferenceData?
             .EntryPoints?
             .FirstOrDefault(entryPoint =>
@@ -604,31 +872,42 @@ public class GoogleCalendarService(
             string googleEventId,
             CancellationToken cancellationToken)
     {
-        const int maximumAttempts = 15;
+        const int maximumAttempts =
+            15;
 
-        var delay = TimeSpan.FromSeconds(1);
+        var delay =
+            TimeSpan.FromSeconds(1);
 
-        Event? currentEvent = null;
+        Event? currentEvent =
+            null;
 
         for (var attempt = 1;
              attempt <= maximumAttempts;
              attempt++)
         {
-            currentEvent = await calendarService.Events
-                .Get(calendarId, googleEventId)
-                .ExecuteAsync(cancellationToken);
+            currentEvent =
+                await calendarService.Events
+                    .Get(
+                        calendarId,
+                        googleEventId)
+                    .ExecuteAsync(
+                        cancellationToken);
 
-            var meetLink = GetMeetLink(currentEvent);
+            var meetLink =
+                GetMeetLink(
+                    currentEvent);
 
-            if (!string.IsNullOrWhiteSpace(meetLink))
+            if (!string.IsNullOrWhiteSpace(
+                    meetLink))
             {
                 return currentEvent;
             }
 
-            var status = currentEvent.ConferenceData?
-                .CreateRequest?
-                .Status?
-                .StatusCode;
+            var status =
+                currentEvent.ConferenceData?
+                    .CreateRequest?
+                    .Status?
+                    .StatusCode;
 
             if (string.Equals(
                     status,
@@ -636,8 +915,8 @@ public class GoogleCalendarService(
                     StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException(
-                    "Google Calendar created the event, " +
-                    "but Google Meet generation failed.");
+                    "Google Calendar created the event, "
+                    + "but Google Meet generation failed.");
             }
 
             await Task.Delay(
@@ -646,10 +925,10 @@ public class GoogleCalendarService(
         }
 
         throw new InvalidOperationException(
-            "Google Calendar created or updated the " +
-            "event, but did not return the Google Meet " +
-            "link yet. Google event ID: " +
-            googleEventId);
+            "Google Calendar created or updated the "
+            + "event, but did not return the Google "
+            + "Meet link yet. Google event ID: "
+            + googleEventId);
     }
 
     private static string BuildDescription(
@@ -657,6 +936,9 @@ public class GoogleCalendarService(
     {
         return $"""
         FYPilot Final Year Project Meeting
+
+        Project ID:
+        {meeting.ProjectId?.ToString() ?? "Not available"}
 
         Agenda:
         {meeting.Agenda}

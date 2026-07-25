@@ -2,7 +2,7 @@
 @model FYPilot.Web.Pages.Supervisor.ProgressTrackingModel
 @{
     ViewData["Title"] = "Progress Tracking";
-    ViewData["Subtitle"] = "Monitor student project progress, milestones, risks, and updates.";
+    ViewData["Subtitle"] = "Monitor shared project progress, milestones, risks, and team updates.";
 
     var project = Model.SelectedProject;
     var milestonePercent =
@@ -25,13 +25,13 @@
     <header class="pt-topbar">
         <div>
             <h1>Progress Tracking</h1>
-            <p>Monitor student project progress, milestones, risks, and updates.</p>
+            <p>Monitor shared project progress, milestones, risks, and team updates.</p>
         </div>
 
         <div class="pt-actions">
             <form method="get" class="pt-search">
                 <i class="bi bi-search"></i>
-                <select name="ideaId" onchange="this.form.submit()">
+                <select name="projectId" onchange="this.form.submit()">
                     @if (!Model.Projects.Any())
                     {
                         <option>No projects available</option>
@@ -40,8 +40,8 @@
                     {
                         @foreach (var item in Model.Projects)
                         {
-                            <option value="@item.IdeaId" selected="@(project?.IdeaId == item.IdeaId)">
-                                @item.StudentName - @item.ProjectTitle
+                            <option value="@item.ProjectId" selected="@(project?.ProjectId == item.ProjectId)">
+                                @item.ProjectTitle — @item.OfficialIdeaTitle
                             </option>
                         }
                     }
@@ -60,7 +60,7 @@
         <section class="pt-empty">
             <i class="bi bi-graph-up-arrow"></i>
             <h2>No projects to track yet</h2>
-            <p>When students generate or submit ideas, their progress tracking view will appear here.</p>
+            <p>When a supervised project has an official idea, its shared progress view will appear here.</p>
             <a href="/Supervisor/IdeaReview">Open Feedback Workspace</a>
         </section>
     }
@@ -68,21 +68,27 @@
     {
         <section class="pt-profile-card">
             <div class="pt-student-avatar">
-                @project.StudentInitials
+                @project.ProjectInitials
             </div>
 
             <div class="pt-project-main">
                 <div class="pt-name-line">
-                    <h2>@project.StudentName</h2>
+                    <h2>@project.ProjectName</h2>
                     <span>@project.Domain</span>
                 </div>
 
-                <h3>@project.ProjectTitle</h3>
+                <h3>@project.OfficialIdeaTitle</h3>
 
                 <div class="pt-project-meta">
                     <span><i class="bi bi-fingerprint"></i>@project.ProjectCode</span>
                     <span><i class="bi bi-calendar3"></i>@project.StartDate.ToString("MMM d, yyyy") - @project.EndDate.ToString("MMM d, yyyy")</span>
                     <span><i class="bi bi-speedometer2"></i>@project.DifficultyLevel</span>
+                    <span>
+                        <i class="bi bi-people"></i>
+                        @project.ProjectMemberCount
+                        @(project.ProjectMemberCount == 1 ? "member" : "members")
+                        · @project.ProjectMembers
+                    </span>
                 </div>
             </div>
 
@@ -93,8 +99,11 @@
                 </div>
 
                 <div>
-                    <span>Department</span>
-                    <strong>@project.Department</strong>
+                    <span>Project Team</span>
+                    <strong>
+                        @project.ProjectMemberCount
+                        @(project.ProjectMemberCount == 1 ? "active member" : "active members")
+                    </strong>
                 </div>
 
                 <div>
@@ -123,9 +132,9 @@
                     <span>Milestones Completed</span>
                     <strong>@project.MilestonesCompleted / @project.MilestonesTotal</strong>
                     <div class="pt-progress-bar">
-                        <i style="width:@milestonePercent / project.MilestonesTotal)%"></i>
+                        <i style="width:@milestonePercent%"></i>
                     </div>
-                    <small>@milestonePercent / project.MilestonesTotal)% completed</small>
+                    <small>@milestonePercent% completed</small>
                 </div>
             </article>
 
@@ -147,7 +156,7 @@
                     <span>Deliverables Submitted</span>
                     <strong>@project.DeliverablesSubmitted / @project.DeliverablesTotal</strong>
                     <div class="pt-progress-bar">
-                        <i style="width:@deliverablePercent/ project.DeliverablesTotal)%"></i>
+                        <i style="width:@deliverablePercent%"></i>
                     </div>
                     <small>Next due: @project.NextDue (@project.NextDueDate.ToString("MMM d"))</small>
                 </div>
@@ -161,7 +170,7 @@
                     <h2>Project Roadmap</h2>
                 </div>
 
-                <a href="/Supervisor/IdeaReview?ideaId=@project.IdeaId" class="pt-header-link">
+                <a href="/Supervisor/IdeaReview?projectId=@project.ProjectId&ideaId=@project.IdeaId" class="pt-header-link">
                     View Review Details
                     <i class="bi bi-box-arrow-up-right"></i>
                 </a>
@@ -201,7 +210,7 @@
                         <h2>Risks & Blockers</h2>
                     </div>
 
-                    <a href="/Supervisor/IdeaReview?ideaId=@project.IdeaId" class="pt-header-link">View All</a>
+                    <a href="/Supervisor/IdeaReview?projectId=@project.ProjectId&ideaId=@project.IdeaId" class="pt-header-link">View All</a>
                 </div>
 
                 <div class="pt-risk-list">
@@ -228,7 +237,7 @@
                 </div>
 
                 <div class="pt-card-footer">
-                    <a href="/Supervisor/IdeaReview?ideaId=@project.IdeaId">
+                    <a href="/Supervisor/IdeaReview?projectId=@project.ProjectId&ideaId=@project.IdeaId">
                         <i class="bi bi-plus-lg"></i>
                         Add Guidance
                     </a>
@@ -239,10 +248,10 @@
                 <div class="pt-card-header">
                     <div class="pt-card-title">
                         <i class="bi bi-chat-square-text"></i>
-                        <h2>Recent Updates</h2>
+                        <h2>Shared Project Updates</h2>
                     </div>
 
-                    <a href="/Supervisor/IdeaDiscussion?ideaId=@project.IdeaId" class="pt-header-link">Open Discussion</a>
+                    <a href="/Supervisor/IdeaDiscussion?projectId=@project.ProjectId&ideaId=@project.IdeaId" class="pt-header-link">Open Discussion</a>
                 </div>
 
                 <div class="pt-update-list">
@@ -265,7 +274,7 @@
                 </div>
 
                 <div class="pt-card-footer">
-                    <a href="/Supervisor/IdeaDiscussion?ideaId=@project.IdeaId">
+                    <a href="/Supervisor/IdeaDiscussion?projectId=@project.ProjectId&ideaId=@project.IdeaId">
                         <i class="bi bi-plus-lg"></i>
                         Add Update
                     </a>

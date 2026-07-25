@@ -4,9 +4,27 @@
 
 @{
     ViewData["Title"] = "Supervisor Feedback";
-    ViewData["Subtitle"] = "Feedback history and communication with your supervisor";
+    ViewData["Subtitle"] =
+        "Shared project feedback and communication with your supervisor";
 
     var selected = Model.SelectedFeedback;
+
+    var activeProjectMembers =
+        Model.CurrentProject?.Members
+            .Where(member =>
+                member.Status == "active" &&
+                member.User != null)
+            .OrderBy(member =>
+                string.Equals(
+                    member.Role,
+                    "owner",
+                    StringComparison.OrdinalIgnoreCase)
+                    ? 0
+                    : 1)
+            .ThenBy(member =>
+                member.JoinedAt)
+            .ToList()
+        ?? [];
 }
 
 @section Head {
@@ -375,10 +393,10 @@
         }
 
         /*
-                                   IMPORTANT:
-                                   white-space: normal is what fixes the giant message cards.
-                                   The old pre-wrap preserved Razor indentation/new lines and made bubbles huge.
-                                */
+                                           IMPORTANT:
+                                           white-space: normal is what fixes the giant message cards.
+                                           The old pre-wrap preserved Razor indentation/new lines and made bubbles huge.
+                                        */
         .sf-bubble {
             display: inline-flex;
             flex-direction: column;
@@ -658,6 +676,217 @@
                 background: linear-gradient(135deg, #28385E, #304163);
             }
 
+        .sf-project-context {
+            display: grid;
+            grid-template-columns: minmax(230px, .72fr) minmax(0, 1.28fr);
+            gap: .85rem;
+            margin-bottom: 1rem;
+        }
+
+        .sf-project-picker,
+        .sf-project-summary {
+            border: 1px solid #E8ECF2;
+            border-radius: 20px;
+            background: #ffffff;
+            box-shadow: 0 10px 26px rgba(15,23,42,.045);
+        }
+
+        .sf-project-picker {
+            padding: .95rem;
+        }
+
+            .sf-project-picker label {
+                display: block;
+                margin-bottom: .42rem;
+                color: #304163;
+                font-size: .72rem;
+                font-weight: 800;
+                letter-spacing: .04em;
+                text-transform: uppercase;
+            }
+
+        .sf-project-select-wrap {
+            position: relative;
+        }
+
+            .sf-project-select-wrap select {
+                width: 100%;
+                min-height: 45px;
+                padding: 0 2.25rem 0 .78rem;
+                appearance: none;
+                border: 1px solid #DCE3EC;
+                border-radius: 12px;
+                color: #24364F;
+                background: #FAFBFD;
+                outline: none;
+                font-size: .78rem;
+                font-weight: 720;
+            }
+
+                .sf-project-select-wrap select:focus {
+                    border-color: #7D94B1;
+                    box-shadow: 0 0 0 .2rem rgba(81,108,141,.12);
+                    background: #ffffff;
+                }
+
+            .sf-project-select-wrap i {
+                position: absolute;
+                top: 50%;
+                right: .78rem;
+                color: #718096;
+                pointer-events: none;
+                transform: translateY(-50%);
+            }
+
+        .sf-project-picker small {
+            display: block;
+            margin-top: .45rem;
+            color: #8290A3;
+            font-size: .64rem;
+            line-height: 1.45;
+        }
+
+        .sf-project-summary {
+            padding: .95rem 1rem;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: .9rem;
+            align-items: center;
+        }
+
+        .sf-project-summary-main {
+            min-width: 0;
+        }
+
+        .sf-project-summary-kicker {
+            display: flex;
+            align-items: center;
+            gap: .35rem;
+            color: #718096;
+            font-size: .64rem;
+            font-weight: 800;
+            letter-spacing: .05em;
+            text-transform: uppercase;
+        }
+
+        .sf-project-summary h2 {
+            margin: .18rem 0 0;
+            overflow: hidden;
+            color: #203655;
+            font-size: .98rem;
+            font-weight: 830;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .sf-project-idea {
+            margin-top: .3rem;
+            color: #64748B;
+            font-size: .7rem;
+            line-height: 1.45;
+        }
+
+            .sf-project-idea strong {
+                color: #425B7D;
+            }
+
+        .sf-project-members {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .38rem;
+            margin-top: .58rem;
+        }
+
+        .sf-project-member {
+            display: inline-flex;
+            align-items: center;
+            gap: .34rem;
+            padding: .28rem .46rem;
+            border: 1px solid #E2E8F0;
+            border-radius: 999px;
+            color: #506079;
+            background: #F8FAFC;
+            font-size: .58rem;
+            font-weight: 700;
+        }
+
+            .sf-project-member span {
+                width: 21px;
+                height: 21px;
+                border-radius: 50%;
+                color: #ffffff;
+                background: linear-gradient(135deg, #304163, #7188A7);
+                display: grid;
+                place-items: center;
+                font-size: .45rem;
+                font-weight: 850;
+            }
+
+            .sf-project-member b {
+                color: #334A68;
+                font-weight: 800;
+            }
+
+        .sf-project-supervision {
+            min-width: 175px;
+            padding: .7rem .75rem;
+            border: 1px solid #E3E8EF;
+            border-radius: 14px;
+            background: #F8FAFC;
+        }
+
+            .sf-project-supervision > span {
+                display: block;
+                color: #8490A3;
+                font-size: .58rem;
+                font-weight: 800;
+                letter-spacing: .04em;
+                text-transform: uppercase;
+            }
+
+            .sf-project-supervision strong {
+                display: block;
+                margin-top: .2rem;
+                color: #2C466A;
+                font-size: .72rem;
+            }
+
+            .sf-project-supervision small {
+                display: inline-flex;
+                align-items: center;
+                gap: .28rem;
+                margin-top: .36rem;
+                padding: .24rem .42rem;
+                border-radius: 999px;
+                color: #5F6E82;
+                background: #EEF2F6;
+                font-size: .55rem;
+                font-weight: 750;
+            }
+
+                .sf-project-supervision small i {
+                    font-size: .36rem;
+                }
+
+        .sf-readonly-note {
+            margin-top: 1rem;
+            padding: .85rem .9rem;
+            border: 1px solid #DDE5EF;
+            border-radius: 16px;
+            color: #53647A;
+            background: #F7F9FC;
+            display: flex;
+            align-items: flex-start;
+            gap: .55rem;
+            font-size: .76rem;
+            line-height: 1.55;
+        }
+
+            .sf-readonly-note i {
+                margin-top: .08rem;
+                color: #516C8D;
+            }
+
         @@media (max-width: 1199px) {
             .sf-layout {
                 grid-template-columns: 1fr;
@@ -669,6 +898,18 @@
         }
 
         @@media (max-width: 767px) {
+            .sf-project-context {
+                grid-template-columns: 1fr;
+            }
+
+            .sf-project-summary {
+                grid-template-columns: 1fr;
+            }
+
+            .sf-project-supervision {
+                min-width: 0;
+            }
+
             .sf-main-head {
                 flex-direction: column;
             }
@@ -959,13 +1200,13 @@
     <div class="sf-hero">
         <h1>Supervisor Feedback</h1>
         <p>
-            View your supervisor’s previous reviews and continue the discussion directly under each feedback.
+            Review the official feedback for each project and continue one shared
+            discussion with your supervisor and active collaborators.
         </p>
     </div>
-
     @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
     {
-        <div class="alert alert-success rounded-4">
+        <div class="alert alert-success rounded-4 mb-3">
             <i class="bi bi-check-circle me-2"></i>
             @Model.SuccessMessage
         </div>
@@ -973,31 +1214,166 @@
 
     @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
     {
-        <div class="alert alert-danger rounded-4">
+        <div class="alert alert-danger rounded-4 mb-3">
             <i class="bi bi-exclamation-triangle me-2"></i>
             @Model.ErrorMessage
         </div>
     }
+    @if (Model.HasProjects)
+    {
+        var statusMeta =
+            SupervisorStatusMeta(
+                Model.AssignmentStatus);
 
-    @if (!Model.CanAccessFeedback)
+        <section class="sf-project-context">
+            <form method="get"
+                  class="sf-project-picker"
+                  id="feedbackProjectForm">
+
+                <label for="feedbackProjectSelect">
+                    Current project
+                </label>
+
+                <div class="sf-project-select-wrap">
+                    <select id="feedbackProjectSelect"
+                            name="projectId"
+                            aria-label="Choose project">
+
+                        @foreach (var project
+                            in Model.AccessibleProjects)
+                        {
+                            if (project.Id == Model.ProjectId)
+                            {
+                                <option value="@project.Id"
+                                        selected>
+                                    @project.Title — @DisplayRole(project.Role)
+                                </option>
+                            }
+                            else
+                            {
+                                <option value="@project.Id">
+                                    @project.Title — @DisplayRole(project.Role)
+                                </option>
+                            }
+                        }
+                    </select>
+
+                    <i class="bi bi-chevron-down"></i>
+                </div>
+
+                <small>
+                    Feedback, supervisor assignment and discussions
+                    are separated by project.
+                </small>
+            </form>
+
+            @if (Model.CurrentProject != null)
+            {
+                <div class="sf-project-summary">
+                    <div class="sf-project-summary-main">
+                        <div class="sf-project-summary-kicker">
+                            <i class="bi bi-folder2-open"></i>
+                            Shared project
+                        </div>
+
+                        <h2>@SafeProjectTitle(Model.CurrentProject.Title)</h2>
+
+                        <div class="sf-project-idea">
+                            Official idea:
+                            <strong>
+                                @(Model.CurrentProject.ProjectIdea?.Title
+                                  ?? "No official idea selected")
+                            </strong>
+                        </div>
+
+                        <div class="sf-project-members"
+                             aria-label="Active project members">
+
+                            @foreach (var member
+                                in activeProjectMembers)
+                            {
+                                <div class="sf-project-member"
+                                     title="@member.User!.FullName — @DisplayRole(member.Role)">
+                                    <span>
+                                        @Initials(member.User.FullName)
+                                    </span>
+
+                                    <b>@member.User.FullName</b>
+
+                                    <em>
+                                        @DisplayRole(member.Role)
+                                    </em>
+                                </div>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="sf-project-supervision">
+                        <span>Project supervisor</span>
+
+                        <strong>
+                            @(Model.CurrentSupervisor?.FullName
+                              ?? Model.CurrentAssignment?.Supervisor?.FullName
+                              ?? "Not assigned")
+                        </strong>
+
+                        <small style="color:@statusMeta.Color;background:@statusMeta.Background">
+                            <i class="bi bi-circle-fill"></i>
+                            @statusMeta.Label
+                        </small>
+                    </div>
+                </div>
+            }
+        </section>
+    }
+
+    @if (!Model.HasProjects)
+    {
+        <div class="sf-empty">
+            <div>
+                <div class="sf-empty-icon">
+                    <i class="bi bi-folder-plus"></i>
+                </div>
+
+                <h2>No Project Available</h2>
+
+                <p>
+                    Create or join a project first. Supervisor assignment,
+                    official evaluations and feedback are managed separately
+                    for every project.
+                </p>
+
+                <a asp-page="/Student/MyProjects"
+                   class="btn sf-send-btn mt-3"
+                   style="text-decoration:none;">
+                    <i class="bi bi-folder2-open me-1"></i>
+                    Open My Projects
+                </a>
+            </div>
+        </div>
+    }
+    else if (!Model.CanAccessFeedback)
     {
         <section class="sf-gate">
             <div class="sf-gate-card">
 
-                @if (Model.CurrentAssignment?.Status == "pending_admin")
+                @if (Model.AssignmentStatus == "pending_admin" ||
+                     Model.CurrentAssignment?.Status == "pending_admin")
                 {
                     <div class="sf-gate-header">
                         <div>
                             <div class="sf-gate-kicker">
                                 <i class="bi bi-hourglass-split"></i>
-                                Assignment request submitted
+                                Project supervisor request submitted
                             </div>
 
                             <h2>Waiting for Admin Approval</h2>
 
                             <p>
-                                You selected a supervisor. The admin must review and approve the assignment before
-                                you can access supervisor feedback and official discussion.
+                                The project owner selected a supervisor for
+                                <strong>@SafeProjectTitle(Model.CurrentProject?.Title)</strong>.
+                                After admin approval, the same supervisor will
+                                automatically apply to every active collaborator.
                             </p>
                         </div>
 
@@ -1008,35 +1384,64 @@
                     </div>
 
                     <div class="sf-requested-box">
-                        <span>Requested supervisor</span>
-                        <strong>@Model.CurrentAssignment.Supervisor?.FullName</strong>
+                        <span>Requested project supervisor</span>
+
+                        <strong>
+                            @(Model.CurrentAssignment?.Supervisor?.FullName
+                              ?? "Supervisor")
+                        </strong>
+
                         <small>
-                            @Model.CurrentAssignment.Supervisor?.SupervisorProfile?.Specialization
-                            @if (!string.IsNullOrWhiteSpace(Model.CurrentAssignment.Supervisor?.SupervisorProfile?.Department))
+                            @Model.CurrentAssignment?.Supervisor
+                            ?.SupervisorProfile?.Specialization
+
+                            @if (!string.IsNullOrWhiteSpace(
+                                Model.CurrentAssignment?.Supervisor
+                                    ?.SupervisorProfile?.Department))
                             {
-                                <text> · @Model.CurrentAssignment.Supervisor?.SupervisorProfile?.Department</text>
+                                <text>
+                                    · @Model.CurrentAssignment?.Supervisor
+                                    ?.SupervisorProfile?.Department
+                                </text>
                             }
                         </small>
                     </div>
+
+                    @if (!Model.IsProjectOwner)
+                    {
+                        <div class="sf-readonly-note">
+                            <i class="bi bi-people-fill"></i>
+
+                            <span>
+                                You are a collaborator in this project.
+                                The owner manages the supervisor request,
+                                and you will automatically receive access
+                                after the admin approves it.
+                            </span>
+                        </div>
+                    }
                 }
-                else
+                else if (Model.CanRequestSupervisor)
                 {
                     <div class="sf-gate-header">
                         <div>
                             <div class="sf-gate-kicker">
                                 <i class="bi bi-person-check"></i>
-                                Supervisor assignment required
+                                Project supervisor required
                             </div>
 
                             @if (Model.CurrentAssignment?.Status == "rejected")
                             {
-                                <h2>Supervisor Request Not Approved</h2>
+                                <h2>Project Supervisor Request Not Approved</h2>
+
                                 <p>
-                                    The admin did not approve your previous supervisor request.
-                                    Please choose another available supervisor from the list below.
+                                    The previous request was not approved.
+                                    As the project owner, choose another
+                                    available supervisor for the whole team.
                                 </p>
 
-                                @if (!string.IsNullOrWhiteSpace(Model.CurrentAssignment.AdminNote))
+                                @if (!string.IsNullOrWhiteSpace(
+                                    Model.CurrentAssignment.AdminNote))
                                 {
                                     <div class="sf-admin-note">
                                         <strong>Admin note:</strong>
@@ -1046,92 +1451,140 @@
                             }
                             else
                             {
-                                <h2>Choose Your Supervisor</h2>
+                                <h2>Choose the Project Supervisor</h2>
+
                                 <p>
-                                    Select one available supervisor that matches your major and profile.
-                                    Supervisors who already reached 4 active students are hidden from this list.
+                                    Select one supervisor for
+                                    <strong>@SafeProjectTitle(Model.CurrentProject?.Title)</strong>.
+                                    Every active collaborator will inherit the
+                                    same supervisor, evaluation and meeting flow.
                                 </p>
                             }
                         </div>
 
                         <div class="sf-gate-state">
                             4 max
-                            <span>students per supervisor</span>
+                            <span>projects per supervisor</span>
                         </div>
                     </div>
 
                     @if (Model.AvailableSupervisors.Any())
                     {
                         <div class="sf-supervisor-grid">
-                            @foreach (var supervisor in Model.AvailableSupervisors)
+                            @foreach (var supervisor
+                                in Model.AvailableSupervisors)
                             {
-                                var capacityPercent = supervisor.CapacityLimit == 0
-                                    ? 0
-                                    : Math.Clamp((supervisor.CapacityUsed * 100) / supervisor.CapacityLimit, 0, 100);
+                                var capacityPercent =
+                                    supervisor.CapacityLimit == 0
+                                        ? 0
+                                        : Math.Clamp(
+                                            (supervisor.CapacityUsed * 100) /
+                                            supervisor.CapacityLimit,
+                                            0,
+                                            100);
 
-                                <form method="post" asp-page-handler="RequestSupervisor" class="sf-supervisor-card">
+                                <form method="post"
+                                      asp-page-handler="RequestSupervisor"
+                                      class="sf-supervisor-card">
+
                                     @Html.AntiForgeryToken()
 
-                                    <input type="hidden" name="supervisorId" value="@supervisor.SupervisorId" />
+                                    <input type="hidden"
+                                           name="projectId"
+                                           value="@Model.ProjectId" />
+
+                                    <input type="hidden"
+                                           name="supervisorId"
+                                           value="@supervisor.SupervisorId" />
 
                                     <div class="sf-supervisor-top">
                                         <div>
                                             <h3>@supervisor.FullName</h3>
+
                                             <span>
                                                 @supervisor.AcademicTitle
-                                                @if (!string.IsNullOrWhiteSpace(supervisor.Department))
+
+                                                @if (!string.IsNullOrWhiteSpace(
+                                                    supervisor.Department))
                                                 {
-                                                    <text> · @supervisor.Department</text>
+                                                    <text>
+                                                        · @supervisor.Department
+                                                    </text>
                                                 }
                                             </span>
                                         </div>
 
-                                        <div class="sf-match-pill">@supervisor.MatchScore% match</div>
+                                        <div class="sf-match-pill">
+                                            @supervisor.MatchScore% match
+                                        </div>
                                     </div>
 
                                     <div class="sf-supervisor-tags">
-                                        @if (!string.IsNullOrWhiteSpace(supervisor.Specialization))
+                                        @if (!string.IsNullOrWhiteSpace(
+                                            supervisor.Specialization))
                                         {
-                                            <span>@supervisor.Specialization</span>
+                                            <span>
+                                                @supervisor.Specialization
+                                            </span>
                                         }
 
-                                        @if (!string.IsNullOrWhiteSpace(supervisor.MeetingMode))
+                                        @if (!string.IsNullOrWhiteSpace(
+                                            supervisor.MeetingMode))
                                         {
-                                            <span>@supervisor.MeetingMode</span>
+                                            <span>
+                                                @supervisor.MeetingMode
+                                            </span>
                                         }
 
-                                        @if (!string.IsNullOrWhiteSpace(supervisor.OfficeHours))
+                                        @if (!string.IsNullOrWhiteSpace(
+                                            supervisor.OfficeHours))
                                         {
-                                            <span>@supervisor.OfficeHours</span>
+                                            <span>
+                                                @supervisor.OfficeHours
+                                            </span>
                                         }
                                     </div>
 
                                     <div class="sf-capacity-line">
-                                        <span>Capacity</span>
-                                        <strong>@supervisor.CapacityUsed / @supervisor.CapacityLimit</strong>
+                                        <span>Project capacity</span>
+
+                                        <strong>
+                                            @supervisor.CapacityUsed /
+                                            @supervisor.CapacityLimit
+                                        </strong>
                                     </div>
 
                                     <div class="sf-capacity-bar">
-                                        <div class="sf-capacity-fill" style="width:@capacityPercent%"></div>
+                                        <div class="sf-capacity-fill"
+                                             style="width:@capacityPercent%">
+                                        </div>
                                     </div>
 
                                     <div class="sf-supervisor-reason">
-                                        @if (!string.IsNullOrWhiteSpace(supervisor.MatchReason))
+                                        @if (!string.IsNullOrWhiteSpace(
+                                            supervisor.MatchReason))
                                         {
-                                            <span>Matched because @supervisor.MatchReason.</span>
+                                            <span>
+                                                Matched because
+                                                @supervisor.MatchReason.
+                                            </span>
                                         }
                                         else
                                         {
-                                            <span>Available supervisor for your profile.</span>
+                                            <span>
+                                                Available for this project.
+                                            </span>
                                         }
                                     </div>
 
                                     <textarea name="studentMessage"
-                                              placeholder="Optional message to admin explaining why you selected this supervisor..."></textarea>
+                                              maxlength="1000"
+                                              placeholder="Optional message to admin explaining why this supervisor matches the project and team..."></textarea>
 
-                                    <button type="submit" class="sf-request-btn">
+                                    <button type="submit"
+                                            class="sf-request-btn">
                                         <i class="bi bi-send me-1"></i>
-                                        Request This Supervisor
+                                        Request for This Project
                                     </button>
                                 </form>
                             }
@@ -1140,13 +1593,52 @@
                     else
                     {
                         <div class="sf-gate-empty">
-                            <strong>No available supervisors right now.</strong>
+                            <strong>
+                                No available supervisors right now.
+                            </strong>
+
                             <p>
-                                No supervisor matching your major is currently available, or all matching supervisors are full.
+                                Matching supervisors may be full, or no
+                                suitable supervisor is currently available.
                                 Please contact the admin.
                             </p>
                         </div>
                     }
+                }
+                else
+                {
+                    <div class="sf-gate-header">
+                        <div>
+                            <div class="sf-gate-kicker">
+                                <i class="bi bi-people-fill"></i>
+                                Shared project supervision
+                            </div>
+
+                            <h2>Waiting for the Project Owner</h2>
+
+                            <p>
+                                Only the project owner can request or change
+                                the supervisor. Once approved, the assigned
+                                supervisor and all feedback will automatically
+                                become available to every active collaborator.
+                            </p>
+                        </div>
+
+                        <div class="sf-gate-state">
+                            Read only
+                            <span>Collaborator access</span>
+                        </div>
+                    </div>
+
+                    <div class="sf-readonly-note">
+                        <i class="bi bi-info-circle-fill"></i>
+
+                        <span>
+                            Your role in this project is
+                            <strong>@DisplayRole(Model.CurrentProjectRole)</strong>.
+                            No separate supervisor request is needed from you.
+                        </span>
+                    </div>
                 }
             </div>
         </section>
@@ -1162,8 +1654,9 @@
                 <h2>No Feedback Yet</h2>
 
                 <p>
-                    Your supervisor has not reviewed any of your ideas yet.
-                    Submit ideas through the Idea Generator and your supervisor will be able to send feedback.
+                    The project supervisor has not evaluated the official
+                    project idea yet. When the evaluation is saved, every
+                    active collaborator will see the same feedback here.
                 </p>
             </div>
         </div>
@@ -1185,6 +1678,7 @@
                         var active = Model.SelectedFeedback?.Evaluation.Id == item.Evaluation.Id;
 
                         <a asp-page="./Feedback"
+                           asp-route-projectId="@Model.ProjectId"
                            asp-route-evaluationId="@item.Evaluation.Id"
                            class="sf-feedback-link @(active ? "active" : "")">
 
@@ -1319,14 +1813,23 @@
                         <section class="sf-chat">
                             <div class="sf-chat-head">
                                 <div>
-                                    <h3>Discussion with Supervisor</h3>
-                                    <p>Continue the conversation about this specific feedback.</p>
+                                    <h3>Shared Project Discussion</h3>
+                                    <p>
+                                        The supervisor and all active collaborators
+                                        share this feedback conversation.
+                                    </p>
                                 </div>
 
                                 <i class="bi bi-chat-dots" style="color:#516C8D"></i>
                             </div>
 
-                            <div class="sf-chat-body" id="feedbackChatBody" data-evaluation-id="@selected.Evaluation.Id" data-current-user-id="@Model.CurrentUserId" data-idea-id="@selected.Idea.Id" data-other-name="@selected.SupervisorName">
+                            <div class="sf-chat-body"
+                                 id="feedbackChatBody"
+                                 data-project-id="@Model.ProjectId"
+                                 data-evaluation-id="@selected.Evaluation.Id"
+                                 data-current-user-id="@Model.CurrentUserId"
+                                 data-idea-id="@selected.Idea.Id"
+                                 data-other-name="@selected.SupervisorName">
 
                                 @if (!string.IsNullOrWhiteSpace(selected.Evaluation.Comment))
                                 {
@@ -1344,15 +1847,51 @@
 
                                 @foreach (var message in selected.Messages)
                                 {
-                                    var isStudent = message.SenderUserId == Model.CurrentUserId;
-                                    var isDeleted = message.DeletedAt.HasValue;
-                                    var replyTarget = message.ReplyToMessageId.HasValue
-                                        ? selected.Messages.FirstOrDefault(m => m.Id == message.ReplyToMessageId.Value)
-                                        : null;
+                                    var isCurrentUser =
+                                        message.SenderUserId ==
+                                        Model.CurrentUserId;
 
-                                    <div class="sf-message @(isStudent ? "student" : "supervisor")" data-message-id="@message.Id" data-sender-id="@message.SenderUserId">
+                                    var isSupervisorMessage =
+                                        message.SenderUserId ==
+                                        selected.Evaluation.SupervisorId;
+
+                                    var messageSide =
+                                        isSupervisorMessage
+                                            ? "supervisor"
+                                            : "student";
+
+                                    var senderDisplayName =
+                                        isCurrentUser
+                                            ? "You"
+                                            : isSupervisorMessage
+                                                ? selected.SupervisorName
+                                                : activeProjectMembers
+                                                    .FirstOrDefault(member =>
+                                                        member.UserId ==
+                                                        message.SenderUserId)
+                                                    ?.User?.FullName
+                                                  ?? "Project member";
+
+                                    var isDeleted =
+                                        message.DeletedAt.HasValue;
+
+                                    var replyTarget =
+                                        message.ReplyToMessageId.HasValue
+                                            ? selected.Messages
+                                                .FirstOrDefault(item =>
+                                                    item.Id ==
+                                                    message.ReplyToMessageId.Value)
+                                            : null;
+
+                                    <div class="sf-message @messageSide"
+                                         data-message-id="@message.Id"
+                                         data-sender-id="@message.SenderUserId">
+
                                         <div class="sf-avatar">
-                                            <i class="bi @(isStudent ? "bi-person" : "bi-person-workspace")"></i>
+                                            <i class="bi
+                                            @(isSupervisorMessage
+                                                   ? "bi-person-workspace"
+                                                   : "bi-person")"></i>
                                         </div>
 
                                         <div class="sf-bubble">
@@ -1373,20 +1912,43 @@
                                             }
 
                                             <time>
-                                                @(isStudent ? "You" : selected.SupervisorName) · @message.CreatedAt.ToString("MMM d, HH:mm")
-                                                @(message.EditedAt.HasValue && !isDeleted ? " · Edited" : "")
-                                                @(isStudent && message.SeenAt.HasValue && !isDeleted ? " · Seen" : "")
+                                                @senderDisplayName ·
+                                                @message.CreatedAt.ToString("MMM d, HH:mm")
+                                                @(message.EditedAt.HasValue &&
+                                                  !isDeleted
+                                                    ? " · Edited"
+                                                    : "")
+                                                @(isCurrentUser &&
+                                                  message.SeenAt.HasValue &&
+                                                  !isDeleted
+                                                    ? " · Seen"
+                                                    : "")
                                             </time>
 
                                             @if (!isDeleted)
                                             {
                                                 <div class="sf-message-actions">
-                                                    <button type="button" data-chat-action="reply" data-message-id="@message.Id" data-message-text="@message.MessageText">Reply</button>
+                                                    <button type="button"
+                                                            data-chat-action="reply"
+                                                            data-message-id="@message.Id"
+                                                            data-message-text="@message.MessageText">
+                                                        Reply
+                                                    </button>
 
-                                                    @if (isStudent)
+                                                    @if (isCurrentUser)
                                                     {
-                                                        <button type="button" data-chat-action="edit" data-message-id="@message.Id" data-message-text="@message.MessageText">Edit</button>
-                                                        <button type="button" data-chat-action="delete" data-message-id="@message.Id">Delete</button>
+                                                        <button type="button"
+                                                                data-chat-action="edit"
+                                                                data-message-id="@message.Id"
+                                                                data-message-text="@message.MessageText">
+                                                            Edit
+                                                        </button>
+
+                                                        <button type="button"
+                                                                data-chat-action="delete"
+                                                                data-message-id="@message.Id">
+                                                            Delete
+                                                        </button>
                                                     }
                                                 </div>
                                             }
@@ -1405,10 +1967,20 @@
                                 </span>
                             </div>
 
-                            <form method="post" asp-page-handler="Reply" class="sf-reply" id="feedbackRealtimeForm">
+                            <form method="post"
+                                  asp-page-handler="Reply"
+                                  class="sf-reply"
+                                  id="feedbackRealtimeForm">
+
                                 @Html.AntiForgeryToken()
 
-                                <input type="hidden" name="SelectedEvaluationId" value="@selected.Evaluation.Id" />
+                                <input type="hidden"
+                                       name="projectId"
+                                       value="@Model.ProjectId" />
+
+                                <input type="hidden"
+                                       name="SelectedEvaluationId"
+                                       value="@selected.Evaluation.Id" />
 
                                 <div id="studentReplyPreview" class="sf-reply-preview">
                                     <span id="studentReplyPreviewText"></span>
@@ -1421,13 +1993,13 @@
                                           id="feedbackMessageInput"
                                           maxlength="2000"
                                           class="form-control"
-                                          placeholder="Write a reply to your supervisor..."></textarea>
+                                          placeholder="Write a reply to the project feedback discussion..."></textarea>
 
                                 <span asp-validation-for="ReplyText" class="text-danger small"></span>
 
                                 <div class="sf-reply-actions">
                                     <div class="sf-reply-note">
-                                        Your reply will be saved under this feedback discussion.
+                                        Your reply is shared with the project supervisor and active collaborators.
                                     </div>
 
                                     <button type="submit" class="btn sf-send-btn">
@@ -1449,6 +2021,18 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
 
     <script>
+        const feedbackProjectSelect =
+        document.getElementById("feedbackProjectSelect");
+
+        const feedbackProjectForm =
+        document.getElementById("feedbackProjectForm");
+
+        feedbackProjectSelect?.addEventListener(
+        "change",
+        function () {
+        feedbackProjectForm?.submit();
+        });
+
         const feedbackChatBody = document.getElementById("feedbackChatBody");
         const feedbackForm = document.getElementById("feedbackRealtimeForm");
         const feedbackInput = document.getElementById("feedbackMessageInput");
@@ -1521,29 +2105,93 @@
         function appendFeedbackMessage(message) {
         hideEmptyState();
 
-        const senderUserId = Number(message.senderUserId ?? message.SenderUserId);
-        const isStudent = senderUserId === currentUserId;
-        const senderName = isStudent ? "You" : (message.senderName ?? message.SenderName ?? "Supervisor");
-        const messageText = message.messageText ?? message.MessageText ?? "";
-        const createdAt = message.createdAt ?? message.CreatedAt ?? new Date().toISOString();
-        const messageId = message.id ?? message.Id ?? 0;
-        const replyPreview = message.replyPreview ?? message.ReplyPreview ?? "";
+        const senderUserId =
+        Number(
+        message.senderUserId ??
+        message.SenderUserId);
 
-        const row = document.createElement("div");
-        row.className = `sf-message ${isStudent ? "student" : "supervisor"}`;
-        row.dataset.messageId = messageId;
-        row.dataset.senderId = senderUserId;
+        const senderRole =
+        String(
+        message.senderRole ??
+        message.SenderRole ??
+        "")
+        .trim()
+        .toLowerCase();
+
+        const isMine =
+        senderUserId === currentUserId;
+
+        const isSupervisor =
+        senderRole === "supervisor";
+
+        const senderName =
+        isMine
+        ? "You"
+        : (
+        message.senderName ??
+        message.SenderName ??
+        (isSupervisor
+        ? "Supervisor"
+        : "Project member")
+        );
+
+        const messageText =
+        message.messageText ??
+        message.MessageText ??
+        "";
+
+        const createdAt =
+        message.createdAt ??
+        message.CreatedAt ??
+        new Date().toISOString();
+
+        const messageId =
+        message.id ??
+        message.Id ??
+        0;
+
+        const replyPreview =
+        message.replyPreview ??
+        message.ReplyPreview ??
+        "";
+
+        const row =
+        document.createElement("div");
+
+        row.className =
+        `sf-message ${
+        isSupervisor
+        ? "supervisor"
+        : "student"
+        }`;
+
+        row.dataset.messageId =
+        messageId;
+
+        row.dataset.senderId =
+        senderUserId;
 
         row.innerHTML = `
         <div class="sf-avatar">
-        <i class="bi ${isStudent ? "bi-person" : "bi-person-workspace"}"></i>
+        <i class="bi ${
+        isSupervisor
+        ? "bi-person-workspace"
+        : "bi-person"
+        }"></i>
         </div>
 
         <div class="sf-bubble">
-        ${replyPreview ? `<div class="sf-message-reply">Replying to: ${escapeHtml(replyPreview)}</div>` : ""}
+        ${replyPreview
+        ? `<div class="sf-message-reply">Replying to: ${escapeHtml(replyPreview)}</div>`
+        : ""}
         <span class="sf-message-text">${escapeHtml(messageText)}</span>
-        <time>${escapeHtml(senderName)} · ${formatMessageTime(createdAt)}${isStudent ? '<span class="sf-seen-placeholder"></span>' : ''}</time>
-        ${buildStudentActions(messageId, messageText, isStudent)}
+        <time>${escapeHtml(senderName)} · ${formatMessageTime(createdAt)}${isMine
+        ? '<span class="sf-seen-placeholder"></span>'
+        : ''}</time>
+        ${buildStudentActions(
+        messageId,
+        messageText,
+        isMine)}
         </div>
         `;
 
@@ -1824,6 +2472,109 @@
     </script>
 }
 @functions {
+    private static string SafeProjectTitle(
+        string? value)
+    {
+        return string.IsNullOrWhiteSpace(
+            value)
+                ? "Untitled Project"
+                : value.Trim();
+    }
+
+    private static string DisplayRole(
+        string? value)
+    {
+        if (string.IsNullOrWhiteSpace(
+            value))
+        {
+            return "Collaborator";
+        }
+
+        return string.Equals(
+            value.Trim(),
+            "owner",
+            StringComparison.OrdinalIgnoreCase)
+                ? "Owner"
+                : "Collaborator";
+    }
+
+    private static string Initials(
+        string? fullName)
+    {
+        if (string.IsNullOrWhiteSpace(
+            fullName))
+        {
+            return "ST";
+        }
+
+        var parts =
+            fullName
+                .Split(
+                    ' ',
+                    StringSplitOptions.RemoveEmptyEntries)
+                .Take(2)
+                .ToList();
+
+        return parts.Count == 0
+            ? "ST"
+            : string.Join(
+                    "",
+                    parts.Select(part =>
+                        part[0]))
+                .ToUpperInvariant();
+    }
+
+    private static (
+        string Label,
+        string Color,
+        string Background)
+        SupervisorStatusMeta(
+            string? status)
+    {
+        var normalized =
+            (status ?? "")
+                .Trim()
+                .ToLowerInvariant();
+
+        return normalized switch
+        {
+            "active" =>
+                (
+                    "Active",
+                    "#166534",
+                    "#F0FDF4"
+                ),
+
+            "pending_admin" =>
+                (
+                    "Pending approval",
+                    "#92400E",
+                    "#FFFBEB"
+                ),
+
+            "reassignment_pending" =>
+                (
+                    "Reassignment pending",
+                    "#92400E",
+                    "#FFFBEB"
+                ),
+
+            "rejected" =>
+                (
+                    "Request rejected",
+                    "#991B1B",
+                    "#FEF2F2"
+                ),
+
+            _ =>
+                (
+                    "Unassigned",
+                    "#475569",
+                    "#EEF2F6"
+                )
+        };
+    }
+
     private static string TrimPreview(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))

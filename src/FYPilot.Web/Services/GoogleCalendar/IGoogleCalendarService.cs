@@ -29,13 +29,13 @@ public interface IGoogleCalendarService
     Task<GoogleCalendarSyncResult> CreateEventAsync(
         int supervisorId,
         Meeting meeting,
-        string studentEmail,
+        IReadOnlyCollection<string> attendeeEmails,
         CancellationToken cancellationToken = default);
 
     Task<GoogleCalendarSyncResult> UpdateEventAsync(
         int supervisorId,
         Meeting meeting,
-        string studentEmail,
+        IReadOnlyCollection<string> attendeeEmails,
         CancellationToken cancellationToken = default);
 
     Task DeleteEventAsync(

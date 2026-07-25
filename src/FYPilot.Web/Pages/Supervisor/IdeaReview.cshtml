@@ -5,7 +5,7 @@
 @model FYPilot.Web.Pages.Supervisor.IdeaReviewModel
 @{
     ViewData["Title"] = "Feedback Workspace";
-    ViewData["Subtitle"] = "Review student ideas, save evaluations, and open a separate discussion per idea.";
+    ViewData["Subtitle"] = "Review assigned projects, save one shared evaluation, and discuss the official idea with the full project team.";
 }
 
 <section class="sfr-page">
@@ -30,7 +30,7 @@
         <div class="sfr-hero-copy">
             <span>Supervisor Review Center</span>
             <h1>Feedback Workspace</h1>
-            <p>Review student ideas in a clean workspace, open a dedicated discussion, and save your academic decision.</p>
+            <p>Review each assigned project, evaluate its official idea once, and communicate with every active project member.</p>
         </div>
     </header>
 
@@ -38,9 +38,9 @@
     {
         <section class="sfr-empty-page">
             <i class="bi bi-inbox"></i>
-            <h2>No selected ideas yet</h2>
+            <h2>No assigned projects yet</h2>
             <p>
-                Assigned students will appear here after they choose their current FYP idea.
+                Projects will appear here after an admin assigns you as their official supervisor and an official idea is selected.
             </p>
         </section>
     }
@@ -51,8 +51,8 @@
             <aside class="sfr-ideas-panel">
                 <div class="sfr-section-head">
                     <div>
-                        <span>Review Queue</span>
-                        <h2>Current Selected Ideas</h2>
+                        <span>Project Queue</span>
+                        <h2>Assigned Project Ideas</h2>
                     </div>
 
                     <div class="sfr-count-pill">
@@ -64,7 +64,7 @@
                 <div class="sfr-queue-summary">
                     <div class="active">
                         <strong>@Model.TotalIdeas</strong>
-                        <span>Current</span>
+                        <span>Projects</span>
                     </div>
 
                     <div>
@@ -83,17 +83,19 @@
                     {
                         var statusMeta = StatusMeta(ideaItem.Status);
 
-                        <a href="/Supervisor/IdeaReview?ideaId=@ideaItem.Id"
+                        <a href="/Supervisor/IdeaReview?projectId=@ideaItem.ProjectId&amp;ideaId=@ideaItem.Id"
                            class="sfr-idea-tile @(ideaItem.IsSelected ? "active" : "")">
                             <div class="sfr-tile-top">
-                                <div class="sfr-student-avatar">@Initials(ideaItem.StudentName)</div>
+                                <div class="sfr-student-avatar">@Initials(ideaItem.ProjectTitle)</div>
                                 <span class="@statusMeta.ClassName">@statusMeta.Label</span>
                             </div>
 
                             <h3>@ideaItem.Title</h3>
 
                             <div class="sfr-tile-meta">
-                                <span><i class="bi bi-person"></i>@ValueOrStudent(ideaItem.StudentName)</span>
+                                <span><i class="bi bi-kanban"></i>@ideaItem.ProjectTitle</span>
+                                <span><i class="bi bi-people"></i>@ideaItem.ProjectMemberCount @(ideaItem.ProjectMemberCount == 1 ? "member" : "members")</span>
+                                <span><i class="bi bi-person-lines-fill"></i>@ValueOrTeam(ideaItem.ProjectMembers)</span>
 
                                 @if (!string.IsNullOrWhiteSpace(ideaItem.Domain))
                                 {
@@ -117,8 +119,8 @@
                 {
                     <section class="sfr-empty-page compact">
                         <i class="bi bi-card-checklist"></i>
-                        <h2>Select an idea to review</h2>
-                        <p>Choose a student idea from the review queue to view its brief and save an evaluation.</p>
+                        <h2>Select a project to review</h2>
+                        <p>Choose an assigned project from the queue to view its official idea and save the shared evaluation.</p>
                     </section>
                 }
                 else
@@ -140,7 +142,7 @@
                                 </div>
 
                                 <div>
-                                    <span>Current Review</span>
+                                    <span>@(Model.SelectedProject?.Title ?? "Current Project")</span>
                                     <h2>@idea.Title</h2>
                                 </div>
                             </div>
@@ -148,7 +150,7 @@
                             <div class="sfr-current-actions">
                                 <span class="@selectedStatusMeta.ClassName">@selectedStatusMeta.Label</span>
 
-                                <a href="/Supervisor/IdeaDiscussion?ideaId=@idea.Id" class="sfr-discussion-btn">
+                                <a href="/Supervisor/IdeaDiscussion?projectId=@(Model.SelectedProject?.Id ?? 0)&amp;ideaId=@idea.Id" class="sfr-discussion-btn">
                                     <i class="bi bi-chat-dots"></i>
                                     Start Discussion
                                 </a>
@@ -156,7 +158,12 @@
                         </div>
 
                         <div class="sfr-current-meta-strip">
-                            <small><i class="bi bi-person"></i>@(idea.User?.FullName ?? "Student")</small>
+                            <small><i class="bi bi-kanban"></i>@(Model.SelectedProject?.Title ?? "Project")</small>
+
+                            <small>
+                                <i class="bi bi-people"></i>
+                                @string.Join(", ", Model.SelectedProjectMembers.Select(member => member.FullName))
+                            </small>
 
                             @if (!string.IsNullOrWhiteSpace(idea.Domain))
                             {
@@ -309,9 +316,9 @@
                         <div class="sfr-evaluation-side">
                             <span>Evaluation Studio</span>
                             <h2>Decision & feedback</h2>
-                            <p>Save your academic decision and guide the student with clear improvement notes.</p>
+                            <p>Save one shared academic decision and guide the entire project team with clear improvement notes.</p>
 
-                            <a href="/Supervisor/IdeaDiscussion?ideaId=@idea.Id" class="sfr-soft-discussion">
+                            <a href="/Supervisor/IdeaDiscussion?projectId=@(Model.SelectedProject?.Id ?? 0)&amp;ideaId=@idea.Id" class="sfr-soft-discussion">
                                 <i class="bi bi-chat-left-text"></i>
                                 Open idea discussion
                             </a>
@@ -320,6 +327,7 @@
                         <form method="post" asp-page-handler="SaveEvaluation" class="sfr-evaluation-form">
                             @Html.AntiForgeryToken()
 
+                            <input type="hidden" asp-for="EvaluationInput.ProjectId" value="@(Model.SelectedProject?.Id ?? 0)" />
                             <input type="hidden" asp-for="EvaluationInput.IdeaId" value="@idea.Id" />
 
                             <div class="sfr-eval-topline">
@@ -354,7 +362,7 @@
 
                                 <div class="sfr-field">
                                     <label asp-for="EvaluationInput.ImprovementSuggestions">Improvement Suggestions</label>
-                                    <textarea asp-for="EvaluationInput.ImprovementSuggestions" class="form-control" rows="4" placeholder="Write specific improvements the student should make..."></textarea>
+                                    <textarea asp-for="EvaluationInput.ImprovementSuggestions" class="form-control" rows="4" placeholder="Write specific improvements the project team should make..."></textarea>
                                 </div>
                             </div>
 
@@ -1177,9 +1185,9 @@
         return string.Join("", parts.Select(p => p[0])).ToUpperInvariant();
     }
 
-    private static string ValueOrStudent(string? value)
+    private static string ValueOrTeam(string? value)
     {
-        return string.IsNullOrWhiteSpace(value) ? "Student" : value;
+        return string.IsNullOrWhiteSpace(value) ? "Project team" : value;
     }
 
     private static (string Label, string ClassName) StatusMeta(string? status)

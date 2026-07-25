@@ -5,7 +5,7 @@
 @model FYPilot.Web.Pages.Supervisor.MeetingsModel
 @{
     ViewData["Title"] = "Meetings";
-    ViewData["Subtitle"] = "Schedule, track, and prepare supervisor meetings.";
+    ViewData["Subtitle"] = "Schedule, track, and prepare meetings for your supervised projects.";
 
     var selected = Model.SelectedMeeting;
     var today = DateTime.Today;
@@ -61,7 +61,7 @@
 
             <div class="meet-hero-copy">
                 <h1>Stay aligned. Make progress together.</h1>
-                <p>Plan productive meetings, track action items, and keep your FYP journey on track.</p>
+                <p>Plan productive project meetings, invite every active collaborator, and keep each team aligned.</p>
             </div>
         </div>
 
@@ -114,7 +114,7 @@
                     <div class="meet-empty-state compact">
                         <i class="bi bi-calendar2-plus"></i>
                         <h3>No upcoming meetings</h3>
-                        <p>Schedule your first real meeting from the form below.</p>
+                        <p>Schedule your first project meeting from the form below.</p>
                     </div>
                 }
                 else
@@ -126,6 +126,7 @@
                             var localEnd = meeting.ScheduledAt.AddMinutes(meeting.DurationMinutes).ToLocalTime();
                             var active = selected?.Id == meeting.Id;
                             var isToday = localStart.Date == today;
+                            var projectInfo = Model.GetProjectInfo(meeting);
 
                             <a href="/Supervisor/Meetings?meetingId=@meeting.Id"
                                class="meet-upcoming-row @(active ? "active" : "")"
@@ -163,10 +164,13 @@
                                 </div>
 
                                 <div class="meet-upcoming-cell">
-                                    <i class="bi bi-person"></i>
+                                    <i class="bi bi-diagram-3"></i>
                                     <div>
-                                        <span>@(meeting.Student?.FullName ?? "No student")</span>
-                                        <small>Student</small>
+                                        <span>@projectInfo.ProjectTitle</span>
+                                        <small>
+                                            @projectInfo.MemberCount
+                                            @(projectInfo.MemberCount == 1 ? "member" : "members")
+                                        </small>
                                     </div>
                                 </div>
 
@@ -267,7 +271,7 @@
                 <div class="meet-empty-state tall">
                     <i class="bi bi-calendar-week"></i>
                     <h3>Select a meeting</h3>
-                    <p>Meeting details will appear here after you select or schedule a meeting.</p>
+                    <p>Project meeting details will appear here after you select or schedule a meeting.</p>
                 </div>
             }
             else
@@ -275,6 +279,7 @@
                 var selectedStart = selected.ScheduledAt.ToLocalTime();
                 var selectedEnd = selected.ScheduledAt.AddMinutes(selected.DurationMinutes).ToLocalTime();
                 var isSelectedToday = selectedStart.Date == today;
+                var selectedProjectInfo = Model.GetProjectInfo(selected);
 
                 <div class="meet-details-head">
                     <h2>Meeting Details</h2>
@@ -307,12 +312,21 @@
                 </div>
 
                 <div class="meet-with-box">
-                    <div class="meet-with-avatar">@Initials(selected.Student?.FullName)</div>
+                    <div class="meet-with-avatar">@Initials(selectedProjectInfo.ProjectTitle)</div>
                     <div>
-                        <span>With</span>
-                        <h3>@(selected.Student?.FullName ?? "No student selected")</h3>
-                        <p>@(selected.Student?.Email ?? "No email available")</p>
+                        <span>Project team</span>
+                        <h3>@selectedProjectInfo.ProjectTitle</h3>
+                        <p>
+                            @(string.IsNullOrWhiteSpace(selectedProjectInfo.MemberNames)
+                                ? "No active project members"
+                                : selectedProjectInfo.MemberNames)
+                        </p>
                     </div>
+                </div>
+
+                <div class="meet-detail-section">
+                    <h3>Official project idea</h3>
+                    <p class="meet-muted">@selectedProjectInfo.OfficialIdeaTitle</p>
                 </div>
 
                 <div class="meet-detail-section">
@@ -449,9 +463,9 @@
                             class="meet-soft-btn js-edit-meeting"
                             data-meeting-id="@selected.Id"
                             data-title="@selected.Title"
-                            data-student-id="@selected.StudentId"
+                            data-project-id="@selected.ProjectId"
                             data-scheduled-at="@selectedStart.ToString("yyyy-MM-ddTHH:mm")"
-                            data-duration="@selected.DurationMinutes"                          
+                            data-duration="@selected.DurationMinutes"
                             data-agenda="@selected.Agenda"
                             data-notes="@selected.NotesToPrepare">
                         <i class="bi bi-pencil-square me-1"></i>
@@ -518,7 +532,7 @@
                         <span>Meeting</span>
                         <span>Date</span>
                         <span>Time</span>
-                        <span>With</span>
+                        <span>Project</span>
                         <span>Mode</span>
                         <span>Duration</span>
                         <span>Outcome</span>
@@ -527,6 +541,7 @@
                     @foreach (var meeting in Model.RecentMeetings.Take(5))
                     {
                         var localStart = meeting.ScheduledAt.ToLocalTime();
+                        var projectInfo = Model.GetProjectInfo(meeting);
 
                         <a href="/Supervisor/Meetings?meetingId=@meeting.Id" class="meet-recent-row">
                             <div class="meet-recent-title">
@@ -543,8 +558,14 @@
                             <span>@localStart.ToString("hh:mm tt")</span>
 
                             <span class="meet-recent-with">
-                                <b class="meet-with-avatar-sm">@Initials(meeting.Student?.FullName)</b>
-                                @(meeting.Student?.FullName ?? "No student")
+                                <b class="meet-with-avatar-sm">@Initials(projectInfo.ProjectTitle)</b>
+                                <span>
+                                    @projectInfo.ProjectTitle
+                                    <small>
+                                        @projectInfo.MemberCount
+                                        @(projectInfo.MemberCount == 1 ? "member" : "members")
+                                    </small>
+                                </span>
                             </span>
 
                             <span><i class="@ModeIcon(meeting.MeetingMode)"></i> @ModeLabel(meeting.MeetingMode)</span>
@@ -582,12 +603,15 @@
 
             <div class="meet-form-grid">
                 <div class="meet-field">
-                    <label asp-for="Input.StudentId">Student</label>
-                    <select asp-for="Input.StudentId" id="meetingStudentInput" class="form-select">
-                        <option value="">No student selected</option>
-                        @foreach (var student in Model.Students)
+                    <label asp-for="Input.ProjectId">Project</label>
+                    <select asp-for="Input.ProjectId" id="meetingProjectInput" class="form-select">
+                        <option value="">Choose an assigned project</option>
+                        @foreach (var project in Model.Projects)
                         {
-                            <option value="@student.Id">@student.FullName - @student.Email</option>
+                            <option value="@project.Id">
+                                @project.Title — @project.MemberCount
+                                @(project.MemberCount == 1 ? "member" : "members")
+                            </option>
                         }
                     </select>
                 </div>
@@ -1933,7 +1957,7 @@
         const meetingForm = document.getElementById("meetingForm");
         const meetingIdInput = document.getElementById("meetingIdInput");
         const meetingTitleInput = document.getElementById("meetingTitleInput");
-        const meetingStudentInput = document.getElementById("meetingStudentInput");
+        const meetingProjectInput = document.getElementById("meetingProjectInput");
         const meetingScheduledInput = document.getElementById("meetingScheduledInput");
         const meetingDurationInput = document.getElementById("meetingDurationInput");
         const meetingAgendaInput = document.getElementById("meetingAgendaInput");
@@ -1965,7 +1989,7 @@
             button.addEventListener("click", function () {
                 if (meetingIdInput) meetingIdInput.value = this.dataset.meetingId || "0";
                 if (meetingTitleInput) meetingTitleInput.value = this.dataset.title || "";
-                if (meetingStudentInput) meetingStudentInput.value = this.dataset.studentId || "";
+                if (meetingProjectInput) meetingProjectInput.value = this.dataset.projectId || "";
                 if (meetingScheduledInput) meetingScheduledInput.value = this.dataset.scheduledAt || "";
                 if (meetingDurationInput) meetingDurationInput.value = this.dataset.duration || "60";
                 if (meetingAgendaInput) meetingAgendaInput.value = this.dataset.agenda || "";

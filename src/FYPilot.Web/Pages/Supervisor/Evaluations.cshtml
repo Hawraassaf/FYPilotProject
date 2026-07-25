@@ -16,7 +16,8 @@
     if (!string.IsNullOrWhiteSpace(search))
     {
         filtered = filtered.Where(e =>
-            e.StudentName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            e.ProjectTitle.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            e.ProjectMembers.Contains(search, StringComparison.OrdinalIgnoreCase) ||
             e.IdeaTitle.Contains(search, StringComparison.OrdinalIgnoreCase) ||
             e.Domain.Contains(search, StringComparison.OrdinalIgnoreCase) ||
             e.Comment.Contains(search, StringComparison.OrdinalIgnoreCase) ||
@@ -42,7 +43,7 @@
         "oldest" => filtered.OrderBy(e => e.UpdatedAt),
         "originality" => filtered.OrderByDescending(e => e.OriginalityScore),
         "similarity" => filtered.OrderByDescending(e => e.SimilarityScore),
-        "student" => filtered.OrderBy(e => e.StudentName),
+        "project" => filtered.OrderBy(e => e.ProjectTitle),
         _ => filtered.OrderByDescending(e => e.UpdatedAt)
     };
 
@@ -55,7 +56,7 @@
         <div class="er-hero-copy">
             <span>Evaluation Records</span>
             <h1>Your official review archive.</h1>
-            <p>Keep every supervisor decision easy to search, edit, discuss, and connect to student progress without repeating extra sections.</p>
+            <p>Keep every shared project decision easy to search, edit, discuss, and connect to team progress without duplicating records for collaborators.</p>
 
             <div class="er-hero-actions">
                 <a href="/Supervisor/IdeaReview" class="er-primary-link">
@@ -118,7 +119,7 @@
             <form method="get" class="er-filter-form">
                 <div class="er-search-box">
                     <i class="bi bi-search"></i>
-                    <input type="search" name="q" value="@search" placeholder="Search student, project, domain, feedback..." />
+                    <input type="search" name="q" value="@search" placeholder="Search project, member, idea, domain, feedback..." />
                 </div>
 
                 <select name="status">
@@ -140,7 +141,7 @@
                     <option value="oldest" selected="@(sort == "oldest")">Oldest updated</option>
                     <option value="originality" selected="@(sort == "originality")">Highest originality</option>
                     <option value="similarity" selected="@(sort == "similarity")">Highest similarity</option>
-                    <option value="student" selected="@(sort == "student")">Student name</option>
+                    <option value="project" selected="@(sort == "project")">Project name</option>
                 </select>
 
                 <button type="submit">
@@ -174,8 +175,8 @@
                     <table class="er-table">
                         <thead>
                             <tr>
-                                <th>Student</th>
-                                <th>Project</th>
+                                <th>Project Team</th>
+                                <th>Official Idea</th>
                                 <th>Decision</th>
                                 <th>Originality</th>
                                 <th>Similarity</th>
@@ -194,10 +195,14 @@
                                 <tr>
                                     <td>
                                         <div class="er-student-cell">
-                                            <span class="er-avatar">@Initials(item.StudentName)</span>
+                                            <span class="er-avatar">@Initials(item.ProjectTitle)</span>
                                             <div>
-                                                <strong>@item.StudentName</strong>
-                                                <small>Student</small>
+                                                <strong>@item.ProjectTitle</strong>
+                                                <small>
+                                                    @item.ProjectMemberCount
+                                                    @(item.ProjectMemberCount == 1 ? "member" : "members")
+                                                    · @item.ProjectMembers
+                                                </small>
                                             </div>
                                         </div>
                                     </td>
@@ -239,17 +244,17 @@
 
                                     <td>
                                         <div class="er-row-actions">
-                                            <a href="/Supervisor/IdeaReview?ideaId=@item.IdeaId" title="Edit evaluation">
+                                            <a href="/Supervisor/IdeaReview?projectId=@item.ProjectId&ideaId=@item.IdeaId" title="Edit evaluation">
                                                 <i class="bi bi-pencil-square"></i>
                                                 Edit
                                             </a>
 
-                                            <a href="/Supervisor/IdeaDiscussion?ideaId=@item.IdeaId" title="Open discussion">
+                                            <a href="/Supervisor/IdeaDiscussion?projectId=@item.ProjectId&ideaId=@item.IdeaId" title="Open discussion">
                                                 <i class="bi bi-chat-dots"></i>
                                                 Discuss
                                             </a>
 
-                                            <a href="/Supervisor/ProgressTracking?ideaId=@item.IdeaId" title="Track progress">
+                                            <a href="/Supervisor/ProgressTracking?projectId=@item.ProjectId&ideaId=@item.IdeaId" title="Track progress">
                                                 <i class="bi bi-graph-up-arrow"></i>
                                                 Track
                                             </a>
