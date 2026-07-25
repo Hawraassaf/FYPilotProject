@@ -1,7 +1,5 @@
 using System.Security.Claims;
-using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
-using FYPilot.Web.Services.Supervisors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
@@ -10,173 +8,191 @@ namespace FYPilot.Web.Pages.Supervisor;
 
 [Authorize(Roles = "supervisor")]
 public class DashboardModel(
-    ApplicationDbContext db,
-    SupervisorAccessService supervisorAccess) : PageModel
+    ApplicationDbContext db) : PageModel
 {
-    public List<StatCard> Stats { get; private set; } = [];
-    public List<PendingItem> PendingIdeas { get; private set; } = [];
-    public List<EvalItem> RecentEvals { get; private set; } = [];
+    public List<ProjectDashboardItem> AllProjects { get; private set; } = [];
 
-    public record StatCard(
-        string Label,
-        string Value,
-        string Icon,
-        string Color,
-        string BgColor);
+    public List<UpcomingMeetingItem> UpcomingMeetings { get; private set; } = [];
 
-    public record PendingItem(
-        int IdeaId,
-        string StudentName,
-        string IdeaTitle,
-        string Domain,
-        int Feasibility,
-        int Innovation,
-        string Status);
-
-    public record EvalItem(
-        string StudentName,
-        string IdeaTitle,
-        string Status);
-
-    public async Task OnGetAsync()
+    public async Task OnGetAsync(
+        CancellationToken cancellationToken)
     {
-        var supervisorId = int.Parse(
-            User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var supervisorId = SupervisorId();
 
-        // Only students actively assigned to this supervisor.
-        var assignedStudentIds =
-            await supervisorAccess.GetAssignedStudentIdsAsync(
-                supervisorId);
-
-        // Load the selected idea of each assigned student.
-        var selectedIdeaEntities = await db.ProjectIdeas
+        var projects = await db.Projects
             .AsNoTracking()
-            .Include(i => i.User)
-            .Where(i =>
-                i.IsSelected &&
-                assignedStudentIds.Contains(i.UserId))
-            .OrderByDescending(i => i.CreatedAt)
-            .ToListAsync();
+            .Include(project => project.Student)
+            .Include(project => project.ProjectIdea)
+            .Include(project => project.Members
+                .Where(member => member.Status == "active"))
+                .ThenInclude(member => member.User)
+            .Where(project =>
+                project.SupervisorId == supervisorId &&
+                project.SupervisorAssignmentStatus == "active" &&
+                project.ProjectIdeaId.HasValue &&
+                project.ProjectIdea != null)
+            .OrderByDescending(project => project.UpdatedAt)
+            .AsSplitQuery()
+            .ToListAsync(cancellationToken);
 
-        // Protect against inconsistent data where a student
-        // may accidentally have more than one selected idea.
-        var selectedIdeas = selectedIdeaEntities
-            .GroupBy(i => i.UserId)
-            .Select(group => group.First())
+        var projectIds = projects
+            .Select(project => project.Id)
             .ToList();
 
-        var ideaIds = selectedIdeas
-            .Select(i => i.Id)
-            .ToList();
-
-        List<SupervisorEvaluation> evaluations;
-
-        if (ideaIds.Count == 0)
-        {
-            evaluations = [];
-        }
-        else
-        {
-            evaluations = await db.SupervisorEvaluations
+        var evaluations = projectIds.Count == 0
+            ? []
+            : await db.SupervisorEvaluations
                 .AsNoTracking()
-                .Where(e =>
-                    e.SupervisorId == supervisorId &&
-                    ideaIds.Contains(e.IdeaId))
-                .ToListAsync();
-        }
+                .Where(evaluation =>
+                    evaluation.SupervisorId == supervisorId &&
+                    evaluation.ProjectId.HasValue &&
+                    projectIds.Contains(evaluation.ProjectId.Value))
+                .ToListAsync(cancellationToken);
 
-        // Use only the latest evaluation for every idea.
-        var latestEvaluationByIdea = evaluations
-            .GroupBy(e => e.IdeaId)
+        var latestEvaluationByProject = evaluations
+            .GroupBy(evaluation => evaluation.ProjectId!.Value)
             .ToDictionary(
                 group => group.Key,
                 group => group
-                    .OrderByDescending(e =>
-                        e.UpdatedAt == default
-                            ? e.CreatedAt
-                            : e.UpdatedAt)
+                    .OrderByDescending(evaluation =>
+                        evaluation.UpdatedAt == default
+                            ? evaluation.CreatedAt
+                            : evaluation.UpdatedAt)
                     .First());
 
-        var pendingCount = selectedIdeas.Count(idea =>
-            !latestEvaluationByIdea.TryGetValue(
-                idea.Id,
-                out var evaluation) ||
-            NormalizeStatus(evaluation.Status) == "pending");
+        AllProjects = projects
+            .Select(project =>
+            {
+                var idea = project.ProjectIdea!;
 
-        var approvedCount = selectedIdeas.Count(idea =>
-            latestEvaluationByIdea.TryGetValue(
-                idea.Id,
-                out var evaluation) &&
-            NormalizeStatus(evaluation.Status) == "approved");
+                latestEvaluationByProject.TryGetValue(
+                    project.Id,
+                    out var evaluation);
 
-        var reviewedCount = selectedIdeas.Count(idea =>
-            latestEvaluationByIdea.TryGetValue(
-                idea.Id,
-                out var evaluation) &&
-            NormalizeStatus(evaluation.Status) != "pending");
+                var members = project.Members
+                    .Where(member =>
+                        member.Status == "active" &&
+                        member.User != null)
+                    .Select(member => new MemberSummary(
+                        member.UserId,
+                        member.User!.FullName))
+                    .ToList();
 
-        Stats =
-        [
-            new(
-                "Pending Reviews",
-                pendingCount.ToString(),
-                "card-checklist",
-                "#f59e0b",
-                "#fffbeb"),
+                if (members.All(member =>
+                        member.UserId != project.StudentId))
+                {
+                    members.Add(new MemberSummary(
+                        project.StudentId,
+                        project.Student?.FullName ?? "Project owner"));
+                }
 
-            new(
-                "Approved Ideas",
-                approvedCount.ToString(),
-                "check-circle",
-                "#10b981",
-                "#f0fdf4"),
+                var distinctMembers = members
+                    .GroupBy(member => member.UserId)
+                    .Select(group => group.First())
+                    .OrderBy(member => member.FullName)
+                    .ToList();
 
-            new(
-                "Total Reviews",
-                reviewedCount.ToString(),
-                "star-half",
-                "#3b82f6",
-                "#eff6ff")
-        ];
+                var evaluationUpdatedAt = evaluation == null
+                    ? DateTime.MinValue
+                    : evaluation.UpdatedAt == default
+                        ? evaluation.CreatedAt
+                        : evaluation.UpdatedAt;
 
-        PendingIdeas = selectedIdeas
-            .Where(idea =>
-                !latestEvaluationByIdea.TryGetValue(
-                    idea.Id,
-                    out var evaluation) ||
-                NormalizeStatus(evaluation.Status) == "pending")
-            .Select(idea => new PendingItem(
-                idea.Id,
-                idea.User?.FullName ?? "Student",
-                idea.Title,
-                idea.Domain ?? "",
-                idea.FeasibilityScore,
-                idea.InnovationScore,
-                "pending"))
+                var lastActivityAt = new[]
+                {
+                    project.UpdatedAt,
+                    idea.CreatedAt,
+                    evaluationUpdatedAt
+                }.Max();
+
+                return new ProjectDashboardItem
+                {
+                    ProjectId = project.Id,
+                    IdeaId = idea.Id,
+                    ProjectTitle = SafeProjectTitle(project.Title),
+                    IdeaTitle = idea.Title,
+                    MemberNames = string.Join(
+                        ", ",
+                        distinctMembers.Select(member => member.FullName)),
+                    MemberCount = distinctMembers.Count,
+                    Domain = string.IsNullOrWhiteSpace(idea.Domain)
+                        ? "Uncategorized"
+                        : idea.Domain,
+                    DifficultyLevel =
+                        string.IsNullOrWhiteSpace(idea.DifficultyLevel)
+                            ? "Not specified"
+                            : idea.DifficultyLevel,
+                    CreatedAt = idea.CreatedAt,
+                    LastActivityAt = lastActivityAt,
+                    FeasibilityScore = idea.FeasibilityScore,
+                    InnovationScore = idea.InnovationScore,
+                    Status = NormalizeStatus(evaluation?.Status)
+                };
+            })
+            .OrderByDescending(project => project.LastActivityAt)
             .ToList();
 
-        var ideaById = selectedIdeas
-            .ToDictionary(i => i.Id);
+        if (projectIds.Count == 0)
+        {
+            UpcomingMeetings = [];
+            return;
+        }
 
-        RecentEvals = latestEvaluationByIdea.Values
-            .Where(e =>
-                NormalizeStatus(e.Status) != "pending" &&
-                ideaById.ContainsKey(e.IdeaId))
-            .OrderByDescending(e =>
-                e.UpdatedAt == default
-                    ? e.CreatedAt
-                    : e.UpdatedAt)
-            .Take(5)
-            .Select(e =>
+        var now = DateTime.UtcNow;
+
+        var meetings = await db.Meetings
+            .AsNoTracking()
+            .Where(meeting =>
+                meeting.SupervisorId == supervisorId &&
+                meeting.ProjectId.HasValue &&
+                projectIds.Contains(meeting.ProjectId.Value) &&
+                meeting.Status == "scheduled" &&
+                meeting.ScheduledAt
+                    .AddMinutes(meeting.DurationMinutes) >= now)
+            .OrderBy(meeting => meeting.ScheduledAt)
+            .Take(6)
+            .ToListAsync(cancellationToken);
+
+        var projectById = AllProjects
+            .ToDictionary(project => project.ProjectId);
+
+        UpcomingMeetings = meetings
+            .Where(meeting =>
+                meeting.ProjectId.HasValue &&
+                projectById.ContainsKey(meeting.ProjectId.Value))
+            .Select(meeting =>
             {
-                var idea = ideaById[e.IdeaId];
+                var project = projectById[meeting.ProjectId!.Value];
 
-                return new EvalItem(
-                    idea.User?.FullName ?? "Student",
-                    idea.Title,
-                    NormalizeStatus(e.Status));
+                return new UpcomingMeetingItem
+                {
+                    MeetingId = meeting.Id,
+                    ProjectId = project.ProjectId,
+                    IdeaId = project.IdeaId,
+                    ProjectTitle = project.ProjectTitle,
+                    MeetingTitle = meeting.Title,
+                    MemberNames = project.MemberNames,
+                    MemberCount = project.MemberCount,
+                    ScheduledAt = meeting.ScheduledAt,
+                    DurationMinutes = meeting.DurationMinutes
+                };
             })
             .ToList();
+    }
+
+    private int SupervisorId()
+    {
+        var value = User
+            .FindFirst(ClaimTypes.NameIdentifier)
+            ?.Value;
+
+        if (int.TryParse(value, out var supervisorId))
+        {
+            return supervisorId;
+        }
+
+        throw new InvalidOperationException(
+            "Unable to identify the logged-in supervisor.");
     }
 
     private static string NormalizeStatus(string? status)
@@ -192,5 +208,66 @@ public class DashboardModel(
             "rejected" => "rejected",
             _ => "pending"
         };
+    }
+
+    private static string SafeProjectTitle(string? title)
+    {
+        return string.IsNullOrWhiteSpace(title)
+            ? "Untitled Project"
+            : title.Trim();
+    }
+
+    private sealed record MemberSummary(
+        int UserId,
+        string FullName);
+
+    public sealed class ProjectDashboardItem
+    {
+        public int ProjectId { get; set; }
+
+        public int IdeaId { get; set; }
+
+        public string ProjectTitle { get; set; } = "";
+
+        public string IdeaTitle { get; set; } = "";
+
+        public string MemberNames { get; set; } = "";
+
+        public int MemberCount { get; set; }
+
+        public string Domain { get; set; } = "";
+
+        public string DifficultyLevel { get; set; } = "";
+
+        public DateTime CreatedAt { get; set; }
+
+        public DateTime LastActivityAt { get; set; }
+
+        public int FeasibilityScore { get; set; }
+
+        public int InnovationScore { get; set; }
+
+        public string Status { get; set; } = "pending";
+    }
+
+    public sealed class UpcomingMeetingItem
+    {
+        public int MeetingId { get; set; }
+
+        public int ProjectId { get; set; }
+
+        public int IdeaId { get; set; }
+
+        public string ProjectTitle { get; set; } = "";
+
+        public string MeetingTitle { get; set; } = "";
+
+        public string MemberNames { get; set; } = "";
+
+        public int MemberCount { get; set; }
+
+        public DateTime ScheduledAt { get; set; }
+
+        public int DurationMinutes { get; set; }
     }
 }

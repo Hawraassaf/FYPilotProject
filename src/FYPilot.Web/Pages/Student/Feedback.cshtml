@@ -1204,7 +1204,21 @@
             discussion with your supervisor and active collaborators.
         </p>
     </div>
+    @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
+    {
+        <div class="alert alert-success rounded-4 mb-3">
+            <i class="bi bi-check-circle me-2"></i>
+            @Model.SuccessMessage
+        </div>
+    }
 
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div class="alert alert-danger rounded-4 mb-3">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            @Model.ErrorMessage
+        </div>
+    }
     @if (Model.HasProjects)
     {
         var statusMeta =

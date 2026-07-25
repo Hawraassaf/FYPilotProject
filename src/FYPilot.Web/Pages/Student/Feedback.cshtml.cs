@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
-
+using Npgsql;
 namespace FYPilot.Web.Pages.Student;
 
 [Authorize(Roles = "student")]
@@ -355,6 +355,22 @@ public class FeedbackModel(
                 });
         }
 
+        var cleanStudentMessage =
+            studentMessage?.Trim() ?? "";
+
+        if (cleanStudentMessage.Length > 1000)
+        {
+            ErrorMessage =
+                "The request message cannot exceed "
+                + "1000 characters.";
+
+            return RedirectToPage(
+                new
+                {
+                    projectId = ProjectId
+                });
+        }
+
         var occupiedProjectIds =
             await LoadOccupiedProjectIdsAsync(
                 supervisorId,
@@ -405,10 +421,31 @@ public class FeedbackModel(
                         "pending_admin",
 
                     StudentMessage =
-                        studentMessage?.Trim() ?? "",
+                        cleanStudentMessage,
+
+                    /*
+                     * These columns already exist in the
+                     * legacy assignment table.
+                     *
+                     * admin_note is NOT NULL in PostgreSQL,
+                     * so it must receive an empty value
+                     * while the request is still waiting
+                     * for an administrator.
+                     */
+                    AssignedByAdminId =
+                        null,
+
+                    AdminNote =
+                        "",
 
                     RequestedAt =
                         now,
+
+                    ApprovedAt =
+                        null,
+
+                    RejectedAt =
+                        null,
 
                     UpdatedAt =
                         now
@@ -426,31 +463,56 @@ public class FeedbackModel(
             project.UpdatedAt =
                 now;
 
-            db.ProjectActivities.Add(
-                new ProjectActivity
-                {
-                    ProjectId =
-                        ProjectId,
-
-                    UserId =
-                        CurrentUserId,
-
-                    ActionType =
-                        "supervisor_requested",
-
-                    Description =
-                        $"Supervisor request submitted "
-                        + $"for {supervisor.FullName}.",
-
-                    CreatedAtUtc =
-                        now
-                });
-
+            /*
+             * Save only the critical assignment and
+             * project status inside the transaction.
+             *
+             * Activity logging is non-critical and must
+             * never roll back a valid supervisor request.
+             */
             await db.SaveChangesAsync(
                 cancellationToken);
 
             await transaction.CommitAsync(
                 cancellationToken);
+
+            try
+            {
+                var activity =
+                    new ProjectActivity
+                    {
+                        ProjectId =
+                            ProjectId,
+
+                        UserId =
+                            CurrentUserId,
+
+                        ActionType =
+                            "supervisor_requested",
+
+                        Description =
+                            $"Supervisor request submitted "
+                            + $"for {supervisor.FullName}.",
+
+                        CreatedAtUtc =
+                            now
+                    };
+
+                db.ProjectActivities.Add(
+                    activity);
+
+                await db.SaveChangesAsync(
+                    cancellationToken);
+            }
+            catch (Exception activityException)
+            {
+                logger.LogWarning(
+                    activityException,
+                    "Supervisor request was saved, but "
+                    + "project activity logging failed "
+                    + "for project {ProjectId}.",
+                    ProjectId);
+            }
 
             /*
              * The requested supervisor is deliberately
@@ -484,15 +546,57 @@ public class FeedbackModel(
             await transaction.RollbackAsync(
                 cancellationToken);
 
-            logger.LogWarning(
-                exception,
-                "Duplicate or conflicting supervisor "
-                + "request for project {ProjectId}.",
-                ProjectId);
+            var postgresException =
+                exception.InnerException as PostgresException
+                ?? exception.GetBaseException()
+                    as PostgresException;
 
-            ErrorMessage =
-                "This project already has a pending "
-                + "supervisor request.";
+            if (postgresException != null)
+            {
+                logger.LogError(
+                    exception,
+                    "Supervisor request database failure. "
+                    + "ProjectId: {ProjectId}, "
+                    + "SqlState: {SqlState}, "
+                    + "Message: {Message}, "
+                    + "Detail: {Detail}, "
+                    + "Constraint: {Constraint}",
+                    ProjectId,
+                    postgresException.SqlState,
+                    postgresException.MessageText,
+                    postgresException.Detail,
+                    postgresException.ConstraintName);
+
+                ErrorMessage =
+                    "Database error: "
+                    + postgresException.MessageText
+                    + " | SQLSTATE: "
+                    + postgresException.SqlState
+                    + (
+                        string.IsNullOrWhiteSpace(
+                            postgresException.ConstraintName)
+                            ? ""
+                            : " | Constraint: "
+                              + postgresException.ConstraintName
+                    );
+            }
+            else
+            {
+                var databaseMessage =
+                    exception.GetBaseException().Message;
+
+                logger.LogError(
+                    exception,
+                    "Supervisor request database failure "
+                    + "for project {ProjectId}: "
+                    + "{DatabaseMessage}",
+                    ProjectId,
+                    databaseMessage);
+
+                ErrorMessage =
+                    "Database error: "
+                    + databaseMessage;
+            }
 
             return RedirectToPage(
                 new
@@ -725,7 +829,8 @@ public class FeedbackModel(
 
                 url:
                     $"/Supervisor/IdeaDiscussion"
-                    + $"?ideaId={evaluation.IdeaId}",
+                    + $"?projectId={ProjectId}"
+                    + $"&ideaId={evaluation.IdeaId}",
 
                 sendEmail:
                     false);
@@ -753,22 +858,72 @@ public class FeedbackModel(
     }
 
     private async Task LoadAccessibleProjectsAsync(
-        CancellationToken cancellationToken)
+     CancellationToken cancellationToken)
     {
-        AccessibleProjects =
+        /*
+         * Load the database entities first.
+         *
+         * Custom C# methods such as NormalizeStatus cannot
+         * be translated into PostgreSQL SQL.
+         */
+        var projectEntities =
             await db.Projects
                 .AsNoTracking()
+                .Include(project =>
+                    project.ProjectIdea)
+                .Include(project =>
+                    project.Members.Where(member =>
+                        member.Status == "active"))
                 .Where(project =>
                     project.StudentId ==
                         CurrentUserId ||
-                    project.Members.Any(
-                        member =>
-                            member.UserId ==
-                                CurrentUserId &&
-                            member.Status ==
-                                "active"))
+                    project.Members.Any(member =>
+                        member.UserId ==
+                            CurrentUserId &&
+                        member.Status ==
+                            "active"))
+                .OrderBy(project =>
+                    project.Title)
+                .AsSplitQuery()
+                .ToListAsync(
+                    cancellationToken);
+
+        /*
+         * The query has now finished.
+         *
+         * Everything below runs in C# memory, so calling
+         * NormalizeStatus and using StringComparison is safe.
+         */
+        AccessibleProjects =
+            projectEntities
                 .Select(project =>
-                    new ProjectOption(
+                {
+                    var currentMembership =
+                        project.Members
+                            .FirstOrDefault(member =>
+                                member.UserId ==
+                                    CurrentUserId &&
+                                member.Status ==
+                                    "active");
+
+                    var isOwner =
+                        project.StudentId ==
+                            CurrentUserId ||
+                        string.Equals(
+                            currentMembership?.Role,
+                            "owner",
+                            StringComparison
+                                .OrdinalIgnoreCase);
+
+                    var role =
+                        isOwner
+                            ? "owner"
+                            : string.IsNullOrWhiteSpace(
+                                currentMembership?.Role)
+                                ? "collaborator"
+                                : currentMembership.Role;
+
+                    return new ProjectOption(
                         project.Id,
 
                         string.IsNullOrWhiteSpace(
@@ -780,38 +935,17 @@ public class FeedbackModel(
                             ? "No official idea selected"
                             : project.ProjectIdea.Title,
 
-                        project.StudentId ==
-                            CurrentUserId
-                            ? "owner"
-                            : project.Members
-                                .Where(member =>
-                                    member.UserId ==
-                                        CurrentUserId &&
-                                    member.Status ==
-                                        "active")
-                                .Select(member =>
-                                    member.Role)
-                                .FirstOrDefault()
-                              ?? "collaborator",
+                        role,
 
-                        project.StudentId ==
-                            CurrentUserId ||
-                        project.Members.Any(
-                            member =>
-                                member.UserId ==
-                                    CurrentUserId &&
-                                member.Status ==
-                                    "active" &&
-                                member.Role ==
-                                    "owner"),
+                        isOwner,
 
                         NormalizeStatus(
                             project
-                                .SupervisorAssignmentStatus)))
+                                .SupervisorAssignmentStatus));
+                })
                 .OrderBy(project =>
                     project.Title)
-                .ToListAsync(
-                    cancellationToken);
+                .ToList();
     }
 
     private async Task<int>

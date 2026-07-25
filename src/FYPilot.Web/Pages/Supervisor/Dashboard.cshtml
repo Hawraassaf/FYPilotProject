@@ -2,60 +2,52 @@
 @using System
 @using System.Linq
 @using System.Collections.Generic
-@model FYPilot.Web.Pages.Supervisor.IdeaReviewModel
+@model FYPilot.Web.Pages.Supervisor.DashboardModel
 @{
     ViewData["Title"] = "Supervisor Dashboard";
-    ViewData["Subtitle"] = "Review student ideas, guide progress, and manage meetings.";
+    ViewData["Subtitle"] = "Review assigned projects, guide teams, and manage project meetings.";
 
-    var totalIdeas = Model.AllIdeas.Count;
+    var totalProjects = Model.AllProjects.Count;
 
-    var pendingIdeas = Model.AllIdeas.Count(i => NormalizeStatus(i.Status) == "pending");
-    var revisionIdeas = Model.AllIdeas.Count(i => NormalizeStatus(i.Status) == "needs_revision");
-    var approvedIdeas = Model.AllIdeas.Count(i => NormalizeStatus(i.Status) == "approved");
-    var rejectedIdeas = Model.AllIdeas.Count(i => NormalizeStatus(i.Status) == "rejected");
+    var pendingProjects = Model.AllProjects.Count(
+        project => NormalizeStatus(project.Status) == "pending");
 
-    var actionNeeded = pendingIdeas + revisionIdeas;
-    var atRiskProjects = revisionIdeas + rejectedIdeas;
+    var revisionProjects = Model.AllProjects.Count(
+        project => NormalizeStatus(project.Status) == "needs_revision");
 
-    var activeStudents = Model.AllIdeas
-        .Select(i => ValueOrStudent(i.StudentName))
-        .Distinct(StringComparer.OrdinalIgnoreCase)
-        .Count();
+    var approvedProjects = Model.AllProjects.Count(
+        project => NormalizeStatus(project.Status) == "approved");
 
-    var priorityIdeas = Model.AllIdeas
-        .Where(i => NormalizeStatus(i.Status) == "pending" || NormalizeStatus(i.Status) == "needs_revision")
-        .OrderByDescending(i => NormalizeStatus(i.Status) == "needs_revision")
-        .ThenBy(i => i.CreatedAt)
+    var rejectedProjects = Model.AllProjects.Count(
+        project => NormalizeStatus(project.Status) == "rejected");
+
+    var actionNeeded = pendingProjects + revisionProjects;
+    var atRiskProjects = revisionProjects + rejectedProjects;
+
+    var priorityProjects = Model.AllProjects
+        .Where(project =>
+            NormalizeStatus(project.Status) == "pending" ||
+            NormalizeStatus(project.Status) == "needs_revision")
+        .OrderByDescending(project =>
+            NormalizeStatus(project.Status) == "needs_revision")
+        .ThenBy(project => project.CreatedAt)
         .Take(4)
         .ToList();
 
-    var studentRows = Model.AllIdeas
-        .GroupBy(i => ValueOrStudent(i.StudentName), StringComparer.OrdinalIgnoreCase)
-        .Select(g => new
-        {
-            Name = g.Key,
-            Latest = g.OrderByDescending(x => x.CreatedAt).First(),
-            Ideas = g.Count(),
-            Pending = g.Count(x => NormalizeStatus(x.Status) == "pending"),
-            Revision = g.Count(x => NormalizeStatus(x.Status) == "needs_revision"),
-            Approved = g.Count(x => NormalizeStatus(x.Status) == "approved"),
-            Rejected = g.Count(x => NormalizeStatus(x.Status) == "rejected"),
-            LastActivity = g.Max(x => x.CreatedAt)
-        })
-        .OrderByDescending(x => x.Pending + x.Revision + x.Rejected)
-        .ThenByDescending(x => x.LastActivity)
+    var projectRows = Model.AllProjects
+        .OrderByDescending(project =>
+            NormalizeStatus(project.Status) == "rejected")
+        .ThenByDescending(project =>
+            NormalizeStatus(project.Status) == "needs_revision")
+        .ThenByDescending(project =>
+            NormalizeStatus(project.Status) == "pending")
+        .ThenByDescending(project => project.LastActivityAt)
         .Take(5)
         .ToList();
 
-    var followUpRows = studentRows
-        .Where(s => s.Pending + s.Revision + s.Rejected > 0)
+    var upcomingMeetings = Model.UpcomingMeetings
         .Take(3)
         .ToList();
-
-    if (!followUpRows.Any())
-    {
-        followUpRows = studentRows.Take(3).ToList();
-    }
 }
 
 <section class="sd-page">
@@ -63,10 +55,10 @@
     <header class="sd-hero">
         <div>
             <span class="sd-eyebrow">Supervisor Dashboard</span>
-            <h1>Review, guide, and follow up with your assigned students.</h1>
+            <h1>Review, guide, and follow up with your assigned projects.</h1>
             <p>
-                A focused workspace for pending reviews, student follow-up, meetings,
-                and academic supervision decisions.
+                A focused workspace for project reviews, team follow-up,
+                meetings, and shared academic supervision decisions.
             </p>
 
             <div class="sd-hero-actions">
@@ -77,28 +69,29 @@
 
                 <a href="/Supervisor/Meetings" class="sd-hero-btn light">
                     <i class="bi bi-calendar-plus"></i>
-                    Schedule meeting
+                    Schedule project meeting
                 </a>
             </div>
         </div>
 
         <div class="sd-hero-focus">
             <span>@actionNeeded</span>
-            <small>items need attention</small>
+            <small>projects need attention</small>
         </div>
     </header>
 
-    @if (!Model.AllIdeas.Any())
+    @if (!Model.AllProjects.Any())
     {
         <section class="sd-empty">
             <div class="sd-empty-icon">
                 <i class="bi bi-inbox"></i>
             </div>
 
-            <h2>No assigned student ideas yet</h2>
+            <h2>No assigned projects yet</h2>
             <p>
-                Once your assigned students submit ideas, their reviews and follow-up
-                items will appear here.
+                Once an administrator assigns a project to you,
+                its official idea, active collaborators, evaluation,
+                and meetings will appear here.
             </p>
 
             <a href="/Supervisor/IdeaReview" class="sd-hero-btn primary">
@@ -116,8 +109,8 @@
 
                 <div>
                     <small>Pending Reviews</small>
-                    <strong>@pendingIdeas</strong>
-                    <span>Needs your attention</span>
+                    <strong>@pendingProjects</strong>
+                    <span>Needs your decision</span>
                 </div>
 
                 <i class="bi bi-chevron-right sd-stat-arrow"></i>
@@ -125,12 +118,12 @@
 
             <article class="sd-stat-card">
                 <div class="sd-stat-icon blue">
-                    <i class="bi bi-people"></i>
+                    <i class="bi bi-diagram-3"></i>
                 </div>
 
                 <div>
-                    <small>Students Assigned</small>
-                    <strong>@activeStudents</strong>
+                    <small>Active Projects</small>
+                    <strong>@totalProjects</strong>
                     <span>Under your supervision</span>
                 </div>
 
@@ -143,8 +136,8 @@
                 </div>
 
                 <div>
-                    <small>Approved Ideas</small>
-                    <strong>@approvedIdeas</strong>
+                    <small>Approved Projects</small>
+                    <strong>@approvedProjects</strong>
                     <span>Ready to progress</span>
                 </div>
 
@@ -172,41 +165,52 @@
                 <div class="sd-panel-head">
                     <div>
                         <span class="sd-eyebrow">Priority</span>
-                        <h2>Priority Review Queue</h2>
+                        <h2>Priority Project Queue</h2>
                     </div>
 
                     <a href="/Supervisor/IdeaReview">View all (@actionNeeded)</a>
                 </div>
 
-                @if (!priorityIdeas.Any())
+                @if (!priorityProjects.Any())
                 {
                     <div class="sd-soft-empty">
                         <i class="bi bi-check2-circle"></i>
-                        <p>No pending reviews right now.</p>
+                        <p>No pending project reviews right now.</p>
                     </div>
                 }
                 else
                 {
                     <div class="sd-review-list">
-                        @foreach (var idea in priorityIdeas)
+                        @foreach (var project in priorityProjects)
                         {
-                            var status = StatusMeta(idea.Status);
+                            var status = StatusMeta(project.Status);
 
-                            <a href="/Supervisor/IdeaReview?ideaId=@idea.Id" class="sd-review-card">
-                                <div class="sd-avatar">@Initials(idea.StudentName)</div>
+                            <a href="/Supervisor/IdeaReview?projectId=@project.ProjectId&ideaId=@project.IdeaId"
+                               class="sd-review-card">
+
+                                <div class="sd-avatar">
+                                    @Initials(project.ProjectTitle)
+                                </div>
 
                                 <div class="sd-review-main">
                                     <div class="sd-review-top">
-                                        <span>@ValueOrStudent(idea.StudentName)</span>
-                                        <small>Submitted @TimeAgo(idea.CreatedAt)</small>
+                                        <span>
+                                            @project.ProjectTitle ·
+                                            @project.MemberCount
+                                            @(project.MemberCount == 1 ? "member" : "members")
+                                        </span>
+
+                                        <small>
+                                            Updated @TimeAgo(project.LastActivityAt)
+                                        </small>
                                     </div>
 
-                                    <h3>@idea.Title</h3>
+                                    <h3>@project.IdeaTitle</h3>
 
                                     <div class="sd-chip-row">
                                         <b class="@status.ClassName">@status.Label</b>
-                                        <span>@ValueOrDash(idea.Domain)</span>
-                                        <span>@ValueOrDash(idea.DifficultyLevel)</span>
+                                        <span>@ValueOrDash(project.Domain)</span>
+                                        <span>@ValueOrDash(project.DifficultyLevel)</span>
                                     </div>
                                 </div>
 
@@ -230,31 +234,31 @@
                         <i class="bi bi-journal-check"></i>
                         <div>
                             <strong>Review Workspace</strong>
-                            <small>Approve, request changes, or provide feedback.</small>
+                            <small>Evaluate the official idea shared by each project team.</small>
                         </div>
                     </a>
 
                     <a href="/Supervisor/Meetings" class="sd-action-tile">
                         <i class="bi bi-calendar-plus"></i>
                         <div>
-                            <strong>Schedule Meeting</strong>
-                            <small>Plan follow-up or review sessions.</small>
+                            <strong>Schedule Project Meeting</strong>
+                            <small>Invite every active collaborator through Google Calendar.</small>
                         </div>
                     </a>
 
                     <a href="/Supervisor/IdeaReview" class="sd-action-tile">
                         <i class="bi bi-chat-dots"></i>
                         <div>
-                            <strong>Message Students</strong>
-                            <small>Send academic guidance and feedback.</small>
+                            <strong>Message Project Teams</strong>
+                            <small>Send shared academic guidance and feedback.</small>
                         </div>
                     </a>
 
                     <a href="/Supervisor/ProgressTracking" class="sd-action-tile">
                         <i class="bi bi-bar-chart-line"></i>
                         <div>
-                            <strong>Track Progress</strong>
-                            <small>Check progress, risks, and next steps.</small>
+                            <strong>Track Project Progress</strong>
+                            <small>Check roadmap phases, risks, and next steps.</small>
                         </div>
                     </a>
                 </div>
@@ -267,44 +271,53 @@
             <article class="sd-panel">
                 <div class="sd-panel-head">
                     <div>
-                        <span class="sd-eyebrow">Students</span>
-                        <h2>Student Follow-up Overview</h2>
+                        <span class="sd-eyebrow">Projects</span>
+                        <h2>Project Follow-up Overview</h2>
                     </div>
 
                     <a href="/Supervisor/ProgressTracking">View progress</a>
                 </div>
 
-                @if (!studentRows.Any())
+                @if (!projectRows.Any())
                 {
                     <div class="sd-soft-empty">
-                        <p>No student activity yet.</p>
+                        <p>No project activity yet.</p>
                     </div>
                 }
                 else
                 {
                     <div class="sd-student-list">
-                        @foreach (var student in studentRows)
+                        @foreach (var project in projectRows)
                         {
-                            var needsAction = student.Pending + student.Revision + student.Rejected;
-                            var studentStatus = StudentStatus(student.Pending, student.Revision, student.Rejected, student.Approved);
+                            var projectStatus = ProjectStatus(project.Status);
 
-                            <a href="/Supervisor/IdeaReview?ideaId=@student.Latest.Id" class="sd-student-row">
-                                <div class="sd-avatar small">@Initials(student.Name)</div>
+                            <a href="/Supervisor/IdeaReview?projectId=@project.ProjectId&ideaId=@project.IdeaId"
+                               class="sd-student-row">
+
+                                <div class="sd-avatar small">
+                                    @Initials(project.ProjectTitle)
+                                </div>
 
                                 <div class="sd-student-info">
-                                    <strong>@student.Name</strong>
-                                    <small>@student.Ideas project@(student.Ideas == 1 ? "" : "s")</small>
+                                    <strong>@project.ProjectTitle</strong>
+                                    <small>
+                                        @project.MemberCount
+                                        @(project.MemberCount == 1 ? "member" : "members")
+                                        · @project.MemberNames
+                                    </small>
                                 </div>
 
                                 <div class="sd-student-status">
-                                    <span class="@studentStatus.ClassName">@studentStatus.Label</span>
+                                    <span class="@projectStatus.ClassName">
+                                        @projectStatus.Label
+                                    </span>
                                 </div>
 
                                 <div class="sd-next-action">
-                                    <i class="@studentStatus.Icon"></i>
+                                    <i class="@projectStatus.Icon"></i>
                                     <div>
-                                        <strong>@NextActionLabel(student.Pending, student.Revision, student.Rejected)</strong>
-                                        <small>@TimeAgo(student.LastActivity)</small>
+                                        <strong>@NextActionLabel(project.Status)</strong>
+                                        <small>@TimeAgo(project.LastActivityAt)</small>
                                     </div>
                                 </div>
 
@@ -318,45 +331,51 @@
             <article class="sd-panel">
                 <div class="sd-panel-head">
                     <div>
-                        <span class="sd-eyebrow">Follow-up</span>
-                        <h2>Upcoming Meetings</h2>
+                        <span class="sd-eyebrow">Calendar</span>
+                        <h2>Upcoming Project Meetings</h2>
                     </div>
 
                     <a href="/Supervisor/Meetings">View calendar</a>
                 </div>
 
                 <div class="sd-meeting-list">
-                    @if (!followUpRows.Any())
+                    @if (!upcomingMeetings.Any())
                     {
                         <div class="sd-soft-empty compact">
                             <i class="bi bi-calendar-check"></i>
-                            <p>No follow-up needed right now.</p>
+                            <p>No upcoming project meetings.</p>
                         </div>
                     }
                     else
                     {
-                        var index = 0;
-
-                        @foreach (var student in followUpRows)
+                        @foreach (var meeting in upcomingMeetings)
                         {
-                            index++;
-                            var meetingStatus = StudentStatus(student.Pending, student.Revision, student.Rejected, student.Approved);
+                            var localMeeting = meeting.ScheduledAt.ToLocalTime();
 
-                            <a href="/Supervisor/Meetings" class="sd-meeting-row">
+                            <a href="/Supervisor/Meetings?meetingId=@meeting.MeetingId"
+                               class="sd-meeting-row">
+
                                 <div class="sd-date-box">
-                                    <span>Next</span>
-                                    <strong>@index.ToString("00")</strong>
+                                    <span>@localMeeting.ToString("MMM")</span>
+                                    <strong>@localMeeting.Day.ToString("00")</strong>
                                 </div>
 
                                 <div class="sd-meeting-main">
-                                    <strong>@student.Name</strong>
-                                    <small>@MeetingPurpose(student.Pending, student.Revision, student.Rejected)</small>
-                                    <p>@NextMeetingHint(student.Pending, student.Revision, student.Rejected)</p>
+                                    <strong>@meeting.ProjectTitle</strong>
+                                    <small>
+                                        @meeting.MeetingTitle ·
+                                        @localMeeting.ToString("hh:mm tt")
+                                    </small>
+                                    <p>
+                                        @meeting.MemberCount
+                                        @(meeting.MemberCount == 1 ? "member" : "members")
+                                        · @meeting.DurationMinutes min
+                                    </p>
                                 </div>
 
-                                <span class="@meetingStatus.ClassName">@meetingStatus.Label</span>
+                                <span class="sd-status ontrack">Scheduled</span>
 
-                                <i class="bi bi-three-dots-vertical sd-dots"></i>
+                                <i class="bi bi-chevron-right sd-dots"></i>
                             </a>
                         }
                     }
@@ -457,29 +476,29 @@
             border: 1px solid transparent;
         }
 
-            .sd-hero-btn.primary {
-                color: #fff;
-                background: rgba(6,28,73,.62);
-                border-color: rgba(255,255,255,.10);
-            }
+        .sd-hero-btn.primary {
+            color: #fff;
+            background: rgba(6,28,73,.62);
+            border-color: rgba(255,255,255,.10);
+        }
 
-            .sd-hero-btn.light {
-                color: var(--sd-blue);
-                background: #fff;
-            }
+        .sd-hero-btn.light {
+            color: var(--sd-blue);
+            background: #fff;
+        }
 
-            .sd-hero-btn:hover {
-                transform: translateY(-1px);
-            }
+        .sd-hero-btn:hover {
+            transform: translateY(-1px);
+        }
 
-            .sd-hero-btn.primary:hover {
-                color: #fff;
-                background: rgba(6,28,73,.78);
-            }
+        .sd-hero-btn.primary:hover {
+            color: #fff;
+            background: rgba(6,28,73,.78);
+        }
 
-            .sd-hero-btn.light:hover {
-                color: var(--sd-blue);
-            }
+        .sd-hero-btn.light:hover {
+            color: var(--sd-blue);
+        }
 
         .sd-hero-focus {
             min-height: 130px;
@@ -494,18 +513,18 @@
             backdrop-filter: blur(8px);
         }
 
-            .sd-hero-focus span {
-                display: block;
-                font-size: 2.55rem;
-                line-height: 1;
-                font-weight: 500;
-            }
+        .sd-hero-focus span {
+            display: block;
+            font-size: 2.55rem;
+            line-height: 1;
+            font-weight: 500;
+        }
 
-            .sd-hero-focus small {
-                margin-top: .45rem;
-                color: rgba(255,255,255,.76);
-                font-size: .78rem;
-            }
+        .sd-hero-focus small {
+            margin-top: .45rem;
+            color: rgba(255,255,255,.76);
+            font-size: .78rem;
+        }
 
         .sd-stats {
             display: grid;
@@ -542,25 +561,25 @@
             flex: none;
         }
 
-            .sd-stat-icon.orange {
-                color: #C2410C;
-                background: #FFF7ED;
-            }
+        .sd-stat-icon.orange {
+            color: #C2410C;
+            background: #FFF7ED;
+        }
 
-            .sd-stat-icon.blue {
-                color: #2563EB;
-                background: #EFF6FF;
-            }
+        .sd-stat-icon.blue {
+            color: #2563EB;
+            background: #EFF6FF;
+        }
 
-            .sd-stat-icon.green {
-                color: var(--sd-green);
-                background: #ECFDF5;
-            }
+        .sd-stat-icon.green {
+            color: var(--sd-green);
+            background: #ECFDF5;
+        }
 
-            .sd-stat-icon.red {
-                color: var(--sd-red);
-                background: #FEF2F2;
-            }
+        .sd-stat-icon.red {
+            color: var(--sd-red);
+            background: #FEF2F2;
+        }
 
         .sd-stat-card small {
             display: block;
@@ -621,20 +640,20 @@
             border-bottom: 1px solid var(--sd-border);
         }
 
-            .sd-panel-head h2 {
-                margin: 0;
-                color: var(--sd-text);
-                font-size: 1rem;
-                font-weight: 500;
-                letter-spacing: -.02em;
-            }
+        .sd-panel-head h2 {
+            margin: 0;
+            color: var(--sd-text);
+            font-size: 1rem;
+            font-weight: 500;
+            letter-spacing: -.02em;
+        }
 
-            .sd-panel-head a {
-                color: #3156B7;
-                font-size: .76rem;
-                font-weight: 500;
-                text-decoration: none;
-            }
+        .sd-panel-head a {
+            color: #3156B7;
+            font-size: .76rem;
+            font-weight: 500;
+            text-decoration: none;
+        }
 
         .sd-review-list,
         .sd-student-list,
@@ -655,14 +674,14 @@
             transition: .15s ease;
         }
 
-            .sd-review-card:hover,
-            .sd-student-row:hover,
-            .sd-meeting-row:hover {
-                color: inherit;
-                border-color: #B8C8DD;
-                box-shadow: 0 10px 22px rgba(40,56,94,.07);
-                transform: translateY(-1px);
-            }
+        .sd-review-card:hover,
+        .sd-student-row:hover,
+        .sd-meeting-row:hover {
+            color: inherit;
+            border-color: #B8C8DD;
+            box-shadow: 0 10px 22px rgba(40,56,94,.07);
+            transform: translateY(-1px);
+        }
 
         .sd-review-card {
             display: grid;
@@ -684,12 +703,12 @@
             font-weight: 500;
         }
 
-            .sd-avatar.small {
-                width: 38px;
-                height: 38px;
-                border-radius: 14px;
-                font-size: .7rem;
-            }
+        .sd-avatar.small {
+            width: 38px;
+            height: 38px;
+            border-radius: 14px;
+            font-size: .7rem;
+        }
 
         .sd-review-top {
             display: flex;
@@ -698,17 +717,17 @@
             gap: .75rem;
         }
 
-            .sd-review-top span {
-                color: #334155;
-                font-size: .78rem;
-                font-weight: 500;
-            }
+        .sd-review-top span {
+            color: #334155;
+            font-size: .78rem;
+            font-weight: 500;
+        }
 
-            .sd-review-top small {
-                color: var(--sd-muted);
-                font-size: .68rem;
-                white-space: nowrap;
-            }
+        .sd-review-top small {
+            color: var(--sd-muted);
+            font-size: .68rem;
+            white-space: nowrap;
+        }
 
         .sd-review-card h3 {
             margin: .24rem 0 .45rem;
@@ -725,16 +744,16 @@
             align-items: center;
         }
 
-            .sd-chip-row span {
-                display: inline-flex;
-                width: fit-content;
-                border-radius: 999px;
-                padding: .24rem .5rem;
-                color: #475569;
-                background: var(--sd-soft);
-                font-size: .67rem;
-                font-weight: 500;
-            }
+        .sd-chip-row span {
+            display: inline-flex;
+            width: fit-content;
+            border-radius: 999px;
+            padding: .24rem .5rem;
+            color: #475569;
+            background: var(--sd-soft);
+            font-size: .67rem;
+            font-weight: 500;
+        }
 
         .sd-status {
             display: inline-flex;
@@ -746,27 +765,27 @@
             white-space: nowrap;
         }
 
-            .sd-status.pending {
-                color: #9A3412;
-                background: #FFF7ED;
-            }
+        .sd-status.pending {
+            color: #9A3412;
+            background: #FFF7ED;
+        }
 
-            .sd-status.revision {
-                color: #92400E;
-                background: #FEF3C7;
-            }
+        .sd-status.revision {
+            color: #92400E;
+            background: #FEF3C7;
+        }
 
-            .sd-status.approved,
-            .sd-status.ontrack {
-                color: var(--sd-green);
-                background: #ECFDF5;
-            }
+        .sd-status.approved,
+        .sd-status.ontrack {
+            color: var(--sd-green);
+            background: #ECFDF5;
+        }
 
-            .sd-status.rejected,
-            .sd-status.risk {
-                color: var(--sd-red);
-                background: #FEF2F2;
-            }
+        .sd-status.rejected,
+        .sd-status.risk {
+            color: var(--sd-red);
+            background: #FEF2F2;
+        }
 
         .sd-card-arrow,
         .sd-dots {
@@ -795,38 +814,38 @@
             transition: .15s ease;
         }
 
-            .sd-action-tile:hover {
-                color: inherit;
-                border-color: #B8C8DD;
-                box-shadow: 0 10px 22px rgba(40,56,94,.07);
-                transform: translateY(-1px);
-            }
+        .sd-action-tile:hover {
+            color: inherit;
+            border-color: #B8C8DD;
+            box-shadow: 0 10px 22px rgba(40,56,94,.07);
+            transform: translateY(-1px);
+        }
 
-            .sd-action-tile i {
-                width: 38px;
-                height: 38px;
-                display: grid;
-                place-items: center;
-                border-radius: 14px;
-                color: #3156B7;
-                background: #EEF2FF;
-                font-size: 1rem;
-            }
+        .sd-action-tile i {
+            width: 38px;
+            height: 38px;
+            display: grid;
+            place-items: center;
+            border-radius: 14px;
+            color: #3156B7;
+            background: #EEF2FF;
+            font-size: 1rem;
+        }
 
-            .sd-action-tile strong {
-                display: block;
-                color: var(--sd-text);
-                font-size: .82rem;
-                font-weight: 500;
-            }
+        .sd-action-tile strong {
+            display: block;
+            color: var(--sd-text);
+            font-size: .82rem;
+            font-weight: 500;
+        }
 
-            .sd-action-tile small {
-                display: block;
-                margin-top: .22rem;
-                color: var(--sd-muted);
-                font-size: .7rem;
-                line-height: 1.42;
-            }
+        .sd-action-tile small {
+            display: block;
+            margin-top: .22rem;
+            color: var(--sd-muted);
+            font-size: .7rem;
+            line-height: 1.42;
+        }
 
         .sd-student-row {
             display: grid;
@@ -857,28 +876,28 @@
             align-items: center;
         }
 
-            .sd-next-action i {
-                width: 34px;
-                height: 34px;
-                display: grid;
-                place-items: center;
-                color: #3156B7;
-                background: #EEF2FF;
-                border-radius: 13px;
-                font-size: .88rem;
-            }
+        .sd-next-action i {
+            width: 34px;
+            height: 34px;
+            display: grid;
+            place-items: center;
+            color: #3156B7;
+            background: #EEF2FF;
+            border-radius: 13px;
+            font-size: .88rem;
+        }
 
-            .sd-next-action strong {
-                display: block;
-                color: #334155;
-                font-size: .75rem;
-                font-weight: 500;
-            }
+        .sd-next-action strong {
+            display: block;
+            color: #334155;
+            font-size: .75rem;
+            font-weight: 500;
+        }
 
-            .sd-next-action small {
-                color: var(--sd-muted);
-                font-size: .68rem;
-            }
+        .sd-next-action small {
+            color: var(--sd-muted);
+            font-size: .68rem;
+        }
 
         .sd-meeting-row {
             display: grid;
@@ -899,20 +918,20 @@
             background: #F3F6FB;
         }
 
-            .sd-date-box span {
-                color: var(--sd-steel);
-                font-size: .62rem;
-                font-weight: 500;
-                text-transform: uppercase;
-                letter-spacing: .06em;
-            }
+        .sd-date-box span {
+            color: var(--sd-steel);
+            font-size: .62rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+        }
 
-            .sd-date-box strong {
-                color: var(--sd-blue);
-                font-size: 1.28rem;
-                line-height: 1;
-                font-weight: 500;
-            }
+        .sd-date-box strong {
+            color: var(--sd-blue);
+            font-size: 1.28rem;
+            line-height: 1;
+            font-weight: 500;
+        }
 
         .sd-meeting-main strong {
             display: block;
@@ -948,19 +967,19 @@
             color: var(--sd-muted);
         }
 
-            .sd-soft-empty.compact {
-                min-height: 190px;
-            }
+        .sd-soft-empty.compact {
+            min-height: 190px;
+        }
 
-            .sd-soft-empty i {
-                color: var(--sd-green);
-                font-size: 1.35rem;
-            }
+        .sd-soft-empty i {
+            color: var(--sd-green);
+            font-size: 1.35rem;
+        }
 
-            .sd-soft-empty p {
-                margin: 0;
-                font-size: .82rem;
-            }
+        .sd-soft-empty p {
+            margin: 0;
+            font-size: .82rem;
+        }
 
         .sd-empty {
             min-height: 460px;
@@ -1056,143 +1075,121 @@
         };
     }
 
-    private static (string Label, string ClassName, string Icon) StudentStatus(
-        int pending,
-        int revision,
-        int rejected,
-        int approved)
+    private static (string Label, string ClassName, string Icon)
+        ProjectStatus(string? status)
     {
-        if (rejected > 0)
+        return NormalizeStatus(status) switch
         {
-            return ("At Risk", "sd-status risk", "bi bi-exclamation-triangle");
-        }
+            "rejected" => (
+                "At Risk",
+                "sd-status risk",
+                "bi bi-exclamation-triangle"),
 
-        if (revision > 0)
-        {
-            return ("Needs Revision", "sd-status revision", "bi bi-pencil-square");
-        }
+            "needs_revision" => (
+                "Needs Revision",
+                "sd-status revision",
+                "bi bi-pencil-square"),
 
-        if (pending > 0)
-        {
-            return ("Pending", "sd-status pending", "bi bi-hourglass-split");
-        }
+            "pending" => (
+                "Pending",
+                "sd-status pending",
+                "bi bi-hourglass-split"),
 
-        return ("On Track", "sd-status ontrack", "bi bi-check2-circle");
+            _ => (
+                "On Track",
+                "sd-status ontrack",
+                "bi bi-check2-circle")
+        };
     }
 
-    private static string NextActionLabel(int pending, int revision, int rejected)
+    private static string NextActionLabel(string? status)
     {
-        if (rejected > 0)
+        return NormalizeStatus(status) switch
         {
-            return "Follow up";
-        }
-
-        if (revision > 0)
-        {
-            return "Review feedback";
-        }
-
-        if (pending > 0)
-        {
-            return "Review idea";
-        }
-
-        return "Progress check";
-    }
-
-    private static string MeetingPurpose(int pending, int revision, int rejected)
-    {
-        if (rejected > 0)
-        {
-            return "Recovery discussion";
-        }
-
-        if (revision > 0)
-        {
-            return "Revision follow-up";
-        }
-
-        if (pending > 0)
-        {
-            return "Proposal review meeting";
-        }
-
-        return "Progress check-in";
-    }
-
-    private static string NextMeetingHint(int pending, int revision, int rejected)
-    {
-        if (rejected > 0)
-        {
-            return "Discuss a new project direction.";
-        }
-
-        if (revision > 0)
-        {
-            return "Clarify required changes.";
-        }
-
-        if (pending > 0)
-        {
-            return "Prepare review decision.";
-        }
-
-        return "Check milestones and next tasks.";
+            "rejected" => "Review direction",
+            "needs_revision" => "Review revisions",
+            "pending" => "Evaluate idea",
+            _ => "Progress check"
+        };
     }
 
     private static string Initials(string? name)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
-            return "ST";
+            return "PR";
         }
 
-        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).ToList();
+        var parts = name
+            .Split(
+                ' ',
+                StringSplitOptions.RemoveEmptyEntries)
+            .Take(2)
+            .ToList();
 
         return parts.Count == 0
-            ? "ST"
-            : string.Join("", parts.Select(part => part[0])).ToUpperInvariant();
-    }
-
-    private static string ValueOrStudent(string? value)
-    {
-        return string.IsNullOrWhiteSpace(value) ? "Student" : value;
+            ? "PR"
+            : string.Join(
+                    "",
+                    parts.Select(part => part[0]))
+                .ToUpperInvariant();
     }
 
     private static string ValueOrDash(string? value)
     {
-        return string.IsNullOrWhiteSpace(value) ? "Uncategorized" : value;
+        return string.IsNullOrWhiteSpace(value)
+            ? "Uncategorized"
+            : value;
     }
 
     private static string TimeAgo(DateTime date)
     {
         var value = date.Kind == DateTimeKind.Utc
             ? date
-            : DateTime.SpecifyKind(date, DateTimeKind.Utc);
+            : DateTime.SpecifyKind(
+                date,
+                DateTimeKind.Utc);
 
         var span = DateTime.UtcNow - value;
 
         if (span.TotalDays >= 7)
         {
-            return value.ToLocalTime().ToString("MMM d");
+            return value
+                .ToLocalTime()
+                .ToString("MMM d");
         }
 
         if (span.TotalDays >= 1)
         {
-            var days = (int)Math.Floor(span.TotalDays);
-            return days == 1 ? "1 day ago" : $"{days} days ago";
+            var days =
+                (int)Math.Floor(
+                    span.TotalDays);
+
+            return days == 1
+                ? "1 day ago"
+                : $"{days} days ago";
         }
 
         if (span.TotalHours >= 1)
         {
-            var hours = (int)Math.Floor(span.TotalHours);
-            return hours == 1 ? "1 hour ago" : $"{hours} hours ago";
+            var hours =
+                (int)Math.Floor(
+                    span.TotalHours);
+
+            return hours == 1
+                ? "1 hour ago"
+                : $"{hours} hours ago";
         }
 
         if (span.TotalMinutes >= 1)
         {
-            var minutes = (int)Math.Floor(span.TotalMinutes);
-            return minutes == 1 ? "1 min ago" : $"{minutes} mins ago";
+            var minutes =
+                (int)Math.Floor(
+                    span.TotalMinutes);
+
+            return minutes == 1
+                ? "1 min ago"
+                : $"{minutes} mins ago";
         }
 
         return "Just now";

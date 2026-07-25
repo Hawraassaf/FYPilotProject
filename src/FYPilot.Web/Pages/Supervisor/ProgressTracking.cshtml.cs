@@ -1,7 +1,6 @@
 using System.Security.Claims;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
-using FYPilot.Web.Services.Supervisors;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
@@ -10,113 +9,157 @@ namespace FYPilot.Web.Pages.Supervisor;
 
 [Authorize(Roles = "supervisor")]
 public class ProgressTrackingModel(
-    ApplicationDbContext db,
-    SupervisorAccessService supervisorAccess) : PageModel
+    ApplicationDbContext db) : PageModel
 {
     public List<ProjectListItem> Projects { get; private set; } = [];
+
     public ProgressProject? SelectedProject { get; private set; }
 
-    public async Task OnGetAsync(int? ideaId)
+    public async Task OnGetAsync(
+        int? projectId,
+        int? ideaId,
+        CancellationToken cancellationToken)
     {
         var supervisorId = SupervisorId();
 
-        var assignedStudentIds = await supervisorAccess.GetAssignedStudentIdsAsync(supervisorId);
-
-        var ideas = await db.ProjectIdeas
+        var projects = await db.Projects
             .AsNoTracking()
-            .Include(i => i.User)
-            .Where(i =>
-                i.IsSelected &&
-                assignedStudentIds.Contains(i.UserId))
-            .OrderByDescending(i => i.CreatedAt)
-            .ToListAsync();
+            .Include(project => project.Student)
+            .Include(project => project.ProjectIdea)
+                .ThenInclude(idea => idea!.User)
+            .Include(project => project.Members
+                .Where(member => member.Status == "active"))
+                .ThenInclude(member => member.User)
+            .Where(project =>
+                project.SupervisorId == supervisorId &&
+                project.SupervisorAssignmentStatus == "active" &&
+                project.ProjectIdeaId.HasValue &&
+                project.ProjectIdea != null)
+            .OrderByDescending(project => project.UpdatedAt)
+            .AsSplitQuery()
+            .ToListAsync(cancellationToken);
 
-        var ideaIds = ideas.Select(i => i.Id).ToList();
+        var projectIds = projects
+            .Select(project => project.Id)
+            .ToList();
 
-        var evaluations = await db.SupervisorEvaluations
-            .AsNoTracking()
-            .Where(e =>
-                e.SupervisorId == supervisorId &&
-                ideaIds.Contains(e.IdeaId))
-            .OrderByDescending(e => e.Id)
-            .ToListAsync();
+        var evaluations = projectIds.Count == 0
+            ? []
+            : await db.SupervisorEvaluations
+                .AsNoTracking()
+                .Where(evaluation =>
+                    evaluation.SupervisorId == supervisorId &&
+                    evaluation.ProjectId.HasValue &&
+                    projectIds.Contains(evaluation.ProjectId.Value))
+                .OrderByDescending(evaluation =>
+                    evaluation.UpdatedAt == default
+                        ? evaluation.CreatedAt
+                        : evaluation.UpdatedAt)
+                .ToListAsync(cancellationToken);
 
-        var evaluationByIdea = evaluations
-            .GroupBy(e => e.IdeaId)
-            .ToDictionary(g => g.Key, g => g.First());
+        var evaluationByProject = evaluations
+            .GroupBy(evaluation => evaluation.ProjectId!.Value)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .OrderByDescending(evaluation =>
+                        evaluation.UpdatedAt == default
+                            ? evaluation.CreatedAt
+                            : evaluation.UpdatedAt)
+                    .First());
 
-        Projects = ideas
-            .Select(idea =>
+        Projects = projects
+            .Select(project =>
             {
-                evaluationByIdea.TryGetValue(idea.Id, out var evaluation);
+                evaluationByProject.TryGetValue(
+                    project.Id,
+                    out var evaluation);
+
+                var members = BuildMemberSummaries(project);
 
                 return new ProjectListItem
                 {
-                    IdeaId = idea.Id,
-                    StudentName = idea.User?.FullName ?? "Student",
-                    ProjectTitle = idea.Title,
-                    Domain = string.IsNullOrWhiteSpace(idea.Domain) ? "Uncategorized" : idea.Domain,
+                    ProjectId = project.Id,
+                    IdeaId = project.ProjectIdea!.Id,
+                    ProjectTitle = SafeProjectTitle(project.Title),
+                    OfficialIdeaTitle = project.ProjectIdea.Title,
+                    ProjectMembers = JoinMemberNames(members),
+                    ProjectMemberCount = members.Count,
+                    Domain = string.IsNullOrWhiteSpace(
+                        project.ProjectIdea.Domain)
+                        ? "Uncategorized"
+                        : project.ProjectIdea.Domain,
                     Status = NormalizeStatus(evaluation?.Status),
-                    CreatedAt = idea.CreatedAt
+                    CreatedAt = project.ProjectIdea.CreatedAt
                 };
             })
             .ToList();
 
-        var selectedIdea = ideaId.HasValue
-            ? ideas.FirstOrDefault(i => i.Id == ideaId.Value)
-            : ideas.FirstOrDefault();
+        var selectedProject = ResolveSelectedProject(
+            projects,
+            projectId,
+            ideaId);
 
-        if (selectedIdea == null)
+        if (selectedProject?.ProjectIdea == null)
         {
             SelectedProject = null;
             return;
         }
 
-        evaluationByIdea.TryGetValue(
-    selectedIdea.Id,
-    out var selectedEvaluation);
+        evaluationByProject.TryGetValue(
+            selectedProject.Id,
+            out var selectedEvaluation);
+
+        var selectedIdea = selectedProject.ProjectIdea;
 
         var selectedRoadmap = await db.ProjectRoadmaps
             .AsNoTracking()
-            .Include(r => r.Phases)
-            .Where(r =>
-                r.IdeaId == selectedIdea.Id &&
-                r.UserId == selectedIdea.UserId)
-            .OrderByDescending(r => r.CreatedAt)
-            .FirstOrDefaultAsync();
+            .Include(roadmap => roadmap.Phases)
+            .Where(roadmap =>
+                roadmap.IdeaId == selectedIdea.Id)
+            .OrderByDescending(roadmap => roadmap.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
 
         var selectedPhases = selectedRoadmap?.Phases
-            .OrderBy(p => p.PhaseNumber)
+            .OrderBy(phase => phase.PhaseNumber)
             .ToList() ?? [];
 
+        var selectedMembers = BuildMemberSummaries(
+            selectedProject);
+
         SelectedProject = BuildProgressProject(
+            selectedProject,
             selectedIdea,
             selectedEvaluation,
-            selectedPhases);
+            selectedPhases,
+            selectedMembers);
     }
 
     private ProgressProject BuildProgressProject(
+        Project project,
         ProjectIdea idea,
         SupervisorEvaluation? evaluation,
-        IReadOnlyList<RoadmapPhase> phases)
+        IReadOnlyList<RoadmapPhase> phases,
+        IReadOnlyList<MemberSummary> members)
     {
         var status = NormalizeStatus(evaluation?.Status);
-
         var startDate = idea.CreatedAt.Date;
 
         var orderedPhases = phases
-            .OrderBy(p => p.PhaseNumber)
+            .OrderBy(phase => phase.PhaseNumber)
             .ToList();
 
         var plannedWeeks = orderedPhases.Count > 0
             ? orderedPhases.Sum(
-                phase => Math.Max(1, phase.EstimatedWeeks))
+                phase => Math.Max(
+                    1,
+                    phase.EstimatedWeeks))
             : idea.ExpectedDurationWeeks > 0
                 ? idea.ExpectedDurationWeeks
                 : 16;
 
-        var endDate =
-            startDate.AddDays(plannedWeeks * 7);
+        var endDate = startDate.AddDays(
+            plannedWeeks * 7);
 
         var today = DateTime.UtcNow.Date;
 
@@ -147,9 +190,10 @@ public class ProgressTrackingModel(
             orderedPhases,
             startDate);
 
-        var nextStep = roadmap.FirstOrDefault(step =>
-            step.State == "current" ||
-            step.State == "upcoming");
+        var nextStep = roadmap.FirstOrDefault(
+            step =>
+                step.State == "current" ||
+                step.State == "upcoming");
 
         var risks = BuildRisks(
             idea,
@@ -159,105 +203,127 @@ public class ProgressTrackingModel(
         var updates = BuildUpdates(
             idea,
             evaluation,
-            status);
+            status,
+            members);
 
         return new ProgressProject
         {
+            ProjectId = project.Id,
             IdeaId = idea.Id,
-
-            StudentName =
-                idea.User?.FullName ?? "Student",
-
-            StudentEmail =
-                idea.User?.Email ?? "",
-
-            StudentInitials =
-                Initials(idea.User?.FullName),
-
-            ProjectCode =
-                $"FYP-{idea.Id:0000}",
-
-            ProjectTitle = idea.Title,
-
-            Department =
-                "Computer Science",
-
-            Domain =
-                string.IsNullOrWhiteSpace(idea.Domain)
-                    ? "Uncategorized"
-                    : idea.Domain,
-
+            ProjectName = SafeProjectTitle(project.Title),
+            ProjectMembers = JoinMemberNames(members),
+            ProjectMemberCount = members.Count,
+            ProjectInitials = Initials(project.Title),
+            ProjectCode = $"FYP-{project.Id:0000}",
+            OfficialIdeaTitle = idea.Title,
+            Department = "Computer Science",
+            Domain = string.IsNullOrWhiteSpace(idea.Domain)
+                ? "Uncategorized"
+                : idea.Domain,
             DifficultyLevel =
-                string.IsNullOrWhiteSpace(
-                    idea.DifficultyLevel)
+                string.IsNullOrWhiteSpace(idea.DifficultyLevel)
                     ? "Not specified"
                     : idea.DifficultyLevel,
-
-            SupervisorName =
-                CurrentSupervisorName(),
-
+            SupervisorName = CurrentSupervisorName(),
             Status = status,
-
-            StatusLabel =
-                ProjectStatusLabel(status),
-
-            StatusClass =
-                ProjectStatusClass(status),
-
+            StatusLabel = ProjectStatusLabel(status),
+            StatusClass = ProjectStatusClass(status),
             StartDate = startDate,
             EndDate = endDate,
-
             OverallProgress = progress,
-
-            MilestonesCompleted =
-                completedPhases,
-
-            MilestonesTotal =
-                totalPhases,
-
-            DaysElapsed =
-                Math.Min(daysElapsed, totalDays),
-
+            MilestonesCompleted = completedPhases,
+            MilestonesTotal = totalPhases,
+            DaysElapsed = Math.Min(daysElapsed, totalDays),
             TotalDays = totalDays,
             DaysRemaining = daysRemaining,
-
-            DeliverablesSubmitted =
-                completedPhases,
-
-            DeliverablesTotal =
-                totalPhases,
-
+            DeliverablesSubmitted = completedPhases,
+            DeliverablesTotal = totalPhases,
             NextDue = nextStep?.Title ??
                 (totalPhases == 0
                     ? "Roadmap not generated"
                     : "All phases completed"),
-
-            NextDueDate =
-                nextStep?.Date ?? endDate,
-
+            NextDueDate = nextStep?.Date ?? endDate,
             Roadmap = roadmap,
             Risks = risks,
             Updates = updates,
-
             OriginalityScore =
                 evaluation?.OriginalityScore ?? 0,
-
             SimilarityScore =
                 evaluation?.SimilarityScore ?? 0
         };
     }
 
-    private List<RoadmapStep> BuildRoadmap(
-      IReadOnlyList<RoadmapPhase> phases,
-      DateTime startDate)
+    private static Project? ResolveSelectedProject(
+        IReadOnlyList<Project> projects,
+        int? projectId,
+        int? ideaId)
+    {
+        if (projectId.HasValue)
+        {
+            var byProject = projects.FirstOrDefault(
+                project =>
+                    project.Id == projectId.Value);
+
+            if (byProject != null)
+            {
+                return byProject;
+            }
+        }
+
+        if (ideaId.HasValue)
+        {
+            var byIdea = projects.FirstOrDefault(
+                project =>
+                    project.ProjectIdeaId == ideaId.Value);
+
+            if (byIdea != null)
+            {
+                return byIdea;
+            }
+        }
+
+        return projects.FirstOrDefault();
+    }
+
+    private static List<MemberSummary> BuildMemberSummaries(
+        Project project)
+    {
+        var members = project.Members
+            .Where(member =>
+                member.Status == "active" &&
+                member.User != null)
+            .Select(member => new MemberSummary(
+                member.UserId,
+                member.User!.FullName))
+            .ToList();
+
+        if (members.All(member =>
+                member.UserId != project.StudentId))
+        {
+            members.Add(new MemberSummary(
+                project.StudentId,
+                project.Student?.FullName ??
+                project.ProjectIdea?.User?.FullName ??
+                "Project owner"));
+        }
+
+        return members
+            .GroupBy(member => member.UserId)
+            .Select(group => group.First())
+            .OrderBy(member => member.FullName)
+            .ToList();
+    }
+
+    private static List<RoadmapStep> BuildRoadmap(
+        IReadOnlyList<RoadmapPhase> phases,
+        DateTime startDate)
     {
         var steps = new List<RoadmapStep>();
-
         var phaseDate = startDate;
         var currentPhaseAssigned = false;
 
         foreach (var phase in phases
-                     .OrderBy(p => p.PhaseNumber))
+                     .OrderBy(phase => phase.PhaseNumber))
         {
             string state;
 
@@ -278,12 +344,9 @@ public class ProgressTrackingModel(
             steps.Add(new RoadmapStep
             {
                 Number = phase.PhaseNumber,
-
-                Title = string.IsNullOrWhiteSpace(
-                    phase.Name)
+                Title = string.IsNullOrWhiteSpace(phase.Name)
                     ? $"Phase {phase.PhaseNumber}"
                     : phase.Name,
-
                 Date = phaseDate,
                 State = state
             });
@@ -297,7 +360,10 @@ public class ProgressTrackingModel(
         return steps;
     }
 
-    private List<RiskItem> BuildRisks(ProjectIdea idea, SupervisorEvaluation? evaluation, string status)
+    private static List<RiskItem> BuildRisks(
+        ProjectIdea idea,
+        SupervisorEvaluation? evaluation,
+        string status)
     {
         var risks = new List<RiskItem>();
 
@@ -306,9 +372,11 @@ public class ProgressTrackingModel(
             risks.Add(new RiskItem
             {
                 Title = "Revision Required",
-                Description = string.IsNullOrWhiteSpace(evaluation?.ImprovementSuggestions)
-                    ? "The idea needs supervisor guidance before moving forward."
-                    : evaluation.ImprovementSuggestions,
+                Description =
+                    string.IsNullOrWhiteSpace(
+                        evaluation?.ImprovementSuggestions)
+                        ? "The project team needs supervisor guidance before moving forward."
+                        : evaluation.ImprovementSuggestions,
                 Severity = "Medium",
                 IdentifiedOn = DateTime.UtcNow.Date,
                 Impact = "Medium"
@@ -320,7 +388,8 @@ public class ProgressTrackingModel(
             risks.Add(new RiskItem
             {
                 Title = "Project Direction Blocked",
-                Description = "The current proposal was rejected and the student needs a new direction.",
+                Description =
+                    "The official proposal was rejected and the project team needs a new direction.",
                 Severity = "High",
                 IdentifiedOn = DateTime.UtcNow.Date,
                 Impact = "High"
@@ -332,7 +401,8 @@ public class ProgressTrackingModel(
             risks.Add(new RiskItem
             {
                 Title = "Domain Not Defined",
-                Description = "The project domain is missing, which may make supervisor matching and tracking less clear.",
+                Description =
+                    "The official idea has no project domain, which can reduce tracking clarity.",
                 Severity = "Low",
                 IdentifiedOn = idea.CreatedAt.Date,
                 Impact = "Low"
@@ -344,27 +414,36 @@ public class ProgressTrackingModel(
             risks.Add(new RiskItem
             {
                 Title = "No Active Blockers",
-                Description = "No major blocker is currently detected from the available review data.",
+                Description =
+                    "No major blocker is currently detected from the shared project review data.",
                 Severity = "Low",
                 IdentifiedOn = DateTime.UtcNow.Date,
                 Impact = "Low"
             });
         }
 
-        return risks.Take(3).ToList();
+        return risks
+            .Take(3)
+            .ToList();
     }
 
-    private List<UpdateItem> BuildUpdates(ProjectIdea idea, SupervisorEvaluation? evaluation, string status)
+    private List<UpdateItem> BuildUpdates(
+        ProjectIdea idea,
+        SupervisorEvaluation? evaluation,
+        string status,
+        IReadOnlyList<MemberSummary> members)
     {
         var updates = new List<UpdateItem>
         {
             new()
             {
-                Title = "Project idea submitted",
+                Title = "Official project idea selected",
                 Subtitle = idea.Title,
                 Date = idea.CreatedAt,
                 Type = "Project",
-                By = idea.User?.FullName ?? "Student",
+                By = members.Count == 0
+                    ? "Project team"
+                    : JoinMemberNames(members),
                 Icon = "bi bi-file-earmark-text"
             }
         };
@@ -375,15 +454,22 @@ public class ProgressTrackingModel(
             {
                 Title = status switch
                 {
-                    "approved" => "Idea approved by supervisor",
-                    "needs_revision" => "Revision feedback added",
-                    "rejected" => "Idea rejected by supervisor",
-                    _ => "Supervisor review is pending"
+                    "approved" =>
+                        "Project idea approved by supervisor",
+                    "needs_revision" =>
+                        "Revision feedback added",
+                    "rejected" =>
+                        "Project idea rejected by supervisor",
+                    _ =>
+                        "Supervisor review is pending"
                 },
-                Subtitle = string.IsNullOrWhiteSpace(evaluation.Comment)
-                    ? "Evaluation status updated."
-                    : evaluation.Comment,
-                Date = evaluation.UpdatedAt == default ? evaluation.CreatedAt : evaluation.UpdatedAt,
+                Subtitle =
+                    string.IsNullOrWhiteSpace(evaluation.Comment)
+                        ? "Shared evaluation status updated."
+                        : evaluation.Comment,
+                Date = evaluation.UpdatedAt == default
+                    ? evaluation.CreatedAt
+                    : evaluation.UpdatedAt,
                 Type = "Evaluation",
                 By = CurrentSupervisorName(),
                 Icon = status switch
@@ -397,7 +483,7 @@ public class ProgressTrackingModel(
         }
 
         return updates
-            .OrderByDescending(u => u.Date)
+            .OrderByDescending(update => update.Date)
             .Take(4)
             .ToList();
     }
@@ -450,29 +536,66 @@ public class ProgressTrackingModel(
     {
         if (string.IsNullOrWhiteSpace(name))
         {
-            return "ST";
+            return "PR";
         }
 
         var parts = name
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Split(
+                ' ',
+                StringSplitOptions.RemoveEmptyEntries)
             .Take(2)
             .ToList();
 
         return parts.Count == 0
-            ? "ST"
-            : string.Join("", parts.Select(p => p[0])).ToUpperInvariant();
+            ? "PR"
+            : string.Join(
+                    "",
+                    parts.Select(part => part[0]))
+                .ToUpperInvariant();
+    }
+
+    private static string JoinMemberNames(
+        IEnumerable<MemberSummary> members)
+    {
+        return string.Join(
+            ", ",
+            members.Select(member => member.FullName));
+    }
+
+    private static string SafeProjectTitle(string? title)
+    {
+        return string.IsNullOrWhiteSpace(title)
+            ? "Untitled Project"
+            : title.Trim();
     }
 
     private int SupervisorId()
     {
-        return int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var value = User
+            .FindFirst(ClaimTypes.NameIdentifier)
+            ?.Value;
+
+        if (int.TryParse(value, out var supervisorId))
+        {
+            return supervisorId;
+        }
+
+        throw new InvalidOperationException(
+            "Unable to identify the logged-in supervisor.");
     }
+
+    private sealed record MemberSummary(
+        int UserId,
+        string FullName);
 
     public sealed class ProjectListItem
     {
+        public int ProjectId { get; set; }
         public int IdeaId { get; set; }
-        public string StudentName { get; set; } = "";
         public string ProjectTitle { get; set; } = "";
+        public string OfficialIdeaTitle { get; set; } = "";
+        public string ProjectMembers { get; set; } = "";
+        public int ProjectMemberCount { get; set; }
         public string Domain { get; set; } = "";
         public string Status { get; set; } = "pending";
         public DateTime CreatedAt { get; set; }
@@ -480,12 +603,14 @@ public class ProgressTrackingModel(
 
     public sealed class ProgressProject
     {
+        public int ProjectId { get; set; }
         public int IdeaId { get; set; }
-        public string StudentName { get; set; } = "";
-        public string StudentEmail { get; set; } = "";
-        public string StudentInitials { get; set; } = "ST";
+        public string ProjectName { get; set; } = "";
+        public string ProjectMembers { get; set; } = "";
+        public int ProjectMemberCount { get; set; }
+        public string ProjectInitials { get; set; } = "PR";
         public string ProjectCode { get; set; } = "";
-        public string ProjectTitle { get; set; } = "";
+        public string OfficialIdeaTitle { get; set; } = "";
         public string Department { get; set; } = "";
         public string Domain { get; set; } = "";
         public string DifficultyLevel { get; set; } = "";
