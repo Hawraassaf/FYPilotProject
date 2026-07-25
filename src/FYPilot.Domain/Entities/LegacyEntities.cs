@@ -16,6 +16,7 @@ public class Project
     [Column("progress_percentage")] public int ProgressPercentage { get; set; } = 0;
     [Column("student_id")] public int StudentId { get; set; }
     [Column("supervisor_id")] public int? SupervisorId { get; set; }
+    [Column("supervisor_assignment_status")] public string SupervisorAssignmentStatus { get; set; } ="unassigned";
     [Column("project_idea_id")] public int? ProjectIdeaId { get; set; }
 
     [Range(1, 3)]
@@ -39,6 +40,11 @@ public class Project
     public ICollection<ProjectTask> Tasks { get; set; } = [];
     public ICollection<Milestone> Milestones { get; set; } = [];
     public ICollection<Feedback> Feedbacks { get; set; } = [];
+    public ICollection<SupervisorAssignment> SupervisorAssignments { get; set; } = [];
+
+    public ICollection<SupervisorEvaluation> SupervisorEvaluations{ get; set; } = [];
+
+    public ICollection<Meeting>  Meetings  { get; set; } = [];
 }
 
 [Table("tasks")]

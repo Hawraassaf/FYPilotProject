@@ -143,6 +143,9 @@ public class PreviousProject
 public class SupervisorEvaluation
 {
     [Key] [Column("id")] public int Id { get; set; }
+    
+    [Column("project_id")]
+    public int? ProjectId { get; set; }
     [Column("idea_id")] public int IdeaId { get; set; }
     [Column("supervisor_id")] public int SupervisorId { get; set; }
     [Column("status")] public string Status { get; set; } = "pending";
@@ -154,4 +157,5 @@ public class SupervisorEvaluation
     [Column("updated_at")] public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     [ForeignKey(nameof(IdeaId))] public ProjectIdea? Idea { get; set; }
     [ForeignKey(nameof(SupervisorId))] public User? Supervisor { get; set; }
+    [ForeignKey(nameof(ProjectId))] public Project? Project { get; set; }
 }

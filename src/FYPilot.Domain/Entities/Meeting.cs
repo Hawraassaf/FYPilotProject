@@ -9,6 +9,8 @@ public class Meeting
     [Key]
     [Column("id")]
     public int Id { get; set; }
+    [Column("project_id")]
+    public int? ProjectId { get; set; }
 
     [Column("supervisor_id")]
     public int SupervisorId { get; set; }
@@ -77,4 +79,6 @@ public class Meeting
 
     [ForeignKey(nameof(StudentId))]
     public User? Student { get; set; }
+    [ForeignKey(nameof(ProjectId))]
+    public Project? Project { get; set; }
 }

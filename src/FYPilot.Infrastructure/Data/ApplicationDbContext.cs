@@ -137,6 +137,10 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
         modelBuilder.Entity<Project>(e =>
         {
+            e.Property(project =>
+              project.SupervisorAssignmentStatus)
+              .HasMaxLength(40)
+              .HasDefaultValue("unassigned");
             e.Property(p => p.MaximumMembers)
                 .HasDefaultValue(3);
 
@@ -538,19 +542,138 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             .HasForeignKey(m => m.MentorChatSessionId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        modelBuilder.Entity<SupervisorEvaluation>(e =>
+        modelBuilder.Entity<SupervisorEvaluation>(entity =>
         {
-            e.HasOne(se => se.Idea)
-                .WithMany()
-                .HasForeignKey(se => se.IdeaId)
+            entity.Property(evaluation =>
+                    evaluation.Status)
+                .HasMaxLength(40)
+                .HasDefaultValue("pending");
+
+            entity.HasOne(evaluation =>
+                    evaluation.Project)
+                .WithMany(project =>
+                    project.SupervisorEvaluations)
+                .HasForeignKey(evaluation =>
+                    evaluation.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            e.HasOne(se => se.Supervisor)
+            entity.HasOne(evaluation =>
+                    evaluation.Idea)
                 .WithMany()
-                .HasForeignKey(se => se.SupervisorId)
-                .OnDelete(DeleteBehavior.Restrict);
-        });
+                .HasForeignKey(evaluation =>
+                    evaluation.IdeaId)
+                .OnDelete(DeleteBehavior.Cascade);
 
+            entity.HasOne(evaluation =>
+                    evaluation.Supervisor)
+                .WithMany()
+                .HasForeignKey(evaluation =>
+                    evaluation.SupervisorId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+         
+            entity.HasIndex(evaluation => new
+            {
+                evaluation.ProjectId,
+                evaluation.IdeaId
+            })
+                .IsUnique()
+                .HasFilter(
+                    "\"project_id\" IS NOT NULL");
+
+            entity.HasIndex(evaluation => new
+            {
+                evaluation.SupervisorId,
+                evaluation.ProjectId
+            });
+        });
+        modelBuilder.Entity<SupervisorAssignment>(entity =>
+        {
+            entity.Property(assignment =>
+                    assignment.Status)
+                .HasMaxLength(40)
+                .HasDefaultValue("pending_admin");
+
+            entity.HasOne(assignment =>
+                    assignment.Project)
+                .WithMany(project =>
+                    project.SupervisorAssignments)
+                .HasForeignKey(assignment =>
+                    assignment.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(assignment =>
+                    assignment.Student)
+                .WithMany()
+                .HasForeignKey(assignment =>
+                    assignment.StudentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(assignment =>
+                    assignment.Supervisor)
+                .WithMany()
+                .HasForeignKey(assignment =>
+                    assignment.SupervisorId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(assignment =>
+                    assignment.AssignedByAdmin)
+                .WithMany()
+                .HasForeignKey(assignment =>
+                    assignment.AssignedByAdminId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+          
+            entity.HasIndex(assignment =>
+                    assignment.ProjectId)
+                .IsUnique()
+                .HasFilter(
+                    "\"project_id\" IS NOT NULL "
+                    + "AND \"status\" IN "
+                    + "('pending_admin', 'active')");
+
+            entity.HasIndex(assignment => new
+            {
+                assignment.SupervisorId,
+                assignment.Status
+            });
+        });
+        modelBuilder.Entity<Meeting>(entity =>
+        {
+            entity.HasOne(meeting =>
+                    meeting.Project)
+                .WithMany(project =>
+                    project.Meetings)
+                .HasForeignKey(meeting =>
+                    meeting.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(meeting =>
+                    meeting.Supervisor)
+                .WithMany()
+                .HasForeignKey(meeting =>
+                    meeting.SupervisorId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(meeting =>
+                    meeting.Student)
+                .WithMany()
+                .HasForeignKey(meeting =>
+                    meeting.StudentId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(meeting => new
+            {
+                meeting.ProjectId,
+                meeting.ScheduledAt
+            });
+
+            entity.HasIndex(meeting => new
+            {
+                meeting.SupervisorId,
+                meeting.ScheduledAt
+            });
+        });
         modelBuilder.Entity<ProjectDocumentation>(entity =>
         {
             entity.ToTable("project_documentations");
