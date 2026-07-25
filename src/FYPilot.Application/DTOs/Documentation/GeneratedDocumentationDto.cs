@@ -18,4 +18,6 @@ public class GeneratedDocumentationDto
 
     public string SupervisorStatus { get; set; } = "Draft";
     public string SupervisorComment { get; set; } = string.Empty;
+
+    public DateTime CreatedAt { get; set; }
 }

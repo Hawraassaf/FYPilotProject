@@ -90,7 +90,13 @@ public record AiSeDocumentationDto(
     List<string> RisksAndLimitations,
     List<string> ExpectedOutcomes,
     int DocumentationQualityScore,
-    List<string> ConsistencyWarnings
+    List<string> ConsistencyWarnings,
+    List<AiSeDocUiScreen>? UiScreens = null,
+    List<AiSeDocSecurityItem>? SecurityAndPrivacy = null,
+    List<AiSeDocAssumption>? Assumptions = null,
+    AiSeDocAiTechnicalReport? AiTechnicalReport = null,
+    bool AiTechnicalReportApplicable = false,
+    AiSeDocQualityAssessment? QualityAssessment = null
 );
 
 public record AiSeDocScope(
@@ -104,7 +110,24 @@ public record AiSeDocRequirement(
     string Title,
     string Description,
     string Priority,
-    string Source
+    string Source,
+    string? Rationale = null,
+    string? PrimaryActor = null,
+    List<string>? Preconditions = null,
+    string? Trigger = null,
+    List<string>? Inputs = null,
+    string? SystemBehavior = null,
+    List<string>? Outputs = null,
+    List<string>? BusinessRules = null,
+    List<string>? ValidationRules = null,
+    List<string>? AcceptanceCriteria = null,
+    List<string>? RelatedUseCaseIds = null,
+    List<string>? RelatedModuleIds = null,
+    string? SourceClassification = null,
+    string? Category = null,
+    string? MeasurableTarget = null,
+    string? VerificationMethod = null,
+    List<string>? RelatedComponents = null
 );
 
 public record AiSeDocUseCase(
@@ -116,14 +139,28 @@ public record AiSeDocUseCase(
     List<string> MainFlow,
     List<string> AlternativeFlow,
     List<string> Postconditions,
-    List<string> RelatedRequirements
+    List<string> RelatedRequirements,
+    string? Trigger = null,
+    List<string>? SupportingActors = null,
+    List<string>? ExceptionFlows = null,
+    List<string>? DataUsed = null,
+    string? SecurityConsiderations = null,
+    string? Importance = null,
+    string? SourceClassification = null
 );
 
 public record AiSeDocEdgeCase(
     string Id,
     string Scenario,
     string ExpectedHandling,
-    string RelatedRequirement
+    string RelatedRequirement,
+    string? Severity = null,
+    string? RecoveryAction = null,
+    string? UserMessage = null,
+    string? LoggingRequirement = null,
+    string? TestScenario = null,
+    List<string>? AffectedUseCases = null,
+    string? SourceClassification = null
 );
 
 public record AiSeDocModule(
@@ -132,14 +169,42 @@ public record AiSeDocModule(
     string Responsibility,
     List<string> Inputs,
     List<string> Outputs,
-    List<string> RelatedRequirements
+    List<string> RelatedRequirements,
+    List<string>? Dependencies = null,
+    List<string>? ExposedInterfaces = null,
+    string? FailureBehavior = null,
+    string? SourceClassification = null
+);
+
+public record AiSeDocEntityField(
+    string Name,
+    string DataType,
+    bool Nullable,
+    string? DefaultValue,
+    string Description,
+    string? Constraints,
+    bool IsSensitive = false,
+    bool IsPrimaryKey = false,
+    bool IsForeignKey = false,
+    string? ReferencedEntity = null,
+    string? ReferencedField = null
 );
 
 public record AiSeDocEntity(
     string Name,
     string Purpose,
     List<string> ImportantFields,
-    List<string> Relationships
+    List<string> Relationships,
+    List<AiSeDocEntityField>? Fields = null,
+    string? PrimaryKey = null,
+    List<string>? ForeignKeys = null,
+    List<string>? UniqueConstraints = null,
+    List<string>? Indexes = null,
+    string? SourceClassification = null,
+    string? EntityId = null,
+    List<string>? ValidationConstraints = null,
+    List<string>? SensitiveFields = null,
+    List<string>? RelatedRequirementIds = null
 );
 
 public record AiSeDocRelationship(
@@ -156,7 +221,15 @@ public record AiSeDocArchitecture(
     string Database,
     string AiService,
     List<string> ExternalServices,
-    string Explanation
+    string Explanation,
+    List<string>? Components = null,
+    List<string>? CommunicationPaths = null,
+    List<string>? TrustBoundaries = null,
+    string? DataFlow = null,
+    string? AuthenticationFlow = null,
+    string? ErrorHandling = null,
+    string? DeploymentAssumptions = null,
+    string? ScalabilityConsiderations = null
 );
 
 public record AiSeDocApiPoint(
@@ -165,7 +238,73 @@ public record AiSeDocApiPoint(
     string Endpoint,
     string Purpose,
     string RequestSummary,
-    string ResponseSummary
+    string ResponseSummary,
+    string? Authentication = null,
+    List<string>? RequestFields = null,
+    List<string>? ResponseFields = null,
+    string? TimeoutBehavior = null,
+    string? SourceClassification = null,
+    string? ApiId = null,
+    List<string>? RelatedRequirements = null
+);
+
+public record AiSeDocUiScreen(
+    string ScreenId,
+    string Name,
+    List<string> AuthorizedRoles,
+    string Purpose,
+    List<string> MainComponents,
+    List<string> UserActions,
+    List<string> ValidationRules,
+    string LoadingState,
+    string EmptyState,
+    string ErrorState,
+    string SuccessState,
+    string AccessibilityNotes,
+    List<string> RelatedUseCases,
+    List<string> RelatedRequirements,
+    string? SourceClassification = null
+);
+
+public record AiSeDocSecurityItem(
+    string Category,
+    string Requirement,
+    string? Rationale = null
+);
+
+public record AiSeDocAssumption(
+    string Item,
+    string Classification,
+    string? Rationale = null
+);
+
+public record AiSeDocQualityAssessment(
+    int OverallScore,
+    Dictionary<string, int> CriterionScores,
+    List<string> FailedChecks,
+    List<string> Warnings,
+    List<string> MissingInformation,
+    int AssumptionsCount,
+    int CriticalIssuesCount = 0,
+    Dictionary<string, int>? CoverageStatistics = null
+);
+
+public record AiSeDocAiTechnicalReport(
+    string? ProblemDefinition = null,
+    string? TaskType = null,
+    string? InputData = null,
+    string? Output = null,
+    string? ModelOrApproach = null,
+    string? TrainingVsInference = null,
+    string? RetrievalStrategy = null,
+    string? FallbackStrategy = null,
+    string? ConfidenceHandling = null,
+    List<string>? EvaluationMetrics = null,
+    string? DatasetNeeds = null,
+    string? BiasAndSafetyRisks = null,
+    string? HallucinationMitigation = null,
+    string? Monitoring = null,
+    string? Limitations = null
 );
 
 public record AiSeDocTestCase(
@@ -174,7 +313,15 @@ public record AiSeDocTestCase(
     string Type,
     List<string> Steps,
     string ExpectedResult,
-    List<string> RelatedRequirements
+    List<string> RelatedRequirements,
+    List<string>? Preconditions = null,
+    string? Priority = null,
+    List<string>? TestData = null,
+    string? PassCriteria = null,
+    bool NegativeCase = false,
+    List<string>? RelatedUseCaseIds = null,
+    bool AutomationCandidate = false,
+    string? SourceClassification = null
 );
 
 public record AiSeDocTraceability(
@@ -182,5 +329,15 @@ public record AiSeDocTraceability(
     string UseCaseId,
     string ModuleId,
     string Entity,
-    string TestCaseId
+    string TestCaseId,
+    string? ScreenId = null,
+    string? ApiId = null,
+    List<string>? UseCaseIds = null,
+    List<string>? ModuleIds = null,
+    List<string>? EntityIds = null,
+    List<string>? ScreenIds = null,
+    List<string>? ApiIds = null,
+    List<string>? TestCaseIds = null,
+    string? CoverageStatus = null,
+    string? Notes = null
 );

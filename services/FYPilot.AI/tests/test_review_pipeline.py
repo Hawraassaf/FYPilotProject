@@ -21,6 +21,7 @@ if _SERVICE_ROOT not in sys.path:
 from pydantic import BaseModel  # noqa: E402
 
 from app.agents.answer_review_agent import AnswerReviewAgent  # noqa: E402
+from app.agents.se_documentation.project_facts import build_project_facts  # noqa: E402
 from app.agents.se_documentation.se_documentation_orchestrator import (  # noqa: E402
     EdgeCaseDto,
     EntityDto,
@@ -1219,8 +1220,16 @@ def _sedoc_module(id_, related_requirements=None):
     }
 
 
-def _sedoc_entity(name):
-    return {"name": name, "purpose": "p", "importantFields": [], "relationships": []}
+def _sedoc_entity(name, entity_id="ENT-01"):
+    return {
+        "entityId": entity_id, "name": name, "purpose": "p", "importantFields": [], "relationships": [],
+        "fields": [
+            {"name": "Id", "dataType": "int", "nullable": False, "isPrimaryKey": True},
+            {"name": "CreatedAt", "dataType": "datetime", "nullable": False},
+            {"name": "Description", "dataType": "string", "nullable": True},
+        ],
+        "primaryKey": "Id",
+    }
 
 
 def _sedoc_test(id_, related_requirements=None):
@@ -1228,6 +1237,16 @@ def _sedoc_test(id_, related_requirements=None):
         "id": id_, "title": "t", "type": "Functional", "steps": [],
         "expectedResult": "ok", "relatedRequirements": related_requirements or [],
     }
+
+
+def _sedoc_traceability_row(requirement_id, **overrides):
+    row = {
+        "requirementId": requirement_id,
+        "useCaseIds": [], "moduleIds": [], "entityIds": [], "screenIds": [], "apiIds": [], "testCaseIds": [],
+        "coverageStatus": "covered", "notes": "",
+    }
+    row.update(overrides)
+    return row
 
 
 def _sedoc_candidate(**overrides):
@@ -1242,7 +1261,7 @@ def _sedoc_candidate(**overrides):
         "nonFunctionalRequirements": [_sedoc_requirement("NFR-01")],
         "useCases": [_sedoc_usecase("UC-01", ["FR-01"])],
         "edgeCases": [_sedoc_edgecase("EC-01", "FR-01")],
-        "systemModules": [_sedoc_module("M-01", ["FR-01"])],
+        "systemModules": [_sedoc_module("MOD-01", ["FR-01"])],
         "databaseEntities": [_sedoc_entity("User")],
         "entityRelationships": [],
         "mermaidERD": "erDiagram",
@@ -1255,10 +1274,12 @@ def _sedoc_candidate(**overrides):
             "explanation": "explanation",
         },
         "apiIntegrationPoints": [],
+        "uiScreens": [],
         "testingPlan": [_sedoc_test("TC-01", ["FR-01"])],
-        "traceabilityMatrix": [],
+        "traceabilityMatrix": [_sedoc_traceability_row("FR-01", useCaseIds=["UC-01"], moduleIds=["MOD-01"], entityIds=["ENT-01"], testCaseIds=["TC-01"])],
         "risksAndLimitations": [],
         "expectedOutcomes": [],
+        "assumptions": [],
         "documentationQualityScore": 88,
         "consistencyWarnings": [],
     }
@@ -1465,6 +1486,7 @@ class SEDocumentationReconciliationTests(unittest.TestCase):
         # final SEDocumentationDto satisfies SEDocumentationCandidateSchema's
         # referential-integrity and uniqueness invariants.
         request = SEDocumentationRequest()
+        facts = build_project_facts(request)
         sections = {
             "requirements": {
                 "functionalRequirements": [
@@ -1473,7 +1495,7 @@ class SEDocumentationReconciliationTests(unittest.TestCase):
                 ],
             },
         }
-        doc = self.agent._assemble_documentation(request, sections, used_fallback=False)
+        doc = self.agent._assemble_documentation(request, facts, sections, used_fallback=False)
         SEDocumentationCandidateSchema.model_validate(doc.model_dump())
 
 

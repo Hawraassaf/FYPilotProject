@@ -376,50 +376,95 @@ class RoadmapCandidateSchema(ProjectRoadmapResponse):
                     )
 
 
-# SE Documentation-specific overclaiming to watch for -- the same forbidden
-# out-of-stack technologies ProjectRoadmapAgent already blocks deterministically
-# in its own generation step, fed here as domain knowledge for the semantic
-# Reviewer instead.
+# SE Documentation-specific overclaiming to watch for. Deliberately does NOT
+# name specific frameworks (React, AWS, Flutter, ...) -- this agent now
+# documents whatever technology stack the STUDENT actually confirmed for
+# their own selected project, which may legitimately be any of those, so a
+# static per-framework blocklist would misfire. Only genuinely unverifiable
+# absolute claims are listed here.
 _SEDOC_KNOWN_RISKY_CLAIMS = [
     "fully secure",
     "production-ready",
     "GDPR compliant",
+    "HIPAA compliant",
     "scales to millions of users",
     "zero downtime",
     "fully tested",
-    "React",
-    "Node.js",
-    "Flutter",
-    "AWS",
-    "Azure",
-    "Kubernetes",
-    "blockchain",
+    "guaranteed to pass",
+    "the model was trained",
 ]
 
 _SEDOC_EXTRA_RUBRIC = """
 SE DOCUMENTATION-SPECIFIC REVIEW CRITERIA (in addition to the standard criteria above):
-- Do NOT suggest changing documentationQualityScore -- it is computed
-  deterministically by the platform, not by the sections you are reviewing.
+- Do NOT suggest changing documentationQualityScore or qualityAssessment -- both
+  are computed deterministically by the platform, not by the sections you are reviewing.
 - Do NOT critique mermaidERD, mermaidClassDiagram, activityDiagram, or
   sequenceDiagram content or syntax -- these four fields are generated
-  deterministically from databaseEntities/entityRelationships, not written by
-  the LLM sections under review.
+  deterministically from databaseEntities/entityRelationships/useCases/architecture,
+  not written by the LLM sections under review.
+- Project identity: flag (category "project_alignment", severity "critical") any
+  mention of "FYPilot", "final year project generator", "roadmap generation", "idea
+  generation", or any other description of the documentation-generator platform
+  itself, UNLESS the trusted project context's ideaTitle genuinely IS that platform.
+  The candidate must describe the STUDENT'S selected project, never this platform.
 - Referential integrity: every id referenced in useCases.relatedRequirements,
-  edgeCases.relatedRequirement, systemModules.relatedRequirements, or
-  testingPlan.relatedRequirements must correspond to a real functional or
-  non-functional requirement id actually present in this candidate. Flag a
-  reference to a requirement id that does not exist as category
+  edgeCases.relatedRequirement, systemModules.relatedRequirements,
+  uiScreens.relatedRequirements, or testingPlan.relatedRequirements must correspond
+  to a real functional or non-functional requirement id actually present in this
+  candidate. Flag a reference to a requirement id that does not exist as category
   "contradiction".
 - Technology alignment: flag (category "project_alignment") any systemModule,
-  apiIntegrationPoint, or architecture description that assumes a technology
-  outside this project's actual stack (ASP.NET Core Razor Pages, Python
-  FastAPI, PostgreSQL, Bootstrap, Ollama) unless the project's own
-  requiredTechnologies explicitly lists it.
+  apiIntegrationPoint, or architecture field (frontend/backend/database/aiService)
+  that names a technology NOT listed in the trusted project context's
+  requiredTechnologies, UNLESS that item's own sourceClassification is "assumption"
+  or "inferred" (an explicitly labeled assumption is acceptable; an unlabeled
+  invented technology is not).
+- UI screens vs. modules: flag (category "quality") any uiScreens entry whose name
+  describes a backend/development concept (e.g. ends in "Module", "Service",
+  "Repository", "Engine", "Middleware") rather than a real user-facing screen.
+- Measurable NFRs: flag (category "missing_mandatory_content") any
+  nonFunctionalRequirements entry with an empty measurableTarget or
+  verificationMethod.
+- AI technical accuracy: if aiTechnicalReportApplicable is true, flag (category
+  "unsupported_claim") any text describing external LLM API calls as "training a
+  model" -- calling an API is not training.
+- Assumption transparency: flag (category "missing_mandatory_content") if
+  consistencyWarnings or the candidate's own content indicates fallback/default
+  content was used but the assumptions list is empty.
 - Completeness: flag (category "missing_mandatory_content") if
-  functionalRequirements, useCases, systemModules, databaseEntities, or
+  functionalRequirements, useCases, systemModules, databaseEntities, uiScreens, or
   testingPlan is empty.
-- Consistency: flag (category "contradiction") if the architecture
-  description conflicts with the project's actual required technologies.
+- Consistency: flag (category "contradiction") if the architecture description
+  conflicts with the project's actual required technologies.
+- Database depth: flag (category "quality") any databaseEntity whose fields are only
+  filler placeholders (e.g. just Id/CreatedAt/Description) when the entity's purpose
+  implies it needs domain-specific fields, or whose fields don't actually support the
+  functional requirements that reference it via relatedRequirementIds.
+- Traceability completeness: flag (category "missing_mandatory_content") if any
+  functionalRequirements id does not appear as a traceabilityMatrix row's
+  requirementId, or if a row's coverageStatus is "uncovered" without a documented
+  reason in notes.
+- ID consistency: flag (category "quality") any id that doesn't follow this
+  candidate's own canonical prefixes (FR-, NFR-, UC-, EC-, MOD-, ENT-, UI-, API-,
+  TC-) -- e.g. a module using "M-01" or a screen using "SC-01" instead of "UI-01".
+- Assumption honesty: flag (category "missing_mandatory_content", severity
+  "critical") if the assumptions list is empty or claims nothing was assumed while
+  any section item's sourceClassification is "inferred", "assumption",
+  "proposed_target", or "unknown".
+- AI/authentication consistency: flag (category "contradiction") any text anywhere
+  in the candidate (requirements, use cases, architecture, AI report) that describes
+  a different AI approach or authentication mechanism than the canonical ones stated
+  in the trusted project context, including describing an external API call as
+  "training" or "fine-tuning" a model, or mentioning JWT when the authentication
+  mechanism is ASP.NET Core Identity.
+- UI coverage: flag (category "missing_mandatory_content") if a confirmed
+  user-facing feature (e.g. knowledge base management, ticket tracking, feedback,
+  configuration, user/role management) has no corresponding uiScreens entry.
+- Test depth: flag (category "quality") any testingPlan entry with a vague
+  expectedResult (e.g. "works correctly", "meets standards") or missing
+  testData/passCriteria.
+- Security: flag (category "unsupported_claim", severity "critical") any
+  databaseEntity field literally named "Password" (must be "PasswordHash").
 """
 
 
@@ -449,6 +494,20 @@ class SEDocumentationCandidateSchema(SEDocumentationDto):
         self._check_unique_ids(self.edgeCases, "edgeCases")
         self._check_unique_ids(self.systemModules, "systemModules")
         self._check_unique_ids(self.testingPlan, "testingPlan")
+
+        screen_ids = [screen.screenId for screen in self.uiScreens]
+        if len(screen_ids) != len(set(screen_ids)):
+            raise ValueError(f"uiScreens ids are not unique: {screen_ids}")
+
+        _dev_module_suffixes = ("module", "service layer", "repository", "engine", "middleware", "pipeline", "worker")
+        for screen in self.uiScreens:
+            lowered = screen.name.lower()
+            looks_like_module = any(suffix in lowered for suffix in _dev_module_suffixes)
+            looks_like_screen = any(word in lowered for word in ("screen", "page", "dashboard", "view"))
+            if looks_like_module and not looks_like_screen:
+                raise ValueError(
+                    f"uiScreens entry '{screen.name}' looks like a development module, not a user-facing screen"
+                )
 
         entity_names = [entity.name for entity in self.databaseEntities]
         if len(entity_names) != len(set(entity_names)):
@@ -485,6 +544,93 @@ class SEDocumentationCandidateSchema(SEDocumentationDto):
                     raise ValueError(
                         f"testCase '{test.id}' references unknown requirement '{req_id}'"
                     )
+
+        for screen in self.uiScreens:
+            for req_id in screen.relatedRequirements:
+                if req_id not in requirement_ids:
+                    raise ValueError(
+                        f"uiScreen '{screen.screenId}' references unknown requirement '{req_id}'"
+                    )
+
+        # Every functional requirement must appear in the traceability matrix
+        # -- the previous positional-zip assembly silently dropped every FR
+        # past the shortest section's length (e.g. only FR-01..FR-06 of 10).
+        traced_requirement_ids = {row.requirementId for row in self.traceabilityMatrix}
+        fr_ids = {fr.id for fr in self.functionalRequirements}
+        missing_frs = fr_ids - traced_requirement_ids
+        if missing_frs:
+            raise ValueError(f"functionalRequirements missing from traceabilityMatrix: {sorted(missing_frs)}")
+
+        # Every id referenced from a traceability row's plural *Ids lists must
+        # correspond to a real item actually present in this candidate.
+        module_ids = {m.id for m in self.systemModules}
+        entity_ids = {e.entityId for e in self.databaseEntities if e.entityId}
+        screen_ids = {s.screenId for s in self.uiScreens}
+        api_ids = {a.apiId for a in self.apiIntegrationPoints if a.apiId}
+        test_ids = {t.id for t in self.testingPlan}
+        use_case_ids = {uc.id for uc in self.useCases}
+
+        for row in self.traceabilityMatrix:
+            for uc_id in row.useCaseIds:
+                if uc_id not in use_case_ids:
+                    raise ValueError(f"traceabilityMatrix row '{row.requirementId}' references unknown useCase '{uc_id}'")
+            for mod_id in row.moduleIds:
+                if mod_id not in module_ids:
+                    raise ValueError(f"traceabilityMatrix row '{row.requirementId}' references unknown module '{mod_id}'")
+            for ent_id in row.entityIds:
+                if ent_id not in entity_ids:
+                    raise ValueError(f"traceabilityMatrix row '{row.requirementId}' references unknown entity '{ent_id}'")
+            for scr_id in row.screenIds:
+                if scr_id not in screen_ids:
+                    raise ValueError(f"traceabilityMatrix row '{row.requirementId}' references unknown screen '{scr_id}'")
+            for api_id in row.apiIds:
+                if api_id not in api_ids:
+                    raise ValueError(f"traceabilityMatrix row '{row.requirementId}' references unknown API '{api_id}'")
+            for tc_id in row.testCaseIds:
+                if tc_id not in test_ids:
+                    raise ValueError(f"traceabilityMatrix row '{row.requirementId}' references unknown test '{tc_id}'")
+
+        # Database hard rules: no entity may render with an empty field
+        # list, every entity needs exactly one primary key, and password
+        # data must never be represented as a raw "Password" field.
+        for entity in self.databaseEntities:
+            if not entity.fields:
+                raise ValueError(f"databaseEntity '{entity.name}' has no field details (empty fields list)")
+
+            is_junction = len(entity.foreignKeys) >= 2 and len(entity.fields) <= 3
+            if not is_junction and len(entity.fields) < 3:
+                raise ValueError(f"databaseEntity '{entity.name}' has fewer than 3 fields and is not a junction table")
+
+            if not any(f.isPrimaryKey for f in entity.fields):
+                raise ValueError(f"databaseEntity '{entity.name}' has no primary key field")
+
+            for field in entity.fields:
+                if field.name.strip().lower() == "password":
+                    raise ValueError(
+                        f"databaseEntity '{entity.name}' has a plaintext 'Password' field -- use 'PasswordHash' instead"
+                    )
+
+        # Assumption-zero rule: an empty assumptions list is only honest when
+        # nothing anywhere in the candidate is actually inferred/assumed/
+        # proposed/unresolved.
+        non_confirmed = {"inferred", "assumption", "proposed_target", "unknown", "unresolved"}
+        if not self.assumptions:
+            classified_items = (
+                [fr.sourceClassification for fr in self.functionalRequirements]
+                + [nfr.sourceClassification for nfr in self.nonFunctionalRequirements]
+                + [uc.sourceClassification for uc in self.useCases]
+                + [ec.sourceClassification for ec in self.edgeCases]
+                + [m.sourceClassification for m in self.systemModules]
+                + [e.sourceClassification for e in self.databaseEntities]
+                + [s.sourceClassification for s in self.uiScreens]
+                + [a.sourceClassification for a in self.apiIntegrationPoints]
+                + [t.sourceClassification for t in self.testingPlan]
+            )
+            if any(c in non_confirmed for c in classified_items):
+                raise ValueError(
+                    "assumptions list is empty but at least one section item is classified as "
+                    "inferred/assumption/proposed_target/unknown/unresolved"
+                )
 
         return self
 
@@ -995,10 +1141,12 @@ AGENT_REGISTRY: dict[str, AgentReviewConfig] = {
         allow_unreviewed_output=False,
         known_risky_claims=_SEDOC_KNOWN_RISKY_CLAIMS,
         mandatory_fields=["projectTitle", "projectOverview", "problemStatement"],
-        # Higher than Roadmap/Mentor Chat's 90s: the Writer stage here makes
-        # up to 5 sequential LLM calls (requirements, use cases, modules,
-        # database, testing) before the Reviewer even runs once.
-        max_total_seconds=180.0,
+        # Higher than Roadmap/Mentor Chat's 90s: the Writer stage here makes up
+        # to 7 sequential LLM calls (requirements, use cases, modules +
+        # architecture, database, UI + API, testing + security, and -- only for
+        # AI-flavored projects -- the AI technical report) before the Reviewer
+        # even runs once.
+        max_total_seconds=240.0,
         extra_rubric=_SEDOC_EXTRA_RUBRIC,
     ),
     "ProjectIdeaAgent": AgentReviewConfig(

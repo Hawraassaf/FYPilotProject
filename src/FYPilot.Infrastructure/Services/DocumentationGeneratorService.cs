@@ -185,46 +185,146 @@ public class DocumentationGeneratorService : IDocumentationGeneratorService
         AiSeDocumentationDto doc)
     {
         var functionalRequirements = doc.FunctionalRequirements
-            .Select(r => $"{r.Id}: {r.Title} — {r.Description} (Priority: {r.Priority})")
+            .Select(r => $"{r.Id}: {r.Title} — {r.Description} (Priority: {r.Priority}" +
+                (string.IsNullOrWhiteSpace(r.SourceClassification) || r.SourceClassification == "confirmed" ? "" : $"; {r.SourceClassification}") +
+                ")" +
+                (r.AcceptanceCriteria is { Count: > 0 } ? $" Acceptance: {string.Join(" | ", r.AcceptanceCriteria)}" : ""))
             .ToList();
 
         var nonFunctionalRequirements = doc.NonFunctionalRequirements
-            .Select(r => $"{r.Id}: {r.Title} — {r.Description} (Priority: {r.Priority})")
+            .Select(r => $"{r.Id}: {r.Title} — {r.Description} (Priority: {r.Priority})" +
+                (!string.IsNullOrWhiteSpace(r.MeasurableTarget) ? $" Target: {r.MeasurableTarget}" : "") +
+                (!string.IsNullOrWhiteSpace(r.VerificationMethod) ? $" Verified by: {r.VerificationMethod}" : ""))
             .ToList();
 
         var useCases = doc.UseCases
-            .Select(u => $"{u.Id}: {u.Title} — Actor: {u.Actor}. Goal: {u.Goal}.")
+            .Select(u => $"{u.Id}: {u.Title} — Actor: {u.Actor}. Goal: {u.Goal}." +
+                (u.MainFlow is { Count: > 0 } ? $" Main flow: {string.Join(" ", u.MainFlow)}" : ""))
             .ToList();
 
         var edgeCases = doc.EdgeCases
-            .Select(e => $"{e.Id}: {e.Scenario} — {e.ExpectedHandling}")
+            .Select(e => $"{e.Id}: {e.Scenario} — {e.ExpectedHandling}" +
+                (!string.IsNullOrWhiteSpace(e.Severity) ? $" (Severity: {e.Severity})" : "") +
+                (!string.IsNullOrWhiteSpace(e.RecoveryAction) ? $" Recovery: {e.RecoveryAction}" : ""))
             .ToList();
 
+        // Field-level detail -- previously rendered e.ImportantFields (which
+        // the LLM never populates, since the prompt only ever asks for the
+        // richer e.Fields list), producing "Fields: )" with nothing inside.
         var databaseDesign = doc.DatabaseEntities
-            .Select(e => $"{e.Name}: {e.Purpose} (Fields: {string.Join(", ", e.ImportantFields)})")
+            .Select(e =>
+            {
+                var fieldDetails = (e.Fields is { Count: > 0 })
+                    ? string.Join("; ", e.Fields.Select(f =>
+                        $"{f.Name} ({f.DataType}{(f.Nullable ? ", nullable" : ", required")}" +
+                        (f.IsPrimaryKey ? ", PK" : "") +
+                        (f.IsForeignKey ? $", FK->{f.ReferencedEntity}.{f.ReferencedField}" : "") +
+                        (f.IsSensitive ? ", sensitive" : "") +
+                        ")"))
+                    : (e.ImportantFields is { Count: > 0 } ? string.Join(", ", e.ImportantFields) : "(no fields returned)");
+
+                return $"{e.EntityId ?? ""} {e.Name}: {e.Purpose} (PK: {e.PrimaryKey ?? "Id"}" +
+                    (e.ForeignKeys is { Count: > 0 } ? $"; FK: {string.Join(", ", e.ForeignKeys)}" : "") +
+                    $") Fields: {fieldDetails}" +
+                    (e.Indexes is { Count: > 0 } ? $" | Indexes: {string.Join(", ", e.Indexes)}" : "");
+            })
             .Concat(doc.EntityRelationships.Select(r =>
                 $"{r.FromEntity} → {r.ToEntity} ({r.Type}): {r.Description}"))
             .ToList();
 
-        var uiDesign = doc.SystemModules
-            .Select(m => $"{m.Name} screen: {m.Responsibility}")
+        // Real user-facing screens -- previously this mislabeled backend
+        // SystemModules as "UI screens"; the Python agent now returns a
+        // genuine UiScreens section describing actual pages, not modules.
+        var uiDesign = (doc.UiScreens ?? [])
+            .Select(s => $"{s.Name}: {s.Purpose}" +
+                (s.AuthorizedRoles is { Count: > 0 } ? $" (Roles: {string.Join(", ", s.AuthorizedRoles)})" : "") +
+                (s.MainComponents is { Count: > 0 } ? $" Components: {string.Join(", ", s.MainComponents)}" : ""))
             .ToList();
 
         var diagramDescriptions =
             $"Entity Relationship Diagram (Mermaid):\n{doc.MermaidERD}\n\n" +
             $"Class Diagram (Mermaid):\n{doc.MermaidClassDiagram}\n\n" +
-            $"Activity Diagram (Mermaid):\n{doc.ActivityDiagram}\n\n" +
-            $"Sequence Diagram (Mermaid):\n{doc.SequenceDiagram}";
+            $"Activity Diagram (Mermaid) — {request.ProjectTitle}'s main workflow:\n{doc.ActivityDiagram}\n\n" +
+            $"Sequence Diagram (Mermaid) — {request.ProjectTitle}'s primary interaction:\n{doc.SequenceDiagram}";
+
+        var architectureBlock =
+            $"Style: {doc.Architecture.Style}\n" +
+            $"Frontend: {doc.Architecture.Frontend} | Backend: {doc.Architecture.Backend} | Database: {doc.Architecture.Database}\n" +
+            $"AI/Service layer: {doc.Architecture.AiService}\n" +
+            (doc.Architecture.Components is { Count: > 0 } ? $"Components: {string.Join("; ", doc.Architecture.Components)}\n" : "") +
+            (!string.IsNullOrWhiteSpace(doc.Architecture.DataFlow) ? $"Data flow: {doc.Architecture.DataFlow}\n" : "") +
+            $"\n{doc.Architecture.Explanation}";
+
+        var moduleBlock = string.Join("\n", doc.SystemModules.Select(m =>
+            $"- {m.Name}: {m.Responsibility}" +
+            (!string.IsNullOrWhiteSpace(m.FailureBehavior) ? $" (On failure: {m.FailureBehavior})" : "")));
+
+        var apiBlock = (doc.ApiIntegrationPoints is { Count: > 0 })
+            ? string.Join("\n", doc.ApiIntegrationPoints.Select(a =>
+                $"- {a.Method} {a.Endpoint} — {a.Purpose}" +
+                (!string.IsNullOrWhiteSpace(a.SourceClassification) && a.SourceClassification != "confirmed" ? $" [{a.SourceClassification}]" : "")))
+            : "No external APIs or third-party integrations were confirmed for this project.";
+
+        var securityBlock = (doc.SecurityAndPrivacy is { Count: > 0 })
+            ? string.Join("\n", doc.SecurityAndPrivacy.Select(s => $"- [{s.Category}] {s.Requirement}"))
+            : "No security/privacy requirements were generated.";
+
+        var testingBlock = string.Join("\n\n", doc.TestingPlan.Select(t =>
+            $"{t.Id} ({t.Type}, {t.Priority ?? "Medium"}{(t.NegativeCase ? ", negative case" : "")}): {t.Title}\n" +
+            (t.Preconditions is { Count: > 0 } ? $"  Preconditions: {string.Join("; ", t.Preconditions)}\n" : "") +
+            (t.TestData is { Count: > 0 } ? $"  Test data: {string.Join("; ", t.TestData)}\n" : "") +
+            (t.Steps is { Count: > 0 } ? $"  Steps: {string.Join(" ", t.Steps)}\n" : "") +
+            $"  Expected result: {t.ExpectedResult}\n" +
+            (!string.IsNullOrWhiteSpace(t.PassCriteria) ? $"  Pass criteria: {t.PassCriteria}" : "")));
+
+        // Requirement-centric traceability table: one row per functional
+        // requirement showing every real use case/module/entity/screen/API/
+        // test that references it, plus coverage status -- previously this
+        // was an arbitrary positional zip that silently truncated to the
+        // shortest section's length (e.g. only FR-01..FR-06 of 10 FRs).
+        var traceabilityBlock = string.Join("\n", doc.TraceabilityMatrix.Select(t =>
+        {
+            string Join(List<string>? ids, string fallback) =>
+                (ids is { Count: > 0 }) ? string.Join(",", ids) : fallback;
+
+            return $"{t.RequirementId,-8} | UC: {Join(t.UseCaseIds, "-"),-14} | MOD: {Join(t.ModuleIds, "-"),-10} | " +
+                   $"ENT: {Join(t.EntityIds, "-"),-18} | UI: {Join(t.ScreenIds, "-"),-10} | API: {Join(t.ApiIds, "-"),-8} | " +
+                   $"TC: {Join(t.TestCaseIds, "-"),-10} | {t.CoverageStatus ?? "covered"}" +
+                   (!string.IsNullOrWhiteSpace(t.Notes) ? $" ({t.Notes})" : "");
+        }));
+
+        var aiReportBlock = doc.AiTechnicalReportApplicable && doc.AiTechnicalReport is { } ai
+            ? $"Task type: {ai.TaskType}\nApproach: {ai.ModelOrApproach}\nTraining vs. inference: {ai.TrainingVsInference}\n" +
+              $"Fallback strategy: {ai.FallbackStrategy}\nEvaluation metrics: {string.Join(", ", ai.EvaluationMetrics ?? [])}\n" +
+              $"Limitations: {ai.Limitations}"
+            : "Not applicable — this project does not include a confirmed or inferred AI/ML/NLP/data-science component.";
+
+        var assumptionsBlock = (doc.Assumptions is { Count: > 0 })
+            ? string.Join("\n", doc.Assumptions.Select((a, i) => $"A-{i + 1:D2} [{a.Classification}]: {a.Item}"))
+            : "No assumptions were required; all sections were derived from confirmed project information.";
+
+        var qualityBlock = doc.QualityAssessment is { } quality
+            ? $"Overall score: {quality.OverallScore}/100 (critical issues: {quality.CriticalIssuesCount})\n" +
+              string.Join("\n", quality.CriterionScores.Select(kv => $"- {kv.Key}: {kv.Value}/100")) +
+              (quality.CoverageStatistics is { Count: > 0 } ? $"\nCoverage statistics:\n{string.Join("\n", quality.CoverageStatistics.Select(kv => $"- {kv.Key}: {kv.Value}"))}" : "") +
+              (quality.FailedChecks is { Count: > 0 } ? $"\nFailed checks:\n{string.Join("\n", quality.FailedChecks.Select(c => $"- {c}"))}" : "") +
+              (quality.Warnings is { Count: > 0 } ? $"\nWarnings:\n{string.Join("\n", quality.Warnings.Select(w => $"- {w}"))}" : "")
+            : $"Documentation Quality Score: {doc.DocumentationQualityScore}/100";
 
         var aiTechnicalReport =
-            $"Architecture: {doc.Architecture.Style}\n\n" +
-            $"{doc.Architecture.Explanation}\n\n" +
-            $"AI / Service Layer: {doc.Architecture.AiService}\n\n" +
-            "Risks and Limitations:\n" +
+            $"1. Architecture\n{architectureBlock}\n\n" +
+            $"2. Module & Component Design\n{moduleBlock}\n\n" +
+            $"3. API & Integration Specification\n{apiBlock}\n\n" +
+            $"4. Security & Privacy\n{securityBlock}\n\n" +
+            $"5. Testing Strategy\n{testingBlock}\n\n" +
+            $"6. Traceability Matrix (Requirement → Use Case → Module → Entity → Test → Screen)\n{traceabilityBlock}\n\n" +
+            $"7. AI / Data Science Technical Report\n{aiReportBlock}\n\n" +
+            "8. Risks and Limitations\n" +
             string.Join("\n", doc.RisksAndLimitations.Select(r => $"- {r}")) + "\n\n" +
-            "Expected Outcomes:\n" +
+            "9. Assumptions\n" + assumptionsBlock + "\n\n" +
+            "10. Expected Outcomes\n" +
             string.Join("\n", doc.ExpectedOutcomes.Select(o => $"- {o}")) + "\n\n" +
-            $"Documentation Quality Score: {doc.DocumentationQualityScore}/100";
+            $"11. Documentation Quality Assessment\n{qualityBlock}";
 
         return new ProjectDocumentation
         {
@@ -504,7 +604,8 @@ public class DocumentationGeneratorService : IDocumentationGeneratorService
             DiagramDescriptions = DeserializeString(documentation.DiagramDescriptionsJson),
             AiTechnicalReport = DeserializeString(documentation.AiTechnicalReportJson),
             SupervisorStatus = documentation.SupervisorStatus,
-            SupervisorComment = documentation.SupervisorComment
+            SupervisorComment = documentation.SupervisorComment,
+            CreatedAt = documentation.CreatedAt
         };
     }
 

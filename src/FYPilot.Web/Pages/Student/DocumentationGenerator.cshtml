@@ -606,7 +606,9 @@
             background: #28385E;
             color: #E8EDF5;
             white-space: pre-wrap;
-            font-size: 0.86rem;
+            overflow-wrap: anywhere;
+            font-family: "Consolas", "Courier New", monospace;
+            font-size: 0.82rem;
             line-height: 1.68;
             overflow-x: auto;
         }
@@ -672,7 +674,20 @@
             margin: 0.4rem 0 0;
         }
 
+        .sdoc-cover {
+            display: none;
+        }
+
+        .sdoc-toc {
+            display: none;
+        }
+
         @@media print {
+            @@page {
+                size: A4;
+                margin: 16mm;
+            }
+
             body * {
                 visibility: hidden;
             }
@@ -688,7 +703,7 @@
                 top: 0;
                 width: 100%;
                 background: white;
-                padding: 30px;
+                padding: 0;
                 box-shadow: none !important;
                 border: 0 !important;
             }
@@ -705,17 +720,76 @@
                 border-bottom: 1px solid #ddd;
             }
 
+            .sdoc-report-body {
+                padding: 0;
+            }
+
             .sdoc-section,
             .sdoc-stat {
                 box-shadow: none !important;
                 break-inside: avoid;
+                page-break-inside: avoid;
+            }
+
+            .sdoc-section-head {
+                break-after: avoid;
+                page-break-after: avoid;
             }
 
             .sdoc-code {
                 background: white !important;
                 color: black !important;
                 border: 1px solid #ddd;
+                font-family: "Consolas", "Courier New", monospace;
             }
+
+            .sdoc-cover {
+                display: block;
+                page-break-after: always;
+                padding: 40px 0;
+            }
+
+            .sdoc-toc {
+                display: block;
+                page-break-after: always;
+            }
+        }
+
+        .sdoc-cover-title {
+            font-size: 1.9rem;
+            font-weight: 800;
+            color: #111827;
+            margin-bottom: 0.25rem;
+        }
+
+        .sdoc-cover-subtitle {
+            font-size: 1.05rem;
+            color: #516C8D;
+            font-weight: 700;
+            margin-bottom: 2rem;
+        }
+
+        .sdoc-cover-meta {
+            margin-top: 2rem;
+            border-top: 1px solid #ddd;
+            padding-top: 1rem;
+        }
+
+        .sdoc-cover-meta div {
+            margin-bottom: 0.4rem;
+            font-size: 0.9rem;
+        }
+
+        .sdoc-cover-footer {
+            position: absolute;
+            bottom: 20px;
+            font-size: 0.78rem;
+            color: #64748B;
+        }
+
+        .sdoc-toc ol {
+            font-size: 0.92rem;
+            line-height: 2;
         }
 
         @@media (max-width: 1199px) {
@@ -825,6 +899,439 @@
         .sdoc-selected-card p {
             line-height: 1.5 !important;
         }
+
+        /* ============================================================
+           Best-version UI refinement
+           Visual-only enhancement: no handlers, DTOs, or backend logic.
+           ============================================================ */
+
+        :root {
+            --sdoc-ink-strong: #172033;
+            --sdoc-surface-soft: #F6F8FB;
+            --sdoc-line-strong: #D8E0EA;
+            --sdoc-accent-soft: #EAF0F6;
+            --sdoc-shadow-soft: 0 12px 34px rgba(28, 44, 72, 0.055);
+        }
+
+        .sdoc-page {
+            color: var(--sdoc-ink-strong);
+        }
+
+        .sdoc-hero {
+            padding: 1.2rem 1.3rem;
+            border-radius: 22px;
+            background:
+                radial-gradient(circle at 8% 10%, rgba(255,255,255,.17), transparent 25%),
+                linear-gradient(135deg, #223250 0%, #324766 62%, #6987A9 125%);
+            box-shadow: 0 18px 45px rgba(34, 50, 80, .17);
+        }
+
+        .sdoc-hero::after {
+            content: "";
+            position: absolute;
+            width: 240px;
+            height: 240px;
+            right: -105px;
+            bottom: -145px;
+            border: 1px solid rgba(255,255,255,.16);
+            border-radius: 50%;
+            box-shadow:
+                0 0 0 34px rgba(255,255,255,.035),
+                0 0 0 68px rgba(255,255,255,.025);
+        }
+
+        .sdoc-hero-content {
+            grid-template-columns: minmax(0, 1fr) 210px;
+        }
+
+        .sdoc-hero h1 {
+            font-size: clamp(1.45rem, 2.7vw, 2.05rem);
+        }
+
+        .sdoc-hero p {
+            max-width: 820px;
+            font-size: .84rem;
+        }
+
+        .sdoc-hero-badge {
+            min-width: 0;
+            padding: .78rem .85rem;
+            border-radius: 15px;
+            text-align: left;
+        }
+
+        .sdoc-shell {
+            grid-template-columns: 345px minmax(0, 1fr);
+            gap: .9rem;
+        }
+
+        .sdoc-panel,
+        .sdoc-report,
+        .sdoc-empty {
+            border-color: #E3E8EE;
+            border-radius: 20px;
+            box-shadow: var(--sdoc-shadow-soft);
+        }
+
+        .sdoc-panel-head {
+            padding: 1rem;
+        }
+
+        .sdoc-panel-body {
+            padding: 1rem;
+        }
+
+        .sdoc-selected-card {
+            border-radius: 15px;
+            background:
+                linear-gradient(180deg, rgba(255,255,255,.92), rgba(246,248,251,.95));
+            border-color: #DEE5ED;
+        }
+
+        .sdoc-mini-item {
+            border-radius: 11px;
+            box-shadow: 0 3px 10px rgba(28, 44, 72, .025);
+        }
+
+        .sdoc-primary-btn {
+            min-height: 46px;
+            border-radius: 12px;
+            font-size: .79rem;
+            background: linear-gradient(135deg, #263A5D, #5B789D);
+            box-shadow: 0 11px 22px rgba(67, 94, 128, .18);
+        }
+
+        .sdoc-primary-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 14px 26px rgba(67, 94, 128, .22);
+        }
+
+        .sdoc-side-note {
+            color: #33455F;
+            background: #F3F6F9;
+            border: 1px solid #E0E6ED;
+        }
+
+        .sdoc-side-note h4 {
+            color: #253858;
+        }
+
+        .sdoc-side-note p {
+            color: #6B7789;
+        }
+
+        .sdoc-empty {
+            min-height: 560px;
+        }
+
+        .sdoc-report-toolbar {
+            top: 82px;
+            padding: .85rem 1rem;
+            border-color: #E3E8EE;
+        }
+
+        .sdoc-report-toolbar h2 {
+            font-size: 1.05rem;
+        }
+
+        .sdoc-report-body {
+            padding: .95rem;
+            background: #FBFCFD;
+        }
+
+        .sdoc-stats {
+            gap: .65rem;
+            margin-bottom: .75rem;
+        }
+
+        .sdoc-stat {
+            position: relative;
+            overflow: hidden;
+            padding: .78rem .82rem;
+            border-radius: 14px;
+            background: #FFFFFF;
+            border-color: #E1E7EE;
+            box-shadow: 0 5px 16px rgba(28, 44, 72, .035);
+        }
+
+        .sdoc-stat::after {
+            content: "";
+            position: absolute;
+            width: 46px;
+            height: 46px;
+            top: -22px;
+            right: -20px;
+            border-radius: 50%;
+            background: #ECF2F7;
+        }
+
+        .sdoc-stat strong {
+            font-size: 1.25rem;
+        }
+
+        .sdoc-quick-nav {
+            position: sticky;
+            top: 152px;
+            z-index: 4;
+            display: grid;
+            grid-template-columns: repeat(8, minmax(0, 1fr));
+            gap: .4rem;
+            margin-bottom: .75rem;
+            padding: .45rem;
+            background: rgba(255,255,255,.94);
+            backdrop-filter: blur(12px);
+            border: 1px solid #E1E7EE;
+            border-radius: 14px;
+            box-shadow: 0 8px 22px rgba(28, 44, 72, .055);
+        }
+
+        .sdoc-quick-nav button {
+            min-width: 0;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: .35rem;
+            padding: .48rem .5rem;
+            color: #667387;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 9px;
+            font-size: .61rem;
+            font-weight: 750;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .sdoc-quick-nav button:hover,
+        .sdoc-quick-nav button.is-active {
+            color: #263A5D;
+            background: #EDF3F8;
+            border-color: #D8E3EC;
+        }
+
+        .sdoc-quick-nav button i {
+            color: #5B789D;
+            font-size: .72rem;
+        }
+
+        .sdoc-quick-nav button span {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .sdoc-quick-nav button strong {
+            display: grid;
+            place-items: center;
+            min-width: 22px;
+            height: 20px;
+            padding: 0 .25rem;
+            color: #263A5D;
+            background: #FFFFFF;
+            border-radius: 999px;
+            font-size: .55rem;
+        }
+
+        .sdoc-section {
+            scroll-margin-top: 225px;
+            border-color: #DFE5EC;
+            border-radius: 15px;
+            box-shadow: 0 5px 17px rgba(28, 44, 72, .028);
+            transition:
+                border-color .18s ease,
+                box-shadow .18s ease,
+                transform .18s ease;
+        }
+
+        .sdoc-section:hover {
+            border-color: #CDD8E3;
+            box-shadow: 0 10px 28px rgba(28, 44, 72, .055);
+        }
+
+        .sdoc-section-head {
+            padding: .78rem .85rem;
+            background: linear-gradient(180deg, #FFFFFF, #F7F9FB);
+        }
+
+        .sdoc-section-icon {
+            width: 34px;
+            height: 34px;
+            border-radius: 10px;
+        }
+
+        .sdoc-section-title h3 {
+            font-size: .84rem;
+        }
+
+        .sdoc-item {
+            grid-template-columns: 38px minmax(0, 1fr);
+            padding: .78rem .85rem;
+            font-size: .76rem;
+            line-height: 1.58;
+            transition: background .15s ease;
+        }
+
+        .sdoc-item:hover {
+            background: #FAFBFD;
+        }
+
+        .sdoc-item-number {
+            width: 32px;
+            height: 32px;
+            border-radius: 9px;
+            background: #EDF3F8;
+        }
+
+        .sdoc-code-diagram {
+            color: #EAF0F7;
+            background:
+                linear-gradient(180deg, rgba(255,255,255,.025), transparent),
+                #202F49;
+            border: 1px solid #344A6C;
+        }
+
+        .sdoc-code-report {
+            color: #26354B;
+            background: #F7F9FB;
+            border: 1px solid #DDE4EC;
+            font-family: "Segoe UI", Arial, sans-serif;
+            font-size: .77rem;
+            line-height: 1.72;
+        }
+
+        .sdoc-loading-card {
+            width: min(570px, calc(100% - 2rem));
+            padding: 1.15rem;
+            text-align: left;
+        }
+
+        .sdoc-loading-card .sdoc-spinner {
+            margin-bottom: .8rem;
+        }
+
+        .sdoc-loading-kicker {
+            margin-bottom: .18rem;
+            color: #5B789D;
+            font-size: .62rem;
+            font-weight: 850;
+            letter-spacing: .09em;
+            text-transform: uppercase;
+        }
+
+        .sdoc-loading-track {
+            height: 5px;
+            margin-top: .9rem;
+            overflow: hidden;
+            background: #E8EDF2;
+            border-radius: 999px;
+        }
+
+        .sdoc-loading-track span {
+            display: block;
+            width: 34%;
+            height: 100%;
+            background: linear-gradient(90deg, #263A5D, #6987A9);
+            border-radius: inherit;
+            animation: sdocLoadTrack 1.45s ease-in-out infinite;
+        }
+
+        .sdoc-loading-status {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: .38rem;
+            margin-top: .65rem;
+        }
+
+        .sdoc-loading-status span {
+            display: flex;
+            align-items: center;
+            gap: .3rem;
+            padding: .45rem;
+            color: #7A8697;
+            background: #F7F9FB;
+            border: 1px solid #E1E7EE;
+            border-radius: 9px;
+            font-size: .59rem;
+            line-height: 1.3;
+        }
+
+        .sdoc-loading-status span.is-active {
+            color: #263A5D;
+            background: #EDF3F8;
+            border-color: #D5E1EB;
+            font-weight: 800;
+        }
+
+        @@keyframes sdocLoadTrack {
+            0% {
+                transform: translateX(-115%);
+            }
+
+            100% {
+                transform: translateX(300%);
+            }
+        }
+
+        @@media (max-width: 1370px) {
+            .sdoc-quick-nav {
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+            }
+        }
+
+        @@media (max-width: 991px) {
+            .sdoc-hero-content {
+                grid-template-columns: 1fr;
+            }
+
+            .sdoc-hero-badge {
+                max-width: 240px;
+            }
+
+            .sdoc-quick-nav {
+                position: static;
+            }
+        }
+
+        @@media (max-width: 720px) {
+            .sdoc-quick-nav {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .sdoc-loading-status {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @@media (max-width: 480px) {
+            .sdoc-quick-nav,
+            .sdoc-loading-status {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @@media (prefers-reduced-motion: reduce) {
+            .sdoc-primary-btn,
+            .sdoc-section,
+            .sdoc-loading-track span {
+                transition: none !important;
+                animation: none !important;
+                transform: none !important;
+            }
+        }
+
+        @@media print {
+            .sdoc-quick-nav {
+                display: none !important;
+            }
+
+            .sdoc-code-report {
+                color: #111 !important;
+                background: #FFFFFF !important;
+                font-family: "Segoe UI", Arial, sans-serif !important;
+            }
+        }
+
     </style>
 }
 
@@ -1075,6 +1582,33 @@
                         </div>
                     </div>
 
+                    <div class="sdoc-cover">
+                        <div class="sdoc-cover-title">@docs.Title</div>
+                        <div class="sdoc-cover-subtitle">Software Requirements Specification &amp; Software Design Document</div>
+                        <div class="sdoc-cover-meta">
+                            <div><strong>Project:</strong> @Model.Request.ProjectTitle</div>
+                            <div><strong>Domain:</strong> @(string.IsNullOrWhiteSpace(Model.Request.Domain) ? "Not specified" : Model.Request.Domain)</div>
+                            <div><strong>Technology stack:</strong> @(string.IsNullOrWhiteSpace(Model.Request.TechStack) ? "Not specified" : Model.Request.TechStack)</div>
+                            <div><strong>Generated on:</strong> @docs.CreatedAt.ToString("dd MMMM yyyy, HH:mm")</div>
+                            <div><strong>Status:</strong> @docs.SupervisorStatus</div>
+                        </div>
+                        <div class="sdoc-cover-footer">Generated by FYPilot</div>
+                    </div>
+
+                    <div class="sdoc-toc">
+                        <h3>Table of Contents</h3>
+                        <ol>
+                            <li>Functional Requirements</li>
+                            <li>Non-Functional Requirements</li>
+                            <li>Use Cases</li>
+                            <li>Edge Cases</li>
+                            <li>Database Design</li>
+                            <li>UI / Frontend Design</li>
+                            <li>Diagram Specifications</li>
+                            <li>Architecture, Security, Testing, Traceability &amp; Quality Assessment</li>
+                        </ol>
+                    </div>
+
                     <div class="sdoc-report-body">
 
                         <div class="sdoc-stats">
@@ -1099,6 +1633,50 @@
                             </div>
                         </div>
 
+
+                        <nav class="sdoc-quick-nav no-print" aria-label="Documentation sections">
+                            <button type="button" data-sdoc-section="0">
+                                <i class="bi bi-list-check"></i>
+                                <span>Functional</span>
+                                <strong>@functionalCount</strong>
+                            </button>
+                            <button type="button" data-sdoc-section="1">
+                                <i class="bi bi-shield-check"></i>
+                                <span>Non-Functional</span>
+                                <strong>@nonFunctionalCount</strong>
+                            </button>
+                            <button type="button" data-sdoc-section="2">
+                                <i class="bi bi-person-gear"></i>
+                                <span>Use Cases</span>
+                                <strong>@useCaseCount</strong>
+                            </button>
+                            <button type="button" data-sdoc-section="3">
+                                <i class="bi bi-exclamation-triangle"></i>
+                                <span>Edge Cases</span>
+                                <strong>@edgeCaseCount</strong>
+                            </button>
+                            <button type="button" data-sdoc-section="4">
+                                <i class="bi bi-database"></i>
+                                <span>Database</span>
+                                <strong>@databaseCount</strong>
+                            </button>
+                            <button type="button" data-sdoc-section="5">
+                                <i class="bi bi-window-sidebar"></i>
+                                <span>UI Design</span>
+                                <strong>@uiCount</strong>
+                            </button>
+                            <button type="button" data-sdoc-section="6">
+                                <i class="bi bi-diagram-3"></i>
+                                <span>Diagrams</span>
+                                <strong>1</strong>
+                            </button>
+                            <button type="button" data-sdoc-section="7">
+                                <i class="bi bi-cpu"></i>
+                                <span>Extended</span>
+                                <strong>1</strong>
+                            </button>
+                        </nav>
+
                         @RenderListSection("1. Functional Requirements", "Core features the system must provide.", "bi-list-check", "FR", functionalRequirements)
                         @RenderListSection("2. Non-Functional Requirements", "Quality, performance, security, and usability requirements.", "bi-shield-check", "NFR", nonFunctionalRequirements)
                         @RenderListSection("3. Use Cases", "Main user interactions and system behavior.", "bi-person-gear", "UC", useCases)
@@ -1122,7 +1700,7 @@
                                 <span class="sdoc-count">Text block</span>
                             </div>
 
-                            <div class="sdoc-code">
+                            <div class="sdoc-code sdoc-code-diagram">
                                 @(string.IsNullOrWhiteSpace(docs.DiagramDescriptions)
                                     ? "No diagram descriptions returned."
                                     : docs.DiagramDescriptions)
@@ -1137,17 +1715,17 @@
                                     </span>
 
                                     <div>
-                                        <h3>8. AI Technical Report</h3>
-                                        <p>Technical explanation of the AI/Data Science component if available.</p>
+                                        <h3>8. Architecture, Security, Testing, Traceability &amp; Quality Assessment</h3>
+                                        <p>Architecture, module design, API/integration, security, testing strategy, traceability matrix, AI technical report (if applicable), risks, assumptions, and the deterministic documentation quality assessment.</p>
                                     </div>
                                 </div>
 
-                                <span class="sdoc-count">AI section</span>
+                                <span class="sdoc-count">Extended report</span>
                             </div>
 
-                            <div class="sdoc-code">
+                            <div class="sdoc-code sdoc-code-report">
                                 @(string.IsNullOrWhiteSpace(docs.AiTechnicalReport)
-                                    ? "No AI technical report returned."
+                                    ? "No extended report returned."
                                     : docs.AiTechnicalReport)
                             </div>
                         </section>
@@ -1163,12 +1741,24 @@
     <div class="sdoc-loading-card">
         <div class="sdoc-spinner"></div>
 
-        <h3>Generating software documentation...</h3>
+        <div class="sdoc-loading-kicker">AI documentation workflow</div>
+        <h3>Building your documentation package</h3>
 
         <p>
-            FYPilot is preparing requirements, use cases, database design,
-            UI structure, diagrams, and technical documentation.
+            FYPilot is reading your project context, generating structured sections,
+            validating consistency, and reviewing the final result.
         </p>
+
+        <div class="sdoc-loading-track" aria-hidden="true">
+            <span></span>
+        </div>
+
+        <div class="sdoc-loading-status">
+            <span class="is-active"><i class="bi bi-folder2-open"></i> Project facts</span>
+            <span><i class="bi bi-list-check"></i> Requirements</span>
+            <span><i class="bi bi-diagram-3"></i> Design</span>
+            <span><i class="bi bi-shield-check"></i> Review</span>
+        </div>
     </div>
 </div>
 
@@ -1195,6 +1785,79 @@
                 }
             });
         }
+
+
+        const sdocQuickNavButtons = Array.from(document.querySelectorAll("[data-sdoc-section]"));
+        const sdocSections = Array.from(document.querySelectorAll(".sdoc-report-body > .sdoc-section"));
+
+        sdocQuickNavButtons.forEach(function (button) {
+            button.addEventListener("click", function () {
+                const index = Number(button.getAttribute("data-sdoc-section"));
+                const section = sdocSections[index];
+
+                if (section) {
+                    section.scrollIntoView({
+                        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+                            ? "auto"
+                            : "smooth",
+                        block: "start"
+                    });
+                }
+            });
+        });
+
+        if ("IntersectionObserver" in window && sdocSections.length > 0) {
+            const sectionObserver = new IntersectionObserver(function (entries) {
+                const visible = entries
+                    .filter(function (entry) { return entry.isIntersecting; })
+                    .sort(function (a, b) { return b.intersectionRatio - a.intersectionRatio; })[0];
+
+                if (!visible) {
+                    return;
+                }
+
+                const index = sdocSections.indexOf(visible.target);
+
+                sdocQuickNavButtons.forEach(function (button, buttonIndex) {
+                    button.classList.toggle("is-active", buttonIndex === index);
+                });
+            }, {
+                rootMargin: "-22% 0px -62% 0px",
+                threshold: [0.05, 0.2, 0.45]
+            });
+
+            sdocSections.forEach(function (section) {
+                sectionObserver.observe(section);
+            });
+        }
+
+        const sdocLoadingStatuses = Array.from(document.querySelectorAll(".sdoc-loading-status span"));
+        let sdocStatusTimer = null;
+
+        if (sdocForm && sdocLoadingStatuses.length > 0) {
+            sdocForm.addEventListener("submit", function () {
+                if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+                    return;
+                }
+
+                let statusIndex = 0;
+
+                sdocStatusTimer = window.setInterval(function () {
+                    sdocLoadingStatuses.forEach(function (status, index) {
+                        status.classList.toggle("is-active", index === statusIndex);
+                    });
+
+                    statusIndex = (statusIndex + 1) % sdocLoadingStatuses.length;
+                }, 1450);
+            });
+        }
+
+        window.addEventListener("pageshow", function () {
+            if (sdocStatusTimer) {
+                window.clearInterval(sdocStatusTimer);
+                sdocStatusTimer = null;
+            }
+        });
     </script>
 }
 
