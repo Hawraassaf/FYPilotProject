@@ -677,19 +677,24 @@
         <div class="asa-hero-content">
             <div>
                 <h1>Supervisor Assignments</h1>
+
                 <p>
-                    Review student supervisor requests, approve official assignments, and keep each supervisor within the 4-student capacity limit.
+                    Review project supervisor requests,
+                    approve one official supervisor for each
+                    project, and manage project supervision
+                    capacity.
                 </p>
             </div>
 
             <div class="asa-hero-badge">
                 <strong>4</strong>
-                <span>max active students</span>
+                <span>max active projects</span>
             </div>
         </div>
     </div>
 
-    @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
+    @if (!string.IsNullOrWhiteSpace(
+        Model.SuccessMessage))
     {
         <div class="asa-alert success">
             <i class="bi bi-check-circle me-2"></i>
@@ -697,7 +702,8 @@
         </div>
     }
 
-    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    @if (!string.IsNullOrWhiteSpace(
+        Model.ErrorMessage))
     {
         <div class="asa-alert error">
             <i class="bi bi-exclamation-triangle me-2"></i>
@@ -707,12 +713,12 @@
 
     <div class="asa-stats">
         <div class="asa-stat">
-            <span>Pending requests</span>
+            <span>Pending project requests</span>
             <strong>@Model.Stats.PendingRequests</strong>
         </div>
 
         <div class="asa-stat">
-            <span>Active assignments</span>
+            <span>Active supervised projects</span>
             <strong>@Model.Stats.ActiveAssignments</strong>
         </div>
 
@@ -732,11 +738,18 @@
         <section class="asa-panel">
             <div class="asa-panel-head">
                 <div>
-                    <h2>Pending Student Requests</h2>
-                    <p>Approve the requested supervisor, assign a different available supervisor, or reject the request.</p>
+                    <h2>Pending Project Requests</h2>
+
+                    <p>
+                        Approve the requested supervisor,
+                        assign another available supervisor,
+                        or reject the project request.
+                    </p>
                 </div>
 
-                <div class="asa-count-pill">@Model.PendingRequests.Count pending</div>
+                <div class="asa-count-pill">
+                    @Model.PendingRequests.Count pending
+                </div>
             </div>
 
             <div class="asa-panel-body">
@@ -744,28 +757,45 @@
                 {
                     <div class="asa-empty">
                         <i class="bi bi-inbox"></i>
-                        <div>No pending supervisor requests right now.</div>
+
+                        <div>
+                            No pending project supervisor
+                            requests right now.
+                        </div>
                     </div>
                 }
                 else
                 {
                     <div class="asa-request-list">
-                        @foreach (var request in Model.PendingRequests)
+                        @foreach (var request
+                            in Model.PendingRequests)
                         {
                             <article class="asa-request-card">
+
                                 <div class="asa-request-top">
                                     <div>
-                                        <div class="asa-student-name">@request.StudentName</div>
+                                        <div class="asa-student-name">
+                                            @request.ProjectTitle
+                                        </div>
+
                                         <div class="asa-subline">
-                                            @request.StudentEmail
-                                            @if (!string.IsNullOrWhiteSpace(request.StudentMajor))
+                                            Owner:
+                                            @request.OwnerName
+
+                                            @if (!string.IsNullOrWhiteSpace(
+                                                request.OwnerEmail))
                                             {
-                                                <text> · @request.StudentMajor</text>
+                                                <text>
+                                                    · @request.OwnerEmail
+                                                </text>
                                             }
-                                            @if (!string.IsNullOrWhiteSpace(request.PreferredDomain))
-                                            {
-                                                <text> · @request.PreferredDomain</text>
-                                            }
+
+                                            <text>
+                                                · @request.ProjectMemberCount
+                                                @(request.ProjectMemberCount == 1
+                                                    ? "member"
+                                                    : "members")
+                                            </text>
                                         </div>
                                     </div>
 
@@ -776,65 +806,128 @@
                                 </div>
 
                                 <div class="asa-request-body">
+
                                     <div class="asa-info-grid">
+
                                         <div class="asa-info-box">
-                                            <span>Latest idea</span>
-                                            <strong>@request.StudentIdeaTitle</strong>
-                                            @if (!string.IsNullOrWhiteSpace(request.StudentIdeaDomain))
+                                            <span>Official project idea</span>
+
+                                            <strong>
+                                                @request.StudentIdeaTitle
+                                            </strong>
+
+                                            @if (!string.IsNullOrWhiteSpace(
+                                                request.StudentIdeaDomain))
                                             {
-                                                <div class="asa-subline">@request.StudentIdeaDomain</div>
+                                                <div class="asa-subline">
+                                                    @request.StudentIdeaDomain
+                                                </div>
                                             }
                                         </div>
 
                                         <div class="asa-info-box">
+                                            <span>Project members</span>
+
+                                            <strong>
+                                                @(string.IsNullOrWhiteSpace(
+                                                    request.ProjectMembers)
+                                                    ? request.OwnerName
+                                                    : request.ProjectMembers)
+                                            </strong>
+                                        </div>
+
+                                        <div class="asa-info-box">
                                             <span>Requested supervisor</span>
-                                            <strong>@request.RequestedSupervisorName</strong>
+
+                                            <strong>
+                                                @request.RequestedSupervisorName
+                                            </strong>
+
                                             <div class="asa-subline">
                                                 @request.RequestedSupervisorSpecialization
-                                                @if (!string.IsNullOrWhiteSpace(request.RequestedSupervisorDepartment))
+
+                                                @if (!string.IsNullOrWhiteSpace(
+                                                    request.RequestedSupervisorDepartment))
                                                 {
-                                                    <text> · @request.RequestedSupervisorDepartment</text>
+                                                    <text>
+                                                        · @request.RequestedSupervisorDepartment
+                                                    </text>
                                                 }
                                             </div>
                                         </div>
 
                                         <div class="asa-info-box">
-                                            <span>Supervisor capacity</span>
+                                            <span>
+                                                Supervisor project capacity
+                                            </span>
+
                                             <strong>
-                                                @request.RequestedSupervisorCapacityUsed / @request.RequestedSupervisorCapacityLimit
+                                                @request.RequestedSupervisorCapacityUsed
+                                                /
+                                                @request.RequestedSupervisorCapacityLimit
+                                                active projects
+
                                                 @if (request.RequestedSupervisorIsFull)
                                                 {
-                                                    <text> FULL</text>
+                                                    <text> · FULL</text>
                                                 }
                                             </strong>
                                         </div>
 
                                         <div class="asa-info-box">
                                             <span>Requested at</span>
-                                            <strong>@request.RequestedAt.ToString("MMM d, yyyy · HH:mm")</strong>
+
+                                            <strong>
+                                                @request.RequestedAt
+                                                .ToString(
+                                                "MMM d, yyyy · HH:mm")
+                                            </strong>
+                                        </div>
+
+                                        <div class="asa-info-box">
+                                            <span>Project domain</span>
+
+                                            <strong>
+                                                @(string.IsNullOrWhiteSpace(
+                                                    request.PreferredDomain)
+                                                    ? "Not specified"
+                                                    : request.PreferredDomain)
+                                            </strong>
                                         </div>
                                     </div>
 
-                                    @if (!string.IsNullOrWhiteSpace(request.StudentSkills))
+                                    @if (!string.IsNullOrWhiteSpace(
+                                        request.StudentSkills))
                                     {
                                         <div class="asa-message">
-                                            <strong>Student skills:</strong>
+                                            <strong>Team skills:</strong>
                                             @request.StudentSkills
                                         </div>
                                     }
 
-                                    @if (!string.IsNullOrWhiteSpace(request.StudentMessage))
+                                    @if (!string.IsNullOrWhiteSpace(
+                                        request.StudentMessage))
                                     {
                                         <div class="asa-message">
-                                            <strong>Student message:</strong>
+                                            <strong>
+                                                Project owner message:
+                                            </strong>
+
                                             @request.StudentMessage
                                         </div>
                                     }
 
                                     <div class="asa-actions">
-                                        <form method="post" asp-page-handler="Approve" class="asa-action-row">
+
+                                        <form method="post"
+                                              asp-page-handler="Approve"
+                                              class="asa-action-row">
+
                                             @Html.AntiForgeryToken()
-                                            <input type="hidden" name="assignmentId" value="@request.AssignmentId" />
+
+                                            <input type="hidden"
+                                                   name="assignmentId"
+                                                   value="@request.AssignmentId" />
 
                                             @if (request.RequestedSupervisorIsFull)
                                             {
@@ -852,7 +945,9 @@
                                             }
 
                                             <div class="asa-muted">
-                                                Approves the supervisor selected by the student.
+                                                Approve the supervisor requested
+                                                by the project owner for the
+                                                entire project team.
                                             </div>
 
                                             <button type="submit"
@@ -862,43 +957,66 @@
                                             </button>
                                         </form>
 
-                                        <form method="post" asp-page-handler="AssignDifferent" class="asa-action-row">
+                                        <form method="post"
+                                              asp-page-handler="AssignDifferent"
+                                              class="asa-action-row">
+
                                             @Html.AntiForgeryToken()
-                                            <input type="hidden" name="assignmentId" value="@request.AssignmentId" />
+
+                                            <input type="hidden"
+                                                   name="assignmentId"
+                                                   value="@request.AssignmentId" />
 
                                             <span class="asa-status-pill available">
                                                 <i class="bi bi-shuffle"></i>
                                                 assign different
                                             </span>
 
-                                            <select name="supervisorId" required>
-                                                <option value="">Choose available supervisor</option>
-                                                @foreach (var supervisor in Model.AssignableSupervisors)
+                                            <select name="supervisorId"
+                                                    required>
+
+                                                <option value="">
+                                                    Choose available supervisor
+                                                </option>
+
+                                                @foreach (var supervisor
+                                                    in Model.AssignableSupervisors)
                                                 {
                                                     <option value="@supervisor.SupervisorId"
                                                             selected="@(supervisor.SupervisorId == request.RequestedSupervisorId)">
-                                                        @supervisor.FullName — @supervisor.CapacityUsed/@supervisor.CapacityLimit
+                                                        @supervisor.FullName
+                                                        —
+                                                        @supervisor.CapacityUsed/@supervisor.CapacityLimit
+                                                        projects
                                                     </option>
                                                 }
                                             </select>
 
-                                            <button type="submit" class="asa-btn secondary">
+                                            <button type="submit"
+                                                    class="asa-btn secondary">
                                                 Assign
                                             </button>
 
                                             <input name="adminNote"
-                                                   placeholder="Optional admin note"
+                                                   placeholder="Optional note for the project team"
                                                    style="grid-column:2 / 4;" />
                                         </form>
 
-                                        <form method="post" asp-page-handler="Reject" class="asa-action-row reject-row">
+                                        <form method="post"
+                                              asp-page-handler="Reject"
+                                              class="asa-action-row reject-row">
+
                                             @Html.AntiForgeryToken()
-                                            <input type="hidden" name="assignmentId" value="@request.AssignmentId" />
+
+                                            <input type="hidden"
+                                                   name="assignmentId"
+                                                   value="@request.AssignmentId" />
 
                                             <input name="adminNote"
-                                                   placeholder="Reason for rejection, shown to the student" />
+                                                   placeholder="Reason shown to all active project members" />
 
-                                            <button type="submit" class="asa-btn danger">
+                                            <button type="submit"
+                                                    class="asa-btn danger">
                                                 Reject
                                             </button>
                                         </form>
@@ -911,6 +1029,333 @@
             </div>
         </section>
 
+        <aside class="asa-panel">
+            <div class="asa-panel-head">
+                <div>
+                    <h2>Supervisor Capacity</h2>
+
+                    <p>
+                        Active supervised projects count
+                        toward the four-project limit.
+                    </p>
+                </div>
+            </div>
+
+            <div class="asa-panel-body">
+                @if (!Model.SupervisorCapacity.Any())
+                {
+                    <div class="asa-empty">
+                        <i class="bi bi-person-workspace"></i>
+
+                        <div>
+                            No supervisor profiles found.
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="asa-capacity-list">
+                        @foreach (var supervisor
+                            in Model.SupervisorCapacity)
+                        {
+                            var percent =
+                                supervisor.CapacityLimit == 0
+                                    ? 0
+                                    : Math.Clamp(
+                                        (
+                                            supervisor.ActiveCount *
+                                            100
+                                        ) /
+                                        supervisor.CapacityLimit,
+                                        0,
+                                        100);
+
+                            <div class="asa-capacity-card">
+                                <div class="asa-capacity-top">
+                                    <div>
+                                        <strong>
+                                            @supervisor.FullName
+                                        </strong>
+
+                                        <small>
+                                            @supervisor.Specialization
+                                        </small>
+                                    </div>
+
+                                    @if (supervisor.IsFull)
+                                    {
+                                        <span class="asa-status-pill full">
+                                            FULL
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <span class="asa-status-pill available">
+                                            Available
+                                        </span>
+                                    }
+                                </div>
+
+                                <div class="asa-capacity-bar">
+                                    <div class="asa-capacity-fill
+                                        @(supervisor.IsFull
+                                             ? "full"
+                                             : "")"
+                                         style="width:@percent%">
+                                    </div>
+                                </div>
+
+                                <div class="asa-capacity-meta">
+                                    <span>
+                                        @supervisor.ActiveCount
+                                        /
+                                        @supervisor.CapacityLimit
+                                        active projects
+                                    </span>
+
+                                    <span>
+                                        @supervisor.PendingCount
+                                        pending
+                                    </span>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </aside>
+    </div>
+
+    <section class="asa-table-wrap transfer-wrap">
+
+        <div class="asa-table-head transfer-head">
+            <div>
+                <h2>
+                    Active Project Assignments & Transfers
+                </h2>
+
+                <p>
+                    Transfer an entire project only when its
+                    official supervisor must be changed by
+                    an admin decision.
+                </p>
+            </div>
+
+            <span class="asa-count-pill">
+                @Model.ActiveAssignments.Count active
+            </span>
+        </div>
+
+        @if (!Model.ActiveAssignments.Any())
+        {
+            <div class="asa-empty">
+                <i class="bi bi-people"></i>
+
+                <div>
+                    No active project supervisor assignments
+                    yet.
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="asa-active-list">
+                @foreach (var assignment
+                    in Model.ActiveAssignments)
+                {
+                    var transferOptions =
+                        Model.AssignableSupervisors
+                            .Where(supervisor =>
+                                supervisor.SupervisorId !=
+                                assignment.SupervisorId)
+                            .ToList();
+
+                    <article class="asa-active-card">
+
+                        <div class="asa-active-main">
+
+                            <div class="asa-person-block">
+                                <span>Project</span>
+
+                                <strong>
+                                    @assignment.ProjectTitle
+                                </strong>
+
+                                <small>
+                                    @assignment.ProjectMemberCount
+                                    @(assignment.ProjectMemberCount == 1
+                                        ? "member"
+                                        : "members")
+                                </small>
+
+                                <small>
+                                    @(string.IsNullOrWhiteSpace(
+                                        assignment.ProjectMembers)
+                                        ? assignment.StudentName
+                                        : assignment.ProjectMembers)
+                                </small>
+                            </div>
+
+                            <div class="asa-arrow-transfer">
+                                <i class="bi bi-arrow-right"></i>
+                            </div>
+
+                            <div class="asa-person-block">
+                                <span>Current Supervisor</span>
+
+                                <strong>
+                                    @assignment.SupervisorName
+                                </strong>
+
+                                <small>
+                                    @assignment.SupervisorSpecialization
+                                </small>
+
+                                <small>
+                                    Approved
+                                    @assignment.ApprovedAt
+                                    .ToString(
+                                    "MMM d, yyyy")
+                                </small>
+                            </div>
+
+                            <div class="asa-idea-block">
+                                <span>Official project idea</span>
+
+                                <strong>
+                                    @assignment.IdeaTitle
+                                </strong>
+                            </div>
+                        </div>
+
+                        <form method="post"
+                              asp-page-handler="Transfer"
+                              class="asa-transfer-form">
+
+                            @Html.AntiForgeryToken()
+
+                            <input type="hidden"
+                                   name="assignmentId"
+                                   value="@assignment.AssignmentId" />
+
+                            <div class="asa-transfer-title">
+                                <i class="bi bi-shuffle"></i>
+
+                                <div>
+                                    <strong>
+                                        Transfer project
+                                    </strong>
+
+                                    <span>
+                                        Choose the new official
+                                        supervisor for the entire
+                                        project team.
+                                    </span>
+                                </div>
+                            </div>
+
+                            <select name="newSupervisorId"
+                                    required>
+
+                                <option value="">
+                                    Choose new supervisor
+                                </option>
+
+                                @foreach (var supervisor
+                                    in transferOptions)
+                                {
+                                    <option value="@supervisor.SupervisorId">
+                                        @supervisor.FullName
+                                        —
+                                        @supervisor.CapacityUsed/@supervisor.CapacityLimit
+                                        projects
+
+                                        @if (!string.IsNullOrWhiteSpace(
+                                            supervisor.Specialization))
+                                        {
+                                            <text>
+                                                · @supervisor.Specialization
+                                            </text>
+                                        }
+                                    </option>
+                                }
+                            </select>
+
+                            <input name="transferReason"
+                                   required
+                                   placeholder="Reason, e.g. domain match, availability or workload" />
+
+                            <button type="submit"
+                                    class="asa-btn primary"
+                                    disabled="@(!transferOptions.Any())">
+                                Transfer Project
+                            </button>
+                        </form>
+                    </article>
+                }
+            </div>
+        }
+    </section>
+
+    @if (Model.RecentRejectedRequests.Any())
+    {
+        <section class="asa-table-wrap">
+
+            <div class="asa-table-head">
+                <h2>
+                    Recent Rejected Project Requests
+                </h2>
+            </div>
+
+            <table class="asa-table">
+                <thead>
+                    <tr>
+                        <th>Project</th>
+                        <th>Project members</th>
+                        <th>Requested supervisor</th>
+                        <th>Admin note</th>
+                        <th>Rejected</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    @foreach (var item
+                        in Model.RecentRejectedRequests)
+                    {
+                        <tr>
+                            <td>
+                                <strong>
+                                    @item.ProjectTitle
+                                </strong>
+                            </td>
+
+                            <td>
+                                @(string.IsNullOrWhiteSpace(
+                                    item.ProjectMembers)
+                                    ? item.StudentName
+                                    : item.ProjectMembers)
+                            </td>
+
+                            <td>
+                                @item.SupervisorName
+                            </td>
+
+                            <td>
+                                @item.AdminNote
+                            </td>
+
+                            <td>
+                                @item.RejectedAt
+                                .ToString(
+                                "MMM d, yyyy")
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+    }
+</section>
         <aside class="asa-panel">
             <div class="asa-panel-head">
                 <div>

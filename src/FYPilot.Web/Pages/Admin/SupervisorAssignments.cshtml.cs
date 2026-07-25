@@ -1,31 +1,50 @@
+using System.Net;
 using System.Security.Claims;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
+using FYPilot.Web.Services.Notifications;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
-using FYPilot.Web.Services.Notifications;
+
 namespace FYPilot.Web.Pages.Admin;
 
 [Authorize(Roles = "admin")]
 public class SupervisorAssignmentsModel(
     ApplicationDbContext db,
-    INotificationService notificationService) : PageModel
+    INotificationService notificationService,
+    ILogger<SupervisorAssignmentsModel> logger)
+    : PageModel
 {
+    /*
+     * Capacity now means supervised projects,
+     * not individual students.
+     */
     private const int SupervisorLimit = 4;
 
-    public AdminAssignmentStats Stats { get; private set; } = new();
+    public AdminAssignmentStats Stats { get; private set; } =
+        new();
 
-    public List<PendingAssignmentRow> PendingRequests { get; private set; } = [];
+    public List<PendingAssignmentRow>
+        PendingRequests
+    { get; private set; } = [];
 
-    public List<SupervisorCapacityRow> SupervisorCapacity { get; private set; } = [];
+    public List<SupervisorCapacityRow>
+        SupervisorCapacity
+    { get; private set; } = [];
 
-    public List<ActiveAssignmentRow> ActiveAssignments { get; private set; } = [];
+    public List<ActiveAssignmentRow>
+        ActiveAssignments
+    { get; private set; } = [];
 
-    public List<RejectedAssignmentRow> RecentRejectedRequests { get; private set; } = [];
+    public List<RejectedAssignmentRow>
+        RecentRejectedRequests
+    { get; private set; } = [];
 
-    public List<AssignableSupervisorOption> AssignableSupervisors { get; private set; } = [];
+    public List<AssignableSupervisorOption>
+        AssignableSupervisors
+    { get; private set; } = [];
 
     [TempData]
     public string? SuccessMessage { get; set; }
@@ -33,1034 +52,2309 @@ public class SupervisorAssignmentsModel(
     [TempData]
     public string? ErrorMessage { get; set; }
 
-    public async Task OnGetAsync()
+    public async Task OnGetAsync(
+        CancellationToken cancellationToken)
     {
-        await LoadAsync();
+        await LoadAsync(
+            cancellationToken);
     }
 
-    public async Task<IActionResult> OnPostApproveAsync(int assignmentId)
+    public async Task<IActionResult>
+        OnPostApproveAsync(
+            int assignmentId,
+            CancellationToken cancellationToken)
     {
-        var adminId = GetCurrentUserId();
+        var adminId =
+            GetCurrentUserId();
 
-        // Read without tracking because the final update will be atomic.
-        var assignment = await db.SupervisorAssignments
-            .AsNoTracking()
-            .FirstOrDefaultAsync(a =>
-                a.Id == assignmentId &&
-                a.Status == "pending_admin");
+        var assignment =
+            await LoadPendingAssignmentAsync(
+                assignmentId,
+                cancellationToken);
 
-        if (assignment == null)
+        if (assignment?.Project == null ||
+            !assignment.ProjectId.HasValue)
         {
             ErrorMessage =
-                "This request was already processed by another administrator.";
+                "This project supervisor request was "
+                + "already processed or is unavailable.";
+
             return RedirectToPage();
         }
 
-        var studentAlreadyActive = await db.SupervisorAssignments
-            .AnyAsync(a =>
-                a.StudentId == assignment.StudentId &&
-                a.Status == "active");
+        var project =
+            assignment.Project;
 
-        if (studentAlreadyActive)
+        if (!CanProcessPendingProject(
+                assignment,
+                project))
         {
             ErrorMessage =
-                "This student already has an active supervisor.";
+                "This project already has an active "
+                + "supervisor or the request is outdated.";
+
             return RedirectToPage();
         }
 
-        var supervisorActiveCount = await db.SupervisorAssignments
-            .CountAsync(a =>
-                a.SupervisorId == assignment.SupervisorId &&
-                a.Status == "active");
+        var supervisor =
+            await LoadValidSupervisorAsync(
+                assignment.SupervisorId,
+                cancellationToken);
 
-        if (supervisorActiveCount >= SupervisorLimit)
+        if (supervisor == null)
         {
             ErrorMessage =
-                "This supervisor is full. Assign a different supervisor or reject the request.";
+                "The requested supervisor could not "
+                + "be found.";
+
             return RedirectToPage();
         }
 
-        var now = DateTime.UtcNow;
+        var activeCount =
+            await CountActiveProjectsAsync(
+                assignment.SupervisorId,
+                project.Id,
+                cancellationToken);
+
+        if (activeCount >=
+            SupervisorLimit)
+        {
+            ErrorMessage =
+                "This supervisor already has the "
+                + "maximum number of active projects. "
+                + "Assign a different supervisor.";
+
+            return RedirectToPage();
+        }
+
+        var now =
+            DateTime.UtcNow;
+
+        await using var transaction =
+            await db.Database.BeginTransactionAsync(
+                cancellationToken);
 
         try
         {
-            // Only one administrator can change this row from
-            // pending_admin to active.
-            var affectedRows = await db.SupervisorAssignments
-                .Where(a =>
-                    a.Id == assignmentId &&
-                    a.Status == "pending_admin")
-                .ExecuteUpdateAsync(updates => updates
-                    .SetProperty(a => a.Status, "active")
-                    .SetProperty(a => a.AssignedByAdminId, adminId)
-                    .SetProperty(a => a.ApprovedAt, now)
-                    .SetProperty(a => a.RejectedAt, (DateTime?)null)
-                    .SetProperty(a => a.AdminNote, "Approved by admin.")
-                    .SetProperty(a => a.UpdatedAt, now));
+            assignment.Status =
+                "active";
 
-            if (affectedRows == 0)
-            {
-                ErrorMessage =
-                    "This request was already processed by another administrator.";
-                return RedirectToPage();
-            }
+            assignment.AssignedByAdminId =
+                adminId;
 
-            await SendAssignmentApprovedCommunicationAsync(assignmentId);
+            assignment.ApprovedAt =
+                now;
 
-            SuccessMessage =
-                "Supervisor assignment approved successfully. The student and supervisor were notified by email.";
+            assignment.RejectedAt =
+                null;
+
+            assignment.AdminNote =
+                "Approved by admin.";
+
+            assignment.UpdatedAt =
+                now;
+
+            project.SupervisorId =
+                assignment.SupervisorId;
+
+            project.SupervisorAssignmentStatus =
+                "active";
+
+            project.UpdatedAt =
+                now;
+
+            AddProjectActivity(
+                project.Id,
+                adminId,
+                "supervisor_assigned",
+                $"{supervisor.FullName} was assigned "
+                + "as the official project supervisor.",
+                now);
+
+            await db.SaveChangesAsync(
+                cancellationToken);
+
+            await transaction.CommitAsync(
+                cancellationToken);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException exception)
         {
+            await transaction.RollbackAsync(
+                cancellationToken);
+
+            logger.LogWarning(
+                exception,
+                "Could not approve assignment "
+                + "{AssignmentId} for project "
+                + "{ProjectId}.",
+                assignmentId,
+                project.Id);
+
             ErrorMessage =
-                "The assignment could not be approved. The student may already have an active supervisor.";
+                "The project supervisor could not be "
+                + "approved. The request may already "
+                + "have been processed.";
+
+            return RedirectToPage();
         }
+
+        await SendAssignmentApprovedCommunicationAsync(
+            assignment.Id,
+            cancellationToken);
+
+        SuccessMessage =
+            "Project supervisor approved successfully. "
+            + "All active project members and the "
+            + "supervisor were notified by email.";
 
         return RedirectToPage();
     }
 
-    public async Task<IActionResult> OnPostAssignDifferentAsync(
-        int assignmentId,
-        int supervisorId,
-        string? adminNote)
+    public async Task<IActionResult>
+        OnPostAssignDifferentAsync(
+            int assignmentId,
+            int supervisorId,
+            string? adminNote,
+            CancellationToken cancellationToken)
     {
-        var adminId = GetCurrentUserId();
+        var adminId =
+            GetCurrentUserId();
 
-        // Read without tracking because the final update is performed
-        // directly and conditionally in the database.
-        var assignment = await db.SupervisorAssignments
-            .AsNoTracking()
-            .FirstOrDefaultAsync(a =>
-                a.Id == assignmentId &&
-                a.Status == "pending_admin");
+        var assignment =
+            await LoadPendingAssignmentAsync(
+                assignmentId,
+                cancellationToken);
 
-        if (assignment == null)
+        if (assignment?.Project == null ||
+            !assignment.ProjectId.HasValue)
         {
             ErrorMessage =
-                "This request was already processed by another administrator.";
+                "This project supervisor request was "
+                + "already processed or is unavailable.";
 
             return RedirectToPage();
         }
 
-        var supervisor = await db.Users
-            .Include(u => u.SupervisorProfile)
-            .FirstOrDefaultAsync(u =>
-                u.Id == supervisorId &&
-                u.Role.ToLower() == "supervisor");
+        var project =
+            assignment.Project;
 
-        if (supervisor == null || supervisor.SupervisorProfile == null)
-        {
-            ErrorMessage = "Selected supervisor was not found.";
-            return RedirectToPage();
-        }
-
-        var studentAlreadyActive = await db.SupervisorAssignments
-            .AnyAsync(a =>
-                a.StudentId == assignment.StudentId &&
-                a.Status == "active");
-
-        if (studentAlreadyActive)
+        if (!CanProcessPendingProject(
+                assignment,
+                project))
         {
             ErrorMessage =
-                "This student already has an active supervisor.";
+                "This project already has an active "
+                + "supervisor or the request is outdated.";
 
             return RedirectToPage();
         }
 
-        var supervisorActiveCount = await db.SupervisorAssignments
-            .CountAsync(a =>
-                a.SupervisorId == supervisorId &&
-                a.Status == "active");
+        var supervisor =
+            await LoadValidSupervisorAsync(
+                supervisorId,
+                cancellationToken);
 
-        if (supervisorActiveCount >= SupervisorLimit)
+        if (supervisor == null)
         {
-            ErrorMessage = "Selected supervisor is full.";
+            ErrorMessage =
+                "The selected supervisor was not found.";
+
             return RedirectToPage();
         }
 
-        var note = string.IsNullOrWhiteSpace(adminNote)
-            ? "Admin assigned a different supervisor based on capacity and suitability."
-            : adminNote.Trim();
+        var activeCount =
+            await CountActiveProjectsAsync(
+                supervisorId,
+                project.Id,
+                cancellationToken);
 
-        var now = DateTime.UtcNow;
+        if (activeCount >=
+            SupervisorLimit)
+        {
+            ErrorMessage =
+                "The selected supervisor already has "
+                + "the maximum number of active projects.";
+
+            return RedirectToPage();
+        }
+
+        var note =
+            string.IsNullOrWhiteSpace(
+                adminNote)
+                ? "Admin assigned a different supervisor "
+                  + "based on capacity and suitability."
+                : adminNote.Trim();
+
+        var now =
+            DateTime.UtcNow;
+
+        await using var transaction =
+            await db.Database.BeginTransactionAsync(
+                cancellationToken);
 
         try
         {
-            // Only the first administrator can change this request
-            // while its status is still pending_admin.
-            var affectedRows = await db.SupervisorAssignments
-                .Where(a =>
-                    a.Id == assignmentId &&
-                    a.Status == "pending_admin")
-                .ExecuteUpdateAsync(updates => updates
-                    .SetProperty(a => a.SupervisorId, supervisorId)
-                    .SetProperty(a => a.Status, "active")
-                    .SetProperty(a => a.AssignedByAdminId, adminId)
-                    .SetProperty(a => a.ApprovedAt, now)
-                    .SetProperty(a => a.RejectedAt, (DateTime?)null)
-                    .SetProperty(a => a.AdminNote, note)
-                    .SetProperty(a => a.UpdatedAt, now));
+            assignment.SupervisorId =
+                supervisorId;
 
-            if (affectedRows == 0)
-            {
-                ErrorMessage =
-                    "This request was already processed by another administrator.";
+            assignment.Status =
+                "active";
 
-                return RedirectToPage();
-            }
+            assignment.AssignedByAdminId =
+                adminId;
 
-            await SendAssignmentApprovedCommunicationAsync(assignmentId);
+            assignment.ApprovedAt =
+                now;
 
-            SuccessMessage =
-                $"Student assigned to {supervisor.FullName} successfully. " +
-                "The student and supervisor were notified by email.";
+            assignment.RejectedAt =
+                null;
+
+            assignment.AdminNote =
+                note;
+
+            assignment.UpdatedAt =
+                now;
+
+            project.SupervisorId =
+                supervisorId;
+
+            project.SupervisorAssignmentStatus =
+                "active";
+
+            project.UpdatedAt =
+                now;
+
+            AddProjectActivity(
+                project.Id,
+                adminId,
+                "supervisor_assigned",
+                $"{supervisor.FullName} was assigned "
+                + "as the official project supervisor.",
+                now);
+
+            await db.SaveChangesAsync(
+                cancellationToken);
+
+            await transaction.CommitAsync(
+                cancellationToken);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException exception)
         {
+            await transaction.RollbackAsync(
+                cancellationToken);
+
+            logger.LogWarning(
+                exception,
+                "Could not assign supervisor "
+                + "{SupervisorId} to project "
+                + "{ProjectId}.",
+                supervisorId,
+                project.Id);
+
             ErrorMessage =
-                "The assignment could not be completed. " +
-                "The student may already have an active supervisor.";
+                "The project supervisor assignment "
+                + "could not be completed.";
+
+            return RedirectToPage();
         }
+
+        await SendAssignmentApprovedCommunicationAsync(
+            assignment.Id,
+            cancellationToken);
+
+        SuccessMessage =
+            $"{supervisor.FullName} was assigned to "
+            + $"project \"{SafeProjectTitle(project.Title)}\". "
+            + "All active project members and the "
+            + "supervisor were notified by email.";
 
         return RedirectToPage();
     }
-    public async Task<IActionResult> OnPostRejectAsync(
-      int assignmentId,
-      string? adminNote)
+
+    public async Task<IActionResult>
+        OnPostRejectAsync(
+            int assignmentId,
+            string? adminNote,
+            CancellationToken cancellationToken)
     {
-        var adminId = GetCurrentUserId();
+        var adminId =
+            GetCurrentUserId();
 
-        var note = string.IsNullOrWhiteSpace(adminNote)
-            ? "Request was not approved by admin. Please choose another available supervisor."
-            : adminNote.Trim();
+        var assignment =
+            await LoadPendingAssignmentAsync(
+                assignmentId,
+                cancellationToken);
 
-        var now = DateTime.UtcNow;
+        if (assignment?.Project == null ||
+            !assignment.ProjectId.HasValue)
+        {
+            ErrorMessage =
+                "This project supervisor request was "
+                + "already processed or is unavailable.";
+
+            return RedirectToPage();
+        }
+
+        var project =
+            assignment.Project;
+
+        if (!CanProcessPendingProject(
+                assignment,
+                project))
+        {
+            ErrorMessage =
+                "This project request was already "
+                + "processed by another administrator.";
+
+            return RedirectToPage();
+        }
+
+        var note =
+            string.IsNullOrWhiteSpace(
+                adminNote)
+                ? "The request was not approved. "
+                  + "The project owner may choose another "
+                  + "available supervisor."
+                : adminNote.Trim();
+
+        var now =
+            DateTime.UtcNow;
+
+        await using var transaction =
+            await db.Database.BeginTransactionAsync(
+                cancellationToken);
 
         try
         {
-            // Reject only when the request is still pending.
-            // If another admin already approved, rejected, or reassigned it,
-            // this update affects zero rows.
-            var affectedRows = await db.SupervisorAssignments
-                .Where(a =>
-                    a.Id == assignmentId &&
-                    a.Status == "pending_admin")
-                .ExecuteUpdateAsync(updates => updates
-                    .SetProperty(a => a.Status, "rejected")
-                    .SetProperty(a => a.AssignedByAdminId, adminId)
-                    .SetProperty(a => a.AdminNote, note)
-                    .SetProperty(a => a.RejectedAt, now)
-                    .SetProperty(a => a.ApprovedAt, (DateTime?)null)
-                    .SetProperty(a => a.UpdatedAt, now));
+            assignment.Status =
+                "rejected";
 
-            if (affectedRows == 0)
-            {
-                ErrorMessage =
-                    "This request was already processed by another administrator.";
+            assignment.AssignedByAdminId =
+                adminId;
 
-                return RedirectToPage();
-            }
+            assignment.AdminNote =
+                note;
 
-            await SendAssignmentRejectedCommunicationAsync(assignmentId);
+            assignment.RejectedAt =
+                now;
 
-            SuccessMessage =
-                "Supervisor request rejected. The student was notified and can now choose another supervisor.";
+            assignment.ApprovedAt =
+                null;
+
+            assignment.UpdatedAt =
+                now;
+
+            project.SupervisorId =
+                null;
+
+            project.SupervisorAssignmentStatus =
+                "unassigned";
+
+            project.UpdatedAt =
+                now;
+
+            AddProjectActivity(
+                project.Id,
+                adminId,
+                "supervisor_request_rejected",
+                "The project supervisor request "
+                + "was not approved.",
+                now);
+
+            await db.SaveChangesAsync(
+                cancellationToken);
+
+            await transaction.CommitAsync(
+                cancellationToken);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException exception)
         {
+            await transaction.RollbackAsync(
+                cancellationToken);
+
+            logger.LogWarning(
+                exception,
+                "Could not reject assignment "
+                + "{AssignmentId} for project "
+                + "{ProjectId}.",
+                assignmentId,
+                project.Id);
+
             ErrorMessage =
-                "The supervisor request could not be rejected. Please refresh and try again.";
+                "The project supervisor request could "
+                + "not be rejected.";
+
+            return RedirectToPage();
         }
+
+        /*
+         * The requested supervisor is not emailed.
+         *
+         * They were never officially assigned and were
+         * deliberately not notified before approval.
+         */
+        await SendAssignmentRejectedCommunicationAsync(
+            assignment.Id,
+            cancellationToken);
+
+        SuccessMessage =
+            "Project supervisor request rejected. "
+            + "All active project members were notified.";
 
         return RedirectToPage();
     }
-    public async Task<IActionResult> OnPostTransferAsync(
-        int assignmentId,
-        int newSupervisorId,
-        string transferReason)
+
+    public async Task<IActionResult>
+        OnPostTransferAsync(
+            int assignmentId,
+            int newSupervisorId,
+            string transferReason,
+            CancellationToken cancellationToken)
     {
-        var adminId = GetCurrentUserId();
+        var adminId =
+            GetCurrentUserId();
 
-        if (string.IsNullOrWhiteSpace(transferReason))
-        {
-            ErrorMessage = "Transfer reason is required.";
-            return RedirectToPage();
-        }
-
-        // Read only. The actual status change will be performed
-        // conditionally inside the database transaction.
-        var currentAssignment = await db.SupervisorAssignments
-            .AsNoTracking()
-            .Include(a => a.Student)
-            .Include(a => a.Supervisor)
-            .FirstOrDefaultAsync(a =>
-                a.Id == assignmentId &&
-                a.Status == "active");
-
-        if (currentAssignment == null)
+        if (string.IsNullOrWhiteSpace(
+                transferReason))
         {
             ErrorMessage =
-                "This assignment was already changed by another administrator.";
+                "A transfer reason is required.";
 
             return RedirectToPage();
         }
 
-        if (currentAssignment.SupervisorId == newSupervisorId)
+        var currentAssignment =
+            await db.SupervisorAssignments
+                .Include(assignment =>
+                    assignment.Project)
+                .Include(assignment =>
+                    assignment.Supervisor)
+                .AsSplitQuery()
+                .FirstOrDefaultAsync(
+                    assignment =>
+                        assignment.Id ==
+                            assignmentId &&
+                        assignment.ProjectId.HasValue &&
+                        assignment.Status ==
+                            "active",
+                    cancellationToken);
+
+        if (currentAssignment?.Project == null ||
+            !currentAssignment.ProjectId.HasValue)
         {
             ErrorMessage =
-                "Student is already assigned to this supervisor.";
+                "This project assignment was already "
+                + "changed or is unavailable.";
 
             return RedirectToPage();
         }
 
-        var newSupervisor = await db.Users
-            .Include(u => u.SupervisorProfile)
-            .FirstOrDefaultAsync(u =>
-                u.Id == newSupervisorId &&
-                u.Role.ToLower() == "supervisor");
+        var project =
+            currentAssignment.Project;
 
-        if (newSupervisor == null ||
-            newSupervisor.SupervisorProfile == null)
+        if (project.SupervisorId !=
+            currentAssignment.SupervisorId ||
+            NormalizeStatus(
+                project.SupervisorAssignmentStatus) !=
+            "active")
         {
             ErrorMessage =
-                "Selected new supervisor was not found.";
+                "This project assignment is no longer "
+                + "the current active assignment.";
 
             return RedirectToPage();
         }
 
-        var newSupervisorActiveCount =
-            await db.SupervisorAssignments.CountAsync(a =>
-                a.SupervisorId == newSupervisorId &&
-                a.Status == "active");
-
-        if (newSupervisorActiveCount >= SupervisorLimit)
+        if (currentAssignment.SupervisorId ==
+            newSupervisorId)
         {
             ErrorMessage =
-                "Selected supervisor is full. Choose another available supervisor.";
+                "This supervisor is already assigned "
+                + "to the project.";
 
             return RedirectToPage();
         }
 
-        var oldSupervisorId = currentAssignment.SupervisorId;
+        var newSupervisor =
+            await LoadValidSupervisorAsync(
+                newSupervisorId,
+                cancellationToken);
+
+        if (newSupervisor == null)
+        {
+            ErrorMessage =
+                "The selected new supervisor was not found.";
+
+            return RedirectToPage();
+        }
+
+        var activeCount =
+            await CountActiveProjectsAsync(
+                newSupervisorId,
+                project.Id,
+                cancellationToken);
+
+        if (activeCount >=
+            SupervisorLimit)
+        {
+            ErrorMessage =
+                "The selected supervisor already has "
+                + "the maximum number of active projects.";
+
+            return RedirectToPage();
+        }
+
+        var oldSupervisorId =
+            currentAssignment.SupervisorId;
 
         var oldSupervisorName =
             currentAssignment.Supervisor?.FullName
             ?? "Previous supervisor";
 
-        var studentName =
-            currentAssignment.Student?.FullName
-            ?? "Student";
+        var reason =
+            transferReason.Trim();
 
-        var reason = transferReason.Trim();
-        var now = DateTime.UtcNow;
+        var now =
+            DateTime.UtcNow;
 
         await using var transaction =
-            await db.Database.BeginTransactionAsync();
+            await db.Database.BeginTransactionAsync(
+                cancellationToken);
+
+        SupervisorAssignment? newAssignment =
+            null;
 
         try
         {
-            // Only the first administrator can transfer this assignment
-            // while it is still active.
-            var affectedRows = await db.SupervisorAssignments
-                .Where(a =>
-                    a.Id == assignmentId &&
-                    a.Status == "active")
-                .ExecuteUpdateAsync(updates => updates
-                    .SetProperty(a => a.Status, "transferred")
-                    .SetProperty(
-                        a => a.AdminNote,
-                        $"Transferred to {newSupervisor.FullName}. Reason: {reason}")
-                    .SetProperty(a => a.UpdatedAt, now));
+            /*
+             * Save the previous row as transferred
+             * before inserting the new active row.
+             *
+             * This avoids violating the unique active
+             * assignment index for ProjectId.
+             */
+            currentAssignment.Status =
+                "transferred";
 
-            if (affectedRows == 0)
-            {
-                await transaction.RollbackAsync();
+            currentAssignment.AdminNote =
+                $"Transferred to {newSupervisor.FullName}. "
+                + $"Reason: {reason}";
 
-                ErrorMessage =
-                    "This assignment was already changed by another administrator.";
+            currentAssignment.UpdatedAt =
+                now;
 
-                return RedirectToPage();
-            }
+            await db.SaveChangesAsync(
+                cancellationToken);
 
-            var newAssignment = new SupervisorAssignment
-            {
-                StudentId = currentAssignment.StudentId,
-                SupervisorId = newSupervisorId,
-                AssignedByAdminId = adminId,
-                Status = "active",
-                StudentMessage = currentAssignment.StudentMessage,
-                AdminNote =
-                    $"Transferred from {oldSupervisorName}. Reason: {reason}",
-                RequestedAt = now,
-                ApprovedAt = now,
-                RejectedAt = null,
-                UpdatedAt = now
-            };
+            newAssignment =
+                new SupervisorAssignment
+                {
+                    ProjectId =
+                        project.Id,
 
-            db.SupervisorAssignments.Add(newAssignment);
-            await db.SaveChangesAsync();
+                    StudentId =
+                        project.StudentId,
 
-            await transaction.CommitAsync();
+                    SupervisorId =
+                        newSupervisorId,
 
-            await SendTransferCommunicationAsync(
-                newAssignment.Id,
-                oldSupervisorId,
-                oldSupervisorName,
-                reason);
+                    AssignedByAdminId =
+                        adminId,
 
-            SuccessMessage =
-                $"{studentName} was transferred from " +
-                $"{oldSupervisorName} to {newSupervisor.FullName}. " +
-                "Student and supervisors were notified.";
+                    Status =
+                        "active",
+
+                    StudentMessage =
+                        currentAssignment.StudentMessage,
+
+                    AdminNote =
+                        $"Transferred from "
+                        + $"{oldSupervisorName}. "
+                        + $"Reason: {reason}",
+
+                    RequestedAt =
+                        now,
+
+                    ApprovedAt =
+                        now,
+
+                    RejectedAt =
+                        null,
+
+                    UpdatedAt =
+                        now
+                };
+
+            db.SupervisorAssignments.Add(
+                newAssignment);
+
+            project.SupervisorId =
+                newSupervisorId;
+
+            project.SupervisorAssignmentStatus =
+                "active";
+
+            project.UpdatedAt =
+                now;
+
+            AddProjectActivity(
+                project.Id,
+                adminId,
+                "supervisor_transferred",
+                $"Project supervision changed from "
+                + $"{oldSupervisorName} to "
+                + $"{newSupervisor.FullName}.",
+                now);
+
+            await db.SaveChangesAsync(
+                cancellationToken);
+
+            await transaction.CommitAsync(
+                cancellationToken);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException exception)
         {
-            await transaction.RollbackAsync();
+            await transaction.RollbackAsync(
+                cancellationToken);
+
+            logger.LogWarning(
+                exception,
+                "Could not transfer project "
+                + "{ProjectId} to supervisor "
+                + "{SupervisorId}.",
+                project.Id,
+                newSupervisorId);
 
             ErrorMessage =
-                "Transfer could not be completed. " +
-                "The assignment may have been changed by another administrator, " +
-                "or the student may already have an active supervisor.";
+                "The project supervisor transfer "
+                + "could not be completed.";
+
+            return RedirectToPage();
         }
+
+        await SendTransferCommunicationAsync(
+            newAssignment.Id,
+            oldSupervisorId,
+            oldSupervisorName,
+            reason,
+            cancellationToken);
+
+        SuccessMessage =
+            $"Project \"{SafeProjectTitle(project.Title)}\" "
+            + $"was transferred from {oldSupervisorName} "
+            + $"to {newSupervisor.FullName}. "
+            + "Project members and both supervisors "
+            + "were notified.";
 
         return RedirectToPage();
     }
 
-    private async Task LoadAsync()
+    private async Task LoadAsync(
+        CancellationToken cancellationToken)
     {
-        var activeLoadRows = await db.SupervisorAssignments
-            .Where(a => a.Status == "active")
-            .GroupBy(a => a.SupervisorId)
-            .Select(g => new
-            {
-                SupervisorId = g.Key,
-                Count = g.Count()
-            })
-            .ToListAsync();
-
-        var activeLoadMap = activeLoadRows.ToDictionary(x => x.SupervisorId, x => x.Count);
-
-        var pendingLoadRows = await db.SupervisorAssignments
-            .Where(a => a.Status == "pending_admin")
-            .GroupBy(a => a.SupervisorId)
-            .Select(g => new
-            {
-                SupervisorId = g.Key,
-                Count = g.Count()
-            })
-            .ToListAsync();
-
-        var pendingLoadMap = pendingLoadRows.ToDictionary(x => x.SupervisorId, x => x.Count);
-
-        var supervisors = await db.Users
-            .Include(u => u.SupervisorProfile)
-            .Where(u => u.Role.ToLower() == "supervisor")
-            .Where(u => u.SupervisorProfile != null)
-            .OrderBy(u => u.FullName)
-            .ToListAsync();
-
-        SupervisorCapacity = supervisors
-            .Select(s =>
-            {
-                var activeCount = activeLoadMap.GetValueOrDefault(s.Id, 0);
-                var pendingCount = pendingLoadMap.GetValueOrDefault(s.Id, 0);
-
-                return new SupervisorCapacityRow
+        var activeProjectRows =
+            await db.Projects
+                .AsNoTracking()
+                .Where(project =>
+                    project.SupervisorId.HasValue &&
+                    project.SupervisorAssignmentStatus ==
+                        "active")
+                .Select(project => new
                 {
-                    SupervisorId = s.Id,
-                    FullName = s.FullName,
-                    Email = s.Email,
-                    Department = s.SupervisorProfile?.Department ?? "",
-                    Specialization = s.SupervisorProfile?.Specialization ?? "",
-                    ResearchAreas = s.SupervisorProfile?.ResearchAreas ?? "",
-                    ActiveCount = activeCount,
-                    PendingCount = pendingCount,
-                    CapacityLimit = SupervisorLimit,
-                    IsFull = activeCount >= SupervisorLimit
-                };
-            })
-            .OrderByDescending(s => s.IsFull)
-            .ThenByDescending(s => s.ActiveCount)
-            .ThenBy(s => s.FullName)
-            .ToList();
+                    SupervisorId =
+                        project.SupervisorId!.Value,
 
-        AssignableSupervisors = SupervisorCapacity
-            .Where(s => !s.IsFull)
-            .Select(s => new AssignableSupervisorOption
-            {
-                SupervisorId = s.SupervisorId,
-                FullName = s.FullName,
-                CapacityUsed = s.ActiveCount,
-                CapacityLimit = s.CapacityLimit,
-                Department = s.Department,
-                Specialization = s.Specialization
-            })
-            .OrderBy(s => s.CapacityUsed)
-            .ThenBy(s => s.FullName)
-            .ToList();
+                    ProjectId =
+                        project.Id
+                })
+                .ToListAsync(
+                    cancellationToken);
 
-        var latestIdeas = await db.ProjectIdeas
-            .OrderByDescending(i => i.CreatedAt)
-            .Select(i => new
-            {
-                i.UserId,
-                i.Title,
-                i.Domain,
-                i.FeasibilityScore,
-                i.CreatedAt
-            })
-            .ToListAsync();
+        var activeLoadMap =
+            activeProjectRows
+                .GroupBy(row =>
+                    row.SupervisorId)
+                .ToDictionary(
+                    group =>
+                        group.Key,
 
-        var latestIdeaMap = latestIdeas
-            .GroupBy(i => i.UserId)
-            .ToDictionary(g => g.Key, g => g.First());
+                    group =>
+                        group
+                            .Select(row =>
+                                row.ProjectId)
+                            .Distinct()
+                            .Count());
 
-        var pendingEntities = await db.SupervisorAssignments
-            .Include(a => a.Student)
-                .ThenInclude(s => s!.StudentProfile)
-            .Include(a => a.Supervisor)
-                .ThenInclude(s => s!.SupervisorProfile)
-            .Where(a => a.Status == "pending_admin")
-            .OrderBy(a => a.RequestedAt)
-            .ToListAsync();
-
-        PendingRequests = pendingEntities
-            .Select(a =>
-            {
-                latestIdeaMap.TryGetValue(a.StudentId, out var idea);
-                var used = activeLoadMap.GetValueOrDefault(a.SupervisorId, 0);
-
-                return new PendingAssignmentRow
+        var pendingProjectRows =
+            await db.SupervisorAssignments
+                .AsNoTracking()
+                .Where(assignment =>
+                    assignment.ProjectId.HasValue &&
+                    assignment.Status ==
+                        "pending_admin")
+                .Select(assignment => new
                 {
-                    AssignmentId = a.Id,
-                    StudentId = a.StudentId,
-                    StudentName = a.Student?.FullName ?? "Student",
-                    StudentEmail = a.Student?.Email ?? "",
-                    StudentMajor = a.Student?.StudentProfile?.Major ?? "",
-                    PreferredDomain = a.Student?.StudentProfile?.PreferredDomain ?? "",
-                    StudentSkills = a.Student?.StudentProfile?.Skills ?? "",
-                    StudentIdeaTitle = idea?.Title ?? "No idea selected yet",
-                    StudentIdeaDomain = idea?.Domain ?? "",
-                    RequestedSupervisorId = a.SupervisorId,
-                    RequestedSupervisorName = a.Supervisor?.FullName ?? "Supervisor",
-                    RequestedSupervisorDepartment = a.Supervisor?.SupervisorProfile?.Department ?? "",
-                    RequestedSupervisorSpecialization = a.Supervisor?.SupervisorProfile?.Specialization ?? "",
-                    RequestedSupervisorCapacityUsed = used,
-                    RequestedSupervisorCapacityLimit = SupervisorLimit,
-                    RequestedSupervisorIsFull = used >= SupervisorLimit,
-                    StudentMessage = a.StudentMessage,
-                    RequestedAt = a.RequestedAt
-                };
-            })
-            .ToList();
+                    assignment.SupervisorId,
 
-        var activeEntities = await db.SupervisorAssignments
-            .Include(a => a.Student)
-                .ThenInclude(s => s!.StudentProfile)
-            .Include(a => a.Supervisor)
-                .ThenInclude(s => s!.SupervisorProfile)
-            .Where(a => a.Status == "active")
-            .OrderByDescending(a => a.ApprovedAt ?? a.UpdatedAt)
-            .ToListAsync();
+                    ProjectId =
+                        assignment.ProjectId!.Value
+                })
+                .ToListAsync(
+                    cancellationToken);
 
-        ActiveAssignments = activeEntities
-            .Select(a =>
-            {
-                latestIdeaMap.TryGetValue(a.StudentId, out var idea);
+        var pendingLoadMap =
+            pendingProjectRows
+                .GroupBy(row =>
+                    row.SupervisorId)
+                .ToDictionary(
+                    group =>
+                        group.Key,
 
-                return new ActiveAssignmentRow
+                    group =>
+                        group
+                            .Select(row =>
+                                row.ProjectId)
+                            .Distinct()
+                            .Count());
+
+        var supervisors =
+            await db.Users
+                .AsNoTracking()
+                .Include(user =>
+                    user.SupervisorProfile)
+                .Where(user =>
+                    user.Role.ToLower() ==
+                        "supervisor" &&
+                    user.SupervisorProfile != null)
+                .OrderBy(user =>
+                    user.FullName)
+                .ToListAsync(
+                    cancellationToken);
+
+        SupervisorCapacity =
+            supervisors
+                .Select(supervisor =>
                 {
-                    AssignmentId = a.Id,
-                    StudentId = a.StudentId,
-                    SupervisorId = a.SupervisorId,
-                    StudentName = a.Student?.FullName ?? "Student",
-                    StudentEmail = a.Student?.Email ?? "",
-                    StudentMajor = a.Student?.StudentProfile?.Major ?? "",
-                    PreferredDomain = a.Student?.StudentProfile?.PreferredDomain ?? "",
-                    SupervisorName = a.Supervisor?.FullName ?? "Supervisor",
-                    SupervisorSpecialization = a.Supervisor?.SupervisorProfile?.Specialization ?? "",
-                    IdeaTitle = idea?.Title ?? "No idea selected yet",
-                    ApprovedAt = a.ApprovedAt ?? a.UpdatedAt
-                };
-            })
-            .ToList();
+                    var activeCount =
+                        activeLoadMap.GetValueOrDefault(
+                            supervisor.Id,
+                            0);
 
-        var rejectedEntities = await db.SupervisorAssignments
-            .Include(a => a.Student)
-            .Include(a => a.Supervisor)
-            .Where(a => a.Status == "rejected")
-            .OrderByDescending(a => a.RejectedAt ?? a.UpdatedAt)
-            .Take(8)
-            .ToListAsync();
+                    var pendingCount =
+                        pendingLoadMap.GetValueOrDefault(
+                            supervisor.Id,
+                            0);
 
-        RecentRejectedRequests = rejectedEntities
-            .Select(a => new RejectedAssignmentRow
+                    return new SupervisorCapacityRow
+                    {
+                        SupervisorId =
+                            supervisor.Id,
+
+                        FullName =
+                            supervisor.FullName,
+
+                        Email =
+                            supervisor.Email,
+
+                        Department =
+                            supervisor.SupervisorProfile
+                                ?.Department
+                            ?? "",
+
+                        Specialization =
+                            supervisor.SupervisorProfile
+                                ?.Specialization
+                            ?? "",
+
+                        ResearchAreas =
+                            supervisor.SupervisorProfile
+                                ?.ResearchAreas
+                            ?? "",
+
+                        ActiveCount =
+                            activeCount,
+
+                        PendingCount =
+                            pendingCount,
+
+                        CapacityLimit =
+                            SupervisorLimit,
+
+                        IsFull =
+                            activeCount >=
+                            SupervisorLimit
+                    };
+                })
+                .OrderByDescending(row =>
+                    row.IsFull)
+                .ThenByDescending(row =>
+                    row.ActiveCount)
+                .ThenBy(row =>
+                    row.FullName)
+                .ToList();
+
+        AssignableSupervisors =
+            SupervisorCapacity
+                .Where(supervisor =>
+                    !supervisor.IsFull)
+                .Select(supervisor =>
+                    new AssignableSupervisorOption
+                    {
+                        SupervisorId =
+                            supervisor.SupervisorId,
+
+                        FullName =
+                            supervisor.FullName,
+
+                        CapacityUsed =
+                            supervisor.ActiveCount,
+
+                        CapacityLimit =
+                            supervisor.CapacityLimit,
+
+                        Department =
+                            supervisor.Department,
+
+                        Specialization =
+                            supervisor.Specialization
+                    })
+                .OrderBy(supervisor =>
+                    supervisor.CapacityUsed)
+                .ThenBy(supervisor =>
+                    supervisor.FullName)
+                .ToList();
+
+        var pendingEntities =
+            await BuildAssignmentQuery()
+                .Where(assignment =>
+                    assignment.ProjectId.HasValue &&
+                    assignment.Status ==
+                        "pending_admin")
+                .OrderBy(assignment =>
+                    assignment.RequestedAt)
+                .ToListAsync(
+                    cancellationToken);
+
+        PendingRequests =
+            pendingEntities
+                .Where(assignment =>
+                    assignment.Project != null)
+                .Select(assignment =>
+                {
+                    var project =
+                        assignment.Project!;
+
+                    var team =
+                        BuildTeamSummary(
+                            project,
+                            assignment.Student);
+
+                    var used =
+                        activeLoadMap.GetValueOrDefault(
+                            assignment.SupervisorId,
+                            0);
+
+                    return new PendingAssignmentRow
+                    {
+                        AssignmentId =
+                            assignment.Id,
+
+                        ProjectId =
+                            project.Id,
+
+                        ProjectTitle =
+                            SafeProjectTitle(
+                                project.Title),
+
+                        ProjectMembers =
+                            team.MemberNames,
+
+                        ProjectMemberCount =
+                            team.MemberCount,
+
+                        OwnerName =
+                            team.OwnerName,
+
+                        OwnerEmail =
+                            team.OwnerEmail,
+
+                        StudentId =
+                            assignment.StudentId,
+
+                        /*
+                         * Temporary compatibility with
+                         * the current Razor design.
+                         */
+                        StudentName =
+                            team.OwnerName,
+
+                        StudentEmail =
+                            team.OwnerEmail,
+
+                        StudentMajor =
+                            team.OwnerMajor,
+
+                        PreferredDomain =
+                            project.ProjectIdea?.Domain
+                            ?? team.PreferredDomain,
+
+                        StudentSkills =
+                            team.TeamSkills,
+
+                        StudentIdeaTitle =
+                            project.ProjectIdea?.Title
+                            ?? "No official idea selected",
+
+                        StudentIdeaDomain =
+                            project.ProjectIdea?.Domain
+                            ?? "",
+
+                        RequestedSupervisorId =
+                            assignment.SupervisorId,
+
+                        RequestedSupervisorName =
+                            assignment.Supervisor?.FullName
+                            ?? "Supervisor",
+
+                        RequestedSupervisorDepartment =
+                            assignment.Supervisor
+                                ?.SupervisorProfile
+                                ?.Department
+                            ?? "",
+
+                        RequestedSupervisorSpecialization =
+                            assignment.Supervisor
+                                ?.SupervisorProfile
+                                ?.Specialization
+                            ?? "",
+
+                        RequestedSupervisorCapacityUsed =
+                            used,
+
+                        RequestedSupervisorCapacityLimit =
+                            SupervisorLimit,
+
+                        RequestedSupervisorIsFull =
+                            used >= SupervisorLimit,
+
+                        StudentMessage =
+                            assignment.StudentMessage,
+
+                        RequestedAt =
+                            assignment.RequestedAt
+                    };
+                })
+                .ToList();
+
+        var activeEntities =
+            await BuildAssignmentQuery()
+                .Where(assignment =>
+                    assignment.ProjectId.HasValue &&
+                    assignment.Status ==
+                        "active")
+                .OrderByDescending(assignment =>
+                    assignment.ApprovedAt ??
+                    assignment.UpdatedAt)
+                .ToListAsync(
+                    cancellationToken);
+
+        ActiveAssignments =
+            activeEntities
+                .Where(assignment =>
+                    assignment.Project != null)
+                .Select(assignment =>
+                {
+                    var project =
+                        assignment.Project!;
+
+                    var team =
+                        BuildTeamSummary(
+                            project,
+                            assignment.Student);
+
+                    return new ActiveAssignmentRow
+                    {
+                        AssignmentId =
+                            assignment.Id,
+
+                        ProjectId =
+                            project.Id,
+
+                        ProjectTitle =
+                            SafeProjectTitle(
+                                project.Title),
+
+                        ProjectMembers =
+                            team.MemberNames,
+
+                        ProjectMemberCount =
+                            team.MemberCount,
+
+                        StudentId =
+                            assignment.StudentId,
+
+                        SupervisorId =
+                            assignment.SupervisorId,
+
+                        /*
+                         * Temporary compatibility with
+                         * the current Razor page.
+                         */
+                        StudentName =
+                            team.OwnerName,
+
+                        StudentEmail =
+                            team.OwnerEmail,
+
+                        StudentMajor =
+                            team.OwnerMajor,
+
+                        PreferredDomain =
+                            project.ProjectIdea?.Domain
+                            ?? team.PreferredDomain,
+
+                        SupervisorName =
+                            assignment.Supervisor?.FullName
+                            ?? "Supervisor",
+
+                        SupervisorSpecialization =
+                            assignment.Supervisor
+                                ?.SupervisorProfile
+                                ?.Specialization
+                            ?? "",
+
+                        IdeaTitle =
+                            project.ProjectIdea?.Title
+                            ?? "No official idea selected",
+
+                        ApprovedAt =
+                            assignment.ApprovedAt ??
+                            assignment.UpdatedAt
+                    };
+                })
+                .ToList();
+
+        var rejectedEntities =
+            await BuildAssignmentQuery()
+                .Where(assignment =>
+                    assignment.ProjectId.HasValue &&
+                    assignment.Status ==
+                        "rejected")
+                .OrderByDescending(assignment =>
+                    assignment.RejectedAt ??
+                    assignment.UpdatedAt)
+                .Take(8)
+                .ToListAsync(
+                    cancellationToken);
+
+        RecentRejectedRequests =
+            rejectedEntities
+                .Where(assignment =>
+                    assignment.Project != null)
+                .Select(assignment =>
+                {
+                    var project =
+                        assignment.Project!;
+
+                    var team =
+                        BuildTeamSummary(
+                            project,
+                            assignment.Student);
+
+                    return new RejectedAssignmentRow
+                    {
+                        AssignmentId =
+                            assignment.Id,
+
+                        ProjectId =
+                            project.Id,
+
+                        ProjectTitle =
+                            SafeProjectTitle(
+                                project.Title),
+
+                        ProjectMembers =
+                            team.MemberNames,
+
+                        /*
+                         * Temporary compatibility with
+                         * the current Razor page.
+                         */
+                        StudentName =
+                            team.OwnerName,
+
+                        SupervisorName =
+                            assignment.Supervisor?.FullName
+                            ?? "Supervisor",
+
+                        AdminNote =
+                            assignment.AdminNote,
+
+                        RejectedAt =
+                            assignment.RejectedAt ??
+                            assignment.UpdatedAt
+                    };
+                })
+                .ToList();
+
+        Stats =
+            new AdminAssignmentStats
             {
-                AssignmentId = a.Id,
-                StudentName = a.Student?.FullName ?? "Student",
-                SupervisorName = a.Supervisor?.FullName ?? "Supervisor",
-                AdminNote = a.AdminNote,
-                RejectedAt = a.RejectedAt ?? a.UpdatedAt
-            })
-            .ToList();
+                PendingRequests =
+                    PendingRequests.Count,
 
-        Stats = new AdminAssignmentStats
-        {
-            PendingRequests = PendingRequests.Count,
-            ActiveAssignments = ActiveAssignments.Count,
-            FullSupervisors = SupervisorCapacity.Count(s => s.IsFull),
-            AvailableSupervisors = SupervisorCapacity.Count(s => !s.IsFull)
-        };
+                ActiveAssignments =
+                    ActiveAssignments.Count,
+
+                FullSupervisors =
+                    SupervisorCapacity.Count(
+                        supervisor =>
+                            supervisor.IsFull),
+
+                AvailableSupervisors =
+                    SupervisorCapacity.Count(
+                        supervisor =>
+                            !supervisor.IsFull)
+            };
     }
 
-    private async Task SendTransferCommunicationAsync(
-    int newAssignmentId,
-    int oldSupervisorId,
-    string oldSupervisorName,
-    string reason)
+    private IQueryable<SupervisorAssignment>
+        BuildAssignmentQuery()
     {
-        var assignment = await db.SupervisorAssignments
-            .Include(a => a.Student)
-            .Include(a => a.Supervisor)
-            .FirstOrDefaultAsync(a => a.Id == newAssignmentId);
+        return db.SupervisorAssignments
+            .AsNoTracking()
+            .Include(assignment =>
+                assignment.Student)
+            .ThenInclude(student =>
+                student!.StudentProfile)
+            .Include(assignment =>
+                assignment.Supervisor)
+            .ThenInclude(supervisor =>
+                supervisor!.SupervisorProfile)
+            .Include(assignment =>
+                assignment.Project)
+            .ThenInclude(project =>
+                project!.ProjectIdea)
+            .Include(assignment =>
+                assignment.Project)
+            .ThenInclude(project =>
+                project!.Members
+                    .Where(member =>
+                        member.Status ==
+                            "active"))
+            .ThenInclude(member =>
+                member.User)
+            .ThenInclude(user =>
+                user!.StudentProfile)
+            .AsSplitQuery();
+    }
 
-        if (assignment?.Student == null || assignment.Supervisor == null)
+    private async Task<SupervisorAssignment?>
+        LoadPendingAssignmentAsync(
+            int assignmentId,
+            CancellationToken cancellationToken)
+    {
+        return await db.SupervisorAssignments
+            .Include(assignment =>
+                assignment.Project)
+            .ThenInclude(project =>
+                project!.ProjectIdea)
+            .Include(assignment =>
+                assignment.Student)
+            .Include(assignment =>
+                assignment.Supervisor)
+            .ThenInclude(supervisor =>
+                supervisor!.SupervisorProfile)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(
+                assignment =>
+                    assignment.Id ==
+                        assignmentId &&
+                    assignment.ProjectId.HasValue &&
+                    assignment.Status ==
+                        "pending_admin",
+                cancellationToken);
+    }
+
+    private static bool CanProcessPendingProject(
+        SupervisorAssignment assignment,
+        Project project)
+    {
+        return assignment.Status ==
+                   "pending_admin" &&
+               assignment.ProjectId ==
+                   project.Id &&
+               !project.SupervisorId.HasValue &&
+               NormalizeStatus(
+                   project.SupervisorAssignmentStatus) ==
+                   "pending_admin";
+    }
+
+    private async Task<User?>
+        LoadValidSupervisorAsync(
+            int supervisorId,
+            CancellationToken cancellationToken)
+    {
+        return await db.Users
+            .Include(user =>
+                user.SupervisorProfile)
+            .FirstOrDefaultAsync(
+                user =>
+                    user.Id ==
+                        supervisorId &&
+                    user.Role.ToLower() ==
+                        "supervisor" &&
+                    user.SupervisorProfile != null,
+                cancellationToken);
+    }
+
+    private async Task<int>
+        CountActiveProjectsAsync(
+            int supervisorId,
+            int excludedProjectId,
+            CancellationToken cancellationToken)
+    {
+        return await db.Projects
+            .AsNoTracking()
+            .CountAsync(
+                project =>
+                    project.Id !=
+                        excludedProjectId &&
+                    project.SupervisorId ==
+                        supervisorId &&
+                    project.SupervisorAssignmentStatus ==
+                        "active",
+                cancellationToken);
+    }
+
+    private void AddProjectActivity(
+        int projectId,
+        int adminId,
+        string actionType,
+        string description,
+        DateTime createdAtUtc)
+    {
+        db.ProjectActivities.Add(
+            new ProjectActivity
+            {
+                ProjectId =
+                    projectId,
+
+                UserId =
+                    adminId,
+
+                ActionType =
+                    actionType,
+
+                Description =
+                    description,
+
+                CreatedAtUtc =
+                    createdAtUtc
+            });
+    }
+
+    private async Task
+        SendAssignmentApprovedCommunicationAsync(
+            int assignmentId,
+            CancellationToken cancellationToken)
+    {
+        var assignment =
+            await db.SupervisorAssignments
+                .AsNoTracking()
+                .Include(item =>
+                    item.Project)
+                .ThenInclude(project =>
+                    project!.ProjectIdea)
+                .Include(item =>
+                    item.Supervisor)
+                .FirstOrDefaultAsync(
+                    item =>
+                        item.Id ==
+                            assignmentId &&
+                        item.ProjectId.HasValue &&
+                        item.Status ==
+                            "active",
+                    cancellationToken);
+
+        if (assignment?.Project == null ||
+            assignment.Supervisor == null)
         {
             return;
         }
 
-        var oldSupervisor = await db.Users
-            .FirstOrDefaultAsync(u => u.Id == oldSupervisorId);
+        var project =
+            assignment.Project;
 
-        var latestIdea = await db.ProjectIdeas
-            .Where(i => i.UserId == assignment.StudentId)
-            .OrderByDescending(i => i.CreatedAt)
-            .FirstOrDefaultAsync();
+        var recipients =
+            await LoadProjectRecipientsAsync(
+                project,
+                cancellationToken);
 
-        var studentName = assignment.Student.FullName;
-        var newSupervisorName = assignment.Supervisor.FullName;
-        var ideaTitle = latestIdea?.Title ?? "your selected project idea";
+        var projectTitle =
+            SafeProjectTitle(
+                project.Title);
 
-        await notificationService.NotifyUserAsync(
-            assignment.StudentId,
-            "Supervisor Assignment Updated",
-            $"Your supervisor has been changed from {oldSupervisorName} to {newSupervisorName}. Reason: {reason}",
-            "assignment_transferred",
-            "/Student/Feedback",
-            sendEmail: true,
-            emailSubject: "Your FYP supervisor has been changed",
-            emailHtmlBody: BuildTransferStudentEmail(
-                studentName,
-                oldSupervisorName,
-                newSupervisorName,
-                ideaTitle,
-                reason));
+        var ideaTitle =
+            project.ProjectIdea?.Title
+            ?? "No official idea selected";
+
+        var supervisorName =
+            assignment.Supervisor.FullName;
+
+        var memberNames =
+            string.Join(
+                ", ",
+                recipients.Select(
+                    recipient =>
+                        recipient.FullName));
+
+        foreach (var recipient in recipients)
+        {
+            await TryNotifyAsync(
+                recipient.UserId,
+                "Project Supervisor Approved",
+                $"{supervisorName} is now the official "
+                + $"supervisor for project "
+                + $"\"{projectTitle}\".",
+                "project_supervisor_approved",
+                $"/Student/Feedback"
+                + $"?projectId={project.Id}",
+                sendEmail:
+                    true,
+                emailSubject:
+                    $"Supervisor approved for {projectTitle}",
+                emailHtmlBody:
+                    BuildMemberApprovedEmail(
+                        recipient.FullName,
+                        projectTitle,
+                        supervisorName,
+                        ideaTitle,
+                        memberNames),
+                cancellationToken);
+        }
+
+        await TryNotifyAsync(
+            assignment.SupervisorId,
+            "New Project Assigned",
+            $"Project \"{projectTitle}\" with students "
+            + $"{memberNames} has been assigned to you.",
+            "project_assigned",
+            $"/Supervisor/IdeaReview"
+            + $"?projectId={project.Id}",
+            sendEmail:
+                true,
+            emailSubject:
+                $"New supervised project: {projectTitle}",
+            emailHtmlBody:
+                BuildSupervisorApprovedEmail(
+                    supervisorName,
+                    projectTitle,
+                    ideaTitle,
+                    memberNames),
+            cancellationToken);
+    }
+
+    private async Task
+        SendAssignmentRejectedCommunicationAsync(
+            int assignmentId,
+            CancellationToken cancellationToken)
+    {
+        var assignment =
+            await db.SupervisorAssignments
+                .AsNoTracking()
+                .Include(item =>
+                    item.Project)
+                .Include(item =>
+                    item.Supervisor)
+                .FirstOrDefaultAsync(
+                    item =>
+                        item.Id ==
+                            assignmentId &&
+                        item.ProjectId.HasValue &&
+                        item.Status ==
+                            "rejected",
+                    cancellationToken);
+
+        if (assignment?.Project == null)
+        {
+            return;
+        }
+
+        var project =
+            assignment.Project;
+
+        var recipients =
+            await LoadProjectRecipientsAsync(
+                project,
+                cancellationToken);
+
+        var projectTitle =
+            SafeProjectTitle(
+                project.Title);
+
+        var supervisorName =
+            assignment.Supervisor?.FullName
+            ?? "the selected supervisor";
+
+        foreach (var recipient in recipients)
+        {
+            await TryNotifyAsync(
+                recipient.UserId,
+                "Project Supervisor Request Not Approved",
+                $"The request for {supervisorName} "
+                + $"for project \"{projectTitle}\" "
+                + "was not approved. "
+                + $"Admin note: {assignment.AdminNote}",
+                "project_supervisor_rejected",
+                $"/Student/Feedback"
+                + $"?projectId={project.Id}",
+                sendEmail:
+                    true,
+                emailSubject:
+                    $"Supervisor request update for "
+                    + projectTitle,
+                emailHtmlBody:
+                    BuildMemberRejectedEmail(
+                        recipient.FullName,
+                        projectTitle,
+                        supervisorName,
+                        assignment.AdminNote),
+                cancellationToken);
+        }
+    }
+
+    private async Task
+        SendTransferCommunicationAsync(
+            int newAssignmentId,
+            int oldSupervisorId,
+            string oldSupervisorName,
+            string reason,
+            CancellationToken cancellationToken)
+    {
+        var assignment =
+            await db.SupervisorAssignments
+                .AsNoTracking()
+                .Include(item =>
+                    item.Project)
+                .ThenInclude(project =>
+                    project!.ProjectIdea)
+                .Include(item =>
+                    item.Supervisor)
+                .FirstOrDefaultAsync(
+                    item =>
+                        item.Id ==
+                            newAssignmentId &&
+                        item.ProjectId.HasValue &&
+                        item.Status ==
+                            "active",
+                    cancellationToken);
+
+        if (assignment?.Project == null ||
+            assignment.Supervisor == null)
+        {
+            return;
+        }
+
+        var project =
+            assignment.Project;
+
+        var recipients =
+            await LoadProjectRecipientsAsync(
+                project,
+                cancellationToken);
+
+        var oldSupervisor =
+            await db.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    user =>
+                        user.Id ==
+                            oldSupervisorId,
+                    cancellationToken);
+
+        var projectTitle =
+            SafeProjectTitle(
+                project.Title);
+
+        var ideaTitle =
+            project.ProjectIdea?.Title
+            ?? "No official idea selected";
+
+        var newSupervisorName =
+            assignment.Supervisor.FullName;
+
+        var memberNames =
+            string.Join(
+                ", ",
+                recipients.Select(
+                    recipient =>
+                        recipient.FullName));
+
+        foreach (var recipient in recipients)
+        {
+            await TryNotifyAsync(
+                recipient.UserId,
+                "Project Supervisor Changed",
+                $"The supervisor for project "
+                + $"\"{projectTitle}\" changed from "
+                + $"{oldSupervisorName} to "
+                + $"{newSupervisorName}. "
+                + $"Reason: {reason}",
+                "project_supervisor_transferred",
+                $"/Student/Feedback"
+                + $"?projectId={project.Id}",
+                sendEmail:
+                    true,
+                emailSubject:
+                    $"Supervisor changed for {projectTitle}",
+                emailHtmlBody:
+                    BuildMemberTransferEmail(
+                        recipient.FullName,
+                        projectTitle,
+                        oldSupervisorName,
+                        newSupervisorName,
+                        ideaTitle,
+                        reason),
+                cancellationToken);
+        }
 
         if (oldSupervisor != null)
         {
-            await notificationService.NotifyUserAsync(
+            await TryNotifyAsync(
                 oldSupervisorId,
-                "Student Transferred",
-                $"{studentName} has been transferred from you to {newSupervisorName}. Reason: {reason}",
-                "student_transferred_out",
+                "Project Transferred",
+                $"Project \"{projectTitle}\" was "
+                + $"transferred to {newSupervisorName}. "
+                + $"Reason: {reason}",
+                "project_transferred_out",
                 "/Supervisor/IdeaReview",
-                sendEmail: true,
-                emailSubject: "A student has been transferred from your supervision",
-                emailHtmlBody: BuildTransferOldSupervisorEmail(
-                    oldSupervisor.FullName,
-                    studentName,
+                sendEmail:
+                    true,
+                emailSubject:
+                    $"Project transferred: {projectTitle}",
+                emailHtmlBody:
+                    BuildOldSupervisorTransferEmail(
+                        oldSupervisor.FullName,
+                        projectTitle,
+                        newSupervisorName,
+                        memberNames,
+                        reason),
+                cancellationToken);
+        }
+
+        await TryNotifyAsync(
+            assignment.SupervisorId,
+            "Project Transferred To You",
+            $"Project \"{projectTitle}\" with students "
+            + $"{memberNames} was transferred to you.",
+            "project_transferred_in",
+            $"/Supervisor/IdeaReview"
+            + $"?projectId={project.Id}",
+            sendEmail:
+                true,
+            emailSubject:
+                $"Project transferred to you: "
+                + projectTitle,
+            emailHtmlBody:
+                BuildNewSupervisorTransferEmail(
                     newSupervisorName,
-                    reason));
-        }
-
-        await notificationService.NotifyUserAsync(
-            assignment.SupervisorId,
-            "New Student Transferred To You",
-            $"{studentName} has been transferred to your supervision. You can now review ideas and schedule meetings.",
-            "student_transferred_in",
-            "/Supervisor/IdeaReview",
-            sendEmail: true,
-            emailSubject: "A student has been transferred to your supervision",
-            emailHtmlBody: BuildTransferNewSupervisorEmail(
-                newSupervisorName,
-                studentName,
-                oldSupervisorName,
-                ideaTitle,
-                reason));
+                    projectTitle,
+                    oldSupervisorName,
+                    ideaTitle,
+                    memberNames,
+                    reason),
+            cancellationToken);
     }
-    private async Task SendAssignmentApprovedCommunicationAsync(int assignmentId)
-    {
-        var assignment = await db.SupervisorAssignments
-            .Include(a => a.Student)
-            .Include(a => a.Supervisor)
-            .FirstOrDefaultAsync(a => a.Id == assignmentId);
 
-        if (assignment?.Student == null || assignment.Supervisor == null)
+    private async Task<List<ProjectRecipient>>
+        LoadProjectRecipientsAsync(
+            Project project,
+            CancellationToken cancellationToken)
+    {
+        var recipients =
+            await db.ProjectMembers
+                .AsNoTracking()
+                .Where(member =>
+                    member.ProjectId ==
+                        project.Id &&
+                    member.Status ==
+                        "active")
+                .Select(member =>
+                    new ProjectRecipient(
+                        member.UserId,
+                        member.User != null
+                            ? member.User.FullName
+                            : "Student",
+                        member.User != null
+                            ? member.User.Email
+                            : ""))
+                .ToListAsync(
+                    cancellationToken);
+
+        if (!recipients.Any(
+                recipient =>
+                    recipient.UserId ==
+                        project.StudentId))
         {
-            return;
+            var owner =
+                await db.Users
+                    .AsNoTracking()
+                    .Where(user =>
+                        user.Id ==
+                            project.StudentId)
+                    .Select(user =>
+                        new ProjectRecipient(
+                            user.Id,
+                            user.FullName,
+                            user.Email))
+                    .FirstOrDefaultAsync(
+                        cancellationToken);
+
+            if (owner != null)
+            {
+                recipients.Add(
+                    owner);
+            }
         }
 
-        var latestIdea = await db.ProjectIdeas
-            .Where(i => i.UserId == assignment.StudentId)
-            .OrderByDescending(i => i.CreatedAt)
-            .FirstOrDefaultAsync();
-
-        var supervisorName = assignment.Supervisor.FullName;
-        var studentName = assignment.Student.FullName;
-        var ideaTitle = latestIdea?.Title ?? "your selected project idea";
-
-        await notificationService.NotifyUserAsync(
-            assignment.StudentId,
-            "Supervisor Assignment Approved",
-            $"You have been assigned to {supervisorName}. {supervisorName} will follow up with you on {ideaTitle}.",
-            "assignment_approved",
-            "/Student/Feedback",
-            sendEmail: true,
-            emailSubject: "Your FYP supervisor has been assigned",
-            emailHtmlBody: BuildAssignmentStudentEmail(studentName, supervisorName, ideaTitle));
-
-        await notificationService.NotifyUserAsync(
-            assignment.SupervisorId,
-            "New Student Assigned",
-            $"{studentName} has been assigned to you. You can now review the student's ideas, schedule meetings, and follow progress.",
-            "student_assigned",
-            "/Supervisor/IdeaReview",
-            sendEmail: true,
-            emailSubject: "A new student has been assigned to you",
-            emailHtmlBody: BuildAssignmentSupervisorEmail(supervisorName, studentName, ideaTitle));
+        return recipients
+            .GroupBy(recipient =>
+                recipient.UserId)
+            .Select(group =>
+                group.First())
+            .ToList();
     }
 
-    private async Task SendAssignmentRejectedCommunicationAsync(int assignmentId)
+    private async Task TryNotifyAsync(
+        int recipientUserId,
+        string title,
+        string message,
+        string type,
+        string url,
+        bool sendEmail,
+        string emailSubject,
+        string emailHtmlBody,
+        CancellationToken cancellationToken)
     {
-        var assignment = await db.SupervisorAssignments
-            .Include(a => a.Student)
-            .Include(a => a.Supervisor)
-            .FirstOrDefaultAsync(a => a.Id == assignmentId);
-
-        if (assignment?.Student == null)
+        try
         {
-            return;
+            await notificationService.NotifyUserAsync(
+                recipientUserId:
+                    recipientUserId,
+
+                title:
+                    title,
+
+                message:
+                    message,
+
+                type:
+                    type,
+
+                url:
+                    url,
+
+                sendEmail:
+                    sendEmail,
+
+                emailSubject:
+                    emailSubject,
+
+                emailHtmlBody:
+                    emailHtmlBody);
         }
-
-        var supervisorName = assignment.Supervisor?.FullName ?? "the selected supervisor";
-
-        var title = "Supervisor Request Not Approved";
-        var message =
-            $"Your request for {supervisorName} was not approved by admin. Please choose another available supervisor.";
-
-        if (!string.IsNullOrWhiteSpace(assignment.AdminNote))
+        catch (Exception exception)
         {
-            message += $" Admin note: {assignment.AdminNote}";
+            logger.LogWarning(
+                exception,
+                "Database action succeeded, but "
+                + "notification failed for user "
+                + "{UserId}.",
+                recipientUserId);
+        }
+    }
+
+    private static TeamSummary BuildTeamSummary(
+        Project project,
+        User? fallbackOwner)
+    {
+        var members =
+            project.Members
+                .Where(member =>
+                    member.Status ==
+                        "active" &&
+                    member.User != null)
+                .Select(member =>
+                    new TeamMemberSummary(
+                        member.UserId,
+                        member.User!.FullName,
+                        member.User.Email,
+                        member.Role,
+                        member.User.StudentProfile?.Major
+                        ?? "",
+                        member.User.StudentProfile
+                            ?.PreferredDomain
+                        ?? "",
+                        member.User.StudentProfile?.Skills
+                        ?? ""))
+                .ToList();
+
+        if (fallbackOwner != null &&
+            members.All(member =>
+                member.UserId !=
+                    fallbackOwner.Id))
+        {
+            members.Add(
+                new TeamMemberSummary(
+                    fallbackOwner.Id,
+                    fallbackOwner.FullName,
+                    fallbackOwner.Email,
+                    "owner",
+                    fallbackOwner.StudentProfile?.Major
+                    ?? "",
+                    fallbackOwner.StudentProfile
+                        ?.PreferredDomain
+                    ?? "",
+                    fallbackOwner.StudentProfile?.Skills
+                    ?? ""));
         }
 
-        await notificationService.NotifyUserAsync(
-            assignment.StudentId,
-            title,
-            message,
-            "assignment_rejected",
-            "/Student/Feedback",
-            sendEmail: true,
-            emailSubject: "Your supervisor request was not approved",
-            emailHtmlBody: BuildRejectedStudentEmail(
-                assignment.Student.FullName,
-                supervisorName,
-                assignment.AdminNote));
+        var owner =
+            members.FirstOrDefault(member =>
+                member.Role.Equals(
+                    "owner",
+                    StringComparison.OrdinalIgnoreCase))
+            ?? members.FirstOrDefault(member =>
+                member.UserId ==
+                    project.StudentId)
+            ?? members.FirstOrDefault();
+
+        return new TeamSummary(
+            OwnerName:
+                owner?.FullName
+                ?? fallbackOwner?.FullName
+                ?? "Project owner",
+
+            OwnerEmail:
+                owner?.Email
+                ?? fallbackOwner?.Email
+                ?? "",
+
+            OwnerMajor:
+                owner?.Major
+                ?? "",
+
+            PreferredDomain:
+                string.Join(
+                    ", ",
+                    members
+                        .Select(member =>
+                            member.PreferredDomain)
+                        .Where(value =>
+                            !string.IsNullOrWhiteSpace(
+                                value))
+                        .Distinct(
+                            StringComparer.OrdinalIgnoreCase)),
+
+            TeamSkills:
+                string.Join(
+                    ", ",
+                    members
+                        .Select(member =>
+                            member.Skills)
+                        .Where(value =>
+                            !string.IsNullOrWhiteSpace(
+                                value))
+                        .Distinct(
+                            StringComparer.OrdinalIgnoreCase)),
+
+            MemberNames:
+                string.Join(
+                    ", ",
+                    members
+                        .Select(member =>
+                            member.FullName)
+                        .Distinct(
+                            StringComparer.OrdinalIgnoreCase)),
+
+            MemberCount:
+                members
+                    .Select(member =>
+                        member.UserId)
+                    .Distinct()
+                    .Count());
     }
 
-    private static string BuildAssignmentStudentEmail(string studentName, string supervisorName, string ideaTitle)
+    private static string BuildMemberApprovedEmail(
+        string memberName,
+        string projectTitle,
+        string supervisorName,
+        string ideaTitle,
+        string memberNames)
     {
-        studentName = System.Net.WebUtility.HtmlEncode(studentName);
-        supervisorName = System.Net.WebUtility.HtmlEncode(supervisorName);
-        ideaTitle = System.Net.WebUtility.HtmlEncode(ideaTitle);
-
-        return $"""
-        <div style="font-family:Arial,sans-serif;background:#F7F8FA;padding:28px;">
-            <div style="max-width:640px;margin:auto;background:#ffffff;border:1px solid #E8ECF2;border-radius:18px;padding:26px;">
-                <h2 style="color:#28385E;margin-top:0;">Supervisor Assignment Approved</h2>
-                <p style="color:#475569;line-height:1.7;">
-                    Hello {studentName},
-                </p>
-                <p style="color:#475569;line-height:1.7;">
-                    Your FYP supervisor assignment has been approved.
-                    <strong>{supervisorName}</strong> will follow up with you on:
-                </p>
-                <div style="background:#F7F8FA;border:1px solid #E8ECF2;border-radius:14px;padding:14px;color:#28385E;font-weight:700;">
-                    {ideaTitle}
-                </div>
-                <p style="color:#475569;line-height:1.7;margin-top:18px;">
-                    You can now open Supervisor Feedback, communicate with your supervisor, and receive meeting updates.
-                </p>
-                <p style="color:#94A3B8;font-size:12px;margin-top:24px;">FYPilot automated notification</p>
-            </div>
-        </div>
-        """;
+        return BuildEmail(
+            "Project Supervisor Approved",
+            memberName,
+            $"""
+            The official supervisor for project
+            <strong>{Encode(projectTitle)}</strong>
+            is now <strong>{Encode(supervisorName)}</strong>.
+            """,
+            $"""
+            <strong>Official idea:</strong>
+            {Encode(ideaTitle)}<br/>
+            <strong>Project members:</strong>
+            {Encode(memberNames)}
+            """,
+            "You can now open Supervisor Feedback, "
+            + "communicate with the supervisor, and "
+            + "receive project meeting updates.");
     }
 
-    private static string BuildAssignmentSupervisorEmail(string supervisorName, string studentName, string ideaTitle)
+    private static string BuildSupervisorApprovedEmail(
+        string supervisorName,
+        string projectTitle,
+        string ideaTitle,
+        string memberNames)
     {
-        supervisorName = System.Net.WebUtility.HtmlEncode(supervisorName);
-        studentName = System.Net.WebUtility.HtmlEncode(studentName);
-        ideaTitle = System.Net.WebUtility.HtmlEncode(ideaTitle);
-
-        return $"""
-        <div style="font-family:Arial,sans-serif;background:#F7F8FA;padding:28px;">
-            <div style="max-width:640px;margin:auto;background:#ffffff;border:1px solid #E8ECF2;border-radius:18px;padding:26px;">
-                <h2 style="color:#28385E;margin-top:0;">New Student Assigned</h2>
-                <p style="color:#475569;line-height:1.7;">
-                    Hello {supervisorName},
-                </p>
-                <p style="color:#475569;line-height:1.7;">
-                    <strong>{studentName}</strong> has been officially assigned to you.
-                </p>
-                <div style="background:#F7F8FA;border:1px solid #E8ECF2;border-radius:14px;padding:14px;color:#28385E;font-weight:700;">
-                    Project idea: {ideaTitle}
-                </div>
-                <p style="color:#475569;line-height:1.7;margin-top:18px;">
-                    You can now review the student's ideas, schedule meetings, and follow progress through FYPilot.
-                </p>
-                <p style="color:#94A3B8;font-size:12px;margin-top:24px;">FYPilot automated notification</p>
-            </div>
-        </div>
-        """;
+        return BuildEmail(
+            "New Project Assigned",
+            supervisorName,
+            $"""
+            You are now the official supervisor for
+            <strong>{Encode(projectTitle)}</strong>.
+            """,
+            $"""
+            <strong>Official idea:</strong>
+            {Encode(ideaTitle)}<br/>
+            <strong>Students:</strong>
+            {Encode(memberNames)}
+            """,
+            "You can now evaluate the shared project, "
+            + "provide feedback, and create meetings "
+            + "for all active project members.");
     }
 
-    private static string BuildRejectedStudentEmail(string studentName, string supervisorName, string adminNote)
+    private static string BuildMemberRejectedEmail(
+        string memberName,
+        string projectTitle,
+        string supervisorName,
+        string adminNote)
     {
-        studentName = System.Net.WebUtility.HtmlEncode(studentName);
-        supervisorName = System.Net.WebUtility.HtmlEncode(supervisorName);
-        adminNote = System.Net.WebUtility.HtmlEncode(adminNote);
-
-        var noteHtml = string.IsNullOrWhiteSpace(adminNote)
-            ? ""
-            : $"""
-              <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:14px;padding:14px;color:#991B1B;margin-top:14px;">
-                  <strong>Admin note:</strong> {adminNote}
-              </div>
-              """;
-
-        return $"""
-        <div style="font-family:Arial,sans-serif;background:#F7F8FA;padding:28px;">
-            <div style="max-width:640px;margin:auto;background:#ffffff;border:1px solid #E8ECF2;border-radius:18px;padding:26px;">
-                <h2 style="color:#28385E;margin-top:0;">Supervisor Request Not Approved</h2>
-                <p style="color:#475569;line-height:1.7;">
-                    Hello {studentName},
-                </p>
-                <p style="color:#475569;line-height:1.7;">
-                    Your request for <strong>{supervisorName}</strong> was not approved by admin.
-                    Please choose another available supervisor from the Supervisor Feedback page.
-                </p>
-                {noteHtml}
-                <p style="color:#94A3B8;font-size:12px;margin-top:24px;">FYPilot automated notification</p>
-            </div>
-        </div>
-        """;
-    }
-    private static string BuildTransferStudentEmail(
-    string studentName,
-    string oldSupervisorName,
-    string newSupervisorName,
-    string ideaTitle,
-    string reason)
-    {
-        studentName = System.Net.WebUtility.HtmlEncode(studentName);
-        oldSupervisorName = System.Net.WebUtility.HtmlEncode(oldSupervisorName);
-        newSupervisorName = System.Net.WebUtility.HtmlEncode(newSupervisorName);
-        ideaTitle = System.Net.WebUtility.HtmlEncode(ideaTitle);
-        reason = System.Net.WebUtility.HtmlEncode(reason);
-
-        return $"""
-    <div style="font-family:Arial,sans-serif;background:#F7F8FA;padding:28px;">
-        <div style="max-width:640px;margin:auto;background:#ffffff;border:1px solid #E8ECF2;border-radius:18px;padding:26px;">
-            <h2 style="color:#28385E;margin-top:0;">Supervisor Assignment Updated</h2>
-
-            <p style="color:#475569;line-height:1.7;">
-                Hello {studentName},
-            </p>
-
-            <p style="color:#475569;line-height:1.7;">
-                Your FYP supervisor has been changed from
-                <strong>{oldSupervisorName}</strong> to
-                <strong>{newSupervisorName}</strong>.
-            </p>
-
-            <div style="background:#F7F8FA;border:1px solid #E8ECF2;border-radius:14px;padding:14px;color:#28385E;margin-top:14px;">
-                <strong>Project idea:</strong> {ideaTitle}<br/>
-                <strong>Reason:</strong> {reason}
-            </div>
-
-            <p style="color:#475569;line-height:1.7;margin-top:18px;">
-                You can continue your FYP follow-up with your new supervisor through FYPilot.
-            </p>
-
-            <p style="color:#94A3B8;font-size:12px;margin-top:24px;">FYPilot automated notification</p>
-        </div>
-    </div>
-    """;
+        return BuildEmail(
+            "Supervisor Request Not Approved",
+            memberName,
+            $"""
+            The request for
+            <strong>{Encode(supervisorName)}</strong>
+            for project
+            <strong>{Encode(projectTitle)}</strong>
+            was not approved.
+            """,
+            $"""
+            <strong>Admin note:</strong>
+            {Encode(adminNote)}
+            """,
+            "The project owner may choose another "
+            + "available supervisor.");
     }
 
-    private static string BuildTransferOldSupervisorEmail(
+    private static string BuildMemberTransferEmail(
+        string memberName,
+        string projectTitle,
         string oldSupervisorName,
-        string studentName,
         string newSupervisorName,
-        string reason)
-    {
-        oldSupervisorName = System.Net.WebUtility.HtmlEncode(oldSupervisorName);
-        studentName = System.Net.WebUtility.HtmlEncode(studentName);
-        newSupervisorName = System.Net.WebUtility.HtmlEncode(newSupervisorName);
-        reason = System.Net.WebUtility.HtmlEncode(reason);
-
-        return $"""
-    <div style="font-family:Arial,sans-serif;background:#F7F8FA;padding:28px;">
-        <div style="max-width:640px;margin:auto;background:#ffffff;border:1px solid #E8ECF2;border-radius:18px;padding:26px;">
-            <h2 style="color:#28385E;margin-top:0;">Student Transferred</h2>
-
-            <p style="color:#475569;line-height:1.7;">
-                Hello {oldSupervisorName},
-            </p>
-
-            <p style="color:#475569;line-height:1.7;">
-                <strong>{studentName}</strong> has been transferred from your supervision to
-                <strong>{newSupervisorName}</strong>.
-            </p>
-
-            <div style="background:#F7F8FA;border:1px solid #E8ECF2;border-radius:14px;padding:14px;color:#28385E;margin-top:14px;">
-                <strong>Reason:</strong> {reason}
-            </div>
-
-            <p style="color:#94A3B8;font-size:12px;margin-top:24px;">FYPilot automated notification</p>
-        </div>
-    </div>
-    """;
-    }
-
-    private static string BuildTransferNewSupervisorEmail(
-        string newSupervisorName,
-        string studentName,
-        string oldSupervisorName,
         string ideaTitle,
         string reason)
     {
-        newSupervisorName = System.Net.WebUtility.HtmlEncode(newSupervisorName);
-        studentName = System.Net.WebUtility.HtmlEncode(studentName);
-        oldSupervisorName = System.Net.WebUtility.HtmlEncode(oldSupervisorName);
-        ideaTitle = System.Net.WebUtility.HtmlEncode(ideaTitle);
-        reason = System.Net.WebUtility.HtmlEncode(reason);
-
-        return $"""
-    <div style="font-family:Arial,sans-serif;background:#F7F8FA;padding:28px;">
-        <div style="max-width:640px;margin:auto;background:#ffffff;border:1px solid #E8ECF2;border-radius:18px;padding:26px;">
-            <h2 style="color:#28385E;margin-top:0;">New Student Transferred To You</h2>
-
-            <p style="color:#475569;line-height:1.7;">
-                Hello {newSupervisorName},
-            </p>
-
-            <p style="color:#475569;line-height:1.7;">
-                <strong>{studentName}</strong> has been transferred to your supervision.
-            </p>
-
-            <div style="background:#F7F8FA;border:1px solid #E8ECF2;border-radius:14px;padding:14px;color:#28385E;margin-top:14px;">
-                <strong>Previous supervisor:</strong> {oldSupervisorName}<br/>
-                <strong>Project idea:</strong> {ideaTitle}<br/>
-                <strong>Reason:</strong> {reason}
-            </div>
-
-            <p style="color:#475569;line-height:1.7;margin-top:18px;">
-                You can now review the student's ideas, schedule meetings, and follow progress through FYPilot.
-            </p>
-
-            <p style="color:#94A3B8;font-size:12px;margin-top:24px;">FYPilot automated notification</p>
-        </div>
-    </div>
-    """;
+        return BuildEmail(
+            "Project Supervisor Changed",
+            memberName,
+            $"""
+            The supervisor for
+            <strong>{Encode(projectTitle)}</strong>
+            changed from
+            <strong>{Encode(oldSupervisorName)}</strong>
+            to
+            <strong>{Encode(newSupervisorName)}</strong>.
+            """,
+            $"""
+            <strong>Official idea:</strong>
+            {Encode(ideaTitle)}<br/>
+            <strong>Reason:</strong>
+            {Encode(reason)}
+            """,
+            "All project members now share the new "
+            + "official supervisor.");
     }
+
+    private static string BuildOldSupervisorTransferEmail(
+        string supervisorName,
+        string projectTitle,
+        string newSupervisorName,
+        string memberNames,
+        string reason)
+    {
+        return BuildEmail(
+            "Project Transferred",
+            supervisorName,
+            $"""
+            Project
+            <strong>{Encode(projectTitle)}</strong>
+            was transferred to
+            <strong>{Encode(newSupervisorName)}</strong>.
+            """,
+            $"""
+            <strong>Students:</strong>
+            {Encode(memberNames)}<br/>
+            <strong>Reason:</strong>
+            {Encode(reason)}
+            """,
+            "You no longer have active supervision "
+            + "access to this project.");
+    }
+
+    private static string BuildNewSupervisorTransferEmail(
+        string supervisorName,
+        string projectTitle,
+        string oldSupervisorName,
+        string ideaTitle,
+        string memberNames,
+        string reason)
+    {
+        return BuildEmail(
+            "Project Transferred To You",
+            supervisorName,
+            $"""
+            Project
+            <strong>{Encode(projectTitle)}</strong>
+            was transferred to your supervision.
+            """,
+            $"""
+            <strong>Previous supervisor:</strong>
+            {Encode(oldSupervisorName)}<br/>
+            <strong>Official idea:</strong>
+            {Encode(ideaTitle)}<br/>
+            <strong>Students:</strong>
+            {Encode(memberNames)}<br/>
+            <strong>Reason:</strong>
+            {Encode(reason)}
+            """,
+            "You can now evaluate the project and "
+            + "schedule meetings for all active members.");
+    }
+
+    private static string BuildEmail(
+        string heading,
+        string recipientName,
+        string mainHtml,
+        string detailsHtml,
+        string closingText)
+    {
+        return $"""
+        <div style="font-family:Arial,sans-serif;
+                    background:#F7F8FA;
+                    padding:28px;">
+            <div style="max-width:640px;
+                        margin:auto;
+                        background:#ffffff;
+                        border:1px solid #E8ECF2;
+                        border-radius:18px;
+                        padding:26px;">
+                <h2 style="color:#28385E;
+                           margin-top:0;">
+                    {Encode(heading)}
+                </h2>
+
+                <p style="color:#475569;
+                          line-height:1.7;">
+                    Hello {Encode(recipientName)},
+                </p>
+
+                <p style="color:#475569;
+                          line-height:1.7;">
+                    {mainHtml}
+                </p>
+
+                <div style="background:#F7F8FA;
+                            border:1px solid #E8ECF2;
+                            border-radius:14px;
+                            padding:14px;
+                            color:#28385E;
+                            line-height:1.7;">
+                    {detailsHtml}
+                </div>
+
+                <p style="color:#475569;
+                          line-height:1.7;
+                          margin-top:18px;">
+                    {Encode(closingText)}
+                </p>
+
+                <p style="color:#94A3B8;
+                          font-size:12px;
+                          margin-top:24px;">
+                    FYPilot automated notification
+                </p>
+            </div>
+        </div>
+        """;
+    }
+
+    private static string Encode(
+        string? value)
+    {
+        return WebUtility.HtmlEncode(
+            value ?? "");
+    }
+
     private int GetCurrentUserId()
     {
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userIdClaim =
+            User.FindFirst(
+                ClaimTypes.NameIdentifier)
+                ?.Value;
 
-        if (int.TryParse(userIdClaim, out var userId))
+        if (int.TryParse(
+                userIdClaim,
+                out var userId))
         {
             return userId;
         }
 
-        throw new InvalidOperationException("Unable to identify the current logged-in user.");
+        throw new InvalidOperationException(
+            "Unable to identify the current "
+            + "logged-in administrator.");
     }
+
+    private static string NormalizeStatus(
+        string? status)
+    {
+        return string.IsNullOrWhiteSpace(
+            status)
+                ? "unassigned"
+                : status.Trim()
+                    .ToLowerInvariant();
+    }
+
+    private static string SafeProjectTitle(
+        string? title)
+    {
+        return string.IsNullOrWhiteSpace(
+            title)
+                ? "Untitled Project"
+                : title.Trim();
+    }
+
+    private sealed record ProjectRecipient(
+        int UserId,
+        string FullName,
+        string Email);
+
+    private sealed record TeamMemberSummary(
+        int UserId,
+        string FullName,
+        string Email,
+        string Role,
+        string Major,
+        string PreferredDomain,
+        string Skills);
+
+    private sealed record TeamSummary(
+        string OwnerName,
+        string OwnerEmail,
+        string OwnerMajor,
+        string PreferredDomain,
+        string TeamSkills,
+        string MemberNames,
+        int MemberCount);
 
     public class AdminAssignmentStats
     {
         public int PendingRequests { get; set; }
+
         public int ActiveAssignments { get; set; }
+
         public int FullSupervisors { get; set; }
+
         public int AvailableSupervisors { get; set; }
     }
 
     public class PendingAssignmentRow
     {
         public int AssignmentId { get; set; }
+
+        public int ProjectId { get; set; }
+
+        public string ProjectTitle { get; set; } = "";
+
+        public string ProjectMembers { get; set; } = "";
+
+        public int ProjectMemberCount { get; set; }
+
+        public string OwnerName { get; set; } = "";
+
+        public string OwnerEmail { get; set; } = "";
+
+        /*
+         * Legacy names retained temporarily so the
+         * existing design continues compiling.
+         */
         public int StudentId { get; set; }
+
         public string StudentName { get; set; } = "";
+
         public string StudentEmail { get; set; } = "";
+
         public string StudentMajor { get; set; } = "";
+
         public string PreferredDomain { get; set; } = "";
+
         public string StudentSkills { get; set; } = "";
+
         public string StudentIdeaTitle { get; set; } = "";
+
         public string StudentIdeaDomain { get; set; } = "";
+
         public int RequestedSupervisorId { get; set; }
-        public string RequestedSupervisorName { get; set; } = "";
-        public string RequestedSupervisorDepartment { get; set; } = "";
-        public string RequestedSupervisorSpecialization { get; set; } = "";
-        public int RequestedSupervisorCapacityUsed { get; set; }
-        public int RequestedSupervisorCapacityLimit { get; set; }
-        public bool RequestedSupervisorIsFull { get; set; }
+
+        public string RequestedSupervisorName { get; set; } =
+            "";
+
+        public string RequestedSupervisorDepartment
+        {
+            get;
+            set;
+        } = "";
+
+        public string RequestedSupervisorSpecialization
+        {
+            get;
+            set;
+        } = "";
+
+        public int RequestedSupervisorCapacityUsed
+        {
+            get;
+            set;
+        }
+
+        public int RequestedSupervisorCapacityLimit
+        {
+            get;
+            set;
+        }
+
+        public bool RequestedSupervisorIsFull
+        {
+            get;
+            set;
+        }
+
         public string StudentMessage { get; set; } = "";
+
         public DateTime RequestedAt { get; set; }
     }
 
     public class SupervisorCapacityRow
     {
         public int SupervisorId { get; set; }
+
         public string FullName { get; set; } = "";
+
         public string Email { get; set; } = "";
+
         public string Department { get; set; } = "";
+
         public string Specialization { get; set; } = "";
+
         public string ResearchAreas { get; set; } = "";
+
         public int ActiveCount { get; set; }
+
         public int PendingCount { get; set; }
+
         public int CapacityLimit { get; set; }
+
         public bool IsFull { get; set; }
     }
 
     public class AssignableSupervisorOption
     {
         public int SupervisorId { get; set; }
+
         public string FullName { get; set; } = "";
+
         public string Department { get; set; } = "";
+
         public string Specialization { get; set; } = "";
+
         public int CapacityUsed { get; set; }
+
         public int CapacityLimit { get; set; }
     }
 
     public class ActiveAssignmentRow
     {
         public int AssignmentId { get; set; }
+
+        public int ProjectId { get; set; }
+
+        public string ProjectTitle { get; set; } = "";
+
+        public string ProjectMembers { get; set; } = "";
+
+        public int ProjectMemberCount { get; set; }
+
+        /*
+         * Legacy names retained temporarily for the
+         * current Razor page.
+         */
         public int StudentId { get; set; }
+
         public int SupervisorId { get; set; }
+
         public string StudentName { get; set; } = "";
+
         public string StudentEmail { get; set; } = "";
+
         public string StudentMajor { get; set; } = "";
+
         public string PreferredDomain { get; set; } = "";
+
         public string SupervisorName { get; set; } = "";
-        public string SupervisorSpecialization { get; set; } = "";
+
+        public string SupervisorSpecialization
+        {
+            get;
+            set;
+        } = "";
+
         public string IdeaTitle { get; set; } = "";
+
         public DateTime ApprovedAt { get; set; }
     }
 
     public class RejectedAssignmentRow
     {
         public int AssignmentId { get; set; }
+
+        public int ProjectId { get; set; }
+
+        public string ProjectTitle { get; set; } = "";
+
+        public string ProjectMembers { get; set; } = "";
+
+        /*
+         * Legacy name retained temporarily.
+         */
         public string StudentName { get; set; } = "";
+
         public string SupervisorName { get; set; } = "";
+
         public string AdminNote { get; set; } = "";
+
         public DateTime RejectedAt { get; set; }
     }
 }

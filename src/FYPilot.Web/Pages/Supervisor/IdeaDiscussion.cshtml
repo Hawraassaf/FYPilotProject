@@ -3,10 +3,12 @@
 @model FYPilot.Web.Pages.Supervisor.IdeaDiscussionModel
 @{
     ViewData["Title"] = "Idea Discussion";
-    ViewData["Subtitle"] = "Live discussion connected to one selected project idea.";
+    ViewData["Subtitle"] = "Live discussion shared by the official supervisor and every active member of one project.";
 
     var currentSupervisorId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "0";
     var idea = Model.Idea;
+    var project = Model.Project;
+    var projectMemberNames = string.Join(", ", Model.ProjectMembers.Select(member => member.FullName));
 }
 
 <section class="sd-page">
@@ -32,14 +34,14 @@
         <section class="sd-empty-page">
             <i class="bi bi-exclamation-circle"></i>
             <h2>Idea not found</h2>
-            <p>Please go back to the feedback workspace and choose an idea.</p>
+            <p>Please go back to the feedback workspace and choose an assigned project.</p>
             <a href="/Supervisor/IdeaReview" class="sd-primary-link">Back to Feedback Workspace</a>
         </section>
     }
     else
     {
         <header class="sd-hero">
-            <a href="/Supervisor/IdeaReview?ideaId=@idea.Id" class="sd-back-link">
+            <a href="/Supervisor/IdeaReview?projectId=@(project?.Id ?? 0)&amp;ideaId=@idea.Id" class="sd-back-link">
                 <i class="bi bi-arrow-left"></i>
                 Back to Review
             </a>
@@ -50,11 +52,13 @@
                 </div>
 
                 <div>
-                    <span>Dedicated Idea Discussion</span>
+                    <span>Project Discussion · @(project?.Title ?? "Assigned Project")</span>
                     <h1>@idea.Title</h1>
 
                     <div class="sd-meta-row">
-                        <small><i class="bi bi-person"></i>@(idea.User?.FullName ?? "Student")</small>
+                        <small><i class="bi bi-kanban"></i>@(project?.Title ?? "Project")</small>
+
+                        <small><i class="bi bi-people"></i>@(string.IsNullOrWhiteSpace(projectMemberNames) ? "Project team" : projectMemberNames)</small>
 
                         @if (!string.IsNullOrWhiteSpace(idea.Domain))
                         {
@@ -74,7 +78,7 @@
             <div class="sd-chat-head">
                 <div>
                     <span>Live Discussion</span>
-                    <h2>Conversation with @(idea.User?.FullName ?? "Student")</h2>
+                    <h2>Conversation with the project team</h2>
                 </div>
 
                 <div class="sd-chat-status">
@@ -83,13 +87,18 @@
                 </div>
             </div>
 
-            <div class="sw-thread" id="supervisorFeedbackThread" data-evaluation-id="@(Model.Evaluation?.Id ?? 0)" data-current-user-id="@currentSupervisorId" data-idea-id="@idea.Id">
+            <div class="sw-thread"
+                 id="supervisorFeedbackThread"
+                 data-evaluation-id="@(Model.Evaluation?.Id ?? 0)"
+                 data-current-user-id="@currentSupervisorId"
+                 data-project-id="@(project?.Id ?? 0)"
+                 data-idea-id="@idea.Id">
                 @if (!Model.Messages.Any())
                 {
                     <div class="sw-thread-empty">
                         <i class="bi bi-chat-dots"></i>
                         <strong>No discussion yet</strong>
-                        <span>Start a discussion for this idea only.</span>
+                        <span>Start a shared discussion for this project and its official idea.</span>
                     </div>
                 }
                 else
@@ -144,7 +153,7 @@
 
             <div class="sw-chat-state">
                 <span id="supervisorTyping" class="sw-typing">
-                    <span id="supervisorTypingName">Student</span> is typing
+                    <span id="supervisorTypingName">Project member</span> is typing
                     <span class="sw-typing-dot"></span>
                     <span class="sw-typing-dot"></span>
                     <span class="sw-typing-dot"></span>
@@ -154,6 +163,7 @@
             <form method="post" asp-page-handler="SendMessage" class="sw-message-form" id="supervisorRealtimeForm">
                 @Html.AntiForgeryToken()
 
+                <input type="hidden" asp-for="MessageInput.ProjectId" value="@(project?.Id ?? 0)" />
                 <input type="hidden" asp-for="MessageInput.IdeaId" value="@idea.Id" />
 
                 <div id="supervisorReplyPreview" class="sw-reply-preview">
@@ -164,7 +174,7 @@
                 <input type="hidden" id="supervisorReplyToMessageId" value="" />
 
                 <div class="sd-message-box">
-                    <textarea asp-for="MessageInput.MessageText" id="supervisorMessageInput" class="form-control" rows="2" placeholder="Write a message about this idea..."></textarea>
+                    <textarea asp-for="MessageInput.MessageText" id="supervisorMessageInput" class="form-control" rows="2" placeholder="Write a message to the project team..."></textarea>
 
                     <button type="submit" class="sd-send-btn" title="Send message">
                         <i class="bi bi-send-fill"></i>
@@ -729,6 +739,7 @@
         if (supervisorThread && supervisorForm && supervisorInput && window.signalR) {
         const currentUserId = Number(supervisorThread.dataset.currentUserId);
         let evaluationId = Number(supervisorThread.dataset.evaluationId);
+        const projectId = Number(supervisorThread.dataset.projectId);
         const ideaId = Number(supervisorThread.dataset.ideaId);
 
         const connection = new signalR.HubConnectionBuilder()
@@ -796,7 +807,9 @@
         const senderUserId = Number(message.senderUserId ?? message.SenderUserId);
         const isSupervisor = senderUserId === currentUserId;
         const senderName = isSupervisor ? "You" : (message.senderName ?? message.SenderName ?? "Student");
-        const senderRole = isSupervisor ? "Supervisor" : "Student";
+        const senderRole = isSupervisor
+        ? "Supervisor"
+        : (message.senderRole ?? message.SenderRole ?? "Project member");
         const messageText = message.messageText ?? message.MessageText ?? "";
         const createdAt = message.createdAt ?? message.CreatedAt ?? new Date().toISOString();
         const messageId = message.id ?? message.Id ?? 0;
@@ -1059,7 +1072,7 @@
         return;
         }
 
-        supervisorTypingName.textContent = data.name ?? data.Name ?? "Student";
+        supervisorTypingName.textContent = data.name ?? data.Name ?? "Project member";
         supervisorTyping.classList.add("show");
         });
 
