@@ -256,6 +256,263 @@ def required_screens_for_text(*texts: str) -> List[tuple[str, str]]:
     return _match_feature_rules(" ".join(t for t in texts if t), SCREEN_FEATURE_RULES)
 
 
+# ---------------------------------------------------------------------------
+# Canonical feature model -- the single structure every generated section
+# (FRs, use cases, modules, entities, screens) is derived from in the
+# deterministic fallback, instead of each fallback generator independently
+# templating "Manage core {domain} records" / "{domain}Record" -- the exact
+# bug that produced "AI/DataScienceRecord" for a chatbot project whose
+# domain dropdown value was "AI/Data Science" rather than a real feature.
+# ---------------------------------------------------------------------------
+
+class CanonicalFeature(BaseModel):
+    featureId: str = ""
+    name: str
+    description: str
+    actors: List[str] = Field(default_factory=list)
+    inputs: List[str] = Field(default_factory=list)
+    processing: List[str] = Field(default_factory=list)
+    outputs: List[str] = Field(default_factory=list)
+    businessRules: List[str] = Field(default_factory=list)
+    dataEntities: List[str] = Field(default_factory=list)
+    uiScreens: List[str] = Field(default_factory=list)
+    externalServices: List[str] = Field(default_factory=list)
+    securityRequirements: List[str] = Field(default_factory=list)
+    sourceClassification: str = "confirmed"  # confirmed | inferred | assumption
+    scopeStatus: str = "core"  # core | supporting | optional | proposed | out_of_scope
+    confidence: float = 1.0
+
+
+def _feature(**kwargs) -> CanonicalFeature:
+    return CanonicalFeature(**kwargs)
+
+
+# Keyword-gated feature templates, roughly grouped by application flavor.
+# Every rule is independently matched against the project's own text (title,
+# problem, solution, deliverables) -- a project only picks up the features
+# its own confirmed text actually supports, never every rule at once.
+_FEATURE_RULES: List[tuple[List[str], CanonicalFeature]] = [
+    # --- Chat / student-support / conversational AI -------------------------
+    (["chat", "chatbot", "conversation", "question", "query"], _feature(
+        name="Submit and Process User Query",
+        description="An actor submits a natural-language question or request, which the system validates, processes, and answers.",
+        processing=[
+            "Trim and normalize the submitted text.",
+            "Reject empty or oversized input.",
+            "Screen the input for unsafe/malicious content.",
+            "Persist the incoming message.",
+            "Route the message to the configured query-processing path.",
+            "Return an answer, a clarification request, or an escalation result.",
+            "Persist the final system response.",
+        ],
+        outputs=["Answer", "Clarification request", "Escalation result"],
+        dataEntities=["Conversation", "Message"],
+        uiScreens=["Chat Interface", "Conversation History"],
+        sourceClassification="confirmed",
+    )),
+    (["intent"], _feature(
+        name="Classify Query Intent",
+        description="The system classifies the intent of an incoming query so it can select the correct processing path.",
+        processing=["Extract features from the normalized query.", "Classify the query against known intents.", "Attach a confidence score to the classification."],
+        outputs=["Classified intent", "Confidence score"],
+        dataEntities=["Intent"],
+        scopeStatus="core",
+    )),
+    (["training phrase"], _feature(
+        name="Maintain Intent Training Data",
+        description="Administrators maintain the example phrases used to train or match each intent.",
+        actors=["Administrator"],
+        processing=["Add, edit, or remove training phrases for an intent.", "Persist the updated training set."],
+        dataEntities=["Intent", "TrainingPhrase"],
+        uiScreens=["Knowledge Base Management"],
+        scopeStatus="supporting",
+    )),
+    (["knowledge base", "faq"], _feature(
+        name="Retrieve Verified Knowledge Base Answer",
+        description="The system retrieves a trusted answer for the query from the verified knowledge base rather than generating unverified content.",
+        processing=["Search the knowledge base for matching articles.", "Rank candidate answers.", "Select the best match or report no match found."],
+        outputs=["Matched knowledge article", "No-match result"],
+        dataEntities=["KnowledgeArticle", "KnowledgeCategory"],
+        uiScreens=["Knowledge Base Browser"],
+    )),
+    (["knowledge base", "faq", "manage knowledge", "manage article"], _feature(
+        name="Manage Knowledge Base Content",
+        description="Authorized staff create, edit, categorize, and retire knowledge base articles.",
+        actors=["Support Staff", "Administrator"],
+        processing=["Create or edit an article.", "Assign a category.", "Publish or retire the article version."],
+        dataEntities=["KnowledgeArticle", "KnowledgeCategory"],
+        uiScreens=["Knowledge Base Management"],
+        scopeStatus="supporting",
+    )),
+    (["confidence", "clarif", "ambiguous", "low confidence"], _feature(
+        name="Handle Low-Confidence and Clarification",
+        description="When the system cannot confidently answer, it asks a clarifying question instead of guessing.",
+        processing=["Compare the confidence score against the configured threshold.", "If below threshold, generate a clarification question instead of an answer."],
+        outputs=["Clarification question"],
+        scopeStatus="supporting",
+        sourceClassification="inferred",
+    )),
+    (["unanswered", "review queue"], _feature(
+        name="Review Unanswered Queries",
+        description="Staff review queries the system could not confidently answer and use them to improve the knowledge base.",
+        actors=["Support Staff", "Administrator"],
+        processing=["List unresolved queries.", "Link a query to a new or existing knowledge article.", "Mark the query resolved."],
+        dataEntities=["UnansweredQuery"],
+        uiScreens=["Unanswered Query Review"],
+        scopeStatus="supporting",
+    )),
+    (["escalat", "support ticket", "ticket"], _feature(
+        name="Escalate Unresolved Query to Support Staff",
+        description="When the system cannot resolve a query, it escalates the conversation to a human support staff member.",
+        actors=["Support Staff"],
+        processing=["Create a support ticket linked to the conversation.", "Notify available support staff.", "Assign the ticket."],
+        dataEntities=["SupportTicket"],
+        uiScreens=["Support Ticket Submission", "Ticket Tracking"],
+        securityRequirements=["Only the ticket owner or assigned staff may view a ticket."],
+    )),
+    (["feedback", "rating"], _feature(
+        name="Collect Response Feedback",
+        description="An actor rates or comments on a system response so response quality can be tracked.",
+        processing=["Record the rating/comment against the originating message.", "Aggregate feedback for quality monitoring."],
+        dataEntities=["ResponseFeedback"],
+        uiScreens=["Feedback Controls"],
+        scopeStatus="supporting",
+    )),
+    (["chat analytics", "chatbot quality", "conversation quality", "response quality", "monitor chatbot", "monitor the chatbot"], _feature(
+        name="Monitor System Usage and Quality",
+        description="Administrators review usage volume, unresolved-query rate, and feedback trends.",
+        actors=["Administrator"],
+        processing=["Aggregate logged interactions.", "Compute quality/usage metrics.", "Render the metrics for review."],
+        dataEntities=["QueryLog"],
+        uiScreens=["Analytics Dashboard"],
+        scopeStatus="supporting",
+    )),
+    (["setting", "configuration", "threshold"], _feature(
+        name="Configure System Settings",
+        description="Administrators adjust configurable behavior (e.g. confidence thresholds) without a code change.",
+        actors=["Administrator"],
+        processing=["View current configurable settings.", "Update a setting.", "Persist and apply the new value."],
+        dataEntities=["SystemSetting"],
+        uiScreens=["System Configuration"],
+        scopeStatus="optional",
+        sourceClassification="inferred",
+    )),
+    # --- Inventory / retail / stock ----------------------------------------
+    (["inventory", "stock"], _feature(
+        name="Track Stock Levels",
+        description="The system tracks current stock levels for each product and flags items that fall below a reorder threshold.",
+        processing=["Record a stock movement (receipt, sale, adjustment).", "Recalculate current stock level.", "Compare against the reorder threshold.", "Raise a low-stock alert when applicable."],
+        outputs=["Updated stock level", "Low-stock alert"],
+        dataEntities=["Product", "StockTransaction"],
+        uiScreens=["Stock Tracking Dashboard", "Low-Stock Alerts"],
+    )),
+    (["product", "catalog", "item"], _feature(
+        name="Manage Product Catalog",
+        description="An authorized actor creates, edits, and retires product records.",
+        processing=["Create or edit a product record.", "Validate required fields (SKU, name, price).", "Persist the change."],
+        dataEntities=["Product"],
+        uiScreens=["Product Details"],
+    )),
+    (["supplier", "vendor", "purchase order"], _feature(
+        name="Manage Suppliers",
+        description="An authorized actor records suppliers and links them to the products they provide.",
+        processing=["Create or edit a supplier record.", "Associate the supplier with one or more products."],
+        dataEntities=["Supplier"],
+        uiScreens=["Supplier Management"],
+        scopeStatus="supporting",
+    )),
+    (["transaction", "sale", "sold", "checkout"], _feature(
+        name="Record Stock Transactions",
+        description="Every stock-affecting event (sale, receipt, adjustment) is recorded as an auditable transaction.",
+        processing=["Capture the transaction type and quantity.", "Apply the transaction to the affected product's stock level.", "Persist the transaction record for audit."],
+        dataEntities=["StockTransaction"],
+        uiScreens=["Stock Tracking Dashboard"],
+    )),
+    (["report", "reporting"], _feature(
+        name="Generate Inventory Reports",
+        description="An authorized actor generates summary reports of stock levels, movements, and low-stock items.",
+        actors=["Store Manager"],
+        processing=["Aggregate transactions/stock levels over the requested period.", "Render the report."],
+        dataEntities=["StockTransaction", "Product"],
+        uiScreens=["Analytics Dashboard"],
+        scopeStatus="supporting",
+    )),
+]
+
+
+def _core_feature_from_facts(facts: "ProjectFacts") -> CanonicalFeature:
+    """
+    The one feature every project gets regardless of keyword matches --
+    built from the literal confirmed problem/solution text, never from the
+    domain dropdown value, so a generic/short domain label like "AI/Data
+    Science" can never leak into a requirement or entity name.
+    """
+    return CanonicalFeature(
+        name=f"{facts.title} Core Capability",
+        description=facts.solution or facts.problem,
+        actors=[facts.primary_actor],
+        processing=[
+            f"Accept the {facts.primary_actor.lower()}'s request relevant to: {facts.problem[:160]}",
+            "Validate the request against the confirmed business rules.",
+            "Execute the confirmed core behavior described in the project's solution summary.",
+            "Return the result to the actor.",
+        ],
+        outputs=["Result of the core action"],
+        sourceClassification="confirmed",
+        scopeStatus="core",
+    )
+
+
+def _authentication_feature(facts: "ProjectFacts") -> CanonicalFeature:
+    confirmed = facts.technical_profile.authentication_mechanism != "not confirmed"
+    return CanonicalFeature(
+        name="Authenticate and Authorize Users",
+        description=f"An actor authenticates using {facts.technical_profile.authentication_mechanism if confirmed else 'a to-be-confirmed mechanism'} before accessing protected features.",
+        actors=[facts.primary_actor] + facts.supporting_actors,
+        processing=[
+            "Actor submits credentials.",
+            "System validates credentials against stored account data.",
+            "System establishes an authenticated session.",
+            "System enforces role-based access on every protected action.",
+        ],
+        outputs=["Authenticated session"],
+        dataEntities=["User", "Role"] if facts.supporting_actors else ["User"],
+        uiScreens=["Login"],
+        securityRequirements=["Passwords are stored as a salted hash, never in plain text."],
+        sourceClassification="confirmed" if confirmed else "inferred",
+        scopeStatus="core" if confirmed else "proposed",
+    )
+
+
+def derive_canonical_features(facts: "ProjectFacts") -> List[CanonicalFeature]:
+    """
+    Deterministic, keyword-gated feature extraction from the project's own
+    confirmed text (title/problem/solution/deliverables), never from the
+    domain dropdown value alone. This is the single structure the
+    project-specific fallback (and coverage-guarantee passes) build every
+    FR/use case/module/entity/screen from, so the fallback stops being a
+    generic CRUD template and starts describing this project's real
+    functionality.
+    """
+    blob = " ".join([facts.title, facts.problem, facts.solution, facts.final_deliverables])
+
+    features: List[CanonicalFeature] = [_core_feature_from_facts(facts)]
+    features.append(_authentication_feature(facts))
+
+    matched_names: set[str] = {f.name for f in features}
+    for keywords, template in _FEATURE_RULES:
+        if any(keyword in blob.lower() for keyword in keywords):
+            if template.name in matched_names:
+                continue
+            features.append(template.model_copy(deep=True))
+            matched_names.add(template.name)
+
+    for index, feature in enumerate(features, start=1):
+        feature.featureId = f"FEATURE-{index:02d}"
+
+    return features
+
+
 def build_project_facts(request) -> ProjectFacts:
     """
     Pure, deterministic. Never calls an LLM. `request` is a

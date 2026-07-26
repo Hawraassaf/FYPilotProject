@@ -1,20 +1,13 @@
-﻿@page
+@page
 @model FYPilot.Web.Pages.Student.MarketDemandModel
 @using System.Text.Json
 @{
     ViewData["Title"] = "Market Demand Intelligence";
-    ViewData["Subtitle"] = "Evidence-backed yearly demand analysis for your project ideas";
+    ViewData["Subtitle"] = "Evidence-backed current demand analysis for your project ideas";
 
     var analysis = Model.Analysis;
     var demandTone = analysis == null ? "neutral" : analysis.DemandScore >= 75 ? "good" : analysis.DemandScore >= 55 ? "warn" : "bad";
     var confidenceTone = analysis == null ? "neutral" : analysis.ConfidenceScore >= 75 ? "good" : analysis.ConfidenceScore >= 50 ? "warn" : "bad";
-    var trendTone = analysis?.TrendDirection switch
-    {
-        "rising" => "good",
-        "falling" => "bad",
-        "unstable" => "warn",
-        _ => "neutral"
-    };
 }
 
 <style>
@@ -146,7 +139,7 @@
 
     .md-toolbar-grid {
         display: grid;
-        grid-template-columns: minmax(280px, 1.6fr) minmax(140px, .55fr) minmax(130px, .45fr) minmax(130px, .45fr) auto;
+        grid-template-columns: minmax(280px, 1.6fr) minmax(140px, .55fr) auto;
         gap: 10px;
         align-items: end;
     }
@@ -204,7 +197,7 @@
 
     .md-kpis {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 12px;
         margin-bottom: 14px;
     }
@@ -265,13 +258,6 @@
             background: #edf2f7;
         }
 
-    .md-main-grid {
-        display: grid;
-        grid-template-columns: minmax(0, 1.65fr) minmax(280px, .72fr);
-        gap: 14px;
-        margin-bottom: 14px;
-    }
-
     .md-card {
         padding: 18px;
     }
@@ -295,44 +281,6 @@
             color: var(--md-muted);
             font-size: .86rem;
         }
-
-    .md-chart {
-        min-height: 350px;
-    }
-
-    .md-forecast-list {
-        display: grid;
-        gap: 9px;
-    }
-
-    .md-forecast-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 10px;
-        padding: 11px;
-        border-radius: 12px;
-        background: #f8fafd;
-        border: 1px solid #e7edf5;
-    }
-
-        .md-forecast-row strong {
-            color: var(--md-ink);
-        }
-
-        .md-forecast-row span {
-            color: var(--md-primary);
-            font-weight: 900;
-        }
-
-    .md-note {
-        margin-top: 12px;
-        padding: 11px 12px;
-        border-radius: 12px;
-        background: #fff8e7;
-        color: #7d5a08;
-        font-size: .84rem;
-    }
 
     .md-two {
         display: grid;
@@ -464,11 +412,7 @@
 
     @@media (max-width: 1180px) {
         .md-toolbar-grid {
-            grid-template-columns: 1fr 1fr 1fr;
-        }
-
-        .md-main-grid {
-            grid-template-columns: 1fr;
+            grid-template-columns: 1fr 1fr;
         }
 
         .md-why-grid {
@@ -488,10 +432,6 @@
         .md-why-grid,
         .md-detail-grid {
             grid-template-columns: 1fr;
-        }
-
-        .md-chart {
-            min-height: 300px;
         }
     }
 </style>
@@ -527,13 +467,13 @@
 
     <section class="md-hero">
         <div class="position-relative" style="z-index:1">
-            <div class="md-kicker">Full yearly intelligence</div>
-            <h1>Yearly Market Demand Validation</h1>
+            <div class="md-kicker">Current market intelligence</div>
+            <h1>Market Demand Validation</h1>
             <p>
-                Measure the current need, build a source-backed annual demand index,
-                and forecast the next years without treating repeated app refreshes as market history.
-                For a quick regional comparison (Lebanon / MENA / Global) per idea, use
-                <strong>Market Insight</strong> inside the Idea Generator instead.
+                Measure the current need for your idea with a source-backed evidence
+                score. For a quick regional comparison (Lebanon / MENA / Global) per
+                idea, use <strong>Market Insight</strong> inside the Idea Generator
+                instead.
             </p>
         </div>
     </section>
@@ -550,7 +490,7 @@
             <div class="md-why-item"><strong>Prove the problem</strong><span>Show that target users face a real, documented need.</span></div>
             <div class="md-why-item"><strong>Choose the right scope</strong><span>Prioritize features that match adoption and sector priorities.</span></div>
             <div class="md-why-item"><strong>Reduce project risk</strong><span>Detect weak demand, crowded competition, or evidence gaps early.</span></div>
-            <div class="md-why-item"><strong>Defend your decisions</strong><span>Use sources, annual trends, and transparent scoring in the defense.</span></div>
+            <div class="md-why-item"><strong>Defend your decisions</strong><span>Use sources and transparent scoring in the defense.</span></div>
         </div>
     </section>
 
@@ -586,25 +526,6 @@
                             <option value="Global">Global</option>
                         </select>
                     </div>
-                    <div class="md-field">
-                        <label>History window</label>
-                        <select asp-for="HistoryYears" class="form-select md-control">
-                            <option value="4">4 years</option>
-                            <option value="5">5 years</option>
-                            <option value="6">6 years</option>
-                            <option value="8">8 years</option>
-                            <option value="10">10 years</option>
-                        </select>
-                    </div>
-                    <div class="md-field">
-                        <label>Forecast</label>
-                        <select asp-for="ForecastYears" class="form-select md-control">
-                            <option value="2">2 years</option>
-                            <option value="3">3 years</option>
-                            <option value="4">4 years</option>
-                            <option value="5">5 years</option>
-                        </select>
-                    </div>
                     <button type="submit" class="md-btn">
                         <i class="bi bi-search"></i>
                         @(analysis == null ? "Analyze" : "Refresh")
@@ -628,8 +549,8 @@
                 <i class="bi bi-graph-up-arrow"></i>
                 <h2>Ready for market validation</h2>
                 <p>
-                    The analysis will use live sources, calculate the current evidence score,
-                    extract defensible annual signals, and forecast only when enough yearly data exists.
+                    The analysis will use live sources and calculate a current
+                    evidence score for this idea.
                 </p>
             </section>
         }
@@ -647,73 +568,10 @@
                     <span class="md-pill @confidenceTone"><i class="bi bi-shield-check"></i>@analysis.ConfidenceLevel</span>
                 </article>
                 <article class="md-card md-kpi">
-                    <div class="md-kpi-label">Annual trend</div>
-                    <div class="md-kpi-value">
-                        @(analysis.TrendSlopePerYear?.ToString("+0.0;-0.0;0.0") ?? "—")
-                        <small> pts/year</small>
-                    </div>
-                    <span class="md-pill @trendTone"><i class="bi bi-activity"></i>@analysis.TrendDirection</span>
+                    <div class="md-kpi-label">Real sources</div>
+                    <div class="md-kpi-value">@analysis.Sources.Count<small> sources</small></div>
+                    <span class="md-pill @(analysis.GroundedInLiveData ? "good" : "warn")"><i class="bi bi-globe2"></i>@(analysis.GroundedInLiveData ? "Grounded" : "Not grounded")</span>
                 </article>
-                <article class="md-card md-kpi">
-                    <div class="md-kpi-label">Source-backed years</div>
-                    <div class="md-kpi-value">@Model.SourceBackedYearCount<small> years</small></div>
-                    <span class="md-pill @(analysis.GroundedInLiveData ? "good" : "warn")"><i class="bi bi-globe2"></i>@analysis.Sources.Count real sources</span>
-                </article>
-            </section>
-
-            <section class="md-main-grid">
-                <article class="md-card">
-                    <div class="md-card-head">
-                        <div>
-                            <h3 class="h5">Historical yearly demand and forecast</h3>
-                            <p>Observed annual evidence indices and future prediction intervals.</p>
-                        </div>
-                        <span class="md-pill @(analysis.ForecastReliable ? "good" : analysis.ForecastReady ? "warn" : "neutral")">
-                            <i class="bi bi-stars"></i>
-                            @(analysis.ForecastReliable ? "Reliable forecast" : analysis.ForecastReady ? "Early forecast" : "Forecast not ready")
-                        </span>
-                    </div>
-                    <div class="md-chart"><canvas id="annualChart"></canvas></div>
-                    <div class="md-note"><i class="bi bi-info-circle me-1"></i>@Model.HistoricalDataNote</div>
-                </article>
-
-                <aside class="md-card">
-                    <div class="md-card-head">
-                        <div>
-                            <h3 class="h5">Forecast summary</h3>
-                            <p>Next-year demand index estimates.</p>
-                        </div>
-                    </div>
-
-                    @if (analysis.ForecastReady && Model.ForecastPoints.Any())
-                    {
-                        <div class="md-forecast-list">
-                            @foreach (var point in Model.ForecastPoints.OrderBy(item => item.Year))
-                            {
-                                <div class="md-forecast-row">
-                                    <strong>@point.Year</strong>
-                                    <span>@point.PredictedScore.ToString("0.0")</span>
-                                </div>
-                            }
-                        </div>
-                        <hr />
-                        <p class="small text-muted mb-1"><strong>Model:</strong> @(analysis.ForecastModel ?? "—")</p>
-                        <p class="small text-muted mb-1"><strong>Validation MAE:</strong> @(analysis.ForecastMae?.ToString("0.00") ?? "—")</p>
-                        <p class="small text-muted mb-0"><strong>R²:</strong> @(analysis.TrendRSquared?.ToString("0.000") ?? "—")</p>
-                    }
-                    else
-                    {
-                        <div class="md-note mt-0">
-                            <strong>No forecast yet.</strong><br />
-                            At least four distinct, source-backed years spanning three years are required.
-                        </div>
-                    }
-
-                    @if (!string.IsNullOrWhiteSpace(analysis.ForecastWarning))
-                    {
-                        <div class="md-note">@analysis.ForecastWarning</div>
-                    }
-                </aside>
             </section>
 
             <section class="md-two">
@@ -749,50 +607,25 @@
             </section>
 
             <details class="md-card md-details" open>
-                <summary><span><i class="bi bi-calendar3 me-2"></i>Annual evidence timeline</span><span class="md-pill neutral">@analysis.YearlyPoints.Count years</span></summary>
-                <div class="md-detail-grid">
-                    @foreach (var point in analysis.YearlyPoints.OrderByDescending(item => item.Year))
-                    {
-                        <div class="md-detail-item">
-                            <div class="d-flex justify-content-between gap-2 mb-1">
-                                <h4>@point.Year</h4>
-                                <span class="md-pill @(point.ConfidenceScore >= 70 ? "good" : point.ConfidenceScore >= 45 ? "warn" : "bad")">@point.DemandIndex.ToString("0.0") / 100</span>
-                            </div>
-                            <p>@point.EvidenceSummary</p>
-                            <div class="small text-muted mt-2">Confidence: @point.ConfidenceScore/100</div>
-                        </div>
-                    }
-                </div>
-            </details>
-
-            <details class="md-card md-details">
                 <summary><span><i class="bi bi-bar-chart me-2"></i>Score breakdown</span><span class="md-pill neutral">5 factors</span></summary>
                 <div style="min-height:300px"><canvas id="breakdownChart"></canvas></div>
             </details>
 
-            <details class="md-card md-details">
-                <summary><span><i class="bi bi-compass me-2"></i>Qualitative signals and similar solutions</span><span class="md-pill neutral">Research detail</span></summary>
-                <div class="md-detail-grid">
-                    @foreach (var signal in analysis.TrendSignals)
-                    {
-                        <div class="md-detail-item">
-                            <h4>@signal.Topic <span class="md-pill @(signal.Direction == "rising" ? "good" : signal.Direction == "falling" ? "bad" : "neutral")">@signal.Direction</span></h4>
-                            <p>@signal.Evidence</p>
-                            @if (!string.IsNullOrWhiteSpace(signal.SourceUrl))
-                            {
-                                <a class="md-source-link" href="@signal.SourceUrl" target="_blank" rel="noopener noreferrer">Open evidence <i class="bi bi-box-arrow-up-right"></i></a>
-                            }
-                        </div>
-                    }
-                    @foreach (var solution in analysis.SimilarSolutions)
-                    {
-                        <div class="md-detail-item">
-                            <h4>@solution.Name <span class="md-pill neutral">@solution.Similarity similarity</span></h4>
-                            <p>@solution.Description</p>
-                        </div>
-                    }
-                </div>
-            </details>
+            @if (analysis.SimilarSolutions.Any())
+            {
+                <details class="md-card md-details">
+                    <summary><span><i class="bi bi-compass me-2"></i>Similar solutions</span><span class="md-pill neutral">Research detail</span></summary>
+                    <div class="md-detail-grid">
+                        @foreach (var solution in analysis.SimilarSolutions)
+                        {
+                            <div class="md-detail-item">
+                                <h4>@solution.Name <span class="md-pill neutral">@solution.Similarity similarity</span></h4>
+                                <p>@solution.Description</p>
+                            </div>
+                        }
+                    </div>
+                </details>
+            }
 
             <details class="md-card md-details">
                 <summary><span><i class="bi bi-journal-check me-2"></i>Next steps</span><span class="md-pill neutral">Action plan</span></summary>
@@ -828,73 +661,6 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <script>
         (() => {
-        const annual = @Html.Raw(Model.AnnualChartJson);
-        const annualCanvas = document.getElementById("annualChart");
-
-        if (annualCanvas && typeof Chart !== "undefined") {
-        const labels = annual.map(item => String(item.year));
-        const observed = annual.map(item => item.observed);
-        const forecast = annual.map(item => item.forecast);
-        const lower = annual.map(item => item.lower);
-        const upper = annual.map(item => item.upper);
-
-        new Chart(annualCanvas, {
-        type: "line",
-        data: {
-        labels,
-        datasets: [
-        {
-        label: "Observed annual demand index",
-        data: observed,
-        borderColor: "#2457e6",
-        backgroundColor: "rgba(36,87,230,.10)",
-        borderWidth: 3,
-        pointRadius: 5,
-        pointHoverRadius: 7,
-        tension: .28
-        },
-        {
-        label: "Forecast lower bound",
-        data: lower,
-        borderColor: "rgba(112,78,170,.30)",
-        borderDash: [4,4],
-        pointRadius: 0,
-        borderWidth: 1
-        },
-        {
-        label: "Forecast upper bound",
-        data: upper,
-        borderColor: "rgba(112,78,170,.30)",
-        backgroundColor: "rgba(112,78,170,.12)",
-        borderDash: [4,4],
-        pointRadius: 0,
-        borderWidth: 1,
-        fill: "-1"
-        },
-        {
-        label: "Forecast annual demand index",
-        data: forecast,
-        borderColor: "#704eaa",
-        borderDash: [8,5],
-        borderWidth: 3,
-        pointRadius: 5,
-        tension: .24
-        }
-        ]
-        },
-        options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: "index", intersect: false },
-        plugins: { legend: { labels: { usePointStyle: true } } },
-        scales: {
-        x: { grid: { display: false }, title: { display: true, text: "Year" } },
-        y: { beginAtZero: true, max: 100, title: { display: true, text: "Evidence demand index" } }
-        }
-        }
-        });
-        }
-
         const breakdown = @Html.Raw(Model.BreakdownJson);
         const breakdownCanvas = document.getElementById("breakdownChart");
         if (breakdownCanvas && typeof Chart !== "undefined") {

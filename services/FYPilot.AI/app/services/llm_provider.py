@@ -318,6 +318,7 @@ class BaseProvider:
         prompt: str,
         *,
         use_search: bool = False,
+        max_tokens: int | None = None,
     ) -> LLMResult:
         raise NotImplementedError
 
@@ -488,6 +489,7 @@ class GroqProvider(BaseProvider):
         prompt: str,
         *,
         use_search: bool = False,
+        max_tokens: int | None = None,
     ) -> LLMResult:
         if not self.enabled:
             return LLMResult(
@@ -523,7 +525,14 @@ class GroqProvider(BaseProvider):
             text, executed_tools, sources = self._request(
                 model=model_to_use,
                 temperature=0.2,
-                max_tokens=2200,
+                # Default (2200) fits every other agent's existing JSON shape.
+                # SE Documentation's richer, higher-count sections (12-20
+                # functional requirements, 10-18 test cases, ...) pass an
+                # explicit higher budget -- without it, those responses were
+                # silently truncated into invalid JSON, which looked like a
+                # provider failure and collapsed the whole section to a
+                # generic deterministic fallback.
+                max_tokens=max_tokens or 2200,
                 messages=[
                     {"role": "system", "content": system_message},
                     {"role": "user", "content": prompt},
@@ -641,6 +650,7 @@ class GeminiProvider(BaseProvider):
         prompt: str,
         *,
         use_search: bool = False,
+        max_tokens: int | None = None,
     ) -> LLMResult:
         if not self.enabled:
             return LLMResult(
@@ -659,6 +669,9 @@ class GeminiProvider(BaseProvider):
 
             client = GeminiClient()
 
+            # Gemini's SDK has no explicit output-token cap in GeminiClient
+            # today, so max_tokens is accepted (to keep this signature
+            # interchangeable with GroqProvider/OllamaProvider) but unused.
             data = client.generate_json(
                 prompt,
                 use_search=use_search,
@@ -781,6 +794,7 @@ class OllamaProvider(BaseProvider):
         prompt: str,
         *,
         use_search: bool = False,
+        max_tokens: int | None = None,
     ) -> LLMResult:
         if not self.enabled:
             return LLMResult(
@@ -795,6 +809,17 @@ class OllamaProvider(BaseProvider):
             )
 
         try:
+            options: dict[str, Any] = {
+                "temperature": 0.2,
+                # Scale the context window with the requested output budget
+                # so a larger SE Documentation section isn't cut short by a
+                # fixed 4096-token window -- default preserved for every
+                # other caller that doesn't pass max_tokens.
+                "num_ctx": max(4096, max_tokens * 2) if max_tokens else 4096,
+            }
+            if max_tokens:
+                options["num_predict"] = max_tokens
+
             response = requests.post(
                 f"{self.base_url}/api/generate",
                 json={
@@ -802,10 +827,7 @@ class OllamaProvider(BaseProvider):
                     "prompt": prompt,
                     "stream": False,
                     "format": "json",
-                    "options": {
-                        "temperature": 0.2,
-                        "num_ctx": 4096,
-                    },
+                    "options": options,
                 },
                 timeout=(5, 90),
             )
@@ -960,6 +982,7 @@ class ProviderChain:
         prompt: str,
         *,
         use_search: bool = False,
+        max_tokens: int | None = None,
     ) -> LLMResult:
         errors: list[str] = []
 
@@ -967,6 +990,7 @@ class ProviderChain:
             result = provider.generate_json(
                 prompt,
                 use_search=use_search,
+                max_tokens=max_tokens,
             )
 
             if result.ok and result.data is not None:

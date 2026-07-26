@@ -465,6 +465,28 @@ SE DOCUMENTATION-SPECIFIC REVIEW CRITERIA (in addition to the standard criteria 
   testData/passCriteria.
 - Security: flag (category "unsupported_claim", severity "critical") any
   databaseEntity field literally named "Password" (must be "PasswordHash").
+- Content depth (content-depth batch): flag (category "quality") a
+  functionalRequirements entry whose description is a single generic sentence
+  with no processingSteps/systemBehavior detail and fewer than two
+  acceptanceCriteria, a useCases entry whose mainFlow has fewer than 3 steps,
+  or a testingPlan entry with fewer than 2 steps -- these read as filler, not
+  real analysis of this project.
+- No generic "record management" substitution: flag (category
+  "project_alignment", severity "critical") any functionalRequirements,
+  useCases, systemModules, or databaseEntities entry whose name/title is a
+  generic template like "Manage core {domain} records", "{Domain}Record", or
+  "Summary Dashboard" -- every requirement/entity/screen must name a real
+  feature or domain concept from this project's own confirmed text, never the
+  domain category label concatenated with a generic noun.
+- No duplicate features: flag (category "quality") two or more
+  functionalRequirements/useCases describing substantially the same
+  capability under different titles.
+- No presented-as-complete placeholders: flag (category
+  "missing_mandatory_content") any aiTechnicalReport field, architecture
+  field, or requirement description containing "placeholder", "not yet
+  confirmed" language, or similar hedging THAT IS NOT ALSO reflected in the
+  assumptions list -- an honestly-unresolved item must still be disclosed as
+  an assumption, not left as a silent gap.
 """
 
 
@@ -917,18 +939,13 @@ class MarketFootprintCandidateSchema(MarketFootprintResponse):
 
 _MARKET_NEEDS_EXTRA_RUBRIC = """
 MARKET NEEDS-SPECIFIC REVIEW CRITERIA (in addition to the standard criteria above):
-- Do NOT suggest changing demandScore, confidenceScore, any scoreBreakdown
-  dimension, any yearlyPoints demandIndex/confidenceScore, or
-  annualForecast -- these are computed deterministically (annualForecast
-  uses a real statistical time-series model), never written by the LLM.
-- Do NOT suggest changing sources, yearlyPoints sourceUrls, or
-  trendSignals sourceUrl -- these are matched deterministically from real
-  search results, never authored by the LLM.
+- Do NOT suggest changing demandScore, confidenceScore, or any scoreBreakdown
+  dimension -- these are computed deterministically, never written by the LLM.
+- Do NOT suggest changing sources -- these are matched deterministically from
+  real search results, never authored by the LLM.
 - Unsupported claims: flag (category "unsupported_claim") any statistic,
   market size, revenue figure, or user count not explicitly present in the
   verified search evidence.
-- Annual values are evidence indices from 0 to 100, not revenue, market
-  size, or Google Trends values -- flag any claim treating them as such.
 - Technology alignment: flag (category "project_alignment") any mention of
   a technology outside the project's actual stack.
 """
@@ -936,36 +953,11 @@ MARKET NEEDS-SPECIFIC REVIEW CRITERIA (in addition to the standard criteria abov
 
 class MarketNeedsCandidateSchema(MarketNeedsResponse):
     """
-    Wraps the agent's own MarketNeedsResponse with the structural invariant
-    that must survive a Rewrite untouched -- every sourceUrl referenced by
-    a yearly point or trend signal must actually exist in the top-level
-    sources list (sources are matched deterministically from real search
-    results in the agent itself, so a Rewrite inventing one is a real
-    defect). A violation here is a schema failure (schema_ok=False),
-    handled entirely by the pipeline's existing structural-repair path --
-    no changes to pipeline.py's decision logic were needed for this.
+    Wraps the agent's own MarketNeedsResponse. No extra structural
+    invariants beyond the base schema -- sources are matched
+    deterministically in the agent itself and are not referenced by any
+    other nested field that a Rewrite could desync.
     """
-
-    @model_validator(mode="after")
-    def _check_structural_invariants(self) -> "MarketNeedsCandidateSchema":
-        known_urls = {source.url for source in self.sources}
-
-        for point in self.yearly_points:
-            for url in point.source_urls:
-                if url not in known_urls:
-                    raise ValueError(
-                        f"yearly point {point.year} references a sourceUrl "
-                        f"not present in the verified sources list: {url}"
-                    )
-
-        for signal in self.trend_signals:
-            if signal.source_url and signal.source_url not in known_urls:
-                raise ValueError(
-                    f"trend signal '{signal.topic}' references a sourceUrl "
-                    f"not present in the verified sources list: {signal.source_url}"
-                )
-
-        return self
 
 
 # Migrated from DefenseSimulatorOrchestrator._clean_unverified_project_claims's
@@ -1145,8 +1137,10 @@ AGENT_REGISTRY: dict[str, AgentReviewConfig] = {
         # to 7 sequential LLM calls (requirements, use cases, modules +
         # architecture, database, UI + API, testing + security, and -- only for
         # AI-flavored projects -- the AI technical report) before the Reviewer
-        # even runs once.
-        max_total_seconds=240.0,
+        # even runs once, and each individual section now retries once on
+        # failure (content-depth batch) rather than aborting the whole
+        # document, so the worst case is up to ~14 provider round-trips.
+        max_total_seconds=340.0,
         extra_rubric=_SEDOC_EXTRA_RUBRIC,
     ),
     "ProjectIdeaAgent": AgentReviewConfig(

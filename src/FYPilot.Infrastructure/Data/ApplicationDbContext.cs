@@ -44,10 +44,6 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         Set<MarketDemandSource>();
     public DbSet<MarketSimilarSolution> MarketSimilarSolutions =>
         Set<MarketSimilarSolution>();
-    public DbSet<MarketTrendSignal> MarketTrendSignals =>
-        Set<MarketTrendSignal>();
-    public DbSet<MarketDemandYearlyPoint> MarketDemandYearlyPoints =>
-        Set<MarketDemandYearlyPoint>();
 
     // Mentor Chat
     public DbSet<MentorChatSession> MentorChatSessions => Set<MentorChatSession>();
@@ -438,14 +434,6 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.Property(x => x.ModelUsed).HasMaxLength(200);
             entity.Property(x => x.SearchProvider).HasMaxLength(200);
             entity.Property(x => x.ConfidenceLevel).HasMaxLength(30);
-            entity.Property(x => x.ForecastStatus).HasMaxLength(80);
-            entity.Property(x => x.ForecastModel).HasMaxLength(120);
-            entity.Property(x => x.TrendDirection).HasMaxLength(30);
-            entity.Property(x => x.TrendStrength).HasMaxLength(30);
-
-            // Preserve compatibility with the forecast migration already applied.
-            entity.Property(x => x.TrendSlopePerYear)
-                .HasColumnName("TrendSlopePerWeek");
 
             entity.HasOne(x => x.ProjectIdea)
                 .WithMany()
@@ -458,30 +446,6 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
                 x.ProjectIdeaId,
                 x.AnalyzedAt
             });
-        });
-
-        modelBuilder.Entity<MarketDemandYearlyPoint>(entity =>
-        {
-            entity.ToTable("market_demand_yearly_points");
-            entity.HasKey(x => x.Id);
-
-            entity.Property(x => x.DemandIndex)
-                .HasPrecision(6, 2);
-            entity.Property(x => x.EvidenceSummary)
-                .HasColumnType("text");
-            entity.Property(x => x.SourceUrlsJson)
-                .HasColumnType("text");
-
-            entity.HasOne(x => x.MarketDemandAnalysis)
-                .WithMany(x => x.YearlyPoints)
-                .HasForeignKey(x => x.MarketDemandAnalysisId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasIndex(x => new
-            {
-                x.MarketDemandAnalysisId,
-                x.Year
-            }).IsUnique();
         });
 
         modelBuilder.Entity<MarketDemandSource>(entity =>
@@ -506,19 +470,6 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.Property(x => x.Similarity).HasMaxLength(30);
             entity.HasOne(x => x.MarketDemandAnalysis)
                 .WithMany(x => x.SimilarSolutions)
-                .HasForeignKey(x => x.MarketDemandAnalysisId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        modelBuilder.Entity<MarketTrendSignal>(entity =>
-        {
-            entity.ToTable("market_trend_signals");
-            entity.HasKey(x => x.Id);
-            entity.Property(x => x.Topic).HasMaxLength(300);
-            entity.Property(x => x.Direction).HasMaxLength(30);
-            entity.Property(x => x.SourceUrl).HasMaxLength(2000);
-            entity.HasOne(x => x.MarketDemandAnalysis)
-                .WithMany(x => x.TrendSignals)
                 .HasForeignKey(x => x.MarketDemandAnalysisId)
                 .OnDelete(DeleteBehavior.Cascade);
         });

@@ -1926,15 +1926,6 @@ class MarketFootprintPipelineTests(unittest.TestCase):
         self.assertEqual(result.attempts, 1)
 
 
-def _needs_yearly_point(year=2024, source_urls=None):
-    return {
-        "year": year, "problemSignal": 60, "adoptionSignal": 60,
-        "jobDemandSignal": 60, "technologyMomentumSignal": 60,
-        "demandIndex": 60, "confidenceScore": 60,
-        "evidenceSummary": "Evidence.", "sourceUrls": source_urls or [],
-    }
-
-
 def _needs_source(url="https://worldbank.org/report", title="Report"):
     return {
         "title": title, "url": url, "publisher": "World Bank", "relevance": "text",
@@ -1942,27 +1933,8 @@ def _needs_source(url="https://worldbank.org/report", title="Report"):
     }
 
 
-def _needs_forecast():
-    return {
-        "status": "ready", "forecastReady": True, "forecastReliable": True,
-        "modelUsed": "linear-regression", "modelMae": 5.0, "naiveMae": 6.0,
-        "averageYearlyConfidence": 70, "historicalStartYear": 2020, "historicalEndYear": 2024,
-        "forecastHorizonYears": 3,
-        "trend": {
-            "direction": "rising", "strength": "moderate", "slopePerYear": 1.0,
-            "totalChange": 5.0, "volatility": 2.0, "rSquared": 0.8, "summary": "Rising trend.",
-        },
-        "forecastPoints": [{"year": 2025, "predictedScore": 65, "lowerBound": 60, "upperBound": 70}],
-        "warning": None,
-    }
-
-
-def _needs_candidate(yearly_points=None, sources=None, trend_signals=None):
+def _needs_candidate(sources=None):
     sources = sources if sources is not None else [_needs_source()]
-    yearly_points = yearly_points if yearly_points is not None else [
-        _needs_yearly_point(source_urls=["https://worldbank.org/report"])
-    ]
-    trend_signals = trend_signals if trend_signals is not None else []
     return {
         "source": "groq-live-research", "provider": "groq", "modelUsed": "llama-3.3-70b-versatile",
         "searchUsed": True, "searchProvider": "Groq grounded search", "groundedInLiveData": True,
@@ -1973,9 +1945,8 @@ def _needs_candidate(yearly_points=None, sources=None, trend_signals=None):
             "competitionOpportunity": 60, "technologyMomentum": 65,
         },
         "targetSector": "Education", "problemEvidence": ["evidence"],
-        "similarSolutions": [], "sources": sources, "trendSignals": trend_signals,
-        "yearlyPoints": yearly_points, "annualForecast": _needs_forecast(),
-        "historicalDataNote": "note", "lebaneseMarketFit": "fit", "universityValue": "value",
+        "similarSolutions": [], "sources": sources,
+        "lebaneseMarketFit": "fit", "universityValue": "value",
         "risks": [], "recommendation": "go", "nextSteps": [],
         "analyzedAt": "2026-01-01T00:00:00Z",
     }
@@ -2000,21 +1971,6 @@ class MarketNeedsRegistryTests(unittest.TestCase):
 
     def test_valid_candidate_passes_schema(self):
         MarketNeedsCandidateSchema.model_validate(_needs_candidate())
-
-    def test_dangling_yearly_point_source_url_rejected(self):
-        candidate = _needs_candidate(
-            yearly_points=[_needs_yearly_point(source_urls=["https://not-a-real-source.example"])]
-        )
-        with self.assertRaises(Exception):
-            MarketNeedsCandidateSchema.model_validate(candidate)
-
-    def test_dangling_trend_signal_source_url_rejected(self):
-        candidate = _needs_candidate(trend_signals=[
-            {"topic": "AI adoption", "direction": "rising", "evidence": "text",
-             "sourceUrl": "https://not-a-real-source.example"}
-        ])
-        with self.assertRaises(Exception):
-            MarketNeedsCandidateSchema.model_validate(candidate)
 
 
 class MarketNeedsPipelineTests(unittest.TestCase):

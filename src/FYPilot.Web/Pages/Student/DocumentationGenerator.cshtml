@@ -37,655 +37,1185 @@
 
 @section Head {
     <style>
-        .sdoc-page {
-            max-width: 1480px;
-            margin: 0 auto;
+        :root {
+            --doc-bg: #f4f7fb;
+            --doc-surface: #ffffff;
+            --doc-ink: #172033;
+            --doc-muted: #697386;
+            --doc-line: #e3e9f1;
+            --doc-line-strong: #d4dce7;
+            --doc-blue: #3157c8;
+            --doc-blue-2: #4a69d4;
+            --doc-blue-soft: #edf2ff;
+            --doc-violet-soft: #f3efff;
+            --doc-green: #1f8a5b;
+            --doc-green-soft: #eaf7f0;
+            --doc-amber: #ad7418;
+            --doc-amber-soft: #fff7e8;
+            --doc-red: #bb4545;
+            --doc-red-soft: #fff0f0;
+            --doc-radius-xl: 24px;
+            --doc-radius-lg: 18px;
+            --doc-radius-md: 13px;
+            --doc-shadow: 0 14px 40px rgba(23, 32, 51, .065);
         }
 
-        .sdoc-hero {
+        html {
+            scroll-behavior: smooth;
+        }
+
+        .doc-page {
+            max-width: 1540px;
+            margin: 0 auto;
+            color: var(--doc-ink);
+        }
+
+        /* ---------- Top cover ---------- */
+
+        .doc-cover-header {
             position: relative;
             overflow: hidden;
-            border-radius: 26px;
-            padding: 1.45rem;
-            color: #ffffff;
-            background: radial-gradient(circle at 12% 18%, rgba(255,255,255,0.14), transparent 26%), linear-gradient(135deg, #28385E 0%, #304163 58%, #516C8D 120%);
-            box-shadow: 0 16px 40px rgba(40, 56, 94, 0.16);
-            border: 1px solid rgba(255,255,255,0.14);
-        }
-
-            .sdoc-hero::before {
-                content: "";
-                position: absolute;
-                inset: 0;
-                opacity: 0.14;
-                background-image: linear-gradient(rgba(255,255,255,0.14) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.14) 1px, transparent 1px);
-                background-size: 42px 42px;
-                mask-image: linear-gradient(90deg, black, transparent 92%);
-            }
-
-        .sdoc-hero-content {
-            position: relative;
-            z-index: 2;
             display: grid;
             grid-template-columns: minmax(0, 1fr) auto;
-            gap: 1.4rem;
+            gap: 1.5rem;
             align-items: center;
+            padding: 1.45rem;
+            color: #fff;
+            background:
+                radial-gradient(circle at 12% 18%, rgba(255,255,255,.18), transparent 28%),
+                radial-gradient(circle at 90% 20%, rgba(255,255,255,.10), transparent 24%),
+                linear-gradient(135deg, #2747ad 0%, #355bcb 55%, #536fda 100%);
+            border: 1px solid rgba(255,255,255,.14);
+            border-radius: var(--doc-radius-xl);
+            box-shadow: 0 18px 48px rgba(49, 87, 200, .20);
         }
 
-        .sdoc-kicker {
+        .doc-cover-header::after {
+            content: "";
+            position: absolute;
+            right: -80px;
+            bottom: -100px;
+            width: 300px;
+            height: 300px;
+            border: 1px solid rgba(255,255,255,.14);
+            border-radius: 50%;
+            box-shadow:
+                0 0 0 34px rgba(255,255,255,.045),
+                0 0 0 74px rgba(255,255,255,.025);
+        }
+
+        .doc-cover-copy,
+        .doc-cover-badges {
+            position: relative;
+            z-index: 1;
+        }
+
+        .doc-cover-kicker {
             display: inline-flex;
             align-items: center;
-            gap: 0.45rem;
-            padding: 0.35rem 0.72rem;
-            border-radius: 999px;
-            color: rgba(255,255,255,0.88);
-            background: rgba(255,255,255,0.13);
-            border: 1px solid rgba(255,255,255,0.18);
-            font-size: 0.72rem;
-            font-weight: 760;
-            letter-spacing: 0.07em;
+            gap: .4rem;
+            margin-bottom: .45rem;
+            color: rgba(255,255,255,.74);
+            font-size: .69rem;
+            font-weight: 850;
+            letter-spacing: .11em;
             text-transform: uppercase;
-            margin-bottom: 0.75rem;
         }
 
-        .sdoc-hero h1 {
-            color: #ffffff;
+        .doc-cover-title {
             margin: 0;
-            font-size: clamp(1.65rem, 3vw, 2.35rem);
-            font-weight: 780;
-            letter-spacing: -0.05em;
+            color: #fff;
+            font-size: clamp(1.65rem, 3vw, 2.45rem);
+            font-weight: 850;
+            letter-spacing: -.045em;
         }
 
-        .sdoc-hero p {
-            max-width: 880px;
-            color: rgba(255,255,255,0.72);
-            margin: 0.5rem 0 0;
+        .doc-cover-subtitle {
+            max-width: 870px;
+            margin: .55rem 0 0;
+            color: rgba(255,255,255,.76);
+            font-size: .88rem;
             line-height: 1.62;
-            font-size: 0.92rem;
         }
 
-        .sdoc-hero-badge {
-            min-width: 180px;
-            padding: 0.95rem 1rem;
-            border-radius: 20px;
-            background: rgba(255,255,255,0.12);
-            border: 1px solid rgba(255,255,255,0.16);
-            text-align: right;
-        }
-
-            .sdoc-hero-badge span {
-                display: block;
-                color: rgba(255,255,255,0.62);
-                font-size: 0.72rem;
-                font-weight: 700;
-                text-transform: uppercase;
-                letter-spacing: 0.07em;
-                margin-bottom: 0.3rem;
-            }
-
-            .sdoc-hero-badge strong {
-                color: #ffffff;
-                font-size: 1.05rem;
-                font-weight: 760;
-            }
-
-        .sdoc-alert {
-            border: 0;
-            border-radius: 16px;
-            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
-        }
-
-        .sdoc-shell {
+        .doc-cover-badges {
             display: grid;
-            grid-template-columns: 390px minmax(0, 1fr);
-            gap: 1rem;
-            margin-top: 1rem;
+            grid-template-columns: repeat(2, minmax(130px, 1fr));
+            gap: .65rem;
         }
 
-        .sdoc-panel,
-        .sdoc-report,
-        .sdoc-empty {
-            background: #ffffff;
-            border: 1px solid #E8E8E8;
-            border-radius: 24px;
-            box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
-        }
-
-        .sdoc-panel {
-            overflow: hidden;
-            align-self: start;
-            position: sticky;
-            top: 104px;
-        }
-
-        .sdoc-panel-head {
-            padding: 1.15rem 1.15rem 1rem;
-            border-bottom: 1px solid #EEF2F7;
-            background: linear-gradient(180deg, #FFFFFF, #FAFBFD);
-        }
-
-            .sdoc-panel-head h2 {
-                color: #111827;
-                margin: 0;
-                font-size: 1.05rem;
-                font-weight: 760;
-                letter-spacing: -0.025em;
-            }
-
-            .sdoc-panel-head p {
-                color: #64748B;
-                margin: 0.3rem 0 0;
-                font-size: 0.82rem;
-                line-height: 1.5;
-            }
-
-        .sdoc-panel-body {
-            padding: 1.15rem;
-        }
-
-        .sdoc-label {
-            color: #111827;
-            font-size: 0.8rem;
-            font-weight: 700;
-            margin-bottom: 0.42rem;
-        }
-
-        .sdoc-select {
-            min-height: 48px;
+        .doc-cover-badge {
+            padding: .8rem .9rem;
+            background: rgba(255,255,255,.11);
+            border: 1px solid rgba(255,255,255,.16);
             border-radius: 15px;
-            border: 1px solid #DDDDDD;
-            color: #111827;
-            font-size: 0.9rem;
         }
 
-            .sdoc-select:focus {
-                border-color: #516C8D;
-                box-shadow: 0 0 0 0.2rem rgba(81, 108, 141, 0.15);
-            }
-
-        .sdoc-helper {
-            color: #64748B;
-            font-size: 0.76rem;
-            line-height: 1.45;
-            margin-top: 0.45rem;
+        .doc-cover-badge span,
+        .doc-cover-badge strong {
+            display: block;
         }
 
-        .sdoc-selected-card {
-            margin-top: 1rem;
-            padding: 1rem;
-            border-radius: 20px;
-            background: #FAFBFD;
-            border: 1px solid #EEF2F7;
+        .doc-cover-badge span {
+            margin-bottom: .2rem;
+            color: rgba(255,255,255,.60);
+            font-size: .61rem;
+            font-weight: 850;
+            letter-spacing: .08em;
+            text-transform: uppercase;
         }
 
-        .sdoc-selected-top {
-            display: flex;
-            gap: 0.75rem;
-            align-items: flex-start;
-            margin-bottom: 0.9rem;
-        }
-
-        .sdoc-selected-icon {
-            width: 44px;
-            height: 44px;
-            border-radius: 15px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #516C8D;
-            background: #EEF2F6;
-            flex-shrink: 0;
-            font-size: 1.1rem;
-        }
-
-        .sdoc-selected-card h3 {
-            color: #111827;
-            margin: 0;
-            font-size: 0.98rem;
-            font-weight: 760;
+        .doc-cover-badge strong {
+            color: #fff;
+            font-size: .79rem;
             line-height: 1.35;
         }
 
-        .sdoc-selected-card p {
-            color: #64748B;
-            margin: 0.25rem 0 0;
-            font-size: 0.78rem;
-            line-height: 1.5;
+        /* ---------- Alerts ---------- */
+
+        .doc-alert {
+            display: flex;
+            align-items: flex-start;
+            gap: .6rem;
+            margin-top: .8rem;
+            padding: .8rem .95rem;
+            border: 1px solid transparent;
+            border-radius: var(--doc-radius-md);
+            font-size: .82rem;
         }
 
-        .sdoc-mini-grid {
+        .doc-alert-success {
+            color: #176844;
+            background: var(--doc-green-soft);
+            border-color: #cce9da;
+        }
+
+        .doc-alert-danger {
+            color: #9e3737;
+            background: var(--doc-red-soft);
+            border-color: #efcccc;
+        }
+
+        .doc-review-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .8rem;
+            margin-top: .8rem;
+            padding: .72rem .9rem;
+            background: #fff;
+            border: 1px solid var(--doc-line);
+            border-radius: var(--doc-radius-md);
+            box-shadow: 0 8px 24px rgba(23, 32, 51, .035);
+        }
+
+        .doc-review-copy {
+            display: flex;
+            align-items: center;
+            gap: .55rem;
+            min-width: 0;
+            color: var(--doc-muted);
+            font-size: .74rem;
+        }
+
+        .doc-review-copy i {
+            color: var(--doc-blue);
+            font-size: 1rem;
+        }
+
+        /* ---------- Project source bar ---------- */
+
+        .doc-source-bar {
             display: grid;
-            gap: 0.65rem;
+            grid-template-columns: minmax(250px, .8fr) minmax(0, 1.5fr) auto;
+            gap: .85rem;
+            align-items: center;
+            margin-top: 1rem;
+            padding: .9rem;
+            background: #fff;
+            border: 1px solid var(--doc-line);
+            border-radius: var(--doc-radius-lg);
+            box-shadow: var(--doc-shadow);
         }
 
-        .sdoc-mini-item {
-            padding: 0.75rem;
-            border-radius: 16px;
-            background: #ffffff;
-            border: 1px solid #EEF2F7;
+        .doc-source-control label {
+            display: block;
+            margin-bottom: .32rem;
+            color: var(--doc-ink);
+            font-size: .69rem;
+            font-weight: 850;
         }
 
-            .sdoc-mini-item span {
-                display: block;
-                color: #64748B;
-                font-size: 0.68rem;
-                font-weight: 740;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
-                margin-bottom: 0.25rem;
-            }
+        .doc-source-select {
+            min-height: 44px;
+            color: var(--doc-ink);
+            background-color: #fff;
+            border: 1px solid var(--doc-line-strong);
+            border-radius: 11px;
+            font-size: .79rem;
+        }
 
-            .sdoc-mini-item strong {
-                display: block;
-                color: #111827;
-                font-size: 0.82rem;
-                font-weight: 700;
-                line-height: 1.38;
-                word-break: break-word;
-                white-space: pre-wrap;
-            }
+        .doc-source-select:focus {
+            border-color: var(--doc-blue);
+            box-shadow: 0 0 0 .2rem rgba(49,87,200,.13);
+        }
 
-        .sdoc-ai-check {
+        .doc-source-project {
+            min-width: 0;
             display: flex;
             align-items: center;
-            gap: 0.55rem;
-            margin-top: 0.8rem;
-            padding: 0.72rem;
-            border-radius: 16px;
-            background: #EEF2F6;
-            color: #304163;
-            font-size: 0.78rem;
-            font-weight: 700;
+            gap: .7rem;
+            padding: .68rem .75rem;
+            background: #f8faff;
+            border: 1px solid #e2e8f8;
+            border-radius: 12px;
         }
 
-            .sdoc-ai-check i {
-                color: #516C8D;
-            }
-
-        .sdoc-primary-btn {
-            width: 100%;
-            min-height: 50px;
-            margin-top: 1rem;
-            border-radius: 16px;
-            color: #ffffff;
-            background: linear-gradient(135deg, #304163, #516C8D);
-            border: 1px solid rgba(81, 108, 141, 0.25);
-            box-shadow: 0 12px 24px rgba(81, 108, 141, 0.17);
-            font-weight: 730;
+        .doc-source-icon {
+            flex: 0 0 auto;
+            width: 38px;
+            height: 38px;
+            display: grid;
+            place-items: center;
+            color: var(--doc-blue);
+            background: var(--doc-blue-soft);
+            border-radius: 11px;
         }
 
-            .sdoc-primary-btn:hover {
-                color: #ffffff;
-                background: linear-gradient(135deg, #28385E, #304163);
-            }
-
-            .sdoc-primary-btn:disabled {
-                opacity: 0.75;
-                cursor: wait;
-            }
-
-        .sdoc-side-note {
-            margin-top: 1rem;
-            padding: 0.9rem;
-            border-radius: 18px;
-            background: linear-gradient(135deg, #28385E, #304163);
-            color: #ffffff;
+        .doc-source-project h2 {
+            margin: 0;
+            color: var(--doc-ink);
+            font-size: .83rem;
+            font-weight: 820;
+            line-height: 1.35;
+            overflow-wrap: anywhere;
         }
 
-            .sdoc-side-note h4 {
-                margin: 0 0 0.35rem;
-                color: #ffffff;
-                font-size: 0.88rem;
-                font-weight: 740;
-            }
-
-            .sdoc-side-note p {
-                margin: 0;
-                color: rgba(255,255,255,0.72);
-                font-size: 0.76rem;
-                line-height: 1.5;
-            }
-
-        .sdoc-empty {
-            min-height: 600px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            padding: 2rem;
-            background: radial-gradient(circle at 50% 20%, rgba(81, 108, 141, 0.06), transparent 30%), linear-gradient(180deg, #FFFFFF, #FAFBFD);
+        .doc-source-project p {
+            margin: .16rem 0 0;
+            color: var(--doc-muted);
+            font-size: .64rem;
+            line-height: 1.4;
+            overflow-wrap: anywhere;
         }
 
-        .sdoc-empty-icon {
-            width: 78px;
-            height: 78px;
+        .doc-generate-btn,
+        .doc-print-btn {
+            min-height: 43px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            border-radius: 26px;
-            color: #516C8D;
-            background: #EEF2F6;
-            font-size: 2rem;
-            margin-bottom: 1rem;
+            gap: .4rem;
+            padding: .58rem .85rem;
+            border-radius: 11px;
+            font-size: .73rem;
+            font-weight: 820;
         }
 
-        .sdoc-empty h2 {
-            color: #111827;
-            font-size: 1.35rem;
-            font-weight: 780;
-            letter-spacing: -0.035em;
+        .doc-generate-btn {
+            color: #fff !important;
+            background: linear-gradient(135deg, var(--doc-blue), var(--doc-blue-2));
+            border: 0;
+            box-shadow: 0 10px 20px rgba(49,87,200,.16);
+        }
+
+        .doc-generate-btn:hover {
+            background: linear-gradient(135deg, #2649b1, #3d5fc9);
+        }
+
+        .doc-generate-btn:disabled {
+            opacity: .7;
+            cursor: wait;
+        }
+
+        .doc-print-btn {
+            color: var(--doc-blue);
+            background: #fff;
+            border: 1px solid var(--doc-line-strong);
+        }
+
+        .doc-print-btn:hover {
+            color: #2747ad;
+            background: var(--doc-blue-soft);
+            border-color: #b9c8ef;
+        }
+
+        /* ---------- Empty state ---------- */
+
+        .doc-empty {
+            min-height: 600px;
+            display: grid;
+            place-items: center;
+            margin-top: 1rem;
+            padding: 2rem;
+            text-align: center;
+            background:
+                radial-gradient(circle at 50% 18%, rgba(49,87,200,.08), transparent 30%),
+                #fff;
+            border: 1px solid var(--doc-line);
+            border-radius: var(--doc-radius-xl);
+            box-shadow: var(--doc-shadow);
+        }
+
+        .doc-empty-inner {
+            max-width: 620px;
+        }
+
+        .doc-empty-icon {
+            width: 76px;
+            height: 76px;
+            display: grid;
+            place-items: center;
+            margin: 0 auto 1rem;
+            color: var(--doc-blue);
+            background: var(--doc-blue-soft);
+            border: 1px solid #dae4ff;
+            border-radius: 22px;
+            font-size: 1.8rem;
+        }
+
+        .doc-empty h2 {
             margin: 0;
+            color: var(--doc-ink);
+            font-size: 1.45rem;
+            font-weight: 850;
+            letter-spacing: -.035em;
         }
 
-        .sdoc-empty p {
-            max-width: 560px;
-            color: #64748B;
-            line-height: 1.6;
-            margin: 0.55rem auto 0;
-            font-size: 0.92rem;
+        .doc-empty p {
+            margin: .55rem auto 0;
+            color: var(--doc-muted);
+            font-size: .84rem;
+            line-height: 1.65;
         }
 
-        .sdoc-empty-actions {
-            display: flex;
-            justify-content: center;
-            gap: 0.75rem;
-            flex-wrap: wrap;
+        .doc-empty-steps {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: .65rem;
             margin-top: 1.2rem;
         }
 
-        .sdoc-soft-pill {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.45rem;
-            padding: 0.55rem 0.82rem;
-            border-radius: 999px;
-            color: #304163;
-            background: #EEF2F6;
-            font-size: 0.78rem;
-            font-weight: 700;
+        .doc-empty-step {
+            padding: .8rem;
+            text-align: left;
+            background: #f8faff;
+            border: 1px solid #e4e9f6;
+            border-radius: 13px;
         }
 
-        .sdoc-report {
-            overflow: hidden;
-        }
-
-        .sdoc-report-toolbar {
-            position: sticky;
-            top: 86px;
-            z-index: 5;
-            padding: 1rem 1.1rem;
-            background: rgba(255,255,255,0.96);
-            backdrop-filter: blur(12px);
-            border-bottom: 1px solid #EEF2F7;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 1rem;
-        }
-
-            .sdoc-report-toolbar span {
-                display: block;
-                color: #516C8D;
-                font-size: 0.7rem;
-                font-weight: 800;
-                text-transform: uppercase;
-                letter-spacing: 0.08em;
-                margin-bottom: 0.2rem;
-            }
-
-            .sdoc-report-toolbar h2 {
-                color: #111827;
-                margin: 0;
-                font-size: 1.15rem;
-                font-weight: 780;
-                letter-spacing: -0.035em;
-            }
-
-        .sdoc-status {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.45rem;
-            padding: 0.48rem 0.75rem;
-            border-radius: 999px;
-            color: #304163;
-            background: #EEF2F6;
-            font-size: 0.78rem;
-            font-weight: 760;
-            white-space: nowrap;
-        }
-
-        .sdoc-print-btn {
-            border-radius: 999px;
-            border: 1px solid #DDDDDD;
-            color: #304163;
-            background: #ffffff;
-            font-size: 0.82rem;
-            font-weight: 700;
-            padding: 0.48rem 0.8rem;
-        }
-
-            .sdoc-print-btn:hover {
-                color: #516C8D;
-                border-color: #516C8D;
-                background: #F7F8FA;
-            }
-
-        .sdoc-report-body {
-            padding: 1.15rem;
-        }
-
-        .sdoc-stats {
+        .doc-empty-step span {
+            width: 28px;
+            height: 28px;
             display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-            gap: 0.8rem;
-            margin-bottom: 1rem;
+            place-items: center;
+            margin-bottom: .45rem;
+            color: #fff;
+            background: var(--doc-blue);
+            border-radius: 8px;
+            font-size: .68rem;
+            font-weight: 850;
         }
 
-        .sdoc-stat {
-            padding: 0.95rem;
-            border-radius: 18px;
-            background: #FAFBFD;
-            border: 1px solid #EEF2F7;
+        .doc-empty-step strong {
+            display: block;
+            color: var(--doc-ink);
+            font-size: .72rem;
         }
 
-            .sdoc-stat strong {
-                display: block;
-                color: #28385E;
-                font-size: 1.45rem;
-                font-weight: 800;
-                line-height: 1;
-            }
-
-            .sdoc-stat span {
-                display: block;
-                color: #64748B;
-                font-size: 0.74rem;
-                line-height: 1.35;
-                margin-top: 0.35rem;
-                font-weight: 650;
-            }
-
-        .sdoc-section {
-            border: 1px solid #E8E8E8;
-            border-radius: 20px;
-            overflow: hidden;
-            background: #ffffff;
-            margin-bottom: 0.9rem;
+        .doc-empty-step p {
+            margin: .22rem 0 0;
+            font-size: .64rem;
+            line-height: 1.45;
         }
 
-        .sdoc-section-head {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
+        /* ---------- Reader shell ---------- */
+
+        .doc-reader {
+            display: grid;
+            grid-template-columns: 250px minmax(0, 1fr);
             gap: 1rem;
-            padding: 0.95rem 1rem;
-            background: #FAFBFD;
-            border-bottom: 1px solid #EEF2F7;
+            align-items: start;
+            margin-top: 1rem;
         }
 
-        .sdoc-section-title {
-            display: flex;
+        .doc-reader-sidebar {
+            position: sticky;
+            top: 92px;
+            overflow: hidden;
+            background: #fff;
+            border: 1px solid var(--doc-line);
+            border-radius: var(--doc-radius-lg);
+            box-shadow: var(--doc-shadow);
+        }
+
+        .doc-reader-sidebar-head {
+            padding: .85rem;
+            background: linear-gradient(180deg, #fff, #f8faff);
+            border-bottom: 1px solid var(--doc-line);
+        }
+
+        .doc-reader-sidebar-head span {
+            display: block;
+            color: var(--doc-blue);
+            font-size: .58rem;
+            font-weight: 850;
+            letter-spacing: .09em;
+            text-transform: uppercase;
+        }
+
+        .doc-reader-sidebar-head strong {
+            display: block;
+            margin-top: .14rem;
+            color: var(--doc-ink);
+            font-size: .78rem;
+        }
+
+        .doc-chapter-nav {
+            display: grid;
+            gap: .22rem;
+            padding: .45rem;
+        }
+
+        .doc-chapter-btn {
+            width: 100%;
+            display: grid;
+            grid-template-columns: 30px minmax(0, 1fr) auto;
             align-items: center;
-            gap: 0.7rem;
+            gap: .5rem;
+            padding: .5rem;
+            color: var(--doc-muted);
+            text-align: left;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 10px;
+            cursor: pointer;
+        }
+
+        .doc-chapter-btn:hover,
+        .doc-chapter-btn.is-active {
+            color: var(--doc-blue);
+            background: var(--doc-blue-soft);
+            border-color: #dae4ff;
+        }
+
+        .doc-chapter-btn-number {
+            width: 28px;
+            height: 28px;
+            display: grid;
+            place-items: center;
+            color: var(--doc-blue);
+            background: #f1f4fb;
+            border-radius: 8px;
+            font-size: .62rem;
+            font-weight: 850;
+        }
+
+        .doc-chapter-btn.is-active .doc-chapter-btn-number {
+            color: #fff;
+            background: var(--doc-blue);
+        }
+
+        .doc-chapter-btn-copy {
             min-width: 0;
         }
 
-        .sdoc-section-icon {
-            width: 38px;
-            height: 38px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 14px;
-            color: #516C8D;
-            background: #EEF2F6;
-            flex-shrink: 0;
+        .doc-chapter-btn-copy strong,
+        .doc-chapter-btn-copy small {
+            display: block;
         }
 
-        .sdoc-section-title h3 {
-            margin: 0;
-            color: #111827;
-            font-size: 0.95rem;
-            font-weight: 760;
-            letter-spacing: -0.02em;
+        .doc-chapter-btn-copy strong {
+            font-size: .68rem;
+            line-height: 1.28;
         }
 
-        .sdoc-section-title p {
-            margin: 0.15rem 0 0;
-            color: #64748B;
-            font-size: 0.74rem;
+        .doc-chapter-btn-copy small {
+            margin-top: .12rem;
+            color: var(--doc-muted);
+            font-size: .56rem;
         }
 
-        .sdoc-count {
-            padding: 0.28rem 0.58rem;
+        .doc-chapter-btn-count {
+            min-width: 24px;
+            padding: .15rem .28rem;
+            color: var(--doc-blue);
+            background: #fff;
             border-radius: 999px;
-            color: #304163;
-            background: #EEF2F6;
-            font-size: 0.7rem;
-            font-weight: 780;
-            white-space: nowrap;
+            text-align: center;
+            font-size: .54rem;
+            font-weight: 850;
         }
 
-        .sdoc-list {
-            display: grid;
-            gap: 0;
+        .doc-reader-main {
+            min-width: 0;
         }
 
-        .sdoc-item {
-            display: grid;
-            grid-template-columns: 34px minmax(0, 1fr);
-            gap: 0.75rem;
-            padding: 0.9rem 1rem;
-            border-bottom: 1px solid #EEF2F7;
-            color: #111827;
-            line-height: 1.62;
-            font-size: 0.88rem;
+        .doc-reader-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .8rem;
+            margin-bottom: .7rem;
+            padding: .72rem .8rem;
+            background: #fff;
+            border: 1px solid var(--doc-line);
+            border-radius: 13px;
+            box-shadow: 0 8px 24px rgba(23,32,51,.035);
         }
 
-            .sdoc-item:last-child {
-                border-bottom: 0;
-            }
+        .doc-reader-toolbar-copy {
+            min-width: 0;
+        }
 
-        .sdoc-item-number {
-            width: 34px;
-            height: 34px;
-            border-radius: 12px;
+        .doc-reader-toolbar-copy span {
+            display: block;
+            color: var(--doc-blue);
+            font-size: .57rem;
+            font-weight: 850;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+        }
+
+        .doc-reader-toolbar-copy h2 {
+            margin: .12rem 0 0;
+            color: var(--doc-ink);
+            font-size: .88rem;
+            font-weight: 820;
+            overflow-wrap: anywhere;
+        }
+
+        .doc-reader-toolbar-actions {
+            display: flex;
+            align-items: center;
+            gap: .45rem;
+        }
+
+        .doc-status-pill {
             display: inline-flex;
             align-items: center;
-            justify-content: center;
-            background: #F7F8FA;
-            color: #516C8D;
-            font-size: 0.74rem;
-            font-weight: 800;
+            gap: .35rem;
+            padding: .42rem .62rem;
+            color: #176844;
+            background: var(--doc-green-soft);
+            border: 1px solid #cce9da;
+            border-radius: 999px;
+            font-size: .65rem;
+            font-weight: 820;
         }
 
-        .sdoc-code {
-            margin: 1rem;
+        /* ---------- Chapters ---------- */
+
+        .doc-chapter {
+            display: none;
+            overflow: hidden;
+            background: #fff;
+            border: 1px solid var(--doc-line);
+            border-radius: var(--doc-radius-xl);
+            box-shadow: var(--doc-shadow);
+        }
+
+        .doc-chapter.is-active {
+            display: block;
+        }
+
+        .doc-chapter-head {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: .8rem;
+            align-items: center;
             padding: 1rem;
-            border-radius: 18px;
-            background: #28385E;
-            color: #E8EDF5;
+            color: #fff;
+            background:
+                radial-gradient(circle at 88% 15%, rgba(255,255,255,.12), transparent 28%),
+                linear-gradient(135deg, var(--doc-blue), var(--doc-blue-2));
+        }
+
+        .doc-chapter-number {
+            width: 48px;
+            height: 48px;
+            display: grid;
+            place-items: center;
+            color: var(--doc-blue);
+            background: #fff;
+            border-radius: 14px;
+            font-size: 1rem;
+            font-weight: 900;
+        }
+
+        .doc-chapter-head h2 {
+            margin: 0;
+            color: #fff;
+            font-size: 1.2rem;
+            font-weight: 850;
+            letter-spacing: -.03em;
+        }
+
+        .doc-chapter-head p {
+            margin: .25rem 0 0;
+            color: rgba(255,255,255,.73);
+            font-size: .72rem;
+            line-height: 1.48;
+        }
+
+        .doc-simple-box {
+            display: flex;
+            align-items: flex-start;
+            gap: .65rem;
+            margin: .9rem;
+            padding: .8rem;
+            color: #264074;
+            background: var(--doc-blue-soft);
+            border: 1px solid #dbe4ff;
+            border-radius: 13px;
+        }
+
+        .doc-simple-box-icon {
+            flex: 0 0 auto;
+            width: 32px;
+            height: 32px;
+            display: grid;
+            place-items: center;
+            color: var(--doc-blue);
+            background: #fff;
+            border-radius: 9px;
+        }
+
+        .doc-simple-box strong {
+            display: block;
+            margin-bottom: .12rem;
+            font-size: .7rem;
+        }
+
+        .doc-simple-box p {
+            margin: 0;
+            color: #52617a;
+            font-size: .65rem;
+            line-height: 1.45;
+        }
+
+        .doc-chapter-body {
+            padding: 0 .9rem .9rem;
+        }
+
+        .doc-overview-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1.4fr) minmax(250px, .6fr);
+            gap: .75rem;
+        }
+
+        .doc-overview-card {
+            padding: .85rem;
+            background: #fff;
+            border: 1px solid var(--doc-line);
+            border-radius: 13px;
+        }
+
+        .doc-overview-card span {
+            display: block;
+            margin-bottom: .25rem;
+            color: var(--doc-muted);
+            font-size: .58rem;
+            font-weight: 850;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+        }
+
+        .doc-overview-card h3 {
+            margin: 0;
+            color: var(--doc-ink);
+            font-size: .9rem;
+            font-weight: 820;
+        }
+
+        .doc-overview-card p {
+            margin: .3rem 0 0;
+            color: var(--doc-muted);
+            font-size: .67rem;
+            line-height: 1.5;
+        }
+
+        .doc-overview-meta {
+            display: grid;
+            gap: .45rem;
+        }
+
+        .doc-meta-row {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: .6rem;
+            padding-bottom: .42rem;
+            border-bottom: 1px solid var(--doc-line);
+            font-size: .65rem;
+        }
+
+        .doc-meta-row:last-child {
+            padding-bottom: 0;
+            border-bottom: 0;
+        }
+
+        .doc-meta-row span {
+            color: var(--doc-muted);
+        }
+
+        .doc-meta-row strong {
+            color: var(--doc-ink);
+            text-align: right;
+            overflow-wrap: anywhere;
+        }
+
+        .doc-stat-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: .55rem;
+            margin-top: .75rem;
+        }
+
+        .doc-stat-card {
+            display: flex;
+            align-items: center;
+            gap: .55rem;
+            padding: .68rem;
+            background: #f8faff;
+            border: 1px solid #e4e9f6;
+            border-radius: 11px;
+        }
+
+        .doc-stat-icon {
+            flex: 0 0 auto;
+            width: 32px;
+            height: 32px;
+            display: grid;
+            place-items: center;
+            color: var(--doc-blue);
+            background: #fff;
+            border-radius: 9px;
+        }
+
+        .doc-stat-card strong,
+        .doc-stat-card span {
+            display: block;
+        }
+
+        .doc-stat-card strong {
+            color: var(--doc-blue);
+            font-size: 1rem;
+            font-weight: 900;
+            line-height: 1;
+        }
+
+        .doc-stat-card span {
+            margin-top: .12rem;
+            color: var(--doc-muted);
+            font-size: .56rem;
+            line-height: 1.25;
+        }
+
+        .doc-readable-list {
+            display: grid;
+            gap: .58rem;
+        }
+
+        .doc-readable-card {
+            display: grid;
+            grid-template-columns: 44px minmax(0, 1fr);
+            gap: .7rem;
+            padding: .78rem;
+            background: #fff;
+            border: 1px solid var(--doc-line);
+            border-radius: 13px;
+            transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+        }
+
+        .doc-readable-card:hover {
+            transform: translateY(-1px);
+            border-color: #cfd9ee;
+            box-shadow: 0 8px 22px rgba(23,32,51,.045);
+        }
+
+        .doc-readable-label {
+            width: 42px;
+            min-height: 42px;
+            display: grid;
+            place-items: center;
+            align-self: start;
+            color: #fff;
+            background: linear-gradient(135deg, var(--doc-blue), var(--doc-blue-2));
+            border-radius: 11px;
+            font-size: .61rem;
+            font-weight: 900;
+        }
+
+        .doc-readable-content {
+            min-width: 0;
+            color: var(--doc-ink);
+            font-size: .73rem;
+            line-height: 1.62;
+            overflow-wrap: anywhere;
+        }
+
+        .doc-readable-content::first-line {
+            font-weight: 780;
+        }
+
+        .doc-code-wrap {
+            position: relative;
+        }
+
+        .doc-code-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .7rem;
+            margin-bottom: .5rem;
+        }
+
+        .doc-code-toolbar span {
+            color: var(--doc-muted);
+            font-size: .64rem;
+            font-weight: 750;
+        }
+
+        .doc-copy-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: .3rem;
+            padding: .35rem .5rem;
+            color: var(--doc-blue);
+            background: var(--doc-blue-soft);
+            border: 1px solid #dbe4ff;
+            border-radius: 8px;
+            font-size: .61rem;
+            font-weight: 820;
+        }
+
+        .doc-code {
+            margin: 0;
+            padding: .9rem;
+            overflow-x: auto;
+            color: #e8edff;
+            background: #1d2a45;
+            border: 1px solid #304164;
+            border-radius: 13px;
             white-space: pre-wrap;
             overflow-wrap: anywhere;
             font-family: "Consolas", "Courier New", monospace;
-            font-size: 0.82rem;
-            line-height: 1.68;
-            overflow-x: auto;
+            font-size: .68rem;
+            line-height: 1.62;
         }
 
-        .sdoc-section-empty {
-            padding: 1rem;
-            color: #64748B;
-            font-size: 0.84rem;
+        .doc-empty-section {
+            padding: .85rem;
+            color: var(--doc-muted);
+            background: #f8faff;
+            border: 1px dashed #cfd8e8;
+            border-radius: 12px;
+            font-size: .7rem;
         }
 
-        .sdoc-loading {
+        .doc-bottom-nav {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .7rem;
+            padding: .8rem .9rem;
+            background: #f8faff;
+            border-top: 1px solid var(--doc-line);
+        }
+
+        .doc-bottom-nav button {
+            display: inline-flex;
+            align-items: center;
+            gap: .35rem;
+            padding: .42rem .6rem;
+            color: var(--doc-blue);
+            background: #fff;
+            border: 1px solid #d8e0ef;
+            border-radius: 9px;
+            font-size: .64rem;
+            font-weight: 820;
+        }
+
+        .doc-bottom-nav button:disabled {
+            opacity: .45;
+            cursor: not-allowed;
+        }
+
+        .doc-bottom-nav span {
+            color: var(--doc-muted);
+            font-size: .61rem;
+            font-weight: 760;
+        }
+
+        /* ---------- Print cover ---------- */
+
+        .doc-print-cover,
+        .doc-print-toc {
+            display: none;
+        }
+
+        /* ---------- Loading ---------- */
+
+        .doc-loading {
             position: fixed;
             inset: 0;
-            z-index: 2000;
+            z-index: 2500;
             display: none;
-            align-items: center;
-            justify-content: center;
-            background: rgba(247, 248, 250, 0.82);
-            backdrop-filter: blur(8px);
+            place-items: center;
+            padding: 1rem;
+            background: rgba(19, 29, 47, .55);
+            backdrop-filter: blur(6px);
         }
 
-            .sdoc-loading.show {
-                display: flex;
-            }
-
-        .sdoc-loading-card {
-            width: min(440px, calc(100% - 2rem));
-            padding: 1.4rem;
-            border-radius: 24px;
-            background: #ffffff;
-            border: 1px solid #E8E8E8;
-            box-shadow: 0 20px 55px rgba(15, 23, 42, 0.14);
-            text-align: center;
+        .doc-loading.show {
+            display: grid;
         }
 
-        .sdoc-spinner {
-            width: 54px;
-            height: 54px;
-            border-radius: 999px;
-            border: 4px solid #EEF2F6;
-            border-top-color: #516C8D;
-            margin: 0 auto 1rem;
-            animation: sdocSpin 0.9s linear infinite;
+        .doc-loading-card {
+            width: min(640px, 100%);
+            overflow: hidden;
+            background: #fff;
+            border: 1px solid var(--doc-line);
+            border-radius: 19px;
+            box-shadow: 0 30px 85px rgba(19,29,47,.28);
         }
 
-        @@keyframes sdocSpin {
-            to {
-                transform: rotate(360deg);
-            }
+        .doc-loading-top {
+            display: flex;
+            align-items: flex-start;
+            gap: .75rem;
+            padding: 1rem;
         }
 
-        .sdoc-loading-card h3 {
-            color: #111827;
-            font-size: 1.05rem;
-            font-weight: 760;
+        .doc-loading-spinner {
+            flex: 0 0 auto;
+            width: 40px;
+            height: 40px;
+            border: 4px solid #e6ebf3;
+            border-top-color: var(--doc-blue);
+            border-radius: 50%;
+            animation: docSpin .8s linear infinite;
+        }
+
+        .doc-loading-card h3 {
             margin: 0;
+            color: var(--doc-ink);
+            font-size: .95rem;
+            font-weight: 840;
         }
 
-        .sdoc-loading-card p {
-            color: #64748B;
-            font-size: 0.84rem;
-            line-height: 1.55;
-            margin: 0.4rem 0 0;
+        .doc-loading-card p {
+            margin: .25rem 0 0;
+            color: var(--doc-muted);
+            font-size: .69rem;
+            line-height: 1.45;
         }
 
-        .sdoc-cover {
-            display: none;
+        .doc-loading-progress {
+            height: 5px;
+            overflow: hidden;
+            background: #edf1f6;
         }
 
-        .sdoc-toc {
-            display: none;
+        .doc-loading-progress div {
+            width: 35%;
+            height: 100%;
+            background: linear-gradient(90deg, var(--doc-blue), var(--doc-blue-2));
+            animation: docProgress 1.45s ease-in-out infinite;
         }
+
+        .doc-loading-steps {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: .4rem;
+            margin: 0;
+            padding: .8rem;
+            list-style: none;
+            background: #f8faff;
+            border-top: 1px solid var(--doc-line);
+        }
+
+        .doc-loading-steps li {
+            display: flex;
+            align-items: flex-start;
+            gap: .35rem;
+            padding: .5rem;
+            color: var(--doc-muted);
+            background: #fff;
+            border: 1px solid var(--doc-line);
+            border-radius: 9px;
+            font-size: .59rem;
+            line-height: 1.35;
+        }
+
+        .doc-loading-steps li.is-active {
+            color: var(--doc-blue);
+            background: var(--doc-blue-soft);
+            border-color: #dbe4ff;
+            font-weight: 820;
+        }
+
+        @@keyframes docSpin {
+            to { transform: rotate(360deg); }
+        }
+
+        @@keyframes docProgress {
+            0% { transform: translateX(-110%); }
+            100% { transform: translateX(290%); }
+        }
+
+        /* ---------- Responsive ---------- */
+
+        @@media (max-width: 1180px) {
+            .doc-source-bar {
+                grid-template-columns: minmax(250px, .8fr) minmax(0, 1.2fr);
+            }
+
+            .doc-source-bar form {
+                grid-column: 1 / -1;
+            }
+
+            .doc-source-bar .doc-generate-btn {
+                width: 100%;
+            }
+        }
+
+        @@media (max-width: 980px) {
+            .doc-cover-header {
+                grid-template-columns: 1fr;
+            }
+
+            .doc-cover-badges {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .doc-source-bar {
+                grid-template-columns: 1fr;
+            }
+
+            .doc-source-bar form {
+                grid-column: auto;
+            }
+
+            .doc-reader {
+                grid-template-columns: 1fr;
+            }
+
+            .doc-reader-sidebar {
+                position: static;
+            }
+
+            .doc-chapter-nav {
+                grid-auto-flow: column;
+                grid-auto-columns: minmax(190px, 1fr);
+                overflow-x: auto;
+            }
+
+            .doc-reader-toolbar {
+                position: sticky;
+                top: 0;
+                z-index: 10;
+            }
+        }
+
+        @@media (max-width: 760px) {
+            .doc-overview-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .doc-stat-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .doc-empty-steps {
+                grid-template-columns: 1fr;
+            }
+
+            .doc-loading-steps {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @@media (max-width: 560px) {
+            .doc-cover-header {
+                padding: 1rem;
+            }
+
+            .doc-cover-badges {
+                grid-template-columns: 1fr;
+            }
+
+            .doc-source-bar {
+                padding: .75rem;
+            }
+
+            .doc-reader-toolbar {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .doc-reader-toolbar-actions {
+                width: 100%;
+                flex-wrap: wrap;
+            }
+
+            .doc-print-btn {
+                flex: 1;
+            }
+
+            .doc-chapter-head {
+                grid-template-columns: 1fr;
+            }
+
+            .doc-readable-card {
+                grid-template-columns: 1fr;
+            }
+
+            .doc-readable-label {
+                width: fit-content;
+                min-width: 45px;
+                height: 30px;
+                min-height: 30px;
+                padding: 0 .45rem;
+            }
+
+            .doc-stat-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .doc-loading-steps {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @@media (prefers-reduced-motion: reduce) {
+            html {
+                scroll-behavior: auto !important;
+            }
+
+            .doc-loading-spinner,
+            .doc-loading-progress div {
+                animation: none !important;
+            }
+
+            .doc-readable-card {
+                transition: none !important;
+            }
+        }
+
+        /* ---------- Print ---------- */
 
         @@media print {
             @@page {
                 size: A4;
-                margin: 16mm;
+                margin: 15mm;
+            }
+
+            html,
+            body {
+                height: auto !important;
+                min-height: 0 !important;
             }
 
             body * {
@@ -699,1066 +1229,716 @@
 
             #se-report {
                 position: absolute;
-                left: 0;
-                top: 0;
+                inset: 0 auto auto 0;
                 width: 100%;
-                background: white;
-                padding: 0;
-                box-shadow: none !important;
-                border: 0 !important;
+                height: auto !important;
+                min-height: 0 !important;
+                background: #fff;
             }
 
             .no-print,
-            .sdoc-panel,
-            .sdoc-hero,
-            .sdoc-loading {
+            .doc-cover-header,
+            .doc-source-bar,
+            .doc-reader-sidebar,
+            .doc-reader-toolbar,
+            .doc-loading,
+            .doc-bottom-nav {
                 display: none !important;
             }
 
-            .sdoc-report-toolbar {
-                position: static !important;
-                border-bottom: 1px solid #ddd;
+            .doc-reader {
+                display: block;
+                margin: 0;
             }
 
-            .sdoc-report-body {
-                padding: 0;
+            .doc-reader-main {
+                width: 100%;
             }
 
-            .sdoc-section,
-            .sdoc-stat {
-                box-shadow: none !important;
+            .doc-print-cover {
+                display: block;
+                min-height: 245mm;
+                position: relative;
+                padding-top: 20mm;
+                page-break-after: always;
+            }
+
+            .doc-print-cover-kicker {
+                color: #3157c8;
+                font-size: 9pt;
+                font-weight: 800;
+                letter-spacing: .12em;
+                text-transform: uppercase;
+            }
+
+            .doc-print-cover h1 {
+                max-width: 165mm;
+                margin: 8mm 0 4mm;
+                color: #172033;
+                font-size: 26pt;
+                font-weight: 850;
+                line-height: 1.15;
+            }
+
+            .doc-print-cover h2 {
+                margin: 0;
+                color: #4a69d4;
+                font-size: 14pt;
+            }
+
+            .doc-print-meta {
+                margin-top: 18mm;
+                padding-top: 6mm;
+                border-top: 1px solid #cfd6df;
+            }
+
+            .doc-print-meta div {
+                margin-bottom: 3mm;
+                font-size: 10pt;
+            }
+
+            .doc-print-footer {
+                position: absolute;
+                bottom: 10mm;
+                color: #697386;
+                font-size: 9pt;
+            }
+
+            .doc-print-toc {
+                display: block;
+                page-break-after: always;
+            }
+
+            .doc-print-toc h2 {
+                color: #172033;
+                font-size: 18pt;
+            }
+
+            .doc-print-toc ol {
+                padding-left: 8mm;
+                font-size: 10pt;
+                line-height: 2;
+            }
+
+            .doc-chapter {
+                display: block !important;
+                margin-bottom: 7mm;
+                overflow: visible;
+                border-radius: 8px;
+                box-shadow: none;
+                page-break-inside: auto;
+                break-inside: auto;
+            }
+
+            .doc-chapter-head {
+                break-after: avoid;
+                page-break-after: avoid;
+                background: #edf2ff !important;
+                border-bottom: 1px solid #ccd7ee;
+            }
+
+            .doc-chapter-number {
+                color: #3157c8 !important;
+                border: 1px solid #ccd7ee;
+            }
+
+            .doc-chapter-head h2 {
+                color: #172033 !important;
+            }
+
+            .doc-chapter-head p {
+                color: #5c687a !important;
+            }
+
+            .doc-simple-box {
                 break-inside: avoid;
                 page-break-inside: avoid;
             }
 
-            .sdoc-section-head {
-                break-after: avoid;
-                page-break-after: avoid;
+            .doc-readable-card {
+                break-inside: avoid;
+                page-break-inside: avoid;
+                box-shadow: none !important;
             }
 
-            .sdoc-code {
-                background: white !important;
-                color: black !important;
-                border: 1px solid #ddd;
-                font-family: "Consolas", "Courier New", monospace;
+            .doc-code {
+                color: #111 !important;
+                background: #fff !important;
+                border: 1px solid #d6dce5;
+                font-size: 8.5pt;
             }
 
-            .sdoc-cover {
-                display: block;
-                page-break-after: always;
-                padding: 40px 0;
-            }
-
-            .sdoc-toc {
-                display: block;
-                page-break-after: always;
-            }
-        }
-
-        .sdoc-cover-title {
-            font-size: 1.9rem;
-            font-weight: 800;
-            color: #111827;
-            margin-bottom: 0.25rem;
-        }
-
-        .sdoc-cover-subtitle {
-            font-size: 1.05rem;
-            color: #516C8D;
-            font-weight: 700;
-            margin-bottom: 2rem;
-        }
-
-        .sdoc-cover-meta {
-            margin-top: 2rem;
-            border-top: 1px solid #ddd;
-            padding-top: 1rem;
-        }
-
-        .sdoc-cover-meta div {
-            margin-bottom: 0.4rem;
-            font-size: 0.9rem;
-        }
-
-        .sdoc-cover-footer {
-            position: absolute;
-            bottom: 20px;
-            font-size: 0.78rem;
-            color: #64748B;
-        }
-
-        .sdoc-toc ol {
-            font-size: 0.92rem;
-            line-height: 2;
-        }
-
-        @@media (max-width: 1199px) {
-            .sdoc-shell {
-                grid-template-columns: 1fr;
-            }
-
-            .sdoc-panel {
-                position: static;
-            }
-        }
-
-        @@media (max-width: 991px) {
-            .sdoc-hero-content {
-                grid-template-columns: 1fr;
-            }
-
-            .sdoc-hero-badge {
-                text-align: left;
-            }
-
-            .sdoc-report-toolbar {
-                position: static;
-                align-items: flex-start;
-                flex-direction: column;
-            }
-
-            .sdoc-stats {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-            }
-        }
-
-        @@media (max-width: 575px) {
-            .sdoc-hero,
-            .sdoc-panel-body,
-            .sdoc-report-body {
-                padding: 1rem;
-            }
-
-            .sdoc-stats {
-                grid-template-columns: 1fr;
-            }
-
-            .sdoc-section-head {
-                align-items: flex-start;
-                flex-direction: column;
-            }
-
-            .sdoc-item {
-                grid-template-columns: 1fr;
-            }
-        }
-        /* Fix selected idea details layout in Documentation Setup */
-        .sdoc-selected-card {
-            overflow: hidden;
-        }
-
-        .sdoc-mini-grid {
-            display: grid;
-            gap: 0.75rem;
-        }
-
-        .sdoc-mini-item {
-            padding: 0.9rem 1rem !important;
-            border-radius: 16px;
-            background: #ffffff;
-            border: 1px solid #EEF2F7;
-        }
-
-            .sdoc-mini-item span {
-                display: block;
-                margin-bottom: 0.55rem !important;
-                color: #64748B;
-                font-size: 0.7rem;
-                font-weight: 800;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
-            }
-
-            .sdoc-mini-item strong {
-                display: block;
-                width: 100%;
-                color: #111827;
-                font-size: 0.86rem !important;
-                font-weight: 700;
-                line-height: 1.55 !important;
-                text-align: left !important;
-                white-space: normal !important;
-                word-break: normal !important;
-                overflow-wrap: anywhere !important;
-            }
-
-                /* Make long tech stacks look cleaner */
-                .sdoc-mini-item strong br {
-                    display: none;
-                }
-
-        /* Better spacing for the selected idea title area */
-        .sdoc-selected-top {
-            align-items: flex-start;
-        }
-
-        .sdoc-selected-card h3 {
-            line-height: 1.35 !important;
-        }
-
-        .sdoc-selected-card p {
-            line-height: 1.5 !important;
-        }
-
-        /* ============================================================
-           Best-version UI refinement
-           Visual-only enhancement: no handlers, DTOs, or backend logic.
-           ============================================================ */
-
-        :root {
-            --sdoc-ink-strong: #172033;
-            --sdoc-surface-soft: #F6F8FB;
-            --sdoc-line-strong: #D8E0EA;
-            --sdoc-accent-soft: #EAF0F6;
-            --sdoc-shadow-soft: 0 12px 34px rgba(28, 44, 72, 0.055);
-        }
-
-        .sdoc-page {
-            color: var(--sdoc-ink-strong);
-        }
-
-        .sdoc-hero {
-            padding: 1.2rem 1.3rem;
-            border-radius: 22px;
-            background:
-                radial-gradient(circle at 8% 10%, rgba(255,255,255,.17), transparent 25%),
-                linear-gradient(135deg, #223250 0%, #324766 62%, #6987A9 125%);
-            box-shadow: 0 18px 45px rgba(34, 50, 80, .17);
-        }
-
-        .sdoc-hero::after {
-            content: "";
-            position: absolute;
-            width: 240px;
-            height: 240px;
-            right: -105px;
-            bottom: -145px;
-            border: 1px solid rgba(255,255,255,.16);
-            border-radius: 50%;
-            box-shadow:
-                0 0 0 34px rgba(255,255,255,.035),
-                0 0 0 68px rgba(255,255,255,.025);
-        }
-
-        .sdoc-hero-content {
-            grid-template-columns: minmax(0, 1fr) 210px;
-        }
-
-        .sdoc-hero h1 {
-            font-size: clamp(1.45rem, 2.7vw, 2.05rem);
-        }
-
-        .sdoc-hero p {
-            max-width: 820px;
-            font-size: .84rem;
-        }
-
-        .sdoc-hero-badge {
-            min-width: 0;
-            padding: .78rem .85rem;
-            border-radius: 15px;
-            text-align: left;
-        }
-
-        .sdoc-shell {
-            grid-template-columns: 345px minmax(0, 1fr);
-            gap: .9rem;
-        }
-
-        .sdoc-panel,
-        .sdoc-report,
-        .sdoc-empty {
-            border-color: #E3E8EE;
-            border-radius: 20px;
-            box-shadow: var(--sdoc-shadow-soft);
-        }
-
-        .sdoc-panel-head {
-            padding: 1rem;
-        }
-
-        .sdoc-panel-body {
-            padding: 1rem;
-        }
-
-        .sdoc-selected-card {
-            border-radius: 15px;
-            background:
-                linear-gradient(180deg, rgba(255,255,255,.92), rgba(246,248,251,.95));
-            border-color: #DEE5ED;
-        }
-
-        .sdoc-mini-item {
-            border-radius: 11px;
-            box-shadow: 0 3px 10px rgba(28, 44, 72, .025);
-        }
-
-        .sdoc-primary-btn {
-            min-height: 46px;
-            border-radius: 12px;
-            font-size: .79rem;
-            background: linear-gradient(135deg, #263A5D, #5B789D);
-            box-shadow: 0 11px 22px rgba(67, 94, 128, .18);
-        }
-
-        .sdoc-primary-btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 14px 26px rgba(67, 94, 128, .22);
-        }
-
-        .sdoc-side-note {
-            color: #33455F;
-            background: #F3F6F9;
-            border: 1px solid #E0E6ED;
-        }
-
-        .sdoc-side-note h4 {
-            color: #253858;
-        }
-
-        .sdoc-side-note p {
-            color: #6B7789;
-        }
-
-        .sdoc-empty {
-            min-height: 560px;
-        }
-
-        .sdoc-report-toolbar {
-            top: 82px;
-            padding: .85rem 1rem;
-            border-color: #E3E8EE;
-        }
-
-        .sdoc-report-toolbar h2 {
-            font-size: 1.05rem;
-        }
-
-        .sdoc-report-body {
-            padding: .95rem;
-            background: #FBFCFD;
-        }
-
-        .sdoc-stats {
-            gap: .65rem;
-            margin-bottom: .75rem;
-        }
-
-        .sdoc-stat {
-            position: relative;
-            overflow: hidden;
-            padding: .78rem .82rem;
-            border-radius: 14px;
-            background: #FFFFFF;
-            border-color: #E1E7EE;
-            box-shadow: 0 5px 16px rgba(28, 44, 72, .035);
-        }
-
-        .sdoc-stat::after {
-            content: "";
-            position: absolute;
-            width: 46px;
-            height: 46px;
-            top: -22px;
-            right: -20px;
-            border-radius: 50%;
-            background: #ECF2F7;
-        }
-
-        .sdoc-stat strong {
-            font-size: 1.25rem;
-        }
-
-        .sdoc-quick-nav {
-            position: sticky;
-            top: 152px;
-            z-index: 4;
-            display: grid;
-            grid-template-columns: repeat(8, minmax(0, 1fr));
-            gap: .4rem;
-            margin-bottom: .75rem;
-            padding: .45rem;
-            background: rgba(255,255,255,.94);
-            backdrop-filter: blur(12px);
-            border: 1px solid #E1E7EE;
-            border-radius: 14px;
-            box-shadow: 0 8px 22px rgba(28, 44, 72, .055);
-        }
-
-        .sdoc-quick-nav button {
-            min-width: 0;
-            display: grid;
-            grid-template-columns: auto minmax(0, 1fr) auto;
-            align-items: center;
-            gap: .35rem;
-            padding: .48rem .5rem;
-            color: #667387;
-            background: transparent;
-            border: 1px solid transparent;
-            border-radius: 9px;
-            font-size: .61rem;
-            font-weight: 750;
-            text-align: left;
-            cursor: pointer;
-        }
-
-        .sdoc-quick-nav button:hover,
-        .sdoc-quick-nav button.is-active {
-            color: #263A5D;
-            background: #EDF3F8;
-            border-color: #D8E3EC;
-        }
-
-        .sdoc-quick-nav button i {
-            color: #5B789D;
-            font-size: .72rem;
-        }
-
-        .sdoc-quick-nav button span {
-            min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .sdoc-quick-nav button strong {
-            display: grid;
-            place-items: center;
-            min-width: 22px;
-            height: 20px;
-            padding: 0 .25rem;
-            color: #263A5D;
-            background: #FFFFFF;
-            border-radius: 999px;
-            font-size: .55rem;
-        }
-
-        .sdoc-section {
-            scroll-margin-top: 225px;
-            border-color: #DFE5EC;
-            border-radius: 15px;
-            box-shadow: 0 5px 17px rgba(28, 44, 72, .028);
-            transition:
-                border-color .18s ease,
-                box-shadow .18s ease,
-                transform .18s ease;
-        }
-
-        .sdoc-section:hover {
-            border-color: #CDD8E3;
-            box-shadow: 0 10px 28px rgba(28, 44, 72, .055);
-        }
-
-        .sdoc-section-head {
-            padding: .78rem .85rem;
-            background: linear-gradient(180deg, #FFFFFF, #F7F9FB);
-        }
-
-        .sdoc-section-icon {
-            width: 34px;
-            height: 34px;
-            border-radius: 10px;
-        }
-
-        .sdoc-section-title h3 {
-            font-size: .84rem;
-        }
-
-        .sdoc-item {
-            grid-template-columns: 38px minmax(0, 1fr);
-            padding: .78rem .85rem;
-            font-size: .76rem;
-            line-height: 1.58;
-            transition: background .15s ease;
-        }
-
-        .sdoc-item:hover {
-            background: #FAFBFD;
-        }
-
-        .sdoc-item-number {
-            width: 32px;
-            height: 32px;
-            border-radius: 9px;
-            background: #EDF3F8;
-        }
-
-        .sdoc-code-diagram {
-            color: #EAF0F7;
-            background:
-                linear-gradient(180deg, rgba(255,255,255,.025), transparent),
-                #202F49;
-            border: 1px solid #344A6C;
-        }
-
-        .sdoc-code-report {
-            color: #26354B;
-            background: #F7F9FB;
-            border: 1px solid #DDE4EC;
-            font-family: "Segoe UI", Arial, sans-serif;
-            font-size: .77rem;
-            line-height: 1.72;
-        }
-
-        .sdoc-loading-card {
-            width: min(570px, calc(100% - 2rem));
-            padding: 1.15rem;
-            text-align: left;
-        }
-
-        .sdoc-loading-card .sdoc-spinner {
-            margin-bottom: .8rem;
-        }
-
-        .sdoc-loading-kicker {
-            margin-bottom: .18rem;
-            color: #5B789D;
-            font-size: .62rem;
-            font-weight: 850;
-            letter-spacing: .09em;
-            text-transform: uppercase;
-        }
-
-        .sdoc-loading-track {
-            height: 5px;
-            margin-top: .9rem;
-            overflow: hidden;
-            background: #E8EDF2;
-            border-radius: 999px;
-        }
-
-        .sdoc-loading-track span {
-            display: block;
-            width: 34%;
-            height: 100%;
-            background: linear-gradient(90deg, #263A5D, #6987A9);
-            border-radius: inherit;
-            animation: sdocLoadTrack 1.45s ease-in-out infinite;
-        }
-
-        .sdoc-loading-status {
-            display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-            gap: .38rem;
-            margin-top: .65rem;
-        }
-
-        .sdoc-loading-status span {
-            display: flex;
-            align-items: center;
-            gap: .3rem;
-            padding: .45rem;
-            color: #7A8697;
-            background: #F7F9FB;
-            border: 1px solid #E1E7EE;
-            border-radius: 9px;
-            font-size: .59rem;
-            line-height: 1.3;
-        }
-
-        .sdoc-loading-status span.is-active {
-            color: #263A5D;
-            background: #EDF3F8;
-            border-color: #D5E1EB;
-            font-weight: 800;
-        }
-
-        @@keyframes sdocLoadTrack {
-            0% {
-                transform: translateX(-115%);
-            }
-
-            100% {
-                transform: translateX(300%);
-            }
-        }
-
-        @@media (max-width: 1370px) {
-            .sdoc-quick-nav {
-                grid-template-columns: repeat(4, minmax(0, 1fr));
-            }
-        }
-
-        @@media (max-width: 991px) {
-            .sdoc-hero-content {
-                grid-template-columns: 1fr;
-            }
-
-            .sdoc-hero-badge {
-                max-width: 240px;
-            }
-
-            .sdoc-quick-nav {
-                position: static;
-            }
-        }
-
-        @@media (max-width: 720px) {
-            .sdoc-quick-nav {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-            }
-
-            .sdoc-loading-status {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-            }
-        }
-
-        @@media (max-width: 480px) {
-            .sdoc-quick-nav,
-            .sdoc-loading-status {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        @@media (prefers-reduced-motion: reduce) {
-            .sdoc-primary-btn,
-            .sdoc-section,
-            .sdoc-loading-track span {
-                transition: none !important;
-                animation: none !important;
-                transform: none !important;
-            }
-        }
-
-        @@media print {
-            .sdoc-quick-nav {
+            .doc-code-toolbar,
+            .doc-copy-btn {
                 display: none !important;
             }
-
-            .sdoc-code-report {
-                color: #111 !important;
-                background: #FFFFFF !important;
-                font-family: "Segoe UI", Arial, sans-serif !important;
-            }
         }
-
     </style>
 }
 
-<section class="sdoc-page">
+<section class="doc-page">
 
-    <div class="sdoc-hero mb-3 no-print">
-        <div class="sdoc-hero-content">
-            <div>
-                <div class="sdoc-kicker">
-                    <i class="bi bi-file-earmark-code"></i>
-                    AI Software Documentation
-                </div>
-
-                <h1>Software Documentation Generator</h1>
-
-                <p>
-                    Generate a professional software engineering documentation package from your selected FYP idea.
-                    The page uses your real saved idea and prepares the content for AI-generated requirements,
-                    use cases, database design, UI structure, diagrams, and AI technical reporting.
-                </p>
+    <header class="doc-cover-header no-print">
+        <div class="doc-cover-copy">
+            <div class="doc-cover-kicker">
+                <i class="bi bi-stars" aria-hidden="true"></i>
+                AI-Guided Documentation
             </div>
 
-            <div class="sdoc-hero-badge">
-                <span>Output Type</span>
-                <strong>SE Report Package</strong>
+            <h1 class="doc-cover-title">Software Documentation Studio</h1>
+
+            <p class="doc-cover-subtitle">
+                Read your project documentation one chapter at a time. Each section starts with a simple explanation,
+                then shows the technical details only when you are ready to review them.
+            </p>
+        </div>
+
+        <div class="doc-cover-badges">
+            <div class="doc-cover-badge">
+                <span>Document Type</span>
+                <strong>SRS + Software Design</strong>
+            </div>
+
+            <div class="doc-cover-badge">
+                <span>Safety Layer</span>
+                <strong>Reviewed &amp; Validated</strong>
             </div>
         </div>
-    </div>
+    </header>
 
     @if (!string.IsNullOrWhiteSpace(Model.Message))
     {
-        <div class="alert alert-success sdoc-alert no-print">
-            <i class="bi bi-check-circle me-2"></i>
-            @Model.Message
+        <div class="doc-alert doc-alert-success no-print" role="status">
+            <i class="bi bi-check-circle-fill" aria-hidden="true"></i>
+            <span>@Model.Message</span>
         </div>
     }
 
     @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
     {
-        <div class="alert alert-danger sdoc-alert no-print">
-            <i class="bi bi-exclamation-triangle me-2"></i>
-            @Model.ErrorMessage
+        <div class="doc-alert doc-alert-danger no-print" role="alert">
+            <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+            <span>@Model.ErrorMessage</span>
         </div>
     }
 
     @if (Model.LatestReview != null)
     {
         var (badgeClass, badgeLabel) = Model.DescribeReview(Model.LatestReview);
-        <div class="mb-3 no-print">
+
+        <div class="doc-review-bar no-print">
+            <div class="doc-review-copy">
+                <i class="bi bi-shield-check" aria-hidden="true"></i>
+                <span>
+                    This documentation includes a Quality Passport and a recorded Review Layer decision.
+                </span>
+            </div>
+
             <span class="badge @badgeClass" title="@Model.LatestReview.DecisionReason">
-                <i class="bi bi-shield-check"></i> @badgeLabel
+                @badgeLabel
             </span>
         </div>
     }
 
-    <div asp-validation-summary="ModelOnly" class="text-danger mb-3 no-print"></div>
+    <div asp-validation-summary="ModelOnly" class="text-danger mt-2 no-print"></div>
 
-    <div class="sdoc-shell">
+    <section class="doc-source-bar no-print" aria-label="Documentation source">
+        <div class="doc-source-control">
+            <label asp-for="SelectedProjectIdeaId">Saved Project Idea</label>
 
-        <aside class="sdoc-panel no-print">
-            <div class="sdoc-panel-head">
-                <h2>Documentation Setup</h2>
-                <p>Select the saved project idea that should be used by the AI documentation generator.</p>
-            </div>
+            <select asp-for="SelectedProjectIdeaId"
+                    asp-items="Model.ProjectIdeaOptions"
+                    class="form-select doc-source-select"
+                    onchange="if(this.value){ window.location='?projectIdeaId=' + this.value; }">
+            </select>
 
-            <div class="sdoc-panel-body">
-                <form method="post" asp-page-handler="Generate" id="sdocGenerateForm">
-                    @Html.AntiForgeryToken()
+            <span asp-validation-for="SelectedProjectIdeaId" class="text-danger small"></span>
+        </div>
 
-                    <div class="mb-3">
-                        <label class="sdoc-label">Saved Project Idea</label>
+        @if (hasSelectedIdea)
+        {
+            <div class="doc-source-project">
+                <div class="doc-source-icon" aria-hidden="true">
+                    <i class="bi bi-lightbulb"></i>
+                </div>
 
-                        <select asp-for="SelectedProjectIdeaId"
-                                asp-items="Model.ProjectIdeaOptions"
-                                class="form-select sdoc-select"
-                                onchange="if(this.value){ window.location='?projectIdeaId=' + this.value; }">
-                        </select>
-
-                        <div class="sdoc-helper">
-                            Documentation will be generated from the project idea stored under your account.
-                        </div>
-
-                        <span asp-validation-for="SelectedProjectIdeaId" class="text-danger small"></span>
-                    </div>
-
-                    @if (hasSelectedIdea)
-                    {
-                        <input type="hidden" asp-for="SelectedProjectIdeaId" />
-
-                        <div class="sdoc-selected-card">
-                            <div class="sdoc-selected-top">
-                                <div class="sdoc-selected-icon">
-                                    <i class="bi bi-lightbulb"></i>
-                                </div>
-
-                                <div class="min-w-0">
-                                    <h3>@Model.Request.ProjectTitle</h3>
-                                    <p>This selected idea will be sent to the documentation AI service.</p>
-                                </div>
-                            </div>
-
-                            <div class="sdoc-mini-grid">
-                                <div class="sdoc-mini-item">
-                                    <span>Domain</span>
-                                    <strong>
-                                        @(string.IsNullOrWhiteSpace(Model.Request.Domain) ? "Not specified" : Model.Request.Domain)
-                                    </strong>
-                                </div>
-
-                                <div class="sdoc-mini-item">
-                                    <span>Technology Stack</span>
-                                    <strong>
-                                        @(string.IsNullOrWhiteSpace(Model.Request.TechStack) ? "Not specified" : Model.Request.TechStack)
-                                    </strong>
-                                </div>
-
-                                <div class="sdoc-mini-item">
-                                    <span>Project Summary</span>
-                                    <strong>
-                                        @(string.IsNullOrWhiteSpace(Model.Request.ProjectDescription)
-                                            ? "No description available."
-                                            : Model.Request.ProjectDescription)
-                                    </strong>
-                                </div>
-                            </div>
-
-                            @if (Model.Request.ContainsAi)
-                            {
-                                <div class="sdoc-ai-check">
-                                    <i class="bi bi-cpu"></i>
-                                    AI/Data Science component detected
-                                </div>
-                            }
-                            else
-                            {
-                                <div class="sdoc-ai-check">
-                                    <i class="bi bi-diagram-3"></i>
-                                    Standard software engineering documentation
-                                </div>
-                            }
-                        </div>
-
-                        <button type="submit" class="btn sdoc-primary-btn" id="sdocGenerateBtn">
-                            <i class="bi bi-stars me-2"></i>
-                            Generate AI Software Documentation
-                        </button>
-                    }
-                    else
-                    {
-                        <button type="button" class="btn sdoc-primary-btn" disabled>
-                            <i class="bi bi-lock me-2"></i>
-                            Select an Idea First
-                        </button>
-                    }
-                </form>
-
-                <div class="sdoc-side-note">
-                    <h4>
-                        <i class="bi bi-info-circle me-1"></i>
-                        What will be generated?
-                    </h4>
+                <div class="min-w-0">
+                    <h2>@Model.Request.ProjectTitle</h2>
                     <p>
-                        Functional requirements, non-functional requirements, use cases, edge cases,
-                        database design, UI structure, diagram descriptions, and AI technical report.
+                        @(string.IsNullOrWhiteSpace(Model.Request.Domain)
+                            ? "Domain not specified"
+                            : Model.Request.Domain)
+                        ·
+                        @(string.IsNullOrWhiteSpace(Model.Request.TechStack)
+                            ? "Technology stack not specified"
+                            : Model.Request.TechStack)
                     </p>
                 </div>
             </div>
-        </aside>
+        }
+        else
+        {
+            <div class="doc-source-project">
+                <div class="doc-source-icon" aria-hidden="true">
+                    <i class="bi bi-arrow-left-right"></i>
+                </div>
 
-        <main class="min-w-0">
-            @if (docs == null)
-            {
-                <div class="sdoc-empty">
-                    <div>
-                        <div class="sdoc-empty-icon">
-                            <i class="bi bi-file-earmark-text"></i>
+                <div>
+                    <h2>No idea selected</h2>
+                    <p>Choose a saved project idea to load its real project context.</p>
+                </div>
+            </div>
+        }
+
+        <form method="post" asp-page-handler="Generate" id="docGenerateForm">
+            @Html.AntiForgeryToken()
+            <input type="hidden" asp-for="SelectedProjectIdeaId" />
+
+            <button type="submit"
+                    class="btn doc-generate-btn"
+                    id="docGenerateBtn"
+                    disabled="@(!hasSelectedIdea ? "disabled" : null)">
+                <i class="bi bi-stars" aria-hidden="true"></i>
+                @(docs == null ? "Generate Documentation" : "Regenerate Documentation")
+            </button>
+        </form>
+    </section>
+
+    @if (docs == null)
+    {
+        <section class="doc-empty">
+            <div class="doc-empty-inner">
+                <div class="doc-empty-icon" aria-hidden="true">
+                    <i class="bi bi-journal-richtext"></i>
+                </div>
+
+                @if (hasSelectedIdea)
+                {
+                    <h2>Your project is ready</h2>
+
+                    <p>
+                        Generate the documentation package, then read it chapter by chapter.
+                        You will see a simple explanation before every technical section.
+                    </p>
+
+                    <div class="doc-empty-steps">
+                        <div class="doc-empty-step">
+                            <span>1</span>
+                            <strong>Read the overview</strong>
+                            <p>Start with the project summary and key document counts.</p>
                         </div>
 
-                        @if (hasSelectedIdea)
-                        {
-                            <h2>Ready to generate documentation</h2>
+                        <div class="doc-empty-step">
+                            <span>2</span>
+                            <strong>Open one chapter</strong>
+                            <p>Only one topic is shown at a time, so the page stays calm and clear.</p>
+                        </div>
 
-                            <p>
-                                Your selected project idea is loaded. Click
-                                <strong>Generate AI Software Documentation</strong>
-                                to create the full software engineering package.
-                            </p>
-
-                            <div class="sdoc-empty-actions">
-                                <span class="sdoc-soft-pill">
-                                    <i class="bi bi-check2-circle"></i>
-                                    Real project idea loaded
-                                </span>
-
-                                <span class="sdoc-soft-pill">
-                                    <i class="bi bi-stars"></i>
-                                    AI-ready request
-                                </span>
-                            </div>
-                        }
-                        else
-                        {
-                            <h2>No project idea selected</h2>
-
-                            <p>
-                                Select one of your saved project ideas from the left panel.
-                                The page no longer uses static sample data, so documentation will only be generated
-                                from a real saved idea.
-                            </p>
-
-                            <div class="sdoc-empty-actions">
-                                <span class="sdoc-soft-pill">
-                                    <i class="bi bi-lightbulb"></i>
-                                    Choose saved idea
-                                </span>
-
-                                <span class="sdoc-soft-pill">
-                                    <i class="bi bi-magic"></i>
-                                    Generate with AI
-                                </span>
-                            </div>
-                        }
+                        <div class="doc-empty-step">
+                            <span>3</span>
+                            <strong>Download when ready</strong>
+                            <p>The print version includes all chapters in a formal report.</p>
+                        </div>
                     </div>
-                </div>
-            }
-            else
-            {
-                <div id="se-report" class="sdoc-report">
+                }
+                else
+                {
+                    <h2>Select a project idea first</h2>
 
-                    <div class="sdoc-report-toolbar">
-                        <div class="min-w-0">
+                    <p>
+                        Choose a saved project from the bar above. The documentation generator uses the selected
+                        project as its source of truth and does not rely on static sample data.
+                    </p>
+                }
+            </div>
+        </section>
+    }
+    else
+    {
+        <article id="se-report">
+
+            <section class="doc-print-cover">
+                <div class="doc-print-cover-kicker">Generated Documentation Package</div>
+
+                <h1>@docs.Title</h1>
+
+                <h2>Software Requirements Specification &amp; Software Design Document</h2>
+
+                <div class="doc-print-meta">
+                    <div><strong>Project:</strong> @Model.Request.ProjectTitle</div>
+                    <div><strong>Domain:</strong> @(string.IsNullOrWhiteSpace(Model.Request.Domain) ? "Not specified" : Model.Request.Domain)</div>
+                    <div><strong>Technology stack:</strong> @(string.IsNullOrWhiteSpace(Model.Request.TechStack) ? "Not specified" : Model.Request.TechStack)</div>
+                    <div><strong>Generated on:</strong> @docs.CreatedAt.ToString("dd MMMM yyyy, HH:mm")</div>
+                    <div><strong>Status:</strong> @docs.SupervisorStatus</div>
+                </div>
+
+                <div class="doc-print-footer">Generated by FYPilot</div>
+            </section>
+
+            <section class="doc-print-toc">
+                <h2>Table of Contents</h2>
+                <ol>
+                    <li>Project Overview</li>
+                    <li>Functional Requirements</li>
+                    <li>Non-Functional Requirements</li>
+                    <li>Use Cases</li>
+                    <li>Edge Cases</li>
+                    <li>Database Design</li>
+                    <li>UI / Frontend Design</li>
+                    <li>Diagram Specifications</li>
+                    <li>Architecture, Security, Testing, Traceability &amp; Quality</li>
+                </ol>
+            </section>
+
+            <div class="doc-reader">
+
+                <aside class="doc-reader-sidebar no-print">
+                    <div class="doc-reader-sidebar-head">
+                        <span>Document Chapters</span>
+                        <strong>Choose one topic to read</strong>
+                    </div>
+
+                    <div class="doc-chapter-nav" role="tablist" aria-orientation="vertical">
+                        @RenderNavButton("overview", "0", "Project Overview", "Start here", "bi-house-door", "1", true)
+                        @RenderNavButton("fr", "1", "Functional Requirements", "What the system does", "bi-list-check", functionalCount.ToString(), false)
+                        @RenderNavButton("nfr", "2", "Quality Requirements", "How well it should work", "bi-shield-check", nonFunctionalCount.ToString(), false)
+                        @RenderNavButton("uc", "3", "Use Cases", "How users interact", "bi-person-gear", useCaseCount.ToString(), false)
+                        @RenderNavButton("ec", "4", "Edge Cases", "What can go wrong", "bi-exclamation-triangle", edgeCaseCount.ToString(), false)
+                        @RenderNavButton("db", "5", "Database Design", "What data is stored", "bi-database", databaseCount.ToString(), false)
+                        @RenderNavButton("ui", "6", "UI Screens", "What users will see", "bi-window-sidebar", uiCount.ToString(), false)
+                        @RenderNavButton("diagrams", "7", "Diagrams", "Visual system flows", "bi-diagram-3", "1", false)
+                        @RenderNavButton("extended", "8", "Engineering Report", "Architecture and testing", "bi-cpu", "1", false)
+                    </div>
+                </aside>
+
+                <main class="doc-reader-main">
+                    <div class="doc-reader-toolbar no-print">
+                        <div class="doc-reader-toolbar-copy">
                             <span>Generated Documentation Package</span>
                             <h2>@docs.Title</h2>
                         </div>
 
-                        <div class="d-flex flex-wrap gap-2 align-items-center no-print">
-                            <div class="sdoc-status">
-                                <i class="bi bi-check-circle"></i>
+                        <div class="doc-reader-toolbar-actions">
+                            <span class="doc-status-pill">
+                                <i class="bi bi-check-circle-fill" aria-hidden="true"></i>
                                 @docs.SupervisorStatus
-                            </div>
+                            </span>
 
                             <button type="button"
-                                    class="btn sdoc-print-btn"
+                                    class="btn doc-print-btn"
                                     onclick="window.print()">
-                                <i class="bi bi-download me-1"></i>
+                                <i class="bi bi-download" aria-hidden="true"></i>
                                 Download PDF
                             </button>
                         </div>
                     </div>
 
-                    <div class="sdoc-cover">
-                        <div class="sdoc-cover-title">@docs.Title</div>
-                        <div class="sdoc-cover-subtitle">Software Requirements Specification &amp; Software Design Document</div>
-                        <div class="sdoc-cover-meta">
-                            <div><strong>Project:</strong> @Model.Request.ProjectTitle</div>
-                            <div><strong>Domain:</strong> @(string.IsNullOrWhiteSpace(Model.Request.Domain) ? "Not specified" : Model.Request.Domain)</div>
-                            <div><strong>Technology stack:</strong> @(string.IsNullOrWhiteSpace(Model.Request.TechStack) ? "Not specified" : Model.Request.TechStack)</div>
-                            <div><strong>Generated on:</strong> @docs.CreatedAt.ToString("dd MMMM yyyy, HH:mm")</div>
-                            <div><strong>Status:</strong> @docs.SupervisorStatus</div>
-                        </div>
-                        <div class="sdoc-cover-footer">Generated by FYPilot</div>
-                    </div>
+                    <section class="doc-chapter is-active"
+                             id="panel-overview"
+                             data-doc-panel="overview"
+                             role="tabpanel"
+                             aria-hidden="false">
+                        <div class="doc-chapter-head">
+                            <div class="doc-chapter-number">0</div>
 
-                    <div class="sdoc-toc">
-                        <h3>Table of Contents</h3>
-                        <ol>
-                            <li>Functional Requirements</li>
-                            <li>Non-Functional Requirements</li>
-                            <li>Use Cases</li>
-                            <li>Edge Cases</li>
-                            <li>Database Design</li>
-                            <li>UI / Frontend Design</li>
-                            <li>Diagram Specifications</li>
-                            <li>Architecture, Security, Testing, Traceability &amp; Quality Assessment</li>
-                        </ol>
-                    </div>
-
-                    <div class="sdoc-report-body">
-
-                        <div class="sdoc-stats">
-                            <div class="sdoc-stat">
-                                <strong>@functionalCount</strong>
-                                <span>Functional Requirements</span>
-                            </div>
-
-                            <div class="sdoc-stat">
-                                <strong>@nonFunctionalCount</strong>
-                                <span>Non-Functional Requirements</span>
-                            </div>
-
-                            <div class="sdoc-stat">
-                                <strong>@useCaseCount</strong>
-                                <span>Use Cases</span>
-                            </div>
-
-                            <div class="sdoc-stat">
-                                <strong>@totalGeneratedItems</strong>
-                                <span>Total Generated Items</span>
+                            <div>
+                                <h2>Project Overview</h2>
+                                <p>Understand the project and the structure of this document before reading technical details.</p>
                             </div>
                         </div>
 
+                        <div class="doc-simple-box">
+                            <div class="doc-simple-box-icon" aria-hidden="true">
+                                <i class="bi bi-lightbulb"></i>
+                            </div>
 
-                        <nav class="sdoc-quick-nav no-print" aria-label="Documentation sections">
-                            <button type="button" data-sdoc-section="0">
-                                <i class="bi bi-list-check"></i>
-                                <span>Functional</span>
-                                <strong>@functionalCount</strong>
-                            </button>
-                            <button type="button" data-sdoc-section="1">
-                                <i class="bi bi-shield-check"></i>
-                                <span>Non-Functional</span>
-                                <strong>@nonFunctionalCount</strong>
-                            </button>
-                            <button type="button" data-sdoc-section="2">
-                                <i class="bi bi-person-gear"></i>
-                                <span>Use Cases</span>
-                                <strong>@useCaseCount</strong>
-                            </button>
-                            <button type="button" data-sdoc-section="3">
-                                <i class="bi bi-exclamation-triangle"></i>
-                                <span>Edge Cases</span>
-                                <strong>@edgeCaseCount</strong>
-                            </button>
-                            <button type="button" data-sdoc-section="4">
-                                <i class="bi bi-database"></i>
-                                <span>Database</span>
-                                <strong>@databaseCount</strong>
-                            </button>
-                            <button type="button" data-sdoc-section="5">
-                                <i class="bi bi-window-sidebar"></i>
-                                <span>UI Design</span>
-                                <strong>@uiCount</strong>
-                            </button>
-                            <button type="button" data-sdoc-section="6">
-                                <i class="bi bi-diagram-3"></i>
-                                <span>Diagrams</span>
-                                <strong>1</strong>
-                            </button>
-                            <button type="button" data-sdoc-section="7">
-                                <i class="bi bi-cpu"></i>
-                                <span>Extended</span>
-                                <strong>1</strong>
-                            </button>
-                        </nav>
+                            <div>
+                                <strong>In simple words</strong>
+                                <p>
+                                    This page explains what your project should do, how users interact with it,
+                                    what data it stores, how it is designed, and how it should be tested.
+                                </p>
+                            </div>
+                        </div>
 
-                        @RenderListSection("1. Functional Requirements", "Core features the system must provide.", "bi-list-check", "FR", functionalRequirements)
-                        @RenderListSection("2. Non-Functional Requirements", "Quality, performance, security, and usability requirements.", "bi-shield-check", "NFR", nonFunctionalRequirements)
-                        @RenderListSection("3. Use Cases", "Main user interactions and system behavior.", "bi-person-gear", "UC", useCases)
-                        @RenderListSection("4. Edge Cases", "Special conditions and unusual system scenarios.", "bi-exclamation-triangle", "EC", edgeCases)
-                        @RenderListSection("5. Database Design", "Suggested entities, relationships, and database structure.", "bi-database", "DB", databaseDesign)
-                        @RenderListSection("6. UI / Frontend Design", "Suggested screens, pages, and interface structure.", "bi-window-sidebar", "UI", uiDesign)
+                        <div class="doc-chapter-body">
+                            <div class="doc-overview-grid">
+                                <section class="doc-overview-card">
+                                    <span>Project</span>
+                                    <h3>@Model.Request.ProjectTitle</h3>
+                                    <p>
+                                        @(string.IsNullOrWhiteSpace(Model.Request.ProjectDescription)
+                                            ? "No project description was provided."
+                                            : Model.Request.ProjectDescription)
+                                    </p>
+                                </section>
 
-                        <section class="sdoc-section">
-                            <div class="sdoc-section-head">
-                                <div class="sdoc-section-title">
-                                    <span class="sdoc-section-icon">
-                                        <i class="bi bi-diagram-3"></i>
-                                    </span>
+                                <section class="doc-overview-card">
+                                    <span>Project details</span>
 
+                                    <div class="doc-overview-meta">
+                                        <div class="doc-meta-row">
+                                            <span>Domain</span>
+                                            <strong>@(string.IsNullOrWhiteSpace(Model.Request.Domain) ? "Not specified" : Model.Request.Domain)</strong>
+                                        </div>
+
+                                        <div class="doc-meta-row">
+                                            <span>Technology</span>
+                                            <strong>@(string.IsNullOrWhiteSpace(Model.Request.TechStack) ? "Not specified" : Model.Request.TechStack)</strong>
+                                        </div>
+
+                                        <div class="doc-meta-row">
+                                            <span>Generated</span>
+                                            <strong>@docs.CreatedAt.ToString("dd MMM yyyy")</strong>
+                                        </div>
+
+                                        <div class="doc-meta-row">
+                                            <span>Status</span>
+                                            <strong>@docs.SupervisorStatus</strong>
+                                        </div>
+                                    </div>
+                                </section>
+                            </div>
+
+                            <div class="doc-stat-grid">
+                                <div class="doc-stat-card">
+                                    <div class="doc-stat-icon"><i class="bi bi-list-check"></i></div>
                                     <div>
-                                        <h3>7. Diagram Descriptions</h3>
-                                        <p>Descriptions for diagrams that can be drawn later.</p>
+                                        <strong>@functionalCount</strong>
+                                        <span>Functional requirements</span>
                                     </div>
                                 </div>
 
-                                <span class="sdoc-count">Text block</span>
+                                <div class="doc-stat-card">
+                                    <div class="doc-stat-icon"><i class="bi bi-shield-check"></i></div>
+                                    <div>
+                                        <strong>@nonFunctionalCount</strong>
+                                        <span>Quality requirements</span>
+                                    </div>
+                                </div>
+
+                                <div class="doc-stat-card">
+                                    <div class="doc-stat-icon"><i class="bi bi-person-gear"></i></div>
+                                    <div>
+                                        <strong>@useCaseCount</strong>
+                                        <span>Use cases</span>
+                                    </div>
+                                </div>
+
+                                <div class="doc-stat-card">
+                                    <div class="doc-stat-icon"><i class="bi bi-collection"></i></div>
+                                    <div>
+                                        <strong>@totalGeneratedItems</strong>
+                                        <span>Total generated items</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        @RenderBottomNavigation("overview")
+                    </section>
+
+                    @RenderListChapter(
+                        "fr",
+                        "1",
+                        "Functional Requirements",
+                        "These are the features and actions the system must provide.",
+                        "This chapter answers: What should the system actually do?",
+                        "bi-list-check",
+                        "FR",
+                        functionalRequirements)
+
+                    @RenderListChapter(
+                        "nfr",
+                        "2",
+                        "Non-Functional Requirements",
+                        "These describe quality targets such as security, performance, reliability, and usability.",
+                        "This chapter answers: How well should the system work?",
+                        "bi-shield-check",
+                        "NFR",
+                        nonFunctionalRequirements)
+
+                    @RenderListChapter(
+                        "uc",
+                        "3",
+                        "Use Cases",
+                        "These explain the steps a user follows to complete an important action.",
+                        "This chapter answers: How will each user interact with the system?",
+                        "bi-person-gear",
+                        "UC",
+                        useCases)
+
+                    @RenderListChapter(
+                        "ec",
+                        "4",
+                        "Edge Cases",
+                        "These show unusual situations, errors, and how the system should respond.",
+                        "This chapter answers: What can go wrong, and what should happen next?",
+                        "bi-exclamation-triangle",
+                        "EC",
+                        edgeCases)
+
+                    @RenderListChapter(
+                        "db",
+                        "5",
+                        "Database Design",
+                        "This section lists the information stored by the system and how records relate to each other.",
+                        "This chapter answers: What data does the project need to save?",
+                        "bi-database",
+                        "DB",
+                        databaseDesign)
+
+                    @RenderListChapter(
+                        "ui",
+                        "6",
+                        "UI / Frontend Design",
+                        "These are the screens, controls, and states that users will see.",
+                        "This chapter answers: What will the application look like to its users?",
+                        "bi-window-sidebar",
+                        "UI",
+                        uiDesign)
+
+                    <section class="doc-chapter"
+                             id="panel-diagrams"
+                             data-doc-panel="diagrams"
+                             role="tabpanel"
+                             aria-hidden="true">
+                        <div class="doc-chapter-head">
+                            <div class="doc-chapter-number">7</div>
+
+                            <div>
+                                <h2>Diagram Specifications</h2>
+                                <p>Mermaid definitions for system structure, data, activities, and interactions.</p>
+                            </div>
+                        </div>
+
+                        <div class="doc-simple-box">
+                            <div class="doc-simple-box-icon" aria-hidden="true">
+                                <i class="bi bi-emoji-smile"></i>
                             </div>
 
-                            <div class="sdoc-code sdoc-code-diagram">
-                                @(string.IsNullOrWhiteSpace(docs.DiagramDescriptions)
+                            <div>
+                                <strong>In simple words</strong>
+                                <p>
+                                    Diagrams turn the written design into pictures. The code below can be rendered
+                                    later as ER, class, activity, or sequence diagrams.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="doc-chapter-body">
+                            <div class="doc-code-wrap">
+                                <div class="doc-code-toolbar no-print">
+                                    <span>Mermaid-ready diagram text</span>
+
+                                    <button type="button"
+                                            class="doc-copy-btn"
+                                            data-copy-target="diagram-code">
+                                        <i class="bi bi-copy"></i>
+                                        Copy
+                                    </button>
+                                </div>
+
+                                <pre class="doc-code" id="diagram-code">@(string.IsNullOrWhiteSpace(docs.DiagramDescriptions)
                                     ? "No diagram descriptions returned."
-                                    : docs.DiagramDescriptions)
+                                    : docs.DiagramDescriptions)</pre>
                             </div>
-                        </section>
+                        </div>
 
-                        <section class="sdoc-section mb-0">
-                            <div class="sdoc-section-head">
-                                <div class="sdoc-section-title">
-                                    <span class="sdoc-section-icon">
-                                        <i class="bi bi-cpu"></i>
-                                    </span>
+                        @RenderBottomNavigation("diagrams")
+                    </section>
 
-                                    <div>
-                                        <h3>8. Architecture, Security, Testing, Traceability &amp; Quality Assessment</h3>
-                                        <p>Architecture, module design, API/integration, security, testing strategy, traceability matrix, AI technical report (if applicable), risks, assumptions, and the deterministic documentation quality assessment.</p>
-                                    </div>
+                    <section class="doc-chapter"
+                             id="panel-extended"
+                             data-doc-panel="extended"
+                             role="tabpanel"
+                             aria-hidden="true">
+                        <div class="doc-chapter-head">
+                            <div class="doc-chapter-number">8</div>
+
+                            <div>
+                                <h2>Architecture, Security, Testing &amp; Quality</h2>
+                                <p>The complete engineering explanation, traceability, assumptions, and quality assessment.</p>
+                            </div>
+                        </div>
+
+                        <div class="doc-simple-box">
+                            <div class="doc-simple-box-icon" aria-hidden="true">
+                                <i class="bi bi-emoji-smile"></i>
+                            </div>
+
+                            <div>
+                                <strong>In simple words</strong>
+                                <p>
+                                    This is the technical report for supervisors and developers. Read it after the previous
+                                    chapters because it connects architecture, testing, risks, and quality in one place.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="doc-chapter-body">
+                            <div class="doc-code-wrap">
+                                <div class="doc-code-toolbar no-print">
+                                    <span>Extended engineering report</span>
+
+                                    <button type="button"
+                                            class="doc-copy-btn"
+                                            data-copy-target="extended-code">
+                                        <i class="bi bi-copy"></i>
+                                        Copy
+                                    </button>
                                 </div>
 
-                                <span class="sdoc-count">Extended report</span>
-                            </div>
-
-                            <div class="sdoc-code sdoc-code-report">
-                                @(string.IsNullOrWhiteSpace(docs.AiTechnicalReport)
+                                <pre class="doc-code" id="extended-code">@(string.IsNullOrWhiteSpace(docs.AiTechnicalReport)
                                     ? "No extended report returned."
-                                    : docs.AiTechnicalReport)
+                                    : docs.AiTechnicalReport)</pre>
                             </div>
-                        </section>
+                        </div>
 
-                    </div>
-                </div>
-            }
-        </main>
-    </div>
+                        @RenderBottomNavigation("extended")
+                    </section>
+                </main>
+            </div>
+        </article>
+    }
 </section>
 
-<div class="sdoc-loading" id="sdocLoading">
-    <div class="sdoc-loading-card">
-        <div class="sdoc-spinner"></div>
+<div class="doc-loading" id="docLoading" role="status" aria-live="polite">
+    <div class="doc-loading-card">
+        <div class="doc-loading-top">
+            <div class="doc-loading-spinner" aria-hidden="true"></div>
 
-        <div class="sdoc-loading-kicker">AI documentation workflow</div>
-        <h3>Building your documentation package</h3>
-
-        <p>
-            FYPilot is reading your project context, generating structured sections,
-            validating consistency, and reviewing the final result.
-        </p>
-
-        <div class="sdoc-loading-track" aria-hidden="true">
-            <span></span>
+            <div>
+                <h3>Creating your documentation</h3>
+                <p>
+                    Keep this page open while FYPilot reads the project, generates the sections,
+                    validates consistency, and reviews the final result.
+                </p>
+            </div>
         </div>
 
-        <div class="sdoc-loading-status">
-            <span class="is-active"><i class="bi bi-folder2-open"></i> Project facts</span>
-            <span><i class="bi bi-list-check"></i> Requirements</span>
-            <span><i class="bi bi-diagram-3"></i> Design</span>
-            <span><i class="bi bi-shield-check"></i> Review</span>
+        <div class="doc-loading-progress" aria-hidden="true">
+            <div></div>
         </div>
+
+        <ol class="doc-loading-steps">
+            <li class="is-active">
+                <i class="bi bi-folder2-open"></i>
+                Reading project facts
+            </li>
+            <li>
+                <i class="bi bi-list-check"></i>
+                Writing requirements
+            </li>
+            <li>
+                <i class="bi bi-diagram-3"></i>
+                Building designs
+            </li>
+            <li>
+                <i class="bi bi-shield-check"></i>
+                Reviewing quality
+            </li>
+        </ol>
     </div>
 </div>
 
@@ -1766,146 +1946,354 @@
     <partial name="_ValidationScriptsPartial" />
 
     <script>
-        const sdocForm = document.getElementById("sdocGenerateForm");
-        const sdocLoading = document.getElementById("sdocLoading");
-        const sdocGenerateBtn = document.getElementById("sdocGenerateBtn");
+        (function () {
+            const chapterOrder = [
+                "overview",
+                "fr",
+                "nfr",
+                "uc",
+                "ec",
+                "db",
+                "ui",
+                "diagrams",
+                "extended"
+            ];
 
-        if (sdocForm) {
-            sdocForm.addEventListener("submit", function () {
-                if (sdocLoading) {
-                    sdocLoading.classList.add("show");
+            const buttons = Array.from(document.querySelectorAll("[data-doc-chapter]"));
+            const panels = Array.from(document.querySelectorAll("[data-doc-panel]"));
+            const previousButtons = Array.from(document.querySelectorAll("[data-doc-previous]"));
+            const nextButtons = Array.from(document.querySelectorAll("[data-doc-next]"));
+
+            function showChapter(chapterId, updateHash) {
+                if (!chapterOrder.includes(chapterId)) {
+                    chapterId = "overview";
                 }
 
-                if (sdocGenerateBtn) {
-                    sdocGenerateBtn.disabled = true;
-                    sdocGenerateBtn.innerHTML = `
-                        <span class="spinner-border spinner-border-sm me-2"></span>
-                        Generating Documentation...
-                    `;
+                buttons.forEach(function (button) {
+                    const active = button.getAttribute("data-doc-chapter") === chapterId;
+                    button.classList.toggle("is-active", active);
+                    button.setAttribute("aria-selected", active ? "true" : "false");
+                });
+
+                panels.forEach(function (panel) {
+                    const active = panel.getAttribute("data-doc-panel") === chapterId;
+                    panel.classList.toggle("is-active", active);
+                    panel.setAttribute("aria-hidden", active ? "false" : "true");
+                });
+
+                if (updateHash) {
+                    history.replaceState(null, "", "#chapter-" + chapterId);
                 }
-            });
-        }
 
+                const readerTop = document.querySelector(".doc-reader");
 
-        const sdocQuickNavButtons = Array.from(document.querySelectorAll("[data-sdoc-section]"));
-        const sdocSections = Array.from(document.querySelectorAll(".sdoc-report-body > .sdoc-section"));
-
-        sdocQuickNavButtons.forEach(function (button) {
-            button.addEventListener("click", function () {
-                const index = Number(button.getAttribute("data-sdoc-section"));
-                const section = sdocSections[index];
-
-                if (section) {
-                    section.scrollIntoView({
+                if (readerTop && updateHash) {
+                    readerTop.scrollIntoView({
                         behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
                             ? "auto"
                             : "smooth",
                         block: "start"
                     });
                 }
-            });
-        });
-
-        if ("IntersectionObserver" in window && sdocSections.length > 0) {
-            const sectionObserver = new IntersectionObserver(function (entries) {
-                const visible = entries
-                    .filter(function (entry) { return entry.isIntersecting; })
-                    .sort(function (a, b) { return b.intersectionRatio - a.intersectionRatio; })[0];
-
-                if (!visible) {
-                    return;
-                }
-
-                const index = sdocSections.indexOf(visible.target);
-
-                sdocQuickNavButtons.forEach(function (button, buttonIndex) {
-                    button.classList.toggle("is-active", buttonIndex === index);
-                });
-            }, {
-                rootMargin: "-22% 0px -62% 0px",
-                threshold: [0.05, 0.2, 0.45]
-            });
-
-            sdocSections.forEach(function (section) {
-                sectionObserver.observe(section);
-            });
-        }
-
-        const sdocLoadingStatuses = Array.from(document.querySelectorAll(".sdoc-loading-status span"));
-        let sdocStatusTimer = null;
-
-        if (sdocForm && sdocLoadingStatuses.length > 0) {
-            sdocForm.addEventListener("submit", function () {
-                if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-                    return;
-                }
-
-                let statusIndex = 0;
-
-                sdocStatusTimer = window.setInterval(function () {
-                    sdocLoadingStatuses.forEach(function (status, index) {
-                        status.classList.toggle("is-active", index === statusIndex);
-                    });
-
-                    statusIndex = (statusIndex + 1) % sdocLoadingStatuses.length;
-                }, 1450);
-            });
-        }
-
-        window.addEventListener("pageshow", function () {
-            if (sdocStatusTimer) {
-                window.clearInterval(sdocStatusTimer);
-                sdocStatusTimer = null;
             }
-        });
+
+            buttons.forEach(function (button) {
+                button.addEventListener("click", function () {
+                    const chapterId = button.getAttribute("data-doc-chapter");
+                    if (chapterId) {
+                        showChapter(chapterId, true);
+                    }
+                });
+
+                button.addEventListener("keydown", function (event) {
+                    const currentIndex = buttons.indexOf(button);
+                    let targetIndex = -1;
+
+                    if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+                        targetIndex = (currentIndex + 1) % buttons.length;
+                    } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+                        targetIndex = (currentIndex - 1 + buttons.length) % buttons.length;
+                    } else if (event.key === "Home") {
+                        targetIndex = 0;
+                    } else if (event.key === "End") {
+                        targetIndex = buttons.length - 1;
+                    }
+
+                    if (targetIndex >= 0) {
+                        event.preventDefault();
+                        buttons[targetIndex].focus();
+
+                        const chapterId = buttons[targetIndex].getAttribute("data-doc-chapter");
+                        if (chapterId) {
+                            showChapter(chapterId, false);
+                        }
+                    }
+                });
+            });
+
+            previousButtons.forEach(function (button) {
+                button.addEventListener("click", function () {
+                    const current = button.getAttribute("data-doc-previous");
+                    const index = chapterOrder.indexOf(current);
+
+                    if (index > 0) {
+                        showChapter(chapterOrder[index - 1], true);
+                    }
+                });
+            });
+
+            nextButtons.forEach(function (button) {
+                button.addEventListener("click", function () {
+                    const current = button.getAttribute("data-doc-next");
+                    const index = chapterOrder.indexOf(current);
+
+                    if (index >= 0 && index < chapterOrder.length - 1) {
+                        showChapter(chapterOrder[index + 1], true);
+                    }
+                });
+            });
+
+            const requestedChapter = window.location.hash.replace("#chapter-", "");
+            if (chapterOrder.includes(requestedChapter)) {
+                showChapter(requestedChapter, false);
+            }
+        })();
+
+        (function () {
+            const form = document.getElementById("docGenerateForm");
+            const loading = document.getElementById("docLoading");
+            const generateButton = document.getElementById("docGenerateBtn");
+            const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            const steps = loading
+                ? Array.from(loading.querySelectorAll(".doc-loading-steps li"))
+                : [];
+
+            let timerId = null;
+
+            if (form) {
+                form.addEventListener("submit", function () {
+                    if (loading) {
+                        loading.classList.add("show");
+                    }
+
+                    if (generateButton) {
+                        generateButton.disabled = true;
+                        generateButton.innerHTML = `
+                            <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                            Generating...
+                        `;
+                    }
+
+                    if (!reduceMotion && steps.length > 0) {
+                        let activeIndex = 0;
+
+                        timerId = window.setInterval(function () {
+                            steps.forEach(function (step, index) {
+                                step.classList.toggle("is-active", index === activeIndex);
+                            });
+
+                            activeIndex = (activeIndex + 1) % steps.length;
+                        }, 1450);
+                    }
+                });
+            }
+
+            window.addEventListener("pageshow", function () {
+                if (loading) {
+                    loading.classList.remove("show");
+                }
+
+                if (timerId) {
+                    window.clearInterval(timerId);
+                    timerId = null;
+                }
+            });
+        })();
+
+        (function () {
+            const copyButtons = Array.from(document.querySelectorAll("[data-copy-target]"));
+
+            copyButtons.forEach(function (button) {
+                button.addEventListener("click", async function () {
+                    const targetId = button.getAttribute("data-copy-target");
+                    const target = targetId ? document.getElementById(targetId) : null;
+
+                    if (!target) {
+                        return;
+                    }
+
+                    try {
+                        await navigator.clipboard.writeText(target.textContent || "");
+                        const original = button.innerHTML;
+
+                        button.innerHTML = `
+                            <i class="bi bi-check2"></i>
+                            Copied
+                        `;
+
+                        window.setTimeout(function () {
+                            button.innerHTML = original;
+                        }, 1400);
+                    } catch {
+                        button.textContent = "Copy failed";
+                    }
+                });
+            });
+        })();
     </script>
 }
 
 @functions {
-    private IHtmlContent RenderListSection(
+    private static readonly string[] ChapterOrder =
+    {
+        "overview",
+        "fr",
+        "nfr",
+        "uc",
+        "ec",
+        "db",
+        "ui",
+        "diagrams",
+        "extended"
+    };
+
+    private IHtmlContent RenderNavButton(
+        string chapterId,
+        string number,
         string title,
         string subtitle,
+        string icon,
+        string count,
+        bool isActive)
+    {
+        var builder = new System.Text.StringBuilder();
+
+        builder.AppendLine(
+            $"<button type=\"button\" class=\"doc-chapter-btn{(isActive ? " is-active" : "")}\" " +
+            $"data-doc-chapter=\"{System.Net.WebUtility.HtmlEncode(chapterId)}\" " +
+            $"role=\"tab\" aria-selected=\"{(isActive ? "true" : "false")}\">");
+
+        builder.AppendLine(
+            $"<span class=\"doc-chapter-btn-number\">{System.Net.WebUtility.HtmlEncode(number)}</span>");
+
+        builder.AppendLine("<span class=\"doc-chapter-btn-copy\">");
+        builder.AppendLine($"<strong>{System.Net.WebUtility.HtmlEncode(title)}</strong>");
+        builder.AppendLine($"<small>{System.Net.WebUtility.HtmlEncode(subtitle)}</small>");
+        builder.AppendLine("</span>");
+
+        builder.AppendLine(
+            $"<span class=\"doc-chapter-btn-count\">{System.Net.WebUtility.HtmlEncode(count)}</span>");
+
+        builder.AppendLine("</button>");
+
+        return new HtmlString(builder.ToString());
+    }
+
+    private IHtmlContent RenderListChapter(
+        string chapterId,
+        string chapterNumber,
+        string title,
+        string subtitle,
+        string simpleExplanation,
         string icon,
         string prefix,
         IEnumerable<string> items)
     {
         var list = items.ToList();
-
         var builder = new System.Text.StringBuilder();
 
-        builder.AppendLine("<section class=\"sdoc-section\">");
-        builder.AppendLine("<div class=\"sdoc-section-head\">");
-        builder.AppendLine("<div class=\"sdoc-section-title\">");
-        builder.AppendLine($"<span class=\"sdoc-section-icon\"><i class=\"bi {icon}\"></i></span>");
+        builder.AppendLine(
+            $"<section class=\"doc-chapter\" id=\"panel-{System.Net.WebUtility.HtmlEncode(chapterId)}\" " +
+            $"data-doc-panel=\"{System.Net.WebUtility.HtmlEncode(chapterId)}\" " +
+            "role=\"tabpanel\" aria-hidden=\"true\">");
+
+        builder.AppendLine("<div class=\"doc-chapter-head\">");
+        builder.AppendLine(
+            $"<div class=\"doc-chapter-number\">{System.Net.WebUtility.HtmlEncode(chapterNumber)}</div>");
+
         builder.AppendLine("<div>");
-        builder.AppendLine($"<h3>{System.Net.WebUtility.HtmlEncode(title)}</h3>");
+        builder.AppendLine($"<h2>{System.Net.WebUtility.HtmlEncode(title)}</h2>");
         builder.AppendLine($"<p>{System.Net.WebUtility.HtmlEncode(subtitle)}</p>");
         builder.AppendLine("</div>");
         builder.AppendLine("</div>");
-        builder.AppendLine($"<span class=\"sdoc-count\">{list.Count} items</span>");
+
+        builder.AppendLine("<div class=\"doc-simple-box\">");
+        builder.AppendLine(
+            $"<div class=\"doc-simple-box-icon\" aria-hidden=\"true\"><i class=\"bi {System.Net.WebUtility.HtmlEncode(icon)}\"></i></div>");
+
+        builder.AppendLine("<div>");
+        builder.AppendLine("<strong>In simple words</strong>");
+        builder.AppendLine($"<p>{System.Net.WebUtility.HtmlEncode(simpleExplanation)}</p>");
         builder.AppendLine("</div>");
+        builder.AppendLine("</div>");
+
+        builder.AppendLine("<div class=\"doc-chapter-body\">");
 
         if (list.Any())
         {
-            builder.AppendLine("<div class=\"sdoc-list\">");
+            builder.AppendLine("<div class=\"doc-readable-list\">");
 
             for (var i = 0; i < list.Count; i++)
             {
-                builder.AppendLine("<div class=\"sdoc-item\">");
-                builder.AppendLine($"<span class=\"sdoc-item-number\">{prefix}{i + 1}</span>");
-                builder.AppendLine($"<div>{System.Net.WebUtility.HtmlEncode(list[i])}</div>");
-                builder.AppendLine("</div>");
+                builder.AppendLine("<article class=\"doc-readable-card\">");
+                builder.AppendLine(
+                    $"<div class=\"doc-readable-label\">{System.Net.WebUtility.HtmlEncode(prefix)}{i + 1}</div>");
+
+                builder.AppendLine(
+                    $"<div class=\"doc-readable-content\">{System.Net.WebUtility.HtmlEncode(list[i])}</div>");
+
+                builder.AppendLine("</article>");
             }
 
             builder.AppendLine("</div>");
         }
         else
         {
-            builder.AppendLine($"<div class=\"sdoc-section-empty\">No {System.Net.WebUtility.HtmlEncode(title.ToLower())} returned.</div>");
+            builder.AppendLine(
+                $"<div class=\"doc-empty-section\">No {System.Net.WebUtility.HtmlEncode(title.ToLowerInvariant())} were returned.</div>");
         }
 
+        builder.AppendLine("</div>");
+        builder.AppendLine(RenderBottomNavigationHtml(chapterId));
         builder.AppendLine("</section>");
 
         return new HtmlString(builder.ToString());
+    }
+
+    private IHtmlContent RenderBottomNavigation(string currentChapter)
+    {
+        return new HtmlString(RenderBottomNavigationHtml(currentChapter));
+    }
+
+    private string RenderBottomNavigationHtml(string currentChapter)
+    {
+        var currentIndex = Array.IndexOf(ChapterOrder, currentChapter);
+        var previousDisabled = currentIndex <= 0;
+        var nextDisabled = currentIndex < 0 || currentIndex >= ChapterOrder.Length - 1;
+
+        var builder = new System.Text.StringBuilder();
+
+        builder.AppendLine("<div class=\"doc-bottom-nav no-print\">");
+
+        builder.AppendLine(
+            $"<button type=\"button\" data-doc-previous=\"{System.Net.WebUtility.HtmlEncode(currentChapter)}\"" +
+            $"{(previousDisabled ? " disabled" : "")}>");
+
+        builder.AppendLine("<i class=\"bi bi-arrow-left\"></i> Previous");
+        builder.AppendLine("</button>");
+
+        builder.AppendLine(
+            $"<span>Chapter {Math.Max(0, currentIndex)} of {ChapterOrder.Length - 1}</span>");
+
+        builder.AppendLine(
+            $"<button type=\"button\" data-doc-next=\"{System.Net.WebUtility.HtmlEncode(currentChapter)}\"" +
+            $"{(nextDisabled ? " disabled" : "")}>");
+
+        builder.AppendLine("Next <i class=\"bi bi-arrow-right\"></i>");
+        builder.AppendLine("</button>");
+
+        builder.AppendLine("</div>");
+
+        return builder.ToString();
     }
 }

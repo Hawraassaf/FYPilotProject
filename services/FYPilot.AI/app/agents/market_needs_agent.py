@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from datetime import datetime, timezone
-from difflib import SequenceMatcher
 from typing import Any
 from urllib.parse import urlparse
 
@@ -13,30 +11,24 @@ from app.models.market_needs_models import (
     ScoreBreakdown,
     SimilarSolution,
     SourceItem,
-    TrendSignal,
-    YearlyMarketPoint,
 )
 from app.services.llm_provider import LLMResult, ProviderChain
 from app.services.market_needs_scoring import (
     calculate_confidence_score,
     calculate_demand_score,
-    calculate_yearly_confidence,
-    calculate_yearly_demand_index,
     clamp_score,
     confidence_label,
     demand_label,
 )
-from app.services.yearly_market_forecasting import build_annual_forecast
 
 
 class MarketNeedsAgent:
     """
-    Current market validation plus source-backed annual intelligence.
+    Current market validation, grounded in live research.
 
     Important:
     - The current score is a deterministic evidence score.
-    - Annual points are accepted only when linked to real provider sources.
-    - Forecasting uses annual indices, never repeated same-day app refreshes.
+    - Claims are backed by real provider sources, never invented.
     """
 
     _recognized_domains = {
@@ -201,16 +193,6 @@ class MarketNeedsAgent:
         )
         grounded = search_used and bool(sources)
 
-        yearly_points = self._normalize_yearly_points(
-            raw_points=self._list(data.get("yearlyEvidence")),
-            sources=sources,
-            request=request,
-        )
-        annual_forecast = build_annual_forecast(
-            yearly_points,
-            request.forecast_years,
-        )
-
         problem_evidence = self._string_list(
             data.get("problemEvidence"),
             maximum=6,
@@ -229,7 +211,6 @@ class MarketNeedsAgent:
             verified_source_count=verified_count,
             problem_evidence_count=len(problem_evidence),
             unique_domain_count=len(unique_domains),
-            source_backed_year_count=len(yearly_points),
         )
         demand_score = calculate_demand_score(breakdown)
 
@@ -245,28 +226,6 @@ class MarketNeedsAgent:
             for item in self._list(data.get("similarSolutions"))
             if isinstance(item, dict) and self._text(item.get("name"))
         ][:6]
-
-        trend_signals = [
-            TrendSignal(
-                topic=self._text(item.get("topic"), maximum=250),
-                direction=self._direction(item.get("direction")),
-                evidence=self._text(item.get("evidence"), maximum=1500),
-                sourceUrl=self._matched_source_url(
-                    item.get("sourceTitle"),
-                    item.get("sourceUrl"),
-                    sources,
-                ),
-            )
-            for item in self._list(data.get("trendSignals"))
-            if isinstance(item, dict) and self._text(item.get("topic"))
-        ][:6]
-
-        note = (
-            "Annual values are normalized evidence indices from 0 to 100. "
-            "They are not revenue, market size, or Google Trends values. "
-            "A year is included only when it can be linked to a real source "
-            "returned by the live research provider."
-        )
 
         return MarketNeedsResponse(
             source=(f"{provider}-live-research" if grounded else provider),
@@ -291,10 +250,6 @@ class MarketNeedsAgent:
             problemEvidence=problem_evidence,
             similarSolutions=similar_solutions,
             sources=sources,
-            trendSignals=trend_signals,
-            yearlyPoints=yearly_points,
-            annualForecast=annual_forecast,
-            historicalDataNote=note,
             lebaneseMarketFit=self._text(
                 data.get("lebaneseMarketFit"),
                 maximum=5000,
@@ -312,178 +267,12 @@ class MarketNeedsAgent:
             analyzedAt=datetime.now(timezone.utc),
         )
 
-    def _normalize_yearly_points(
-        self,
-        *,
-        raw_points: list[Any],
-        sources: list[SourceItem],
-        request: MarketNeedsRequest,
-    ) -> list[YearlyMarketPoint]:
-        current_year = datetime.now(timezone.utc).year
-        minimum_year = current_year - request.history_years + 1
-        points: list[YearlyMarketPoint] = []
-
-        for raw in raw_points:
-            if not isinstance(raw, dict):
-                continue
-
-            try:
-                year = int(raw.get("year"))
-            except (TypeError, ValueError):
-                continue
-
-            if year < minimum_year or year > current_year:
-                continue
-
-            requested_titles = self._string_list(
-                raw.get("sourceTitles"),
-                maximum=6,
-            )
-            matched_sources = self._match_year_sources(
-                year=year,
-                requested_titles=requested_titles,
-                sources=sources,
-            )
-
-            # Correctness rule: no real source means no historical point.
-            if not matched_sources:
-                continue
-
-            problem = clamp_score(raw.get("problemSignal"), 50)
-            adoption = clamp_score(raw.get("adoptionSignal"), 50)
-            jobs = clamp_score(raw.get("jobDemandSignal"), 50)
-            technology = clamp_score(
-                raw.get("technologyMomentumSignal"),
-                50,
-            )
-            summary = self._text(
-                raw.get("evidenceSummary"),
-                maximum=1600,
-            )
-            explicit_year = any(
-                self._source_mentions_year(source, year)
-                for source in matched_sources
-            )
-            verified_count = sum(
-                1 for source in matched_sources if source.is_verified
-            )
-            confidence = calculate_yearly_confidence(
-                source_count=len(matched_sources),
-                verified_source_count=verified_count,
-                has_explicit_year_evidence=explicit_year,
-                evidence_summary_present=bool(summary),
-            )
-
-            points.append(
-                YearlyMarketPoint(
-                    year=year,
-                    problemSignal=problem,
-                    adoptionSignal=adoption,
-                    jobDemandSignal=jobs,
-                    technologyMomentumSignal=technology,
-                    demandIndex=calculate_yearly_demand_index(
-                        problem_signal=problem,
-                        adoption_signal=adoption,
-                        job_demand_signal=jobs,
-                        technology_momentum_signal=technology,
-                    ),
-                    confidenceScore=confidence,
-                    evidenceSummary=summary,
-                    sourceUrls=[source.url for source in matched_sources[:4]],
-                )
-            )
-
-        # Keep the highest-confidence result for duplicate years.
-        by_year: dict[int, YearlyMarketPoint] = {}
-        for point in points:
-            existing = by_year.get(point.year)
-            if existing is None or point.confidence_score > existing.confidence_score:
-                by_year[point.year] = point
-
-        return [by_year[year] for year in sorted(by_year)]
-
-    def _match_year_sources(
-        self,
-        *,
-        year: int,
-        requested_titles: list[str],
-        sources: list[SourceItem],
-    ) -> list[SourceItem]:
-        ranked: list[tuple[float, SourceItem]] = []
-
-        for source in sources:
-            score = 0.0
-            if self._source_mentions_year(source, year):
-                score += 0.75
-
-            source_title = self._normalize_text(source.title)
-            for requested in requested_titles:
-                requested_title = self._normalize_text(requested)
-                if not requested_title or not source_title:
-                    continue
-                similarity = SequenceMatcher(
-                    None,
-                    requested_title,
-                    source_title,
-                ).ratio()
-                if requested_title in source_title or source_title in requested_title:
-                    similarity = max(similarity, 0.92)
-                score = max(score, similarity)
-
-            if score >= 0.60:
-                ranked.append((score, source))
-
-        ranked.sort(
-            key=lambda item: (
-                item[0],
-                item[1].is_verified,
-                item[1].relevance_score,
-            ),
-            reverse=True,
-        )
-        return [source for _, source in ranked[:4]]
-
-    @staticmethod
-    def _source_mentions_year(source: SourceItem, year: int) -> bool:
-        text = f"{source.title} {source.relevance} {source.url}"
-        return str(year) in text
-
-    def _matched_source_url(
-        self,
-        source_title: object,
-        proposed_url: object,
-        sources: list[SourceItem],
-    ) -> str | None:
-        proposed = self._text(proposed_url, maximum=2000)
-        for source in sources:
-            if proposed and source.url.rstrip("/") == proposed.rstrip("/"):
-                return source.url
-
-        title = self._normalize_text(source_title)
-        if not title:
-            return None
-
-        best: tuple[float, str] | None = None
-        for source in sources:
-            ratio = SequenceMatcher(
-                None,
-                title,
-                self._normalize_text(source.title),
-            ).ratio()
-            if best is None or ratio > best[0]:
-                best = (ratio, source.url)
-
-        return best[1] if best and best[0] >= 0.65 else None
-
     def _build_prompt(self, request: MarketNeedsRequest) -> str:
-        current_year = datetime.now(timezone.utc).year
-        start_year = current_year - request.history_years + 1
-
         return f"""
 You are the Market Demand Intelligence Agent for FYPilot.
 
-Analyze whether this final-year software project solves a real problem and how
-its demand has changed across calendar years.
+Analyze whether this final-year software project solves a real, current
+problem worth building for.
 
 PROJECT
 Title: {request.project_title}
@@ -492,7 +281,6 @@ Target users: {request.target_users}
 Domain: {request.domain}
 Technologies: {request.technologies}
 Market scope: {request.country_context}
-Historical window: {start_year} to {current_year}
 
 RESEARCH RULES
 - Use live web research before answering.
@@ -500,13 +288,9 @@ RESEARCH RULES
   job-market reports, industry reports, and credible organizations.
 - Use Lebanon evidence first; when unavailable, use MENA or global evidence
   and state that limitation.
-- Never invent a URL, statistic, annual value, publication, or market size.
-- Current and annual scores are evidence indices from 0 to 100, not money,
-  revenue, total-addressable market, or Google Trends values.
-- Historical years must be backed by sources returned during this search.
-- For each yearly point, copy sourceTitles exactly from the search results you
-  used. The application will reject years that cannot be matched to real tool
-  sources.
+- Never invent a URL, statistic, publication, or market size.
+- Scores are evidence indices from 0 to 100, not money, revenue,
+  total-addressable market, or Google Trends values.
 - Do not output a sources array. Real source URLs are read from provider tool
   metadata, not trusted from generated JSON.
 
@@ -516,16 +300,6 @@ CURRENT SCORE CATEGORIES
 - universityValue: academic, research, operational, or partnership value.
 - competitionOpportunity: remaining opportunity after competitors.
 - technologyMomentum: present adoption and technical relevance.
-
-ANNUAL SIGNAL CATEGORIES
-For each year with enough real evidence, rate:
-- problemSignal: evidence that the problem was important that year.
-- adoptionSignal: adoption or organizational interest that year.
-- jobDemandSignal: employment, procurement, or implementation demand.
-- technologyMomentumSignal: research, funding, standards, or technology activity.
-
-Do not force all years. Omit years without defensible source evidence.
-Aim for 4 to {request.history_years} distinct years when the evidence supports it.
 
 Return ONLY valid JSON in this exact shape:
 {{
@@ -538,30 +312,11 @@ Return ONLY valid JSON in this exact shape:
   }},
   "targetSector": "",
   "problemEvidence": [""],
-  "yearlyEvidence": [
-    {{
-      "year": {start_year},
-      "problemSignal": 0,
-      "adoptionSignal": 0,
-      "jobDemandSignal": 0,
-      "technologyMomentumSignal": 0,
-      "evidenceSummary": "",
-      "sourceTitles": [""]
-    }}
-  ],
   "similarSolutions": [
     {{
       "name": "",
       "description": "",
       "similarity": "low|medium|high"
-    }}
-  ],
-  "trendSignals": [
-    {{
-      "topic": "",
-      "direction": "rising|stable|falling",
-      "evidence": "",
-      "sourceTitle": ""
     }}
   ],
   "lebaneseMarketFit": "",
@@ -584,7 +339,6 @@ Return ONLY valid JSON in this exact shape:
             competitionOpportunity=45,
             technologyMomentum=45,
         )
-        annual_forecast = build_annual_forecast([], request.forecast_years)
         demand_score = calculate_demand_score(breakdown)
 
         return MarketNeedsResponse(
@@ -604,13 +358,6 @@ Return ONLY valid JSON in this exact shape:
             problemEvidence=[],
             similarSolutions=[],
             sources=[],
-            trendSignals=[],
-            yearlyPoints=[],
-            annualForecast=annual_forecast,
-            historicalDataNote=(
-                "No source-backed annual data was produced because live "
-                "research was unavailable."
-            ),
             lebaneseMarketFit="",
             universityValue="",
             risks=[
@@ -757,16 +504,6 @@ Return ONLY valid JSON in this exact shape:
         return text[:maximum]
 
     @staticmethod
-    def _normalize_text(value: object) -> str:
-        text = str(value or "").lower()
-        return re.sub(r"[^a-z0-9]+", " ", text).strip()
-
-    @staticmethod
     def _similarity(value: object) -> str:
         normalized = str(value or "").strip().lower()
         return normalized if normalized in {"low", "medium", "high"} else "medium"
-
-    @staticmethod
-    def _direction(value: object) -> str:
-        normalized = str(value or "").strip().lower()
-        return normalized if normalized in {"rising", "stable", "falling"} else "stable"

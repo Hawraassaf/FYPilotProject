@@ -43,18 +43,6 @@ class MarketNeedsRequest(CamelModel):
         alias="countryContext",
         max_length=120,
     )
-    history_years: int = Field(
-        default=6,
-        alias="historyYears",
-        ge=4,
-        le=10,
-    )
-    forecast_years: int = Field(
-        default=3,
-        alias="forecastYears",
-        ge=1,
-        le=5,
-    )
     use_search: bool = Field(
         default=True,
         alias="useSearch",
@@ -88,16 +76,6 @@ class SimilarSolution(CamelModel):
     similarity: str = "medium"
 
 
-class TrendSignal(CamelModel):
-    topic: str
-    direction: str
-    evidence: str
-    source_url: str | None = Field(
-        default=None,
-        alias="sourceUrl",
-    )
-
-
 class ScoreBreakdown(CamelModel):
     problem_evidence: int = Field(
         alias="problemEvidence",
@@ -124,132 +102,6 @@ class ScoreBreakdown(CamelModel):
         ge=0,
         le=100,
     )
-
-
-class YearlyMarketPoint(CamelModel):
-    year: int
-    problem_signal: int = Field(
-        alias="problemSignal",
-        ge=0,
-        le=100,
-    )
-    adoption_signal: int = Field(
-        alias="adoptionSignal",
-        ge=0,
-        le=100,
-    )
-    job_demand_signal: int = Field(
-        alias="jobDemandSignal",
-        ge=0,
-        le=100,
-    )
-    technology_momentum_signal: int = Field(
-        alias="technologyMomentumSignal",
-        ge=0,
-        le=100,
-    )
-    demand_index: float = Field(
-        alias="demandIndex",
-        ge=0,
-        le=100,
-    )
-    confidence_score: int = Field(
-        alias="confidenceScore",
-        ge=0,
-        le=100,
-    )
-    evidence_summary: str = Field(
-        alias="evidenceSummary",
-    )
-    source_urls: list[str] = Field(
-        default_factory=list,
-        alias="sourceUrls",
-    )
-
-
-class AnnualForecastPoint(CamelModel):
-    year: int
-    predicted_score: float = Field(
-        alias="predictedScore",
-        ge=0,
-        le=100,
-    )
-    lower_bound: float = Field(
-        alias="lowerBound",
-        ge=0,
-        le=100,
-    )
-    upper_bound: float = Field(
-        alias="upperBound",
-        ge=0,
-        le=100,
-    )
-
-
-class AnnualTrendAnalysis(CamelModel):
-    direction: str
-    strength: str
-    slope_per_year: float = Field(
-        alias="slopePerYear",
-    )
-    total_change: float = Field(
-        alias="totalChange",
-    )
-    volatility: float
-    r_squared: float = Field(
-        alias="rSquared",
-        ge=0,
-        le=1,
-    )
-    summary: str
-
-
-class AnnualForecast(CamelModel):
-    status: str
-    forecast_ready: bool = Field(
-        alias="forecastReady",
-    )
-    forecast_reliable: bool = Field(
-        alias="forecastReliable",
-    )
-    model_used: str | None = Field(
-        default=None,
-        alias="modelUsed",
-    )
-    model_mae: float | None = Field(
-        default=None,
-        alias="modelMae",
-        ge=0,
-    )
-    naive_mae: float | None = Field(
-        default=None,
-        alias="naiveMae",
-        ge=0,
-    )
-    average_yearly_confidence: float = Field(
-        alias="averageYearlyConfidence",
-        ge=0,
-        le=100,
-    )
-    historical_start_year: int | None = Field(
-        default=None,
-        alias="historicalStartYear",
-    )
-    historical_end_year: int | None = Field(
-        default=None,
-        alias="historicalEndYear",
-    )
-    forecast_horizon_years: int = Field(
-        alias="forecastHorizonYears",
-        ge=1,
-        le=5,
-    )
-    trend: AnnualTrendAnalysis
-    forecast_points: list[AnnualForecastPoint] = Field(
-        default_factory=list,
-        alias="forecastPoints",
-    )
-    warning: str | None = None
 
 
 class MarketNeedsResponse(CamelModel):
@@ -298,17 +150,6 @@ class MarketNeedsResponse(CamelModel):
         alias="similarSolutions",
     )
     sources: list[SourceItem] = Field(default_factory=list)
-    trend_signals: list[TrendSignal] = Field(
-        default_factory=list,
-        alias="trendSignals",
-    )
-
-    yearly_points: list[YearlyMarketPoint] = Field(
-        default_factory=list,
-        alias="yearlyPoints",
-    )
-    annual_forecast: AnnualForecast = Field(alias="annualForecast")
-    historical_data_note: str = Field(alias="historicalDataNote")
 
     lebanese_market_fit: str = Field(
         default="",

@@ -1,4 +1,3 @@
-using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 using System.Text.Json;
 using FYPilot.Application.DTOs;
@@ -27,22 +26,12 @@ public class MarketDemandModel(
     [BindProperty]
     public string CountryContext { get; set; } = "Lebanon";
 
-    [BindProperty]
-    [Range(4, 10)]
-    public int HistoryYears { get; set; } = 6;
-
-    [BindProperty]
-    [Range(1, 5)]
-    public int ForecastYears { get; set; } = 3;
-
     public ProjectIdea? Idea { get; private set; }
     public MarketDemandAnalysis? Analysis { get; private set; }
     public List<ProjectIdea> UserIdeas { get; private set; } = [];
     public List<string> ProblemEvidence { get; private set; } = [];
     public List<string> Risks { get; private set; } = [];
     public List<string> NextSteps { get; private set; } = [];
-    public List<MarketNeedsAnnualForecastPointDto> ForecastPoints { get; private set; } = [];
-    public string AnnualChartJson { get; private set; } = "[]";
     public string BreakdownJson { get; private set; } = "[]";
     public string? SuccessMessage { get; private set; }
     public string? ErrorMessage { get; private set; }
@@ -68,14 +57,6 @@ public class MarketDemandModel(
         _ => ("bg-secondary", review.Status),
     };
 
-    public string HistoricalDataNote =>
-        "Annual values are normalized evidence indices from 0 to 100. " +
-        "They are not revenue, market size, or Google Trends values. " +
-        "Only years linked to real research sources are displayed.";
-
-    public int SourceBackedYearCount =>
-        Analysis?.YearlyPoints.Count ?? 0;
-
     public async Task<IActionResult> OnGetAsync(
     CancellationToken cancellationToken)
     {
@@ -98,8 +79,6 @@ public class MarketDemandModel(
         }
 
         CountryContext = NormalizeCountry(CountryContext);
-        HistoryYears = Math.Clamp(HistoryYears, 4, 10);
-        ForecastYears = Math.Clamp(ForecastYears, 1, 5);
 
         var request = new AnalyzeMarketNeedsRequest(
             ProjectTitle: SafeText(idea.Title, 300),
@@ -108,8 +87,6 @@ public class MarketDemandModel(
             Domain: SafeText(idea.Domain, 200),
             Technologies: SafeText(idea.RequiredTechnologies, 2000),
             CountryContext: CountryContext,
-            HistoryYears: HistoryYears,
-            ForecastYears: ForecastYears,
             UseSearch: true
         );
 
@@ -172,8 +149,7 @@ public class MarketDemandModel(
             await db.SaveChangesAsync(cancellationToken);
 
             TempData["Success"] =
-                $"Market intelligence saved with {analysis.Sources.Count} real source(s) " +
-                $"and {analysis.YearlyPoints.Count} source-backed year(s).";
+                $"Market intelligence saved with {analysis.Sources.Count} real source(s).";
 
             return RedirectToPage(new { ideaId = idea.Id });
         }
@@ -249,8 +225,6 @@ public class MarketDemandModel(
             .AsNoTracking()
             .Include(item => item.Sources)
             .Include(item => item.SimilarSolutions)
-            .Include(item => item.TrendSignals)
-            .Include(item => item.YearlyPoints)
             .Where(item =>
                 item.UserId == userId &&
                 item.ProjectIdeaId == IdeaId)
@@ -267,37 +241,6 @@ public class MarketDemandModel(
         ProblemEvidence = ParseJsonList(Analysis.ProblemEvidenceJson);
         Risks = ParseJsonList(Analysis.RisksJson);
         NextSteps = ParseJsonList(Analysis.NextStepsJson);
-        ForecastPoints = ParseForecastPoints(Analysis.ForecastPointsJson);
-
-        var observed = Analysis.YearlyPoints
-            .OrderBy(item => item.Year)
-            .Select(item => new
-            {
-                year = item.Year,
-                observed = item.DemandIndex,
-                confidence = item.ConfidenceScore,
-                forecast = (decimal?)null,
-                lower = (decimal?)null,
-                upper = (decimal?)null,
-                kind = "observed"
-            });
-
-        var forecast = ForecastPoints
-            .OrderBy(item => item.Year)
-            .Select(item => new
-            {
-                year = item.Year,
-                observed = (decimal?)null,
-                confidence = (int?)null,
-                forecast = (decimal?)item.PredictedScore,
-                lower = (decimal?)item.LowerBound,
-                upper = (decimal?)item.UpperBound,
-                kind = "forecast"
-            });
-
-        AnnualChartJson = JsonSerializer.Serialize(
-            observed.Cast<object>().Concat(forecast.Cast<object>()),
-            JsonOptions);
 
         BreakdownJson = JsonSerializer.Serialize(
             new[]
@@ -321,8 +264,6 @@ public class MarketDemandModel(
     {
         var breakdown = response.ScoreBreakdown
             ?? new MarketNeedsScoreBreakdownDto(0, 0, 0, 0, 0);
-        var forecast = response.AnnualForecast;
-        var trend = forecast?.Trend;
 
         var analysis = new MarketDemandAnalysis
         {
@@ -352,50 +293,10 @@ public class MarketDemandModel(
             RisksJson = JsonSerializer.Serialize(CleanList(response.Risks, 8)),
             Recommendation = SafeText(response.Recommendation, 8000),
             NextStepsJson = JsonSerializer.Serialize(CleanList(response.NextSteps, 8)),
-            ForecastStatus = SafeText(forecast?.Status, 80),
-            ForecastReady = forecast?.ForecastReady ?? false,
-            ForecastReliable = forecast?.ForecastReliable ?? false,
-            ForecastModel = SafeTextOrNull(forecast?.ModelUsed, 120),
-            ForecastMae = forecast?.ModelMae,
-            NaiveForecastMae = forecast?.NaiveMae,
-            ForecastPointsJson = JsonSerializer.Serialize(forecast?.ForecastPoints ?? []),
-            ForecastWarning = SafeTextOrNull(forecast?.Warning, 3000),
-            ForecastGeneratedAt = DateTime.UtcNow,
-            TrendDirection = NormalizeTrendDirection(trend?.Direction),
-            TrendStrength = NormalizeTrendStrength(trend?.Strength),
-            TrendSlopePerYear = trend?.SlopePerYear,
-            TrendTotalChange = trend?.TotalChange,
-            TrendVolatility = trend?.Volatility,
-            TrendRSquared = trend == null ? null : Math.Clamp(trend.RSquared, 0, 1),
-            TrendSummary = SafeTextOrNull(trend?.Summary, 3000),
             AnalyzedAt = response.AnalyzedAt == default
                 ? DateTime.UtcNow
                 : response.AnalyzedAt.ToUniversalTime()
         };
-
-        foreach (var point in (response.YearlyPoints ?? [])
-            .GroupBy(item => item.Year)
-            .Select(group => group.OrderByDescending(item => item.ConfidenceScore).First())
-            .OrderBy(item => item.Year)
-            .Take(10))
-        {
-            analysis.YearlyPoints.Add(new MarketDemandYearlyPoint
-            {
-                Year = point.Year,
-                ProblemSignal = ClampScore(point.ProblemSignal),
-                AdoptionSignal = ClampScore(point.AdoptionSignal),
-                JobDemandSignal = ClampScore(point.JobDemandSignal),
-                TechnologyMomentumSignal = ClampScore(point.TechnologyMomentumSignal),
-                DemandIndex = Math.Clamp(point.DemandIndex, 0, 100),
-                ConfidenceScore = ClampScore(point.ConfidenceScore),
-                EvidenceSummary = SafeText(point.EvidenceSummary, 3000),
-                SourceUrlsJson = JsonSerializer.Serialize(
-                    (point.SourceUrls ?? [])
-                    .Where(IsSafeHttpUrl)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .Take(6))
-            });
-        }
 
         foreach (var source in (response.Sources ?? [])
             .Where(item => !string.IsNullOrWhiteSpace(item.Title) && IsSafeHttpUrl(item.Url))
@@ -429,36 +330,7 @@ public class MarketDemandModel(
             });
         }
 
-        foreach (var item in (response.TrendSignals ?? []).Take(6))
-        {
-            if (string.IsNullOrWhiteSpace(item.Topic)) continue;
-            analysis.TrendSignals.Add(new MarketTrendSignal
-            {
-                Topic = SafeText(item.Topic, 300),
-                Direction = NormalizeQualitativeDirection(item.Direction),
-                Evidence = SafeText(item.Evidence, 3000),
-                SourceUrl = IsSafeHttpUrl(item.SourceUrl)
-                    ? SafeText(item.SourceUrl, 2000)
-                    : null
-            });
-        }
-
         return analysis;
-    }
-
-    private static List<MarketNeedsAnnualForecastPointDto> ParseForecastPoints(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return [];
-        try
-        {
-            return JsonSerializer.Deserialize<List<MarketNeedsAnnualForecastPointDto>>(
-                value,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
-        }
-        catch (JsonException)
-        {
-            return [];
-        }
     }
 
     private static List<string> ParseJsonList(string? value)
@@ -501,30 +373,6 @@ public class MarketDemandModel(
         "low" => "low",
         "high" => "high",
         _ => "medium"
-    };
-
-    private static string NormalizeQualitativeDirection(string? value) => value?.Trim().ToLowerInvariant() switch
-    {
-        "rising" => "rising",
-        "falling" => "falling",
-        _ => "stable"
-    };
-
-    private static string NormalizeTrendDirection(string? value) => value?.Trim().ToLowerInvariant() switch
-    {
-        "rising" => "rising",
-        "falling" => "falling",
-        "stable" => "stable",
-        "unstable" => "unstable",
-        _ => "insufficient-data"
-    };
-
-    private static string NormalizeTrendStrength(string? value) => value?.Trim().ToLowerInvariant() switch
-    {
-        "strong" => "strong",
-        "moderate" => "moderate",
-        "weak" => "weak",
-        _ => "insufficient-data"
     };
 
     private static string SafeText(string? value, int maximumLength)

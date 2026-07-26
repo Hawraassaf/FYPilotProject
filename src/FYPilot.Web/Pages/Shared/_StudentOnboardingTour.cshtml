@@ -1,0 +1,140 @@
+﻿<div class="student-onboarding"
+     id="studentOnboarding"
+     aria-hidden="true">
+    <div class="student-onboarding-spotlight"
+         id="studentOnboardingSpotlight"
+         aria-hidden="true"></div>
+
+    <section class="student-onboarding-card"
+             id="studentOnboardingCard"
+             role="dialog"
+             aria-modal="true"
+             aria-labelledby="studentOnboardingTitle"
+             aria-describedby="studentOnboardingDescription">
+        <div class="student-onboarding-card-arrow"
+             aria-hidden="true"></div>
+
+        <header class="student-onboarding-header">
+            <div class="student-onboarding-brand">
+                <span class="student-onboarding-brand-icon">
+                    <i class="bi bi-compass"></i>
+                </span>
+
+                <div>
+                    <small>FYPilot guided journey</small>
+                    <strong id="studentOnboardingCounter">Welcome</strong>
+                </div>
+            </div>
+
+            <button type="button"
+                    class="student-onboarding-close"
+                    id="studentOnboardingClose"
+                    aria-label="Close guided journey">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </header>
+
+        <div class="student-onboarding-progress"
+             aria-hidden="true">
+            <span id="studentOnboardingProgressBar"></span>
+        </div>
+
+        <div class="student-onboarding-phase-route"
+             id="studentOnboardingPhaseRoute"
+             aria-label="Project journey phases">
+            <span data-tour-phase="foundation">
+                <i></i>
+                Foundation
+            </span>
+
+            <span data-tour-phase="intelligence">
+                <i></i>
+                Intelligence
+            </span>
+
+            <span data-tour-phase="engineering">
+                <i></i>
+                Engineering
+            </span>
+
+            <span data-tour-phase="support">
+                <i></i>
+                Support
+            </span>
+
+            <span data-tour-phase="defense">
+                <i></i>
+                Defense
+            </span>
+        </div>
+
+        <div class="student-onboarding-body">
+            <div class="student-onboarding-step-heading">
+                <div class="student-onboarding-step-icon"
+                     id="studentOnboardingIcon"
+                     aria-hidden="true">
+                    <i class="bi bi-stars"></i>
+                </div>
+
+                <div>
+                    <span id="studentOnboardingKicker">
+                        Welcome to FYPilot
+                    </span>
+
+                    <h2 id="studentOnboardingTitle">
+                        Build your project in the right order
+                    </h2>
+                </div>
+            </div>
+
+            <p class="student-onboarding-description"
+               id="studentOnboardingDescription">
+                See the full path from creating a project to preparing for defense.
+            </p>
+
+            <div class="student-onboarding-action">
+                <span class="student-onboarding-action-icon">
+                    <i class="bi bi-arrow-right-circle"></i>
+                </span>
+
+                <div>
+                    <small>Your action</small>
+                    <strong id="studentOnboardingAction">
+                        Start by creating or selecting a project.
+                    </strong>
+                </div>
+            </div>
+        </div>
+
+        <footer class="student-onboarding-footer">
+            <button type="button"
+                    class="student-onboarding-skip"
+                    id="studentOnboardingSkip">
+                Skip
+            </button>
+
+            <div class="student-onboarding-navigation">
+                <button type="button"
+                        class="student-onboarding-back"
+                        id="studentOnboardingBack">
+                    <i class="bi bi-arrow-left"></i>
+                    Back
+                </button>
+
+                <button type="button"
+                        class="student-onboarding-next"
+                        id="studentOnboardingNext">
+                    Start
+                    <i class="bi bi-arrow-right"></i>
+                </button>
+            </div>
+        </footer>
+
+        <button type="button"
+                class="student-onboarding-start-button"
+                id="studentOnboardingStartButton">
+            <i class="bi bi-folder2-open"></i>
+            Open My Projects
+        </button>
+    </section>
+</div>

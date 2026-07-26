@@ -96,7 +96,12 @@ public record AiSeDocumentationDto(
     List<AiSeDocAssumption>? Assumptions = null,
     AiSeDocAiTechnicalReport? AiTechnicalReport = null,
     bool AiTechnicalReportApplicable = false,
-    AiSeDocQualityAssessment? QualityAssessment = null
+    AiSeDocQualityAssessment? QualityAssessment = null,
+    // "provider" | "fallback" per section key -- lets the UI/report be
+    // honest when a provider outage caused only SOME sections to fall back
+    // to deterministic content, instead of mislabeling a partial result as
+    // either fully AI-generated or fully generic.
+    Dictionary<string, string>? SectionProvenance = null
 );
 
 public record AiSeDocScope(

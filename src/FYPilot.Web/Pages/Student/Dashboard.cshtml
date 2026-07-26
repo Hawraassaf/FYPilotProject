@@ -1,760 +1,3719 @@
 @page
+@using System
+@using System.Linq
+@using System.Security.Claims
 @model FYPilot.Web.Pages.Student.DashboardModel
+
 @{
-    ViewData["Title"] = "Project Dashboard";
-    ViewData["Subtitle"] =
-        "Your active project workspace";
+    ViewData["Title"] = "Project Command Center";
+    ViewData["Subtitle"] = "Your intelligent final-year project workspace";
+
+    var completedFoundations =
+        (Model.HasSkills ? 1 : 0) +
+        (Model.HasSelectedIdea ? 1 : 0) +
+        (Model.HasRoadmaps ? 1 : 0);
+
+    var readiness = (int)Math.Round(completedFoundations / 3.0 * 100);
+
+    var activityPreview = Model.RecentActivities.Take(7).ToList();
+
+    var innovation = Model.SelectedIdea?.InnovationScore ?? 0;
+    var feasibility = Model.SelectedIdea?.FeasibilityScore ?? 0;
+    var marketFit = Model.SelectedIdea?.MarketDemandScore ?? 0;
+
+
+    var activeJourney = !Model.HasSkills
+        ? "skills"
+        : !Model.HasSelectedIdea
+            ? "idea"
+            : !Model.HasRoadmaps
+                ? "roadmap"
+                : "execution";
+
+    var nextActionPage = activeJourney switch
+    {
+        "skills" => "/Student/SkillAssessment",
+        "idea" => "/Student/IdeaGenerator",
+        "roadmap" => "/Student/Roadmap",
+        _ => "/Student/DocumentationGenerator"
+    };
+
+    var nextActionLabel = activeJourney switch
+    {
+        "skills" => "Complete Skill Assessment",
+        "idea" => "Select Project Idea",
+        "roadmap" => "Create Project Roadmap",
+        _ => "Generate SE Documentation"
+    };
+
+    var nextActionIcon = activeJourney switch
+    {
+        "skills" => "bar-chart-line",
+        "idea" => "lightbulb",
+        "roadmap" => "map",
+        _ => "journal-code"
+    };
+
+    var nextActionReason = activeJourney switch
+    {
+        "skills" =>
+            "Your skills profile is missing, so personalization cannot start yet.",
+
+        "idea" =>
+            "Your skills are ready, but this project still has no official selected idea.",
+
+        "roadmap" =>
+            "The project idea is selected, but no implementation roadmap exists yet.",
+
+        _ =>
+            "Skills, idea, and roadmap are ready; engineering documentation is the next planned stage."
+    };
 }
 
-<div class="dashboard-page">
+<div class="nova-dashboard"
+     data-tour-user-id="@(User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "anonymous")"
+     data-tour-version="1">
 
-    <section class="active-project-panel mb-4">
-        <div class="active-project-main">
-            <div class="active-project-icon">
-                <i class="bi bi-folder2-open"></i>
+    <section class="nova-top-deck nova-glass" data-tilt-card data-tour="project-command">
+        <div class="nova-mesh"></div>
+        <div class="nova-orb nova-orb-a"></div>
+        <div class="nova-orb nova-orb-b"></div>
+        <div class="nova-orb nova-orb-c"></div>
+
+        <div class="nova-topbar">
+            <div class="nova-live-label">
+                <span class="nova-live-pulse"></span>
+                FYPilot Project OS
             </div>
 
-            <div class="min-w-0">
-                <div class="active-project-label">
-                    Current Project
-                </div>
-
-                <h1 title="@Model.ProjectTitle">
-                    @Model.ProjectTitle
-                </h1>
-
-                <div class="active-project-meta">
-                    <span>
-                        <i class="bi bi-person-badge"></i>
-                        @Model.AccessRoleLabel
-                    </span>
-
-                    <span>
-                        <i class="bi bi-circle-fill"></i>
-                        @Model.ProjectStatus
-                    </span>
-
-                    <span>
-                        <i class="bi bi-people"></i>
-                        @Model.ActiveMembersCount
-                        of
-                        @Model.MaximumMembers
-                        members
-                    </span>
-                </div>
-            </div>
         </div>
 
-        <a asp-page="/Student/MyProjects"
-           class="switch-project-button">
+        <div class="nova-hero-grid">
+            <div class="nova-project-identity">
+                <div class="nova-project-chip">
+                    <i class="bi bi-folder2-open"></i>
+                    Active workspace
+                </div>
 
-            <i class="bi bi-arrow-left-right"></i>
-            Switch Project
-        </a>
+                <h1>@Model.ProjectTitle</h1>
+
+                <div class="nova-project-meta">
+                    <span><i class="bi bi-person-badge"></i>@Model.AccessRoleLabel</span>
+                    <span><i class="bi bi-activity"></i>@Model.ProjectStatus</span>
+                    <span><i class="bi bi-people"></i>@Model.ActiveMembersCount/@Model.MaximumMembers collaborators</span>
+                </div>
+
+                <p>
+                    One connected workspace for project intelligence, planning, engineering,
+                    collaboration, and defense preparation.
+                </p>
+
+                <div class="nova-hero-actions">
+                    <a asp-page="@nextActionPage"
+                       asp-route-projectId="@Model.ProjectId"
+                       class="nova-main-action" data-tour="next-action">
+                        <span class="nova-main-action-icon">
+                            <i class="bi bi-@nextActionIcon"></i>
+                        </span>
+
+                        <span class="nova-main-action-copy">
+                            <small>
+                                Next step based on the current project state
+                            </small>
+
+                            <strong>@nextActionLabel</strong>
+
+                            <em>@nextActionReason</em>
+                        </span>
+
+                        <i class="bi bi-arrow-up-right"></i>
+                    </a>
+
+                    <a asp-page="/Student/MyProjects"
+                       class="nova-ghost-action">
+                        <i class="bi bi-arrow-left-right"></i>
+                        Switch project
+                    </a>
+                </div>
+            </div>
+
+            <aside class="nova-project-summary" aria-label="Project readiness summary">
+                <div class="nova-summary-heading">
+                    <div>
+                        <span>Project readiness</span>
+                        <strong>@readiness%</strong>
+                    </div>
+
+                    <div class="nova-summary-ring" style="--summary-progress:@readiness">
+                        <span>@completedFoundations/3</span>
+                    </div>
+                </div>
+
+                <div class="nova-summary-progress">
+                    <div class="nova-summary-progress-label">
+                        <span>Foundation progress</span>
+                        <strong>@completedFoundations completed</strong>
+                    </div>
+
+                    <div class="nova-summary-progress-track">
+                        <span style="width:@readiness%"></span>
+                    </div>
+                </div>
+
+                <div class="nova-summary-checklist">
+                    <div class="@(Model.HasSkills ? "is-complete" : "is-pending")">
+                        <i class="bi @(Model.HasSkills ? "bi-check2" : "bi-circle")"></i>
+                        <span>Skills assessment</span>
+                    </div>
+
+                    <div class="@(Model.HasSelectedIdea ? "is-complete" : "is-pending")">
+                        <i class="bi @(Model.HasSelectedIdea ? "bi-check2" : "bi-circle")"></i>
+                        <span>Selected idea</span>
+                    </div>
+
+                    <div class="@(Model.HasRoadmaps ? "is-complete" : "is-pending")">
+                        <i class="bi @(Model.HasRoadmaps ? "bi-check2" : "bi-circle")"></i>
+                        <span>Project roadmap</span>
+                    </div>
+                </div>
+            </aside>
+        </div>
     </section>
 
-    <section class="row g-3 mb-4">
+    <section class="nova-metric-ribbon"
+             data-tour="project-stats"
+             aria-label="Live project statistics">
         @foreach (var stat in Model.Stats)
         {
-            <div class="col-12 col-sm-6 col-xl-3">
-                <article class="dashboard-stat-card h-100">
-                    <div class="stat-main">
-                        <div class="dashboard-stat-icon">
-                            <i class="bi bi-@stat.Icon"></i>
-                        </div>
+            <article class="nova-metric-card"
+                     data-float-card>
+                <div class="nova-metric-icon">
+                    <i class="bi bi-@stat.Icon"></i>
+                </div>
 
-                        <div class="min-w-0">
-                            <div class="dashboard-stat-label">
-                                @stat.Label
-                            </div>
+                <div class="nova-metric-copy">
+                    <span>@stat.Label</span>
+                    <strong>@stat.Value</strong>
+                    <small>@stat.Note</small>
+                </div>
 
-                            <div class="dashboard-stat-value">
-                                @stat.Value
-                            </div>
-
-                            <div class="dashboard-stat-note">
-                                @stat.Note
-                            </div>
-                        </div>
-                    </div>
-                </article>
-            </div>
+                <div class="nova-metric-spark">
+                    <i class="bi bi-arrow-up-right"></i>
+                </div>
+            </article>
         }
     </section>
 
-    <section class="row g-4">
-        <div class="col-xl-7">
-            <article class="dashboard-card h-100">
-                <header class="card-head">
-                    <div>
-                        <h2>
-                            <i class="bi bi-lightbulb"></i>
-                            Selected Project Idea
-                        </h2>
+    <section class="nova-journey-board nova-surface" data-tour="project-journey">
+        <header class="nova-section-header">
+            <div>
+                <span class="nova-section-kicker">Interactive project journey</span>
+                <h2>Navigate the full FYP lifecycle</h2>
+                <p>Choose a stage to see its purpose, current state, and recommended action.</p>
+            </div>
 
-                        <p>
-                            The single shared idea currently connected
-                            to this project.
-                        </p>
-                    </div>
+            <div class="nova-progress-pill">
+                <span>@readiness%</span>
+                planning ready
+            </div>
+        </header>
 
-                    <a asp-page="/Student/IdeaGenerator"
-                       asp-route-projectId="@Model.ProjectId"
-                       class="card-link">
+        <div class="nova-journey-map">
+            <div class="nova-journey-line">
+                <span style="width:@readiness%"></span>
+            </div>
 
-                        @(Model.HasSelectedIdea
-                            ? "Change Idea"
-                            : "Choose Idea")
-                    </a>
-                </header>
+            <div class="nova-journey-nodes" role="tablist" aria-label="Project stages">
+                <button type="button"
+                        class="nova-journey-node @(Model.HasSkills ? "is-complete" : (activeJourney == "skills" ? "is-active" : ""))"
+                        data-journey-select="skills"
+                        role="tab"
+                        aria-selected="@(activeJourney == "skills" ? "true" : "false")">
+                    <span class="nova-node-icon">
+                        <i class="bi @(Model.HasSkills ? "bi-check2" : "bi-bar-chart-line")"></i>
+                    </span>
+                    <strong>Skills</strong>
+                    <small>@(Model.HasSkills ? "Mapped" : "Pending")</small>
+                </button>
 
-                @if (Model.SelectedIdea == null)
-                {
-                    <div class="empty-state project-empty-state">
-                        <div class="empty-icon">
-                            <i class="bi bi-lightbulb"></i>
-                        </div>
+                <button type="button"
+                        class="nova-journey-node @(Model.HasSelectedIdea ? "is-complete" : (activeJourney == "idea" ? "is-active" : ""))"
+                        data-journey-select="idea"
+                        role="tab"
+                        aria-selected="@(activeJourney == "idea" ? "true" : "false")">
+                    <span class="nova-node-icon">
+                        <i class="bi @(Model.HasSelectedIdea ? "bi-check2" : "bi-lightbulb")"></i>
+                    </span>
+                    <strong>Idea</strong>
+                    <small>@(Model.HasSelectedIdea ? "Selected" : "Pending")</small>
+                </button>
 
-                        <h3>No idea selected for this project</h3>
+                <button type="button"
+                        class="nova-journey-node @(Model.HasRoadmaps ? "is-complete" : (activeJourney == "roadmap" ? "is-active" : ""))"
+                        data-journey-select="roadmap"
+                        role="tab"
+                        aria-selected="@(activeJourney == "roadmap" ? "true" : "false")">
+                    <span class="nova-node-icon">
+                        <i class="bi @(Model.HasRoadmaps ? "bi-check2" : "bi-map")"></i>
+                    </span>
+                    <strong>Plan</strong>
+                    <small>@(Model.HasRoadmaps ? "Created" : "Pending")</small>
+                </button>
 
-                        <p>
-                            This project workspace is ready, but it
-                            does not have a shared project idea yet.
-                        </p>
+                <button type="button"
+                        class="nova-journey-node @(activeJourney == "execution" ? "is-active" : "")"
+                        data-journey-select="execution"
+                        role="tab"
+                        aria-selected="@(activeJourney == "execution" ? "true" : "false")">
+                    <span class="nova-node-icon">
+                        <i class="bi bi-code-slash"></i>
+                    </span>
+                    <strong>Execute</strong>
+                    <small>Build &amp; test</small>
+                </button>
 
-                        @if (!Model.HasSkills)
-                        {
-                            <a asp-page="/Student/SkillAssessment"
-                               class="btn btn-outline-primary mt-2">
-
-                                <i class="bi bi-bar-chart-line me-1"></i>
-                                Complete Skill Assessment
-                            </a>
-                        }
-                        else
-                        {
-                            <a asp-page="/Student/IdeaGenerator"
-                               asp-route-projectId="@Model.ProjectId"
-                               class="btn btn-primary mt-2">
-
-                                <i class="bi bi-stars me-1"></i>
-                                Choose Project Idea
-                            </a>
-                        }
-                    </div>
-                }
-                else
-                {
-                    <div class="selected-dashboard-idea">
-                        <div class="selected-idea-heading">
-                            <div class="selected-idea-icon">
-                                <i class="bi bi-cpu"></i>
-                            </div>
-
-                            <div class="min-w-0">
-                                <span>
-                                    @Model.SelectedIdea.Domain
-                                </span>
-
-                                <h3>
-                                    @Model.SelectedIdea.Title
-                                </h3>
-                            </div>
-                        </div>
-
-                        <p class="selected-idea-problem">
-                            @Model.SelectedIdea.ProblemStatement
-                        </p>
-
-                        <div class="selected-idea-scores">
-                            <div>
-                                <span>Innovation</span>
-                                <strong>
-                                    @Model.SelectedIdea.InnovationScore%
-                                </strong>
-                            </div>
-
-                            <div>
-                                <span>Feasibility</span>
-                                <strong>
-                                    @Model.SelectedIdea.FeasibilityScore%
-                                </strong>
-                            </div>
-
-                            <div>
-                                <span>Market Fit</span>
-                                <strong>
-                                    @Model.SelectedIdea.MarketDemandScore%
-                                </strong>
-                            </div>
-                        </div>
-
-                        <div class="selected-idea-actions">
-                            <a asp-page="/Student/ProjectDetails"
-                               asp-route-id="@Model.SelectedIdea.Id"
-                               class="btn btn-outline-primary">
-
-                                <i class="bi bi-eye me-1"></i>
-                                View Details
-                            </a>
-
-                            <a asp-page="/Student/IdeaGenerator"
-                               asp-route-projectId="@Model.ProjectId"
-                               class="btn btn-primary">
-
-                                <i class="bi bi-arrow-repeat me-1"></i>
-                                Replace Idea
-                            </a>
-                        </div>
-                    </div>
-                }
-            </article>
+                <button type="button"
+                        class="nova-journey-node"
+                        data-journey-select="defense"
+                        role="tab"
+                        aria-selected="false">
+                    <span class="nova-node-icon">
+                        <i class="bi bi-mortarboard"></i>
+                    </span>
+                    <strong>Defend</strong>
+                    <small>Prepare</small>
+                </button>
+            </div>
         </div>
 
-        <div class="col-xl-5">
-            <article class="dashboard-card h-100">
-                <header class="card-head">
-                    <div>
-                        <h2>
-                            <i class="bi bi-activity"></i>
-                            Project Progress
-                        </h2>
+        <div class="nova-journey-details">
+            <article class="nova-journey-detail @(activeJourney == "skills" ? "is-active" : "")"
+                     data-journey-panel="skills">
+                <div class="nova-detail-icon skill-detail">
+                    <i class="bi bi-bar-chart-line"></i>
+                </div>
 
-                        <p>
-                            Readiness steps for this project.
-                        </p>
+                <div>
+                    <span>Stage 01</span>
+                    <h3>Skills Foundation</h3>
+                    <p>Assess current capabilities and identify the technical foundation available to the project.</p>
+                </div>
+
+                <a asp-page="/Student/SkillAssessment">
+                    @(Model.HasSkills ? "Review assessment" : "Complete assessment")
+                    <i class="bi bi-arrow-right"></i>
+                </a>
+            </article>
+
+            <article class="nova-journey-detail @(activeJourney == "idea" ? "is-active" : "")"
+                     data-journey-panel="idea">
+                <div class="nova-detail-icon idea-detail">
+                    <i class="bi bi-lightbulb"></i>
+                </div>
+
+                <div>
+                    <span>Stage 02</span>
+                    <h3>Project Direction</h3>
+                    <p>Generate, compare, and select the idea that will become the shared source of truth.</p>
+                </div>
+
+                <a asp-page="/Student/IdeaGenerator" asp-route-projectId="@Model.ProjectId">
+                    @(Model.HasSelectedIdea ? "Explore ideas" : "Generate ideas")
+                    <i class="bi bi-arrow-right"></i>
+                </a>
+            </article>
+
+            <article class="nova-journey-detail @(activeJourney == "roadmap" ? "is-active" : "")"
+                     data-journey-panel="roadmap">
+                <div class="nova-detail-icon roadmap-detail">
+                    <i class="bi bi-map"></i>
+                </div>
+
+                <div>
+                    <span>Stage 03</span>
+                    <h3>Roadmap Planning</h3>
+                    <p>Build project-specific phases, tasks, hours, workload allocation, and delivery logic.</p>
+                </div>
+
+                <a asp-page="/Student/Roadmap">
+                    @(Model.HasRoadmaps ? "Open roadmap" : "Generate roadmap")
+                    <i class="bi bi-arrow-right"></i>
+                </a>
+            </article>
+
+            <article class="nova-journey-detail @(activeJourney == "execution" ? "is-active" : "")"
+                     data-journey-panel="execution">
+                <div class="nova-detail-icon execution-detail">
+                    <i class="bi bi-code-square"></i>
+                </div>
+
+                <div>
+                    <span>Stage 04</span>
+                    <h3>Engineering Execution</h3>
+                    <p>Implement the system, generate SE documentation, collaborate, test, and refine the solution.</p>
+                </div>
+
+                <a asp-page="/Student/DocumentationGenerator">
+                    Open engineering tools
+                    <i class="bi bi-arrow-right"></i>
+                </a>
+            </article>
+
+            <article class="nova-journey-detail"
+                     data-journey-panel="defense">
+                <div class="nova-detail-icon defense-detail">
+                    <i class="bi bi-shield-check"></i>
+                </div>
+
+                <div>
+                    <span>Stage 05</span>
+                    <h3>Defense Readiness</h3>
+                    <p>Practice project-specific questions, improve answers, and prepare to explain every design decision.</p>
+                </div>
+
+                <a asp-page="/Student/DefenseSimulator">
+                    Start defense practice
+                    <i class="bi bi-arrow-right"></i>
+                </a>
+            </article>
+        </div>
+    </section>
+
+    <section class="nova-bento-grid">
+        <article class="nova-core-card nova-surface" data-float-card data-tour="selected-idea">
+            <div class="nova-core-top">
+                <div>
+                    <span class="nova-section-kicker">Project core</span>
+                    <h2>Selected idea intelligence</h2>
+                </div>
+
+                <a asp-page="/Student/IdeaGenerator"
+                   asp-route-projectId="@Model.ProjectId"
+                   class="nova-small-link">
+                    @(Model.HasSelectedIdea ? "Replace idea" : "Choose idea")
+                    <i class="bi bi-arrow-up-right"></i>
+                </a>
+            </div>
+
+            @if (Model.SelectedIdea == null)
+            {
+                <div class="nova-no-idea">
+                    <div class="nova-no-idea-visual">
+                        <i class="bi bi-lightbulb"></i>
+                        <span></span>
+                        <span></span>
                     </div>
-                </header>
 
-                <div class="progress-timeline">
-                    <div class="timeline-item
-                        @(Model.HasSkills ? "done" : "pending")">
+                    <h3>No project intelligence yet</h3>
+                    <p>Select a shared project idea to unlock the full FYPilot analysis system.</p>
 
-                        <div class="timeline-dot">
-                            <i class="bi
-                                @(Model.HasSkills
-                                   ? "bi-check"
-                                   : "bi-circle")">
-                            </i>
+                    <a asp-page="@(Model.HasSkills ? "/Student/IdeaGenerator" : "/Student/SkillAssessment")"
+                       asp-route-projectId="@Model.ProjectId">
+                        @(Model.HasSkills ? "Generate ideas" : "Complete skills first")
+                    </a>
+                </div>
+            }
+            else
+            {
+                <div class="nova-core-content">
+                    <div class="nova-core-copy">
+                        <div class="nova-domain-chip">
+                            <i class="bi bi-shield-shaded"></i>
+                            @Model.SelectedIdea.Domain
                         </div>
 
-                        <div>
-                            <div class="timeline-title">
-                                Skill Assessment
-                            </div>
+                        <h3>@Model.SelectedIdea.Title</h3>
+                        <p>@Model.SelectedIdea.ProblemStatement</p>
 
-                            <div class="timeline-text">
-                                @(Model.HasSkills
-                                    ? "Private skills are available"
-                                    : "Assessment pending")
-                            </div>
-                        </div>
-                    </div>
+                        <div class="nova-core-actions">
+                            <a asp-page="/Student/ProjectDetails"
+                               asp-route-id="@Model.SelectedIdea.Id"
+                               class="nova-solid-btn">
+                                <i class="bi bi-eye"></i>
+                                View details
+                            </a>
 
-                    <div class="timeline-item
-                        @(Model.HasSelectedIdea
-                             ? "done"
-                             : "active")">
-
-                        <div class="timeline-dot">
-                            <i class="bi
-                                @(Model.HasSelectedIdea
-                                   ? "bi-check"
-                                   : "bi-circle")">
-                            </i>
-                        </div>
-
-                        <div>
-                            <div class="timeline-title">
-                                Project Idea
-                            </div>
-
-                            <div class="timeline-text">
-                                @(Model.HasSelectedIdea
-                                    ? "Shared idea selected"
-                                    : "Choose one idea")
-                            </div>
+                            <a asp-page="/Student/ProjectDNA"
+                               class="nova-outline-btn">
+                                <i class="bi bi-diagram-3"></i>
+                                Project DNA
+                            </a>
                         </div>
                     </div>
 
-                    <div class="timeline-item
-                        @(Model.HasRoadmaps
-                             ? "done"
-                             : "pending")">
-
-                        <div class="timeline-dot">
-                            <i class="bi
-                                @(Model.HasRoadmaps
-                                   ? "bi-check"
-                                   : "bi-circle")">
-                            </i>
+                    <div class="nova-score-columns">
+                        <div style="--score:@innovation">
+                            <span>Innovation</span>
+                            <strong>@innovation%</strong>
+                            <div><i></i></div>
                         </div>
 
-                        <div>
-                            <div class="timeline-title">
-                                Roadmap Planning
-                            </div>
-
-                            <div class="timeline-text">
-                                @(Model.HasRoadmaps
-                                    ? "Roadmap created"
-                                    : "Pending")
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="timeline-item pending">
-                        <div class="timeline-dot">
-                            <i class="bi bi-circle"></i>
+                        <div style="--score:@feasibility">
+                            <span>Feasibility</span>
+                            <strong>@feasibility%</strong>
+                            <div><i></i></div>
                         </div>
 
-                        <div>
-                            <div class="timeline-title">
-                                Project Execution
-                            </div>
-
-                            <div class="timeline-text">
-                                Track tasks and milestones
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="timeline-item pending">
-                        <div class="timeline-dot">
-                            <i class="bi bi-circle"></i>
-                        </div>
-
-                        <div>
-                            <div class="timeline-title">
-                                Defense Preparation
-                            </div>
-
-                            <div class="timeline-text">
-                                Pending
-                            </div>
+                        <div style="--score:@marketFit">
+                            <span>Market fit</span>
+                            <strong>@marketFit%</strong>
+                            <div><i></i></div>
                         </div>
                     </div>
                 </div>
-            </article>
+            }
+        </article>
+
+        <article class="nova-trust-card" data-tilt-card data-tour="trust-layer">
+            <div class="nova-trust-beam"></div>
+
+            <div class="nova-trust-header">
+                <span><i class="bi bi-shield-lock"></i>AI TrustLayer</span>
+                <strong>Safe by architecture</strong>
+            </div>
+
+            <div class="nova-trust-core">
+                <div class="trust-core-center">
+                    <i class="bi bi-cpu"></i>
+                    <strong>Reviewed AI</strong>
+                    <small>Every critical output</small>
+                </div>
+
+                <span class="trust-orbit trust-orbit-one"></span>
+                <span class="trust-orbit trust-orbit-two"></span>
+                <span class="trust-orbit-node node-a">Firewall</span>
+                <span class="trust-orbit-node node-b">Schema</span>
+                <span class="trust-orbit-node node-c">Reviewer</span>
+                <span class="trust-orbit-node node-d">Passport</span>
+            </div>
+
+            <p>
+                Generated content is filtered, validated, reviewed, and assigned a traceable quality decision.
+            </p>
+
+            <button type="button" class="nova-trust-more" id="openTrustDetails">
+                View TrustLayer flow
+                <i class="bi bi-arrow-right"></i>
+            </button>
+        </article>
+
+        <article class="nova-activity-card nova-surface nova-activity-wide">
+            <header class="nova-section-header nova-section-header-small">
+                <div>
+                    <span class="nova-section-kicker">Live stream</span>
+                    <h2>Recent project activity</h2>
+                </div>
+
+                <span class="nova-live-status">
+                    <i></i>
+                    Live
+                </span>
+            </header>
+
+            @if (activityPreview.Count == 0)
+            {
+                <div class="nova-mini-empty">
+                    <i class="bi bi-clock-history"></i>
+                    <strong>No activity yet</strong>
+                    <span>Project events will appear here.</span>
+                </div>
+            }
+            else
+            {
+                <div class="nova-activity-list">
+                    @foreach (var activity in activityPreview)
+                    {
+                        <div class="nova-activity-item">
+                            <span class="nova-activity-line"></span>
+
+                            <div class="nova-activity-dot"></div>
+
+                            <div class="nova-activity-copy">
+                                <strong>@activity.Description</strong>
+                                <time>@activity.CreatedAtUtc.ToLocalTime().ToString("MMM d · h:mm tt")</time>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </article>
+
+    </section>
+
+    <section class="nova-capability-universe nova-surface" data-tour="capability-universe">
+        <header class="nova-section-header">
+            <div>
+                <span class="nova-section-kicker">FYPilot intelligence universe</span>
+                <h2>The complete project ecosystem</h2>
+                <p>Explore the connected AI and project-management capabilities around your active project.</p>
+            </div>
+
+            <div class="nova-capability-filter" role="group" aria-label="Filter capabilities">
+                <button type="button" class="is-active" data-capability-filter="all">All</button>
+                <button type="button" data-capability-filter="plan">Plan</button>
+                <button type="button" data-capability-filter="build">Build</button>
+                <button type="button" data-capability-filter="support">Support</button>
+            </div>
+        </header>
+
+        <div class="nova-universe-map">
+            <div class="nova-connector connector-one"></div>
+            <div class="nova-connector connector-two"></div>
+            <div class="nova-connector connector-three"></div>
+            <div class="nova-connector connector-four"></div>
+
+            <div class="nova-universe-column">
+                <a asp-page="/Student/IdeaGenerator"
+                   asp-route-projectId="@Model.ProjectId"
+                   class="nova-feature-node feature-blue"
+                   data-capability-group="plan"
+                   data-float-card>
+                    <span><i class="bi bi-lightbulb"></i></span>
+                    <div>
+                        <strong>Idea Generator</strong>
+                        <small>Project-specific ideas</small>
+                    </div>
+                    <i class="bi bi-arrow-up-right"></i>
+                </a>
+
+                <a asp-page="/Student/IdeaComparison"
+                   class="nova-feature-node feature-violet"
+                   data-capability-group="plan"
+                   data-float-card>
+                    <span><i class="bi bi-columns-gap"></i></span>
+                    <div>
+                        <strong>Idea Comparison</strong>
+                        <small>Rank and compare choices</small>
+                    </div>
+                    <i class="bi bi-arrow-up-right"></i>
+                </a>
+
+                <a asp-page="/Student/MarketDemand"
+                   class="nova-feature-node feature-cyan"
+                   data-capability-group="plan"
+                   data-float-card>
+                    <span><i class="bi bi-graph-up-arrow"></i></span>
+                    <div>
+                        <strong>Market Intelligence</strong>
+                        <small>Evidence and opportunity</small>
+                    </div>
+                    <i class="bi bi-arrow-up-right"></i>
+                </a>
+
+                <a asp-page="/Student/ProjectDNA"
+                   class="nova-feature-node feature-indigo"
+                   data-capability-group="plan"
+                   data-float-card>
+                    <span><i class="bi bi-diagram-3"></i></span>
+                    <div>
+                        <strong>Project DNA</strong>
+                        <small>Technical identity</small>
+                    </div>
+                    <i class="bi bi-arrow-up-right"></i>
+                </a>
+            </div>
+
+            <div class="nova-universe-core">
+                <div class="nova-core-rings ring-a"></div>
+                <div class="nova-core-rings ring-b"></div>
+                <div class="nova-core-rings ring-c"></div>
+
+                <div class="nova-core-emblem">
+                    <img src="/image/FYPilot_logo.png" alt="" />
+                    <strong>FYPilot</strong>
+                    <span>AI Project OS</span>
+                </div>
+
+                <div class="nova-core-signal signal-a"></div>
+                <div class="nova-core-signal signal-b"></div>
+                <div class="nova-core-signal signal-c"></div>
+            </div>
+
+            <div class="nova-universe-column">
+                <a asp-page="/Student/Roadmap"
+                   class="nova-feature-node feature-green"
+                   data-capability-group="build"
+                   data-float-card>
+                    <span><i class="bi bi-map"></i></span>
+                    <div>
+                        <strong>Project Roadmap</strong>
+                        <small>Schedule and workload</small>
+                    </div>
+                    <i class="bi bi-arrow-up-right"></i>
+                </a>
+
+                <a asp-page="/Student/DocumentationGenerator"
+                   class="nova-feature-node feature-orange"
+                   data-capability-group="build"
+                   data-float-card>
+                    <span><i class="bi bi-journal-code"></i></span>
+                    <div>
+                        <strong>SE Documentation</strong>
+                        <small>SRS, design, and tests</small>
+                    </div>
+                    <i class="bi bi-arrow-up-right"></i>
+                </a>
+
+                <a asp-page="/Student/MentorChat"
+                   class="nova-feature-node feature-pink"
+                   data-capability-group="support"
+                   data-float-card>
+                    <span><i class="bi bi-chat-dots"></i></span>
+                    <div>
+                        <strong>AI Mentor</strong>
+                        <small>Contextual guidance</small>
+                    </div>
+                    <i class="bi bi-arrow-up-right"></i>
+                </a>
+
+                <a asp-page="/Student/DefenseSimulator"
+                   class="nova-feature-node feature-red"
+                   data-capability-group="support"
+                   data-float-card>
+                    <span><i class="bi bi-shield-check"></i></span>
+                    <div>
+                        <strong>Defense Simulator</strong>
+                        <small>Practice and evaluation</small>
+                    </div>
+                    <i class="bi bi-arrow-up-right"></i>
+                </a>
+            </div>
         </div>
     </section>
 
-    <section class="row g-4 mt-1">
-        <div class="col-xl-7">
-            <article class="dashboard-card h-100">
-                <header class="card-head">
-                    <div>
-                        <h2>
-                            <i class="bi bi-clock-history"></i>
-                            Recent Project Activity
-                        </h2>
+    <div class="nova-floating-dock no-motion">
+        <button type="button"
+                class="nova-dock-trigger"
+                id="novaDockTrigger"
+                data-tour="quick-actions"
+                aria-expanded="false"
+                aria-controls="novaQuickDock">
+            <i class="bi bi-grid"></i>
+            <span>Quick actions</span>
+        </button>
 
-                        <p>
-                            Actions recorded only for this project.
-                        </p>
-                    </div>
-                </header>
+        <div class="nova-quick-dock" id="novaQuickDock">
+            <a asp-page="/Student/Roadmap">
+                <i class="bi bi-map"></i>
+                <span>Roadmap</span>
+            </a>
 
-                @if (Model.RecentActivities.Count == 0)
-                {
-                    <div class="small-dashboard-empty">
-                        <i class="bi bi-clock"></i>
+            <a asp-page="/Student/DocumentationGenerator">
+                <i class="bi bi-journal-code"></i>
+                <span>SE Docs</span>
+            </a>
 
-                        <div>
-                            <strong>No activity yet</strong>
+            <a asp-page="/Student/MentorChat">
+                <i class="bi bi-chat-dots"></i>
+                <span>Mentor</span>
+            </a>
 
-                            <span>
-                                Project actions will appear here.
-                            </span>
-                        </div>
-                    </div>
-                }
-                else
-                {
-                    <div class="dashboard-activity-list">
-                        @foreach (var activity
-                            in Model.RecentActivities)
-                        {
-                            <div class="dashboard-activity-item">
-                                <div class="activity-dot"></div>
-
-                                <div class="min-w-0">
-                                    <strong>
-                                        @activity.Description
-                                    </strong>
-
-                                    <span>
-                                        @activity.CreatedAtUtc
-                                        .ToLocalTime()
-                                        .ToString(
-                                        "MMM d, yyyy · h:mm tt")
-                                    </span>
-                                </div>
-                            </div>
-                        }
-                    </div>
-                }
-            </article>
+            <a asp-page="/Student/DefenseSimulator">
+                <i class="bi bi-shield-check"></i>
+                <span>Defense</span>
+            </a>
         </div>
+    </div>
 
-        <div class="col-xl-5">
-            <article class="dashboard-card h-100">
-                <header class="card-head">
+    <div class="nova-modal-backdrop"
+         id="trustLayerModal"
+         aria-hidden="true">
+        <section class="nova-modal"
+                 role="dialog"
+                 aria-modal="true"
+                 aria-labelledby="trustLayerTitle">
+            <button type="button"
+                    class="nova-modal-close"
+                    id="closeTrustDetails"
+                    aria-label="Close TrustLayer details">
+                <i class="bi bi-x-lg"></i>
+            </button>
+
+            <div class="nova-modal-icon">
+                <i class="bi bi-shield-lock"></i>
+            </div>
+
+            <span class="nova-section-kicker">AI TrustLayer architecture</span>
+            <h2 id="trustLayerTitle">How FYPilot protects AI outputs</h2>
+
+            <div class="nova-modal-flow">
+                <div>
+                    <span>01</span>
+                    <strong>Writer Agent</strong>
+                    <p>Creates a structured candidate using the selected project context.</p>
+                </div>
+
+                <i class="bi bi-arrow-right"></i>
+
+                <div>
+                    <span>02</span>
+                    <strong>LLM Firewall</strong>
+                    <p>Scans untrusted input and generated output for unsafe patterns.</p>
+                </div>
+
+                <i class="bi bi-arrow-right"></i>
+
+                <div>
+                    <span>03</span>
+                    <strong>Schema Validation</strong>
+                    <p>Checks IDs, required fields, structure, and referential integrity.</p>
+                </div>
+
+                <i class="bi bi-arrow-right"></i>
+
+                <div>
+                    <span>04</span>
+                    <strong>Reviewer Agent</strong>
+                    <p>Evaluates quality, realism, consistency, and unsupported claims.</p>
+                </div>
+
+                <i class="bi bi-arrow-right"></i>
+
+                <div>
+                    <span>05</span>
+                    <strong>Quality Passport</strong>
+                    <p>Records the decision, provider, attempts, findings, and fallback status.</p>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <div class="student-tour-overlay"
+         id="studentTourOverlay"
+         aria-hidden="true">
+        <div class="student-tour-spotlight"
+             id="studentTourSpotlight"
+             aria-hidden="true"></div>
+
+        <section class="student-tour-card"
+                 id="studentTourCard"
+                 role="dialog"
+                 aria-modal="true"
+                 aria-labelledby="studentTourTitle"
+                 aria-describedby="studentTourDescription">
+            <div class="student-tour-card-head">
+                <div class="student-tour-brand">
+                    <span><i class="bi bi-compass"></i></span>
                     <div>
-                        <h2>
-                            <i class="bi bi-exclamation-triangle"></i>
-                            Project Alerts
-                        </h2>
-
-                        <p>
-                            Important next actions.
-                        </p>
+                        <small>FYPilot Guided Tour</small>
+                        <strong id="studentTourProgress">Welcome</strong>
                     </div>
-                </header>
+                </div>
 
-                @if (Model.RiskAlarms.Count == 0)
-                {
-                    <div class="small-dashboard-empty">
-                        <i class="bi bi-check-circle"></i>
+                <button type="button"
+                        class="student-tour-close"
+                        id="studentTourClose"
+                        aria-label="Close guided tour">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>
 
-                        <div>
-                            <strong>No current alerts</strong>
+            <div class="student-tour-progress-track">
+                <span id="studentTourProgressBar"></span>
+            </div>
 
-                            <span>
-                                The project setup looks ready.
-                            </span>
-                        </div>
-                    </div>
-                }
-                else
-                {
-                    <div class="dashboard-alert-list">
-                        @foreach (var alarm
-                            in Model.RiskAlarms)
-                        {
-                            <div class="dashboard-risk
-                                risk-@alarm.Severity">
+            <div class="student-tour-card-body">
+                <div class="student-tour-step-icon"
+                     id="studentTourStepIcon">
+                    <i class="bi bi-stars"></i>
+                </div>
 
-                                <i class="bi
-                                    @(alarm.Severity == "high"
-                                       ? "bi-exclamation-circle-fill"
-                                       : "bi-info-circle-fill")">
-                                </i>
+                <span class="student-tour-kicker"
+                      id="studentTourKicker">
+                    Welcome to FYPilot
+                </span>
 
-                                <div>
-                                    <strong>@alarm.Title</strong>
-                                    <p>@alarm.Message</p>
-                                </div>
-                            </div>
-                        }
-                    </div>
-                }
-            </article>
-        </div>
-    </section>
+                <h2 id="studentTourTitle">
+                    Your project journey starts here
+                </h2>
+
+                <p id="studentTourDescription">
+                    This tour explains the recommended workflow and the most important tools.
+                </p>
+
+                <div class="student-tour-tip"
+                     id="studentTourTip">
+                    <i class="bi bi-lightbulb"></i>
+                    <span>Use the recommended next move whenever you are unsure what to do.</span>
+                </div>
+            </div>
+
+            <div class="student-tour-card-actions">
+                <button type="button"
+                        class="student-tour-skip"
+                        id="studentTourSkip">
+                    Skip tour
+                </button>
+
+                <div class="student-tour-nav">
+                    <button type="button"
+                            class="student-tour-back"
+                            id="studentTourBack">
+                        <i class="bi bi-arrow-left"></i>
+                        Back
+                    </button>
+
+                    <button type="button"
+                            class="student-tour-next"
+                            id="studentTourNext">
+                        Start tour
+                        <i class="bi bi-arrow-right"></i>
+                    </button>
+                </div>
+            </div>
+
+            <button type="button"
+                    class="student-tour-open-next"
+                    id="studentTourOpenNext">
+                <i class="bi bi-arrow-up-right-circle"></i>
+                Open my recommended next step
+            </button>
+        </section>
+    </div>
+
 </div>
 
 @section Head {
     <style>
-        .active-project-panel {
+        :root {
+            --nova-bg: #eef3fb;
+            --nova-surface: rgba(255,255,255,.86);
+            --nova-surface-solid: #fff;
+            --nova-text: #14213a;
+            --nova-muted: #6f7d94;
+            --nova-line: rgba(124,147,183,.22);
+            --nova-primary: #3457f0;
+            --nova-primary-2: #8a5cf6;
+            --nova-cyan: #2fd4e0;
+            --nova-green: #1fbd7d;
+            --nova-amber: #f5a531;
+            --nova-coral: #ff6b5e;
+            --nova-red: #e75e68;
+            --nova-shadow: 0 18px 48px rgba(36,54,89,.09);
+            --nova-radius-xl: 28px;
+            --nova-radius-lg: 20px;
+            --nova-radius-md: 14px;
+        }
+
+        .nova-dashboard {
+            --theme-bg:
+                radial-gradient(circle at 8% 6%, rgba(78,121,245,.13), transparent 26%),
+                radial-gradient(circle at 92% 10%, rgba(47,212,224,.12), transparent 25%),
+                radial-gradient(circle at 50% 120%, rgba(138,92,246,.08), transparent 35%),
+                linear-gradient(180deg, #f6f8fc 0%, #eef3f9 100%);
+            --theme-hero:
+                radial-gradient(circle at 88% 0%, rgba(90,180,255,.34), transparent 32%),
+                radial-gradient(circle at 34% 115%, rgba(47,212,224,.16), transparent 32%),
+                radial-gradient(circle at 4% 40%, rgba(138,92,246,.18), transparent 28%),
+                linear-gradient(122deg, #0a2050 0%, #133c78 48%, #1c5ac0 78%, #2a6ee0 100%);
+            --theme-card: rgba(255,255,255,.9);
+            --theme-card-solid: #fff;
+            --theme-text: #17233b;
+            --theme-muted: #718096;
+            --theme-border: rgba(118,142,180,.19);
+            position: relative;
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 0 0 6rem;
+            color: var(--theme-text);
+        }
+
+        .nova-dashboard::before {
+            content: "";
+            position: fixed;
+            z-index: -2;
+            inset: 0;
+            pointer-events: none;
+            background: var(--theme-bg);
+        }
+
+
+        .nova-glass,
+        .nova-surface {
+            background: var(--theme-card);
+            border: 1px solid var(--theme-border);
+            box-shadow: var(--nova-shadow);
+            backdrop-filter: blur(18px);
+        }
+
+        .nova-surface {
+            border-radius: var(--nova-radius-lg);
+        }
+
+        .nova-top-deck {
+            position: relative;
+            isolation: isolate;
+            overflow: hidden;
+            color: #fff;
+            background: var(--theme-hero);
+            border-radius: var(--nova-radius-xl);
+            box-shadow: 0 22px 58px rgba(11,38,86,.19);
+            transform-style: preserve-3d;
+        }
+
+        .nova-mesh {
+            position: absolute;
+            z-index: -3;
+            inset: 0;
+            opacity: .16;
+            background-image:
+                linear-gradient(rgba(255,255,255,.16) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,.16) 1px, transparent 1px);
+            background-size: 44px 44px;
+            mask-image: linear-gradient(90deg, #000, transparent 92%);
+        }
+
+        .nova-orb {
+            position: absolute;
+            z-index: -2;
+            border-radius: 50%;
+            filter: blur(4px);
+            animation: novaDrift 14s ease-in-out infinite;
+        }
+
+        .nova-orb-a {
+            width: 440px;
+            height: 440px;
+            right: -140px;
+            top: -240px;
+            background: radial-gradient(circle at 35% 35%, rgba(130,195,255,.42), rgba(102,172,255,.08) 70%);
+        }
+
+        .nova-orb-b {
+            width: 300px;
+            height: 300px;
+            left: 37%;
+            bottom: -210px;
+            background: radial-gradient(circle at 40% 40%, rgba(56,232,224,.32), rgba(56,211,232,.05) 70%);
+            animation-delay: -6s;
+            animation-direction: reverse;
+        }
+
+        .nova-orb-c {
+            width: 230px;
+            height: 230px;
+            left: -90px;
+            top: 30%;
+            background: radial-gradient(circle at 45% 45%, rgba(160,120,255,.3), rgba(138,92,246,.04) 70%);
+            animation-delay: -3s;
+        }
+
+        .nova-topbar {
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 1rem;
-            padding: 1.25rem 1.35rem;
-            border: 1px solid #cddcf7;
-            border-radius: 18px;
-            color: #fff;
-            background: radial-gradient( circle at 88% 10%, rgba(111, 160, 255, .3), transparent 30%), linear-gradient( 135deg, #071d49, #173e7c);
-            box-shadow: 0 15px 35px rgba(7, 29, 73, .16);
+            padding: .68rem 1rem;
+            border-bottom: 1px solid rgba(255,255,255,.09);
         }
 
-        .active-project-main {
-            min-width: 0;
-            display: flex;
+        .nova-live-label {
+            display: inline-flex;
             align-items: center;
-            gap: .9rem;
-        }
-
-        .active-project-icon {
-            width: 54px;
-            height: 54px;
-            flex: 0 0 auto;
-            display: grid;
-            place-items: center;
-            border: 1px solid rgba(255,255,255,.18);
-            border-radius: 15px;
-            background: rgba(255,255,255,.11);
-            font-size: 1.35rem;
-        }
-
-        .active-project-label {
-            color: rgba(255,255,255,.63);
+            gap: .48rem;
+            color: rgba(255,255,255,.72);
             font-size: .65rem;
-            font-weight: 800;
-            letter-spacing: .1em;
+            font-weight: 900;
+            letter-spacing: .11em;
             text-transform: uppercase;
         }
 
-        .active-project-panel h1 {
-            margin: .18rem 0 0;
-            overflow: hidden;
-            font-size: 1.35rem;
-            font-weight: 850;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+        .nova-live-pulse {
+            position: relative;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #55efb2;
+            box-shadow: 0 0 0 5px rgba(85,239,178,.1);
         }
 
-        .active-project-meta {
+        .nova-live-pulse::after {
+            content: "";
+            position: absolute;
+            inset: -6px;
+            border: 1px solid rgba(85,239,178,.44);
+            border-radius: 50%;
+            animation: novaPulse 2s ease-out infinite;
+        }
+
+
+        .nova-hero-grid {
+            display: grid;
+            grid-template-columns: minmax(0,1.55fr) minmax(260px,.45fr);
+            gap: 1.2rem;
+            align-items: center;
+            padding: 1.25rem 1.35rem 1.35rem;
+        }
+
+        .nova-project-chip,
+        .nova-section-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: .38rem;
+            font-size: .62rem;
+            font-weight: 900;
+            letter-spacing: .09em;
+            text-transform: uppercase;
+        }
+
+        .nova-project-chip {
+            padding: .35rem .55rem;
+            color: #bdeeff;
+            background: rgba(56,195,227,.1);
+            border: 1px solid rgba(56,195,227,.2);
+            border-radius: 999px;
+        }
+
+        .nova-project-identity h1 {
+            max-width: 940px;
+            margin: .75rem 0 0;
+            color: #fff;
+            font-size: clamp(1.7rem,3.2vw,2.65rem);
+            font-weight: 930;
+            letter-spacing: -.055em;
+            line-height: 1.02;
+        }
+
+        .nova-project-meta {
             display: flex;
             flex-wrap: wrap;
-            gap: .45rem .8rem;
-            margin-top: .5rem;
-            color: rgba(255,255,255,.76);
-            font-size: .68rem;
-            font-weight: 650;
+            gap: .45rem .9rem;
+            margin-top: .75rem;
+            color: rgba(255,255,255,.72);
+            font-size: .69rem;
+            font-weight: 700;
         }
 
-            .active-project-meta span {
-                display: inline-flex;
-                align-items: center;
-                gap: .3rem;
-            }
+        .nova-project-meta span {
+            display: inline-flex;
+            align-items: center;
+            gap: .35rem;
+        }
 
-            .active-project-meta .bi-circle-fill {
-                font-size: .4rem;
-            }
+        .nova-project-identity > p {
+            max-width: 850px;
+            margin: .7rem 0 0;
+            color: rgba(255,255,255,.7);
+            font-size: .8rem;
+            line-height: 1.65;
+        }
 
-        .switch-project-button {
-            min-height: 41px;
-            flex: 0 0 auto;
+        .nova-hero-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .65rem;
+            margin-top: .85rem;
+        }
+
+        .nova-main-action {
+            min-width: min(100%,430px);
+            display: grid;
+            grid-template-columns: auto minmax(0,1fr) auto;
+            align-items: center;
+            gap: .7rem;
+            padding: .6rem .72rem;
+            color: #102653;
+            background: #fff;
+            border-radius: 14px;
+            box-shadow: 0 15px 35px rgba(0,0,0,.17);
+            text-decoration: none;
+            transition: transform .18s ease, box-shadow .18s ease;
+        }
+
+        .nova-main-action:hover {
+            color: #102653;
+            transform: translateY(-1px);
+            box-shadow: 0 20px 45px rgba(0,0,0,.22);
+        }
+
+        .nova-main-action-icon {
+            width: 34px;
+            height: 34px;
+            display: grid;
+            place-items: center;
+            color: #fff;
+            background: linear-gradient(135deg,var(--nova-primary),var(--nova-primary-2));
+            border-radius: 11px;
+        }
+
+        .nova-main-action-copy small,
+        .nova-main-action-copy strong {
+            display: block;
+        }
+
+        .nova-main-action-copy small {
+            color: #8590a3;
+            font-size: .56rem;
+            font-weight: 700;
+        }
+
+        .nova-main-action-copy strong {
+            margin-top: .1rem;
+            font-size: .73rem;
+            font-weight: 900;
+        }
+
+        .nova-ghost-action {
             display: inline-flex;
             align-items: center;
             justify-content: center;
             gap: .4rem;
+            min-height: 48px;
             padding: 0 .85rem;
-            border: 1px solid rgba(255,255,255,.3);
-            border-radius: 10px;
             color: #fff;
-            background: rgba(255,255,255,.1);
-            font-size: .68rem;
+            background: rgba(255,255,255,.07);
+            border: 1px solid rgba(255,255,255,.2);
+            border-radius: 13px;
+            text-decoration: none;
+            font-size: .65rem;
+            font-weight: 800;
+        }
+
+        .nova-ghost-action:hover {
+            color: #153066;
+            background: #fff;
+        }
+
+
+
+        .nova-project-summary {
+            align-self: stretch;
+            display: grid;
+            align-content: center;
+            gap: .75rem;
+            padding: .9rem;
+            background: rgba(255,255,255,.075);
+            border: 1px solid rgba(255,255,255,.14);
+            border-radius: 18px;
+            backdrop-filter: blur(12px);
+        }
+
+        .nova-summary-heading {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .8rem;
+        }
+
+        .nova-summary-heading > div:first-child span,
+        .nova-summary-heading > div:first-child strong {
+            display: block;
+        }
+
+        .nova-summary-heading > div:first-child span {
+            color: rgba(255,255,255,.58);
+            font-size: .55rem;
+            font-weight: 850;
+            letter-spacing: .06em;
+            text-transform: uppercase;
+        }
+
+        .nova-summary-heading > div:first-child strong {
+            margin-top: .08rem;
+            color: #fff;
+            font-size: 1.55rem;
+            font-weight: 930;
+            line-height: 1;
+        }
+
+        .nova-summary-ring {
+            position: relative;
+            width: 58px;
+            height: 58px;
+            display: grid;
+            place-items: center;
+            border-radius: 50%;
+            background: conic-gradient(#59e6c1 calc(var(--summary-progress) * 1%), rgba(255,255,255,.13) 0);
+            box-shadow: 0 0 22px rgba(89,230,193,.35);
+        }
+
+        .nova-summary-ring::before {
+            content: "";
+            position: absolute;
+            inset: 6px;
+            background: #17427d;
+            border-radius: 50%;
+        }
+
+        .nova-summary-ring span {
+            position: relative;
+            z-index: 1;
+            color: #fff;
+            font-size: .62rem;
+            font-weight: 900;
+        }
+
+        .nova-summary-progress {
+            padding: .6rem;
+            background: rgba(255,255,255,.05);
+            border-radius: 11px;
+        }
+
+        .nova-summary-progress-label {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .6rem;
+            color: rgba(255,255,255,.57);
+            font-size: .52rem;
+        }
+
+        .nova-summary-progress-label strong {
+            color: #fff;
+        }
+
+        .nova-summary-progress-track {
+            height: 5px;
+            margin-top: .42rem;
+            overflow: hidden;
+            background: rgba(255,255,255,.12);
+            border-radius: 999px;
+        }
+
+        .nova-summary-progress-track span {
+            display: block;
+            height: 100%;
+            background: linear-gradient(90deg,#58e3bd,#54bee9);
+            border-radius: inherit;
+        }
+
+        .nova-summary-checklist {
+            display: grid;
+            gap: .35rem;
+        }
+
+        .nova-summary-checklist > div {
+            display: flex;
+            align-items: center;
+            gap: .42rem;
+            padding: .45rem .5rem;
+            color: rgba(255,255,255,.52);
+            background: rgba(255,255,255,.045);
+            border-radius: 9px;
+            font-size: .57rem;
+            font-weight: 700;
+        }
+
+        .nova-summary-checklist > div.is-complete {
+            color: #caffec;
+        }
+
+        .nova-summary-checklist > div.is-complete i {
+            color: #59e6c1;
+        }
+
+        .nova-metric-ribbon {
+            display: grid;
+            grid-template-columns: repeat(4,minmax(0,1fr));
+            gap: .75rem;
+            margin-top: .9rem;
+        }
+
+        .nova-metric-card {
+            --metric-accent: var(--nova-primary);
+            --metric-accent-bg: rgba(52,104,245,.1);
+            position: relative;
+            display: grid;
+            grid-template-columns: auto minmax(0,1fr) auto;
+            align-items: center;
+            gap: .65rem;
+            min-height: 84px;
+            padding: .9rem;
+            color: var(--theme-text);
+            background: var(--theme-card);
+            border: 1px solid var(--theme-border);
+            border-radius: 15px;
+            box-shadow: 0 14px 35px rgba(35,52,83,.07);
+            backdrop-filter: blur(14px);
+            overflow: hidden;
+            transform: translateY(0);
+            transition: transform .18s ease, box-shadow .18s ease;
+        }
+
+        .nova-metric-card::before {
+            content: "";
+            position: absolute;
+            inset: 0 auto 0 0;
+            width: 3px;
+            background: var(--metric-accent);
+        }
+
+        .nova-metric-card:nth-of-type(2) { --metric-accent: var(--nova-cyan); --metric-accent-bg: rgba(47,212,224,.12); }
+        .nova-metric-card:nth-of-type(3) { --metric-accent: var(--nova-primary-2); --metric-accent-bg: rgba(138,92,246,.12); }
+        .nova-metric-card:nth-of-type(4) { --metric-accent: var(--nova-amber); --metric-accent-bg: rgba(245,165,49,.13); }
+
+        .nova-metric-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 20px 42px rgba(35,52,83,.14);
+        }
+
+        .nova-metric-icon {
+            width: 46px;
+            height: 46px;
+            display: grid;
+            place-items: center;
+            color: var(--metric-accent);
+            background: var(--metric-accent-bg);
+            border-radius: 12px;
+            font-size: 1.05rem;
+        }
+
+        .nova-metric-copy span,
+        .nova-metric-copy strong,
+        .nova-metric-copy small {
+            display: block;
+        }
+
+        .nova-metric-copy span {
+            color: var(--theme-muted);
+            font-size: .65rem;
+            font-weight: 850;
+            letter-spacing: .05em;
+            text-transform: uppercase;
+        }
+
+        .nova-metric-copy strong {
+            margin-top: .08rem;
+            color: var(--theme-text);
+            font-size: 1.28rem;
+            font-weight: 930;
+            line-height: 1.1;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .nova-metric-copy small {
+            margin-top: .16rem;
+            color: var(--theme-muted);
+            font-size: .65rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .nova-metric-spark {
+            color: var(--metric-accent);
+            opacity: .6;
+            font-size: .7rem;
+        }
+
+        .nova-journey-board,
+        .nova-capability-universe {
+            margin-top: .9rem;
+            padding: 1rem;
+        }
+
+        .nova-section-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+        .nova-section-header-small {
+            padding: .9rem .95rem;
+            border-bottom: 1px solid var(--theme-border);
+        }
+
+        .nova-section-kicker {
+            color: var(--nova-primary);
+        }
+
+        .nova-section-header h2,
+        .nova-core-card h2,
+        .nova-trust-card h2 {
+            margin: .18rem 0 0;
+            color: var(--theme-text);
+            font-size: 1rem;
+            font-weight: 900;
+            letter-spacing: -.025em;
+        }
+
+        .nova-section-header p {
+            margin: .2rem 0 0;
+            color: var(--theme-muted);
+            font-size: .64rem;
+        }
+
+        .nova-progress-pill {
+            padding: .4rem .6rem;
+            color: var(--nova-primary);
+            background: rgba(52,104,245,.09);
+            border-radius: 999px;
+            font-size: .57rem;
+            font-weight: 800;
+            white-space: nowrap;
+        }
+
+        .nova-progress-pill span {
+            margin-right: .2rem;
+            font-weight: 950;
+        }
+
+        .nova-journey-map {
+            position: relative;
+            margin-top: 1.15rem;
+            padding: .5rem 1rem;
+        }
+
+        .nova-journey-line {
+            position: absolute;
+            left: 10%;
+            right: 10%;
+            top: 44px;
+            height: 4px;
+            overflow: hidden;
+            background: rgba(123,143,177,.18);
+            border-radius: 999px;
+        }
+
+        .nova-journey-line span {
+            display: block;
+            height: 100%;
+            background: linear-gradient(90deg,var(--nova-primary),var(--nova-cyan));
+            box-shadow: 0 0 18px rgba(54,146,245,.28);
+            border-radius: inherit;
+            transition: width .4s ease;
+        }
+
+        .nova-journey-nodes {
+            position: relative;
+            z-index: 1;
+            display: grid;
+            grid-template-columns: repeat(5,1fr);
+            gap: .5rem;
+        }
+
+        .nova-journey-node {
+            display: grid;
+            justify-items: center;
+            gap: .18rem;
+            color: var(--theme-muted);
+            background: transparent;
+            border: 0;
+            text-align: center;
+            cursor: pointer;
+        }
+
+        .nova-node-icon {
+            width: 68px;
+            height: 68px;
+            display: grid;
+            place-items: center;
+            color: #8796ae;
+            background: var(--theme-card-solid);
+            border: 4px solid rgba(137,154,182,.14);
+            border-radius: 50%;
+            box-shadow: 0 10px 25px rgba(31,48,78,.09);
+            transition: transform .18s ease, box-shadow .18s ease;
+        }
+
+        .nova-journey-node:hover .nova-node-icon {
+            transform: translateY(-1px);
+        }
+
+        .nova-journey-node.is-active .nova-node-icon {
+            color: #fff;
+            background: linear-gradient(135deg,var(--nova-primary),var(--nova-primary-2));
+            border-color: rgba(83,119,250,.22);
+            box-shadow: 0 0 0 7px rgba(52,104,245,.12),0 16px 35px rgba(52,104,245,.3);
+            animation: novaGlowPulse 2.4s ease-in-out infinite;
+        }
+
+        .nova-journey-node.is-complete .nova-node-icon {
+            color: #fff;
+            background: linear-gradient(135deg,#1cb47b,#42d7a1);
+            border-color: rgba(47,190,137,.18);
+            box-shadow: 0 8px 18px rgba(28,180,123,.28);
+        }
+
+        .nova-journey-node strong {
+            color: var(--theme-text);
+            font-size: .64rem;
+        }
+
+        .nova-journey-node small {
+            font-size: .53rem;
+        }
+
+        .nova-journey-details {
+            margin-top: 1rem;
+        }
+
+        .nova-journey-detail {
+            display: none;
+            grid-template-columns: auto minmax(0,1fr) auto;
+            align-items: center;
+            gap: .75rem;
+            padding: .8rem;
+            color: var(--theme-text);
+            background: rgba(52,104,245,.045);
+            border: 1px solid rgba(52,104,245,.11);
+            border-radius: 14px;
+        }
+
+        .nova-journey-detail.is-active {
+            display: grid;
+            animation: novaFade .25s ease;
+        }
+
+        .nova-detail-icon {
+            width: 42px;
+            height: 42px;
+            display: grid;
+            place-items: center;
+            border-radius: 12px;
+        }
+
+        .skill-detail { color: #315fcc; background: #eaf1ff; }
+        .idea-detail { color: #9a65d6; background: #f4ecff; }
+        .roadmap-detail { color: #168d70; background: #e9f7f1; }
+        .execution-detail { color: #cc7d23; background: #fff3e4; }
+        .defense-detail { color: #d04859; background: #fff0f2; }
+
+        .nova-journey-detail span {
+            color: var(--nova-primary);
+            font-size: .52rem;
+            font-weight: 900;
+            text-transform: uppercase;
+        }
+
+        .nova-journey-detail h3 {
+            margin: .1rem 0 0;
+            font-size: .76rem;
+            font-weight: 900;
+        }
+
+        .nova-journey-detail p {
+            margin: .16rem 0 0;
+            color: var(--theme-muted);
+            font-size: .58rem;
+            line-height: 1.4;
+        }
+
+        .nova-journey-detail > a {
+            display: inline-flex;
+            align-items: center;
+            gap: .3rem;
+            padding: .45rem .58rem;
+            color: #fff;
+            background: var(--nova-primary);
+            border-radius: 9px;
+            font-size: .57rem;
+            font-weight: 800;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+        .nova-bento-grid {
+            display: grid;
+            grid-template-columns: minmax(0,1.3fr) minmax(300px,.7fr);
+            gap: .9rem;
+            margin-top: .9rem;
+        }
+
+        .nova-core-card {
+            padding: 1rem;
+        }
+
+        .nova-core-top {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: .8rem;
+        }
+
+        .nova-small-link {
+            display: inline-flex;
+            align-items: center;
+            gap: .3rem;
+            color: var(--nova-primary);
+            font-size: .58rem;
             font-weight: 800;
             text-decoration: none;
         }
 
-            .switch-project-button:hover {
-                color: #12336e;
-                background: #fff;
-            }
-
-        .project-empty-state {
-            min-height: 300px;
-        }
-
-        .selected-dashboard-idea {
-            padding: 1rem;
-        }
-
-        .selected-idea-heading {
+        .nova-core-content {
             display: grid;
-            grid-template-columns: auto minmax(0,1fr);
-            gap: .75rem;
-            align-items: center;
+            grid-template-columns: minmax(0,1.35fr) minmax(220px,.65fr);
+            gap: 1rem;
+            margin-top: .9rem;
         }
 
-        .selected-idea-icon {
-            width: 52px;
-            height: 52px;
+        .nova-core-copy {
+            padding: .9rem;
+            background:
+                radial-gradient(circle at 100% 0%,rgba(52,104,245,.09),transparent 30%),
+                rgba(52,104,245,.035);
+            border: 1px solid rgba(52,104,245,.11);
+            border-radius: 15px;
+        }
+
+        .nova-domain-chip {
+            width: fit-content;
+            display: inline-flex;
+            align-items: center;
+            gap: .35rem;
+            padding: .3rem .48rem;
+            color: var(--nova-primary);
+            background: rgba(52,104,245,.09);
+            border-radius: 999px;
+            font-size: .57rem;
+            font-weight: 850;
+        }
+
+        .nova-core-copy h3 {
+            margin: .58rem 0 0;
+            color: var(--theme-text);
+            font-size: 1.15rem;
+            font-weight: 930;
+            letter-spacing: -.025em;
+        }
+
+        .nova-core-copy p {
+            margin: .35rem 0 0;
+            color: var(--theme-muted);
+            font-size: .65rem;
+            line-height: 1.55;
+        }
+
+        .nova-core-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .45rem;
+            margin-top: .75rem;
+        }
+
+        .nova-solid-btn,
+        .nova-outline-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: .35rem;
+            padding: .48rem .6rem;
+            border-radius: 9px;
+            font-size: .57rem;
+            font-weight: 800;
+            text-decoration: none;
+        }
+
+        .nova-solid-btn {
+            color: #fff;
+            background: var(--nova-primary);
+        }
+
+        .nova-outline-btn {
+            color: var(--nova-primary);
+            background: var(--theme-card-solid);
+            border: 1px solid rgba(52,104,245,.18);
+        }
+
+        .nova-score-columns {
+            --score-accent: var(--nova-primary);
+            --score-accent-2: var(--nova-cyan);
+            display: grid;
+            gap: .55rem;
+        }
+
+        .nova-score-columns > div:nth-child(2) { --score-accent: var(--nova-primary-2); --score-accent-2: #b18cff; }
+        .nova-score-columns > div:nth-child(3) { --score-accent: var(--nova-green); --score-accent-2: var(--nova-cyan); }
+
+        .nova-score-columns > div {
+            display: grid;
+            grid-template-columns: minmax(0,1fr) auto;
+            gap: .35rem;
+            padding: .7rem;
+            color: var(--theme-text);
+            background: var(--theme-card-solid);
+            border: 1px solid var(--theme-border);
+            border-radius: 12px;
+        }
+
+        .nova-score-columns span {
+            color: var(--theme-muted);
+            font-size: .63rem;
+        }
+
+        .nova-score-columns strong {
+            font-size: .87rem;
+            font-weight: 930;
+            color: var(--score-accent);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .nova-score-columns > div > div {
+            grid-column: 1 / -1;
+            height: 6px;
+            overflow: hidden;
+            background: rgba(130,149,181,.15);
+            border-radius: 999px;
+        }
+
+        .nova-score-columns i {
+            display: block;
+            width: calc(var(--score) * 1%);
+            height: 100%;
+            background: linear-gradient(90deg,var(--score-accent),var(--score-accent-2));
+            box-shadow: 0 0 8px color-mix(in srgb, var(--score-accent) 55%, transparent);
+            animation: novaGrow .7s cubic-bezier(.22,.9,.3,1) both;
+        }
+
+        .nova-no-idea {
+            min-height: 230px;
             display: grid;
             place-items: center;
-            border-radius: 14px;
-            color: #155eef;
-            background: #eaf1ff;
-            font-size: 1.25rem;
+            align-content: center;
+            text-align: center;
         }
 
-        .selected-idea-heading span {
-            color: #155eef;
-            font-size: .67rem;
-            font-weight: 750;
+        .nova-no-idea-visual {
+            position: relative;
+            width: 80px;
+            height: 80px;
+            display: grid;
+            place-items: center;
+            color: var(--nova-primary);
+            background: rgba(52,104,245,.08);
+            border-radius: 50%;
+            font-size: 1.5rem;
         }
 
-        .selected-idea-heading h3 {
-            margin: .18rem 0 0;
-            color: #172033;
-            font-size: 1.08rem;
+        .nova-no-idea h3 {
+            margin: .7rem 0 0;
+            font-size: .85rem;
+            font-weight: 900;
+        }
+
+        .nova-no-idea p {
+            max-width: 440px;
+            margin: .3rem 0 0;
+            color: var(--theme-muted);
+            font-size: .62rem;
+        }
+
+        .nova-no-idea > a {
+            margin-top: .65rem;
+            color: var(--nova-primary);
+            font-size: .61rem;
             font-weight: 800;
         }
 
-        .selected-idea-problem {
-            margin: 1rem 0;
-            padding: .85rem;
-            border: 1px solid #e4e9f1;
-            border-radius: 12px;
-            color: #58677c;
-            background: #f8fafc;
-            font-size: .75rem;
-            line-height: 1.6;
+        .nova-trust-card {
+            position: relative;
+            isolation: isolate;
+            overflow: hidden;
+            padding: 1rem;
+            color: #fff;
+            background:
+                radial-gradient(circle at 90% 0%,rgba(72,225,238,.28),transparent 36%),
+                radial-gradient(circle at 8% 100%,rgba(138,92,246,.22),transparent 38%),
+                linear-gradient(145deg,#071933,#0d3268 60%,#1a58a2 100%);
+            border: 1px solid rgba(96,170,255,.26);
+            border-radius: var(--nova-radius-lg);
+            box-shadow: 0 24px 60px rgba(8,30,65,.28);
         }
 
-        .selected-idea-scores {
-            display: grid;
-            grid-template-columns: repeat(3,minmax(0,1fr));
-            gap: .65rem;
-        }
-
-            .selected-idea-scores > div {
-                padding: .75rem;
-                border: 1px solid #e1e7ef;
-                border-radius: 11px;
-                background: #fff;
-            }
-
-            .selected-idea-scores span,
-            .selected-idea-scores strong {
-                display: block;
-            }
-
-            .selected-idea-scores span {
-                color: #7c8899;
-                font-size: .63rem;
-                font-weight: 700;
-            }
-
-            .selected-idea-scores strong {
-                margin-top: .2rem;
-                color: #203b67;
-                font-size: 1rem;
-            }
-
-        .selected-idea-actions {
-            display: flex;
-            justify-content: flex-end;
-            gap: .55rem;
-            margin-top: 1rem;
-        }
-
-        .small-dashboard-empty {
-            min-height: 145px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: .7rem;
-            color: #7b8798;
-            text-align: left;
-        }
-
-            .small-dashboard-empty > i {
-                font-size: 1.5rem;
-                color: #6d8bc4;
-            }
-
-            .small-dashboard-empty strong,
-            .small-dashboard-empty span {
-                display: block;
-            }
-
-            .small-dashboard-empty strong {
-                color: #334155;
-                font-size: .76rem;
-            }
-
-            .small-dashboard-empty span {
-                margin-top: .15rem;
-                font-size: .66rem;
-            }
-
-        .dashboard-activity-list,
-        .dashboard-alert-list {
-            display: grid;
-            gap: .65rem;
-            padding: .25rem 0;
-        }
-
-        .dashboard-activity-item {
-            display: grid;
-            grid-template-columns: auto minmax(0,1fr);
-            gap: .65rem;
-            align-items: flex-start;
-            padding: .7rem;
-            border-radius: 10px;
-            background: #f8fafc;
-        }
-
-        .activity-dot {
-            width: 8px;
-            height: 8px;
-            margin-top: .35rem;
+        .nova-trust-beam {
+            position: absolute;
+            z-index: -1;
+            width: 250px;
+            height: 250px;
+            right: -120px;
+            top: -120px;
+            border: 1px solid rgba(255,255,255,.12);
             border-radius: 50%;
-            background: #4b7de2;
+            box-shadow:
+                0 0 0 28px rgba(255,255,255,.035),
+                0 0 0 58px rgba(255,255,255,.018);
         }
 
-        .dashboard-activity-item strong,
-        .dashboard-activity-item span {
+        .nova-trust-header span,
+        .nova-trust-header strong {
             display: block;
         }
 
-        .dashboard-activity-item strong {
-            color: #425066;
-            font-size: .68rem;
+        .nova-trust-header span {
+            color: #84e6f2;
+            font-size: .58rem;
+            font-weight: 900;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+        }
+
+        .nova-trust-header strong {
+            margin-top: .18rem;
+            color: #fff;
+            font-size: 1rem;
+            font-weight: 930;
+        }
+
+        .nova-trust-core {
+            position: relative;
+            height: 190px;
+            display: grid;
+            place-items: center;
+            margin-top: .4rem;
+        }
+
+        .trust-core-center {
+            z-index: 2;
+            width: 105px;
+            height: 105px;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            color: #fff;
+            background: rgba(255,255,255,.09);
+            border: 1px solid rgba(255,255,255,.2);
+            border-radius: 50%;
+            box-shadow: inset 0 0 30px rgba(72,225,238,.16), 0 0 34px rgba(72,225,238,.16);
+            text-align: center;
+            animation: novaGlowPulse 3.2s ease-in-out infinite;
+        }
+
+        .trust-core-center i {
+            color: #8ff0f7;
+            font-size: 1.25rem;
+        }
+
+        .trust-core-center strong,
+        .trust-core-center small {
+            display: block;
+        }
+
+        .trust-core-center strong {
+            margin-top: .25rem;
+            font-size: .66rem;
+        }
+
+        .trust-core-center small {
+            margin-top: .12rem;
+            color: rgba(255,255,255,.48);
+            font-size: .47rem;
+        }
+
+        .trust-orbit {
+            position: absolute;
+            border: 1px dashed rgba(120,230,242,.32);
+            border-radius: 50%;
+        }
+
+        .trust-orbit-one {
+            width: 150px;
+            height: 150px;
+            animation: novaRotate 18s linear infinite;
+        }
+
+        .trust-orbit-two {
+            width: 188px;
+            height: 188px;
+            animation: novaRotate 24s linear infinite reverse;
+        }
+
+        .trust-orbit-node {
+            position: absolute;
+            padding: .22rem .35rem;
+            color: #a8f2f7;
+            background: rgba(73,205,226,.09);
+            border: 1px solid rgba(73,205,226,.18);
+            border-radius: 999px;
+            font-size: .46rem;
+            font-weight: 800;
+        }
+
+        .node-a { top: 8px; left: 50%; transform: translateX(-50%); }
+        .node-b { right: 6px; top: 50%; transform: translateY(-50%); }
+        .node-c { bottom: 7px; left: 50%; transform: translateX(-50%); }
+        .node-d { left: 4px; top: 50%; transform: translateY(-50%); }
+
+        .nova-trust-card > p {
+            margin: .3rem 0 0;
+            color: rgba(255,255,255,.58);
+            font-size: .58rem;
+            line-height: 1.5;
+        }
+
+        .nova-trust-more {
+            display: inline-flex;
+            align-items: center;
+            gap: .3rem;
+            margin-top: .65rem;
+            padding: 0;
+            color: #8de9f1;
+            background: transparent;
+            border: 0;
+            font-size: .56rem;
+            font-weight: 800;
+        }
+
+        .nova-activity-card,
+        .nova-alert-card {
+            min-height: 285px;
+        }
+
+        .nova-live-status {
+            display: inline-flex;
+            align-items: center;
+            gap: .3rem;
+            color: var(--nova-green);
+            font-size: .52rem;
+            font-weight: 800;
+        }
+
+        .nova-live-status i {
+            width: 7px;
+            height: 7px;
+            background: var(--nova-green);
+            border-radius: 50%;
+            box-shadow: 0 0 0 4px rgba(34,187,126,.09);
+        }
+
+        .nova-activity-list {
+            display: grid;
+            padding: .3rem .95rem .9rem;
+        }
+
+        .nova-activity-item {
+            position: relative;
+            display: grid;
+            grid-template-columns: 13px minmax(0,1fr);
+            gap: .5rem;
+            padding: .65rem 0;
+        }
+
+        .nova-activity-line {
+            position: absolute;
+            left: 5px;
+            top: 24px;
+            bottom: -3px;
+            width: 1px;
+            background: var(--theme-border);
+        }
+
+        .nova-activity-item:last-child .nova-activity-line {
+            display: none;
+        }
+
+        .nova-activity-dot {
+            z-index: 1;
+            width: 11px;
+            height: 11px;
+            margin-top: .2rem;
+            background: var(--nova-primary);
+            border: 3px solid var(--theme-card-solid);
+            border-radius: 50%;
+            box-shadow: 0 0 0 3px rgba(52,104,245,.1);
+        }
+
+        .nova-activity-copy strong,
+        .nova-activity-copy time {
+            display: block;
+        }
+
+        .nova-activity-copy strong {
+            color: var(--theme-text);
+            font-size: .59rem;
             line-height: 1.4;
         }
 
-        .dashboard-activity-item span {
-            margin-top: .2rem;
-            color: #95a0af;
-            font-size: .57rem;
+        .nova-activity-copy time {
+            margin-top: .13rem;
+            color: var(--theme-muted);
+            font-size: .49rem;
         }
 
-        .dashboard-risk {
+        .nova-mini-empty {
+            min-height: 205px;
             display: grid;
-            grid-template-columns: auto minmax(0,1fr);
-            gap: .65rem;
-            padding: .75rem;
-            border-radius: 11px;
+            place-items: center;
+            align-content: center;
+            text-align: center;
         }
 
-        .risk-high {
-            border: 1px solid #fecaca;
-            color: #991b1b;
-            background: #fff1f2;
-        }
-
-        .risk-medium {
-            border: 1px solid #f4d7a5;
-            color: #8a5611;
-            background: #fff8e8;
-        }
-
-        .dashboard-risk strong {
+        .nova-mini-empty strong,
+        .nova-mini-empty span {
             display: block;
-            font-size: .7rem;
         }
 
-        .dashboard-risk p {
-            margin: .2rem 0 0;
-            font-size: .63rem;
+        .nova-mini-empty strong {
+            margin-top: .5rem;
+            color: var(--theme-text);
+            font-size: .71rem;
+        }
+
+        .nova-mini-empty span {
+            margin-top: .15rem;
+            color: var(--theme-muted);
+            font-size: .59rem;
+        }
+
+        .nova-mini-empty > i {
+            color: var(--nova-primary);
+            font-size: 1.4rem;
+        }
+
+        .nova-capability-filter {
+            display: inline-flex;
+            gap: .25rem;
+            padding: .25rem;
+            background: rgba(121,143,180,.1);
+            border-radius: 999px;
+        }
+
+        .nova-capability-filter button {
+            padding: .36rem .5rem;
+            color: var(--theme-muted);
+            background: transparent;
+            border: 0;
+            border-radius: 999px;
+            font-size: .52rem;
+            font-weight: 800;
+        }
+
+        .nova-capability-filter button.is-active {
+            color: #fff;
+            background: var(--nova-primary);
+        }
+
+        .nova-universe-map {
+            position: relative;
+            display: grid;
+            grid-template-columns: minmax(300px,1fr) 330px minmax(300px,1fr);
+            gap: 2rem;
+            align-items: center;
+            min-height: 470px;
+            margin-top: 1.2rem;
+            padding: 1.4rem;
+            overflow: hidden;
+            background:
+                radial-gradient(circle at 50% 50%,rgba(52,104,245,.1),transparent 36%),
+                radial-gradient(circle at 90% 90%,rgba(47,212,224,.07),transparent 30%),
+                linear-gradient(180deg,rgba(52,104,245,.03),transparent);
+            border: 1px solid rgba(52,104,245,.1);
+            border-radius: 20px;
+        }
+
+        .nova-universe-column {
+            z-index: 2;
+            display: grid;
+            gap: .72rem;
+        }
+
+        .nova-feature-node {
+            --feature-accent: var(--nova-primary);
+            display: grid;
+            grid-template-columns: auto minmax(0,1fr) auto;
+            align-items: center;
+            gap: .72rem;
+            min-height: 82px;
+            padding: .85rem;
+            color: var(--theme-text);
+            background: var(--theme-card-solid);
+            border: 1px solid var(--theme-border);
+            border-radius: 15px;
+            box-shadow: 0 10px 24px rgba(34,49,78,.06);
+            text-decoration: none;
+            transition: transform .18s ease, opacity .18s ease, box-shadow .18s ease, border-color .18s ease;
+        }
+
+        .nova-feature-node:hover {
+            color: var(--theme-text);
+            transform: translateY(-2px);
+            border-color: color-mix(in srgb, var(--feature-accent) 45%, var(--theme-border));
+            box-shadow: 0 16px 34px color-mix(in srgb, var(--feature-accent) 22%, rgba(34,49,78,.1));
+        }
+
+        .nova-feature-node.is-filtered {
+            display: none;
+        }
+
+        .nova-feature-node > span {
+            width: 48px;
+            height: 48px;
+            display: grid;
+            place-items: center;
+            border-radius: 13px;
+            font-size: 1.05rem;
+        }
+
+        .nova-feature-node strong,
+        .nova-feature-node small {
+            display: block;
+        }
+
+        .nova-feature-node strong {
+            font-size: .82rem;
+            font-weight: 900;
+            line-height: 1.25;
+        }
+
+        .nova-feature-node small {
+            margin-top: .18rem;
+            color: var(--theme-muted);
+            font-size: .66rem;
+            line-height: 1.4;
+        }
+
+        .nova-feature-node > i {
+            color: var(--theme-muted);
+            font-size: .75rem;
+        }
+
+        .feature-blue { --feature-accent: #2f66d8; }
+        .feature-violet { --feature-accent: #8660d2; }
+        .feature-cyan { --feature-accent: #1489a8; }
+        .feature-indigo { --feature-accent: #565bd2; }
+        .feature-green { --feature-accent: #168a68; }
+        .feature-orange { --feature-accent: #bc7024; }
+        .feature-pink { --feature-accent: #c65086; }
+        .feature-red { --feature-accent: #c84654; }
+
+        .feature-blue > span { color: #2f66d8; background: #eaf1ff; }
+        .feature-violet > span { color: #8660d2; background: #f3edff; }
+        .feature-cyan > span { color: #1489a8; background: #e8f9fc; }
+        .feature-indigo > span { color: #565bd2; background: #eeefff; }
+        .feature-green > span { color: #168a68; background: #e8f7f1; }
+        .feature-orange > span { color: #bc7024; background: #fff1e2; }
+        .feature-pink > span { color: #c65086; background: #fff0f7; }
+        .feature-red > span { color: #c84654; background: #fff0f2; }
+
+        .nova-universe-core {
+            position: relative;
+            height: 350px;
+            display: grid;
+            place-items: center;
+        }
+
+        .nova-core-rings {
+            position: absolute;
+            border: 1px dashed rgba(52,104,245,.24);
+            border-radius: 50%;
+        }
+
+        .ring-a {
+            width: 180px;
+            height: 180px;
+            animation: novaRotate 18s linear infinite;
+        }
+
+        .ring-b {
+            width: 250px;
+            height: 250px;
+            border-color: rgba(47,212,224,.22);
+            animation: novaRotate 25s linear infinite reverse;
+        }
+
+        .ring-c {
+            width: 320px;
+            height: 320px;
+            border-color: rgba(138,92,246,.18);
+            opacity: .7;
+            animation: novaRotate 34s linear infinite;
+        }
+
+        .nova-core-emblem {
+            z-index: 2;
+            width: 142px;
+            height: 142px;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            color: #fff;
+            background:
+                radial-gradient(circle at 30% 20%,rgba(255,255,255,.2),transparent 32%),
+                linear-gradient(145deg,#0b2c66,#2a6ee0);
+            border: 1px solid rgba(255,255,255,.2);
+            border-radius: 50%;
+            box-shadow: 0 18px 40px rgba(27,72,155,.32), 0 0 46px rgba(47,212,224,.14);
+            text-align: center;
+            animation: novaGlowPulse 4s ease-in-out infinite;
+        }
+
+        .nova-core-emblem img {
+            width: 48px;
+            height: 48px;
+            object-fit: contain;
+        }
+
+        .nova-core-emblem strong,
+        .nova-core-emblem span {
+            display: block;
+        }
+
+        .nova-core-emblem strong {
+            margin-top: .28rem;
+            font-size: .94rem;
+            font-weight: 900;
+        }
+
+        .nova-core-emblem span {
+            margin-top: .1rem;
+            color: rgba(255,255,255,.6);
+            font-size: .62rem;
+        }
+
+        .nova-core-signal {
+            position: absolute;
+            width: 7px;
+            height: 7px;
+            background: var(--nova-cyan);
+            border-radius: 50%;
+            box-shadow: 0 0 12px rgba(53,207,231,.65);
+        }
+
+        .signal-a { top: 32px; left: 50%; }
+        .signal-b { right: 18px; bottom: 82px; }
+        .signal-c { left: 18px; bottom: 82px; }
+
+        .nova-connector {
+            position: absolute;
+            z-index: 1;
+            height: 1px;
+            opacity: .35;
+            background: linear-gradient(90deg,transparent,var(--nova-primary),transparent);
+        }
+
+        .connector-one { left: 23%; right: 50%; top: 24%; transform: rotate(8deg); }
+        .connector-two { left: 23%; right: 50%; bottom: 24%; transform: rotate(-8deg); }
+        .connector-three { left: 50%; right: 23%; top: 24%; transform: rotate(-8deg); }
+        .connector-four { left: 50%; right: 23%; bottom: 24%; transform: rotate(8deg); }
+
+        .nova-floating-dock {
+            position: fixed;
+            z-index: 90;
+            right: 1.25rem;
+            bottom: 1.25rem;
+        }
+
+        .nova-dock-trigger {
+            display: inline-flex;
+            align-items: center;
+            gap: .45rem;
+            padding: .65rem .78rem;
+            color: #fff;
+            background: linear-gradient(135deg,#174ba6,#3f76e8);
+            border: 1px solid rgba(255,255,255,.16);
+            border-radius: 999px;
+            box-shadow: 0 18px 45px rgba(24,72,159,.28);
+            font-size: .62rem;
+            font-weight: 850;
+        }
+
+        .nova-quick-dock {
+            position: absolute;
+            right: 0;
+            bottom: calc(100% + .55rem);
+            width: 205px;
+            display: grid;
+            gap: .32rem;
+            padding: .45rem;
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(12px) scale(.96);
+            background: var(--theme-card-solid);
+            border: 1px solid var(--theme-border);
+            border-radius: 14px;
+            box-shadow: 0 22px 55px rgba(31,48,80,.2);
+            transition: opacity .18s ease,transform .18s ease;
+        }
+
+        .nova-quick-dock.is-open {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateY(0) scale(1);
+        }
+
+        .nova-quick-dock a {
+            display: flex;
+            align-items: center;
+            gap: .5rem;
+            padding: .55rem;
+            color: var(--theme-text);
+            border-radius: 9px;
+            font-size: .58rem;
+            font-weight: 800;
+            text-decoration: none;
+        }
+
+        .nova-quick-dock a:hover {
+            background: rgba(52,104,245,.08);
+        }
+
+        .nova-modal-backdrop {
+            position: fixed;
+            z-index: 2000;
+            inset: 0;
+            display: grid;
+            place-items: center;
+            padding: 1rem;
+            opacity: 0;
+            pointer-events: none;
+            background: rgba(8,17,34,.62);
+            backdrop-filter: blur(7px);
+            transition: opacity .2s ease;
+        }
+
+        .nova-modal-backdrop.is-open {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .nova-modal {
+            position: relative;
+            width: min(950px,100%);
+            padding: 1.25rem;
+            transform: translateY(20px) scale(.97);
+            background: #fff;
+            border-radius: 22px;
+            box-shadow: 0 35px 90px rgba(7,21,47,.32);
+            transition: transform .2s ease;
+        }
+
+        .nova-modal-backdrop.is-open .nova-modal {
+            transform: translateY(0) scale(1);
+        }
+
+        .nova-modal-close {
+            position: absolute;
+            right: .8rem;
+            top: .8rem;
+            width: 34px;
+            height: 34px;
+            display: grid;
+            place-items: center;
+            color: #65728a;
+            background: #f1f4f8;
+            border: 0;
+            border-radius: 9px;
+        }
+
+        .nova-modal-icon {
+            width: 48px;
+            height: 48px;
+            display: grid;
+            place-items: center;
+            color: #fff;
+            background: linear-gradient(135deg,var(--nova-primary),var(--nova-primary-2));
+            border-radius: 14px;
+            font-size: 1.1rem;
+        }
+
+        .nova-modal h2 {
+            margin: .25rem 0 0;
+            color: #17223a;
+            font-size: 1.15rem;
+            font-weight: 900;
+        }
+
+        .nova-modal-flow {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr auto 1fr;
+            gap: .5rem;
+            align-items: center;
+            margin-top: 1rem;
+        }
+
+        .nova-modal-flow > div {
+            min-height: 155px;
+            padding: .75rem;
+            background: #f7f9fd;
+            border: 1px solid #e3e9f2;
+            border-radius: 13px;
+        }
+
+        .nova-modal-flow > div > span {
+            color: var(--nova-primary);
+            font-size: .52rem;
+            font-weight: 900;
+        }
+
+        .nova-modal-flow strong {
+            display: block;
+            margin-top: .35rem;
+            color: #1c2942;
+            font-size: .67rem;
+        }
+
+        .nova-modal-flow p {
+            margin: .25rem 0 0;
+            color: #738097;
+            font-size: .53rem;
             line-height: 1.45;
         }
 
-        @@media (max-width: 700px) {
-            .active-project-panel {
+        .nova-modal-flow > i {
+            color: #a4afc0;
+        }
+
+        @@keyframes novaPulse {
+            from { opacity: .8; transform: scale(.7); }
+            to { opacity: 0; transform: scale(1.6); }
+        }
+
+        @@keyframes novaRotate {
+            to { transform: rotate(360deg); }
+        }
+
+        @@keyframes novaFade {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @@keyframes novaDrift {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            50% { transform: translate(-14px, 16px) scale(1.05); }
+        }
+
+        @@keyframes novaGlowPulse {
+            0%, 100% { filter: brightness(1); }
+            50% { filter: brightness(1.14); }
+        }
+
+        @@keyframes novaGrow {
+            from { width: 0; }
+        }
+
+
+        @@media (max-width: 1080px) {
+            .nova-project-summary {
+                max-width: none;
+            }
+        }
+
+        @@media (max-width: 1280px) {
+            .nova-hero-grid {
+                grid-template-columns: minmax(0,1fr) 390px;
+            }
+
+            .nova-bento-grid {
+                grid-template-columns: 1fr 340px;
+            }
+
+            .nova-universe-map {
+                grid-template-columns: 1fr 220px 1fr;
+            }
+        }
+
+        @@media (max-width: 1080px) {
+            .nova-hero-grid {
+                grid-template-columns: 1fr;
+            }
+
+
+            .nova-foundation-track {
+                margin-top: 0;
+            }
+
+            .nova-metric-ribbon {
+                grid-template-columns: repeat(2,minmax(0,1fr));
+            }
+
+            .nova-bento-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .nova-trust-card {
+                min-height: 390px;
+            }
+
+            .nova-universe-map {
+                grid-template-columns: 1fr;
+            }
+
+            .nova-universe-core {
+                order: -1;
+                height: 245px;
+            }
+
+            .nova-connector {
+                display: none;
+            }
+
+            .nova-universe-column {
+                grid-template-columns: repeat(2,minmax(0,1fr));
+            }
+
+            .nova-modal-flow {
+                grid-template-columns: 1fr;
+            }
+
+            .nova-modal-flow > i {
+                transform: rotate(90deg);
+                justify-self: center;
+            }
+
+            .nova-modal-flow > div {
+                min-height: 0;
+            }
+        }
+
+        @@media (max-width: 780px) {
+            .nova-topbar,
+            .nova-section-header,
+            .nova-core-top {
                 align-items: flex-start;
                 flex-direction: column;
             }
 
-            .switch-project-button {
-                width: 100%;
+
+            .nova-project-identity h1 {
+                font-size: clamp(1.55rem,7.5vw,2.15rem);
             }
 
-            .selected-idea-scores {
+
+            .nova-metric-ribbon {
                 grid-template-columns: 1fr;
             }
 
-            .selected-idea-actions {
-                align-items: stretch;
-                flex-direction: column;
+            .nova-journey-map {
+                overflow-x: auto;
+                padding-inline: .5rem;
+            }
+
+            .nova-journey-nodes {
+                min-width: 700px;
+            }
+
+            .nova-journey-line {
+                left: 80px;
+                right: auto;
+                width: 535px;
+            }
+
+            .nova-journey-detail {
+                grid-template-columns: auto minmax(0,1fr);
+            }
+
+            .nova-journey-detail > a {
+                grid-column: 1 / -1;
+                justify-content: center;
+            }
+
+            .nova-core-content {
+                grid-template-columns: 1fr;
+            }
+
+            .nova-capability-filter {
+                width: 100%;
+            }
+
+            .nova-capability-filter button {
+                flex: 1;
             }
         }
+
+        @@media (max-width: 560px) {
+            .nova-hero-grid {
+                padding: 1rem;
+            }
+
+            .nova-hero-actions {
+                display: grid;
+            }
+
+            .nova-main-action {
+                min-width: 0;
+            }
+
+            .nova-ghost-action {
+                min-height: 46px;
+            }
+
+            .nova-universe-column {
+                grid-template-columns: 1fr;
+            }
+
+            .nova-floating-dock {
+                right: .75rem;
+                bottom: .75rem;
+            }
+
+            .nova-dock-trigger span {
+                display: none;
+            }
+
+            .nova-dock-trigger {
+                width: 48px;
+                height: 48px;
+                justify-content: center;
+                padding: 0;
+            }
+        }
+
+        @@media (prefers-reduced-motion: reduce) {
+            .nova-live-pulse::after,
+            .trust-orbit-one,
+            .trust-orbit-two,
+            .ring-a,
+            .ring-b,
+            .ring-c,
+            .nova-orb,
+            .trust-core-center,
+            .nova-core-emblem,
+            .nova-journey-node.is-active .nova-node-icon,
+            .nova-score-columns i {
+                animation: none !important;
+            }
+
+            [data-float-card],
+            [data-tilt-card],
+            .nova-main-action,
+            .nova-feature-node,
+            .nova-quick-dock,
+            .nova-modal {
+                transition: none !important;
+            }
+        }
+
+        /* =========================================================
+           READABILITY PASS — slightly larger typography
+           Keeps the same layout, spacing, colors, and interactions.
+           ========================================================= */
+
+        .nova-live-label {
+            font-size: .72rem;
+        }
+
+        .nova-project-chip,
+        .nova-section-kicker {
+            font-size: .68rem;
+        }
+
+        .nova-project-identity h1 {
+            font-size: clamp(1.85rem, 3.35vw, 2.85rem);
+        }
+
+        .nova-project-meta {
+            font-size: .76rem;
+        }
+
+        .nova-project-identity > p {
+            font-size: .88rem;
+        }
+
+        .nova-main-action-copy small {
+            font-size: .62rem;
+        }
+
+        .nova-main-action-copy strong {
+            font-size: .81rem;
+        }
+
+        .nova-ghost-action {
+            font-size: .72rem;
+        }
+
+        .nova-summary-heading > div:first-child span {
+            font-size: .61rem;
+        }
+
+        .nova-summary-heading > div:first-child strong {
+            font-size: 1.68rem;
+        }
+
+        .nova-summary-ring span {
+            font-size: .69rem;
+        }
+
+        .nova-summary-progress-label {
+            font-size: .59rem;
+        }
+
+        .nova-summary-checklist > div {
+            font-size: .64rem;
+        }
+
+        .nova-metric-copy span {
+            font-size: .60rem;
+        }
+
+        .nova-metric-copy strong {
+            font-size: 1.14rem;
+        }
+
+        .nova-metric-copy small {
+            font-size: .59rem;
+        }
+
+        .nova-metric-spark {
+            font-size: .76rem;
+        }
+
+        .nova-section-header h2,
+        .nova-core-card h2,
+        .nova-trust-card h2 {
+            font-size: 1.10rem;
+        }
+
+        .nova-section-header p {
+            font-size: .71rem;
+        }
+
+        .nova-progress-pill {
+            font-size: .63rem;
+        }
+
+        .nova-journey-node strong {
+            font-size: .71rem;
+        }
+
+        .nova-journey-node small {
+            font-size: .59rem;
+        }
+
+        .nova-journey-detail span {
+            font-size: .58rem;
+        }
+
+        .nova-journey-detail h3 {
+            font-size: .84rem;
+        }
+
+        .nova-journey-detail p {
+            font-size: .64rem;
+        }
+
+        .nova-journey-detail > a {
+            font-size: .63rem;
+        }
+
+        .nova-small-link {
+            font-size: .64rem;
+        }
+
+        .nova-domain-chip {
+            font-size: .63rem;
+        }
+
+        .nova-core-copy h3 {
+            font-size: 1.24rem;
+        }
+
+        .nova-core-copy p {
+            font-size: .71rem;
+        }
+
+        .nova-solid-btn,
+        .nova-outline-btn {
+            font-size: .63rem;
+        }
+
+        .nova-score-columns span {
+            font-size: .63rem;
+        }
+
+        .nova-score-columns strong {
+            font-size: .87rem;
+        }
+
+        .nova-no-idea h3 {
+            font-size: .93rem;
+        }
+
+        .nova-no-idea p {
+            font-size: .68rem;
+        }
+
+        .nova-no-idea > a {
+            font-size: .67rem;
+        }
+
+        .nova-trust-header span {
+            font-size: .64rem;
+        }
+
+        .nova-trust-header strong {
+            font-size: 1.08rem;
+        }
+
+        .trust-core-center strong {
+            font-size: .72rem;
+        }
+
+        .trust-core-center small {
+            font-size: .54rem;
+        }
+
+        .trust-orbit-node {
+            font-size: .52rem;
+        }
+
+        .nova-trust-card > p {
+            font-size: .64rem;
+        }
+
+        .nova-trust-more {
+            font-size: .62rem;
+        }
+
+        .nova-live-status,
+        .nova-alert-count {
+            font-size: .58rem;
+        }
+
+        .nova-activity-copy strong {
+            font-size: .65rem;
+        }
+
+        .nova-activity-copy time {
+            font-size: .55rem;
+        }
+
+        .nova-alert-item strong {
+            font-size: .63rem;
+        }
+
+        .nova-alert-item p {
+            font-size: .56rem;
+        }
+
+        .nova-clear-state strong,
+        .nova-mini-empty strong {
+            font-size: .71rem;
+        }
+
+        .nova-clear-state span,
+        .nova-mini-empty span {
+            font-size: .59rem;
+        }
+
+        .nova-capability-filter button {
+            font-size: .58rem;
+        }
+
+        .nova-feature-node strong {
+            font-size: .70rem;
+        }
+
+        .nova-feature-node small {
+            font-size: .57rem;
+        }
+
+        .nova-feature-node > i {
+            font-size: .68rem;
+        }
+
+        .nova-core-emblem strong {
+            font-size: .76rem;
+        }
+
+        .nova-core-emblem span {
+            font-size: .51rem;
+        }
+
+        .nova-dock-trigger {
+            font-size: .68rem;
+        }
+
+        .nova-quick-dock a {
+            font-size: .64rem;
+        }
+
+        .nova-modal h2 {
+            font-size: 1.23rem;
+        }
+
+        .nova-modal-flow > div > span {
+            font-size: .58rem;
+        }
+
+        .nova-modal-flow strong {
+            font-size: .73rem;
+        }
+
+        .nova-modal-flow p {
+            font-size: .60rem;
+        }
+
+        @@media (max-width: 780px) {
+            .nova-project-identity h1 {
+                font-size: clamp(1.72rem, 8vw, 2.35rem);
+            }
+        }
+
+
+        /* First-time student onboarding tour */
+        .topbar-tour-launch {
+            display:inline-flex;align-items:center;gap:.4rem;min-height:38px;
+            padding:.45rem .65rem;color:#315fae;background:#eef4ff;
+            border:1px solid #d5e2fb;border-radius:10px;font-size:.72rem;
+            font-weight:800;transition:.16s ease;
+        }
+        .topbar-tour-launch:hover { background:#e4edff;transform:translateY(-1px); }
+
+        .student-tour-overlay {
+            position:fixed;z-index:5000;inset:0;opacity:0;pointer-events:none;
+            transition:opacity .2s ease;
+        }
+        .student-tour-overlay.is-open { opacity:1;pointer-events:auto; }
+        .student-tour-overlay:not(.has-target)::before {
+            content:"";position:fixed;z-index:0;inset:0;
+            background:rgba(5,14,31,.76);backdrop-filter:blur(5px);
+        }
+
+        .student-tour-spotlight {
+            position:fixed;z-index:1;display:none;pointer-events:none;
+            border:2px solid rgba(111,191,255,.98);border-radius:16px;
+            box-shadow:0 0 0 9999px rgba(5,14,31,.70),
+                       0 0 0 7px rgba(70,145,255,.16),
+                       0 18px 52px rgba(4,22,56,.28);
+            transition:top .22s ease,left .22s ease,width .22s ease,height .22s ease;
+        }
+        .student-tour-overlay.has-target .student-tour-spotlight { display:block; }
+
+        .student-tour-card {
+            position:fixed;z-index:2;width:min(390px,calc(100vw - 28px));
+            overflow:hidden;color:#17243d;background:#fff;
+            border:1px solid rgba(126,153,195,.25);border-radius:18px;
+            box-shadow:0 28px 85px rgba(3,17,42,.36);
+            transition:top .22s ease,left .22s ease,transform .2s ease;
+        }
+        .student-tour-overlay.is-centered .student-tour-card {
+            left:50%!important;top:50%!important;transform:translate(-50%,-50%);
+        }
+
+        .student-tour-card-head {
+            display:flex;align-items:center;justify-content:space-between;gap:.8rem;
+            padding:.82rem .9rem;
+            background:radial-gradient(circle at 92% 0%,rgba(69,173,238,.16),transparent 36%),
+                       linear-gradient(135deg,#0b2b60,#1d58aa);
+        }
+        .student-tour-brand { display:flex;align-items:center;gap:.58rem; }
+        .student-tour-brand>span {
+            width:34px;height:34px;display:grid;place-items:center;color:#fff;
+            background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);
+            border-radius:10px;
+        }
+        .student-tour-brand small,.student-tour-brand strong { display:block; }
+        .student-tour-brand small { color:rgba(255,255,255,.62);font-size:.62rem; }
+        .student-tour-brand strong { margin-top:.08rem;color:#fff;font-size:.74rem;font-weight:900; }
+
+        .student-tour-close {
+            width:32px;height:32px;display:grid;place-items:center;color:#fff;
+            background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);
+            border-radius:9px;
+        }
+        .student-tour-progress-track { height:4px;background:#e9eef6; }
+        .student-tour-progress-track span {
+            display:block;width:0;height:100%;
+            background:linear-gradient(90deg,#3478f6,#31c7dc);
+            transition:width .24s ease;
+        }
+
+        .student-tour-card-body { padding:1rem .95rem .9rem; }
+        .student-tour-step-icon {
+            width:42px;height:42px;display:grid;place-items:center;color:#326ae0;
+            background:#ecf3ff;border:1px solid #d8e5ff;border-radius:12px;font-size:1rem;
+        }
+        .student-tour-kicker {
+            display:block;margin-top:.68rem;color:#326ae0;font-size:.62rem;
+            font-weight:900;letter-spacing:.08em;text-transform:uppercase;
+        }
+        .student-tour-card h2 {
+            margin:.22rem 0 0;color:#17243d;font-size:1.12rem;font-weight:900;
+            letter-spacing:-.025em;line-height:1.24;
+        }
+        .student-tour-card-body>p {
+            margin:.42rem 0 0;color:#68758b;font-size:.76rem;line-height:1.58;
+        }
+        .student-tour-tip {
+            display:flex;align-items:flex-start;gap:.48rem;margin-top:.72rem;
+            padding:.62rem .68rem;color:#52617b;background:#f5f8fd;
+            border:1px solid #e2e9f3;border-radius:11px;font-size:.66rem;line-height:1.45;
+        }
+        .student-tour-tip i { color:#e49c22; }
+
+        .student-tour-card-actions {
+            display:flex;align-items:center;justify-content:space-between;gap:.7rem;
+            padding:.75rem .9rem;background:#f8fafd;border-top:1px solid #e5eaf2;
+        }
+        .student-tour-nav { display:inline-flex;gap:.38rem; }
+        .student-tour-skip,.student-tour-back,.student-tour-next,.student-tour-open-next {
+            display:inline-flex;align-items:center;justify-content:center;gap:.34rem;
+            border-radius:9px;font-size:.68rem;font-weight:850;
+        }
+        .student-tour-skip { padding:.45rem .15rem;color:#7b8798;background:transparent;border:0; }
+        .student-tour-back {
+            min-height:36px;padding:.43rem .58rem;color:#4e5e76;background:#fff;
+            border:1px solid #d9e0ea;
+        }
+        .student-tour-back:disabled { opacity:.45; }
+        .student-tour-next {
+            min-height:36px;padding:.43rem .65rem;color:#fff;
+            background:linear-gradient(135deg,#3478f6,#436be7);
+            border:1px solid #3478f6;box-shadow:0 8px 18px rgba(52,120,246,.2);
+        }
+        .student-tour-open-next {
+            display:none;width:calc(100% - 1.8rem);min-height:40px;
+            margin:0 .9rem .9rem;padding:.5rem .7rem;color:#285bbd;
+            background:#eef4ff;border:1px solid #d4e1fb;
+        }
+        .student-tour-overlay.is-finished .student-tour-open-next { display:inline-flex; }
+        .student-tour-overlay.is-finished .student-tour-skip,
+        .student-tour-overlay.is-finished .student-tour-back { display:none; }
+        .student-tour-overlay.is-finished .student-tour-card-actions { justify-content:flex-end; }
+        .student-tour-target-emphasis { position:relative;z-index:4999!important; }
+
+        @@media (max-width:780px) {
+            .topbar-tour-launch span { display:none; }
+            .topbar-tour-launch { width:38px;padding:0;justify-content:center; }
+        }
+        @@media (max-width:560px) {
+            .student-tour-card { left:10px!important;right:10px;width:auto; }
+            .student-tour-overlay.is-centered .student-tour-card {
+                left:10px!important;right:10px;transform:translateY(-50%);
+            }
+            .student-tour-card-actions { flex-direction:column;align-items:stretch; }
+            .student-tour-nav { width:100%; }
+            .student-tour-back,.student-tour-next { flex:1; }
+        }
+        @@media (prefers-reduced-motion:reduce) {
+            .student-tour-overlay,.student-tour-spotlight,.student-tour-card,
+            .student-tour-progress-track span { transition:none!important; }
+        }
+
+
+        /* =========================================================
+           DASHBOARD CLARITY UPGRADE
+           - Deterministic KPI content
+           - Wider, more readable live stream
+           - Larger intelligence universe
+           - Attention Center removed from markup
+           ========================================================= */
+
+        .nova-main-action-copy em {
+            display: block;
+            max-width: 520px;
+            margin-top: .15rem;
+            overflow: hidden;
+            color: #748198;
+            font-size: .64rem;
+            font-style: normal;
+            line-height: 1.35;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .nova-main-action-copy small {
+            color: #71809a;
+            font-weight: 850;
+            letter-spacing: .02em;
+        }
+
+        .nova-activity-wide {
+            grid-column: 1 / -1;
+            min-height: 330px;
+        }
+
+        .nova-activity-wide .nova-section-header-small {
+            padding: 1.05rem 1.2rem;
+        }
+
+        .nova-activity-wide .nova-section-kicker {
+            font-size: .75rem;
+        }
+
+        .nova-activity-wide .nova-section-header h2 {
+            margin-top: .22rem;
+            font-size: 1.35rem;
+            letter-spacing: -.03em;
+        }
+
+        .nova-activity-wide .nova-live-status {
+            font-size: .68rem;
+        }
+
+        .nova-activity-wide .nova-activity-list {
+            padding: .4rem 1.2rem 1.1rem;
+        }
+
+        .nova-activity-wide .nova-activity-item {
+            grid-template-columns: 17px minmax(0, 1fr);
+            gap: .65rem;
+            padding: .82rem 0;
+        }
+
+        .nova-activity-wide .nova-activity-line {
+            left: 7px;
+            top: 29px;
+        }
+
+        .nova-activity-wide .nova-activity-dot {
+            width: 14px;
+            height: 14px;
+            margin-top: .2rem;
+        }
+
+        .nova-activity-wide .nova-activity-copy strong {
+            font-size: .82rem;
+            font-weight: 780;
+            line-height: 1.5;
+        }
+
+        .nova-activity-wide .nova-activity-copy time {
+            margin-top: .2rem;
+            font-size: .65rem;
+        }
+
+        .nova-capability-universe {
+            padding: 1.3rem;
+        }
+
+        .nova-capability-universe .nova-section-kicker {
+            font-size: .78rem;
+            letter-spacing: .09em;
+        }
+
+        .nova-capability-universe .nova-section-header h2 {
+            margin-top: .25rem;
+            font-size: 1.5rem;
+            font-weight: 950;
+            letter-spacing: -.035em;
+        }
+
+        .nova-capability-universe .nova-section-header p {
+            max-width: 780px;
+            margin-top: .32rem;
+            font-size: .84rem;
+            line-height: 1.5;
+        }
+
+        .nova-capability-universe .nova-capability-filter {
+            padding: .32rem;
+        }
+
+        .nova-capability-universe .nova-capability-filter button {
+            min-width: 64px;
+            padding: .46rem .7rem;
+            font-size: .67rem;
+        }
+
+        @@media (max-width: 1280px) {
+            .nova-universe-map {
+                grid-template-columns:
+                    minmax(270px, 1fr)
+                    270px
+                    minmax(270px, 1fr);
+                gap: 1.25rem;
+            }
+
+            .nova-universe-core {
+                height: 315px;
+            }
+
+            .ring-c {
+                width: 285px;
+                height: 285px;
+            }
+        }
+
+        @@media (max-width: 1080px) {
+            .nova-universe-map {
+                grid-template-columns: 1fr;
+            }
+
+            .nova-universe-core {
+                height: 300px;
+            }
+
+            .nova-universe-column {
+                grid-template-columns:
+                    repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @@media (max-width: 780px) {
+            .nova-main-action-copy em {
+                white-space: normal;
+            }
+
+            .nova-activity-wide .nova-section-header h2 {
+                font-size: 1.18rem;
+            }
+
+            .nova-capability-universe .nova-section-header h2 {
+                font-size: 1.28rem;
+            }
+
+            .nova-capability-universe .nova-section-header p {
+                font-size: .76rem;
+            }
+        }
+
+        @@media (max-width: 560px) {
+            .nova-universe-column {
+                grid-template-columns: 1fr;
+            }
+
+            .nova-feature-node {
+                min-height: 76px;
+            }
+        }
+
     </style>
+}
+
+@section Scripts {
+    <script>
+
+        (function () {
+            const buttons = document.querySelectorAll("[data-journey-select]");
+            const panels = document.querySelectorAll("[data-journey-panel]");
+
+            function selectJourney(stage) {
+                buttons.forEach(function (button) {
+                    const active = button.getAttribute("data-journey-select") === stage;
+                    button.classList.toggle("is-active", active);
+                    button.setAttribute("aria-selected", active ? "true" : "false");
+                });
+
+                panels.forEach(function (panel) {
+                    panel.classList.toggle(
+                        "is-active",
+                        panel.getAttribute("data-journey-panel") === stage
+                    );
+                });
+            }
+
+            buttons.forEach(function (button) {
+                button.addEventListener("click", function () {
+                    const stage = button.getAttribute("data-journey-select");
+
+                    if (stage) {
+                        selectJourney(stage);
+                    }
+                });
+            });
+        })();
+
+        (function () {
+            const filterButtons = document.querySelectorAll("[data-capability-filter]");
+            const nodes = document.querySelectorAll("[data-capability-group]");
+
+            filterButtons.forEach(function (button) {
+                button.addEventListener("click", function () {
+                    const filter = button.getAttribute("data-capability-filter");
+
+                    filterButtons.forEach(function (item) {
+                        item.classList.toggle("is-active", item === button);
+                    });
+
+                    nodes.forEach(function (node) {
+                        const group = node.getAttribute("data-capability-group");
+                        node.classList.toggle(
+                            "is-filtered",
+                            filter !== "all" && group !== filter
+                        );
+                    });
+                });
+            });
+        })();
+
+        (function () {
+            const trigger = document.getElementById("novaDockTrigger");
+            const dock = document.getElementById("novaQuickDock");
+
+            if (!trigger || !dock) {
+                return;
+            }
+
+            trigger.addEventListener("click", function () {
+                const open = dock.classList.toggle("is-open");
+                trigger.setAttribute("aria-expanded", open ? "true" : "false");
+            });
+
+            document.addEventListener("click", function (event) {
+                if (!dock.contains(event.target) && !trigger.contains(event.target)) {
+                    dock.classList.remove("is-open");
+                    trigger.setAttribute("aria-expanded", "false");
+                }
+            });
+        })();
+
+        (function () {
+            const openButton = document.getElementById("openTrustDetails");
+            const closeButton = document.getElementById("closeTrustDetails");
+            const modal = document.getElementById("trustLayerModal");
+
+            if (!openButton || !closeButton || !modal) {
+                return;
+            }
+
+            function setOpen(open) {
+                modal.classList.toggle("is-open", open);
+                modal.setAttribute("aria-hidden", open ? "false" : "true");
+                document.body.style.overflow = open ? "hidden" : "";
+            }
+
+            openButton.addEventListener("click", function () {
+                setOpen(true);
+            });
+
+            closeButton.addEventListener("click", function () {
+                setOpen(false);
+            });
+
+            modal.addEventListener("click", function (event) {
+                if (event.target === modal) {
+                    setOpen(false);
+                }
+            });
+
+            document.addEventListener("keydown", function (event) {
+                if (event.key === "Escape") {
+                    setOpen(false);
+                }
+            });
+        })();
+
+        (function () {
+            const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+            if (reduceMotion || window.matchMedia("(pointer: coarse)").matches) {
+                return;
+            }
+
+            document.querySelectorAll("[data-float-card]").forEach(function (card) {
+                card.addEventListener("pointermove", function (event) {
+                    const rect = card.getBoundingClientRect();
+                    const x = (event.clientX - rect.left) / rect.width - .5;
+                    const y = (event.clientY - rect.top) / rect.height - .5;
+
+                    card.style.transform =
+                        `perspective(1000px) rotateX(${(-y * .55).toFixed(2)}deg) ` +
+                        `rotateY(${(x * .7).toFixed(2)}deg)`;
+                });
+
+                card.addEventListener("pointerleave", function () {
+                    card.style.transform = "";
+                });
+            });
+
+            document.querySelectorAll("[data-tilt-card]").forEach(function (card) {
+                card.addEventListener("pointermove", function (event) {
+                    const rect = card.getBoundingClientRect();
+                    const x = (event.clientX - rect.left) / rect.width - .5;
+                    const y = (event.clientY - rect.top) / rect.height - .5;
+
+                    card.style.transform =
+                        `perspective(1200px) rotateX(${(-y * .28).toFixed(2)}deg) ` +
+                        `rotateY(${(x * .36).toFixed(2)}deg)`;
+                });
+
+                card.addEventListener("pointerleave", function () {
+                    card.style.transform = "";
+                });
+            });
+        })();
+
+        (function () {
+            const dashboard = document.querySelector(".nova-dashboard");
+            const overlay = document.getElementById("studentTourOverlay");
+            const spotlight = document.getElementById("studentTourSpotlight");
+            const card = document.getElementById("studentTourCard");
+            const title = document.getElementById("studentTourTitle");
+            const description = document.getElementById("studentTourDescription");
+            const kicker = document.getElementById("studentTourKicker");
+            const tip = document.getElementById("studentTourTip");
+            const icon = document.getElementById("studentTourStepIcon");
+            const progress = document.getElementById("studentTourProgress");
+            const progressBar = document.getElementById("studentTourProgressBar");
+            const backButton = document.getElementById("studentTourBack");
+            const nextButton = document.getElementById("studentTourNext");
+            const skipButton = document.getElementById("studentTourSkip");
+            const closeButton = document.getElementById("studentTourClose");
+            const openNextButton = document.getElementById("studentTourOpenNext");
+            const restartButton = document.getElementById("startStudentTourButton");
+
+            if (!dashboard || !overlay || !spotlight || !card) return;
+
+            const userId = dashboard.dataset.tourUserId || "anonymous";
+            const version = dashboard.dataset.tourVersion || "1";
+            const storageKey = `fypilot.student-onboarding.v${version}.${userId}`;
+            const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+            const steps = [
+                {
+                    type: "welcome", icon: "bi-stars", kicker: "Welcome to FYPilot",
+                    title: "Your project journey starts here",
+                    description: "FYPilot guides your final-year project from skills and idea selection to planning, engineering, supervision, and defense.",
+                    tip: "This tour can be skipped and restarted later from the Tour button in the top bar."
+                },
+                {
+                    selector: "[data-tour='project-command']", icon: "bi-grid-1x2",
+                    kicker: "Project Command Center", title: "Everything begins with the active project",
+                    description: "This area shows the project you are currently working on, your role, team, readiness, and current status.",
+                    tip: "Use Switch Project before working on another personal or shared project."
+                },
+                {
+                    selector: "[data-tour='next-action']", icon: "bi-signpost-split",
+                    kicker: "Recommended workflow", title: "FYPilot tells you what to do next",
+                    description: "The recommended action changes according to your progress, so you always know the next useful step.",
+                    tip: "The normal order is Skills → Idea → Plan → Execute → Defend."
+                },
+                {
+                    selector: "[data-tour='project-stats']", icon: "bi-bar-chart-line",
+                    kicker: "Project pulse", title: "Understand the project at a glance",
+                    description: "These indicators show the current stage, planning readiness, team capacity, and available planning assets.",
+                    tip: "The recommended action is calculated from missing project foundations, not selected randomly."
+                },
+                {
+                    selector: "[data-tour='project-journey']", icon: "bi-diagram-3",
+                    kicker: "Interactive lifecycle", title: "Move through the full FYP journey",
+                    description: "Select Skills, Idea, Plan, Execute, or Defend to understand the stage and open its correct feature.",
+                    tip: "Green means completed; blue marks the current recommended stage."
+                },
+                {
+                    selector: "[data-tour='skill-assessment']", icon: "bi-bar-chart-line",
+                    kicker: "Step 1 — Skills", title: "Start with Skill Assessment",
+                    description: "Your private skill profile helps FYPilot match ideas and guidance to your actual technical level.",
+                    tip: "Complete this before relying on generated project recommendations."
+                },
+                {
+                    selector: "[data-tour='idea-generator']", icon: "bi-lightbulb",
+                    kicker: "Step 2 — Direction", title: "Generate and validate project ideas",
+                    description: "Use Idea Generator, Idea Comparison, Market Demand, and Project DNA to select a strong project direction.",
+                    tip: "The selected shared idea becomes the source of truth for later features."
+                },
+                {
+                    selector: "[data-tour='roadmap']", icon: "bi-map",
+                    kicker: "Step 3 — Planning", title: "Build a realistic project roadmap",
+                    description: "Roadmap converts the selected idea into phases, tasks, durations, hours, dependencies, and team allocations.",
+                    tip: "Finish planning before beginning heavy project implementation."
+                },
+                {
+                    selector: "[data-tour='se-documentation']", icon: "bi-journal-code",
+                    kicker: "Step 4 — Engineering", title: "Generate Software Engineering documentation",
+                    description: "Create requirements, use cases, architecture, database design, UI specifications, tests, diagrams, and traceability.",
+                    tip: "Check assumptions and the Quality Passport before downloading."
+                },
+                {
+                    selector: "[data-tour='mentor-chat']", icon: "bi-chat-dots",
+                    kicker: "Project support", title: "Get support throughout the project",
+                    description: "Mentor Chat provides contextual guidance. Defense Simulator prepares questions, while Supervisor Feedback keeps human guidance visible.",
+                    tip: "AI guidance supports the project; your supervisor remains the academic authority."
+                },
+                {
+                    selector: "[data-tour='trust-layer']", icon: "bi-shield-lock",
+                    kicker: "AI TrustLayer", title: "Critical AI output is reviewed",
+                    description: "Important results pass through the LLM Firewall, schema validation, AI Reviewer, and Quality Passport.",
+                    tip: "Open the TrustLayer flow to see the complete review architecture."
+                },
+                {
+                    selector: "[data-tour='capability-universe']", icon: "bi-stars",
+                    kicker: "Complete ecosystem", title: "Every FYPilot capability is connected",
+                    description: "This map gives direct access to planning, engineering, support, and defense tools around the active project.",
+                    tip: "Use the filters to focus on Plan, Build, or Support features."
+                },
+                {
+                    type: "finish", icon: "bi-check2-circle", kicker: "Tour completed",
+                    title: "You are ready to use FYPilot",
+                    description: "Follow the recommended next move and progress through the lifecycle one stage at a time.",
+                    tip: "Restart the tour whenever needed from the top bar."
+                }
+            ];
+
+            let index = 0;
+            let target = null;
+            let previousFocus = null;
+
+            function seen() {
+                try { return Boolean(localStorage.getItem(storageKey)); }
+                catch { return false; }
+            }
+
+            function save(status) {
+                try {
+                    localStorage.setItem(storageKey, JSON.stringify({
+                        status, version, updatedAt: new Date().toISOString()
+                    }));
+                } catch { }
+            }
+
+            function delay(ms) {
+                return new Promise(resolve => window.setTimeout(resolve, ms));
+            }
+
+            function clearTarget() {
+                if (target) target.classList.remove("student-tour-target-emphasis");
+                target = null;
+            }
+
+            async function reveal(element) {
+                element.scrollIntoView({
+                    behavior: reduceMotion ? "auto" : "smooth",
+                    block: "center",
+                    inline: "nearest"
+                });
+                await delay(reduceMotion ? 20 : 330);
+            }
+
+            function placeCard(rect) {
+                const gap = 18;
+                const vw = window.innerWidth;
+                const vh = window.innerHeight;
+                const cardRect = card.getBoundingClientRect();
+                let left = (vw - cardRect.width) / 2;
+                let top = (vh - cardRect.height) / 2;
+
+                if (vw - rect.right >= cardRect.width + gap) {
+                    left = rect.right + gap;
+                    top = rect.top + (rect.height - cardRect.height) / 2;
+                } else if (rect.left >= cardRect.width + gap) {
+                    left = rect.left - cardRect.width - gap;
+                    top = rect.top + (rect.height - cardRect.height) / 2;
+                } else if (vh - rect.bottom >= cardRect.height + gap) {
+                    left = rect.left + (rect.width - cardRect.width) / 2;
+                    top = rect.bottom + gap;
+                } else {
+                    left = rect.left + (rect.width - cardRect.width) / 2;
+                    top = rect.top - cardRect.height - gap;
+                }
+
+                left = Math.max(12, Math.min(left, vw - cardRect.width - 12));
+                top = Math.max(12, Math.min(top, vh - cardRect.height - 12));
+                card.style.left = `${left}px`;
+                card.style.top = `${top}px`;
+            }
+
+            function positionTarget(element) {
+                const rect = element.getBoundingClientRect();
+                const pad = 9;
+                const top = Math.max(6, rect.top - pad);
+                const left = Math.max(6, rect.left - pad);
+                const right = Math.min(window.innerWidth - 6, rect.right + pad);
+                const bottom = Math.min(window.innerHeight - 6, rect.bottom + pad);
+
+                spotlight.style.top = `${top}px`;
+                spotlight.style.left = `${left}px`;
+                spotlight.style.width = `${Math.max(24, right - left)}px`;
+                spotlight.style.height = `${Math.max(24, bottom - top)}px`;
+                spotlight.style.borderRadius =
+                    window.getComputedStyle(element).borderRadius || "14px";
+
+                placeCard({
+                    top, left, right, bottom,
+                    width: right - left,
+                    height: bottom - top
+                });
+            }
+
+            async function render() {
+                const step = steps[index];
+                clearTarget();
+                overlay.classList.remove("has-target", "is-centered", "is-finished");
+
+                icon.innerHTML = `<i class="bi ${step.icon}"></i>`;
+                kicker.textContent = step.kicker;
+                title.textContent = step.title;
+                description.textContent = step.description;
+                tip.querySelector("span").textContent = step.tip;
+
+                progress.textContent =
+                    step.type === "welcome" ? "Welcome" :
+                    step.type === "finish" ? "Tour complete" :
+                    `Step ${index} of ${steps.length - 2}`;
+
+                progressBar.style.width =
+                    step.type === "welcome" ? "4%" :
+                    step.type === "finish" ? "100%" :
+                    `${Math.round((index / (steps.length - 1)) * 100)}%`;
+
+                backButton.disabled = index === 0;
+                nextButton.innerHTML =
+                    step.type === "welcome"
+                        ? 'Start tour <i class="bi bi-arrow-right"></i>'
+                        : step.type === "finish"
+                            ? 'Finish <i class="bi bi-check2"></i>'
+                            : 'Next <i class="bi bi-arrow-right"></i>';
+
+                if (step.type === "welcome" || step.type === "finish") {
+                    overlay.classList.add("is-centered");
+                    if (step.type === "finish") overlay.classList.add("is-finished");
+                    card.style.left = "";
+                    card.style.top = "";
+                    return;
+                }
+
+                target = document.querySelector(step.selector);
+
+                if (!target) {
+                    index += 1;
+                    await render();
+                    return;
+                }
+
+                await reveal(target);
+                target.classList.add("student-tour-target-emphasis");
+                overlay.classList.add("has-target");
+                positionTarget(target);
+            }
+
+            async function start(force) {
+                if (!force && seen()) return;
+                previousFocus = document.activeElement;
+                index = 0;
+                overlay.classList.add("is-open");
+                overlay.setAttribute("aria-hidden", "false");
+                await render();
+                nextButton.focus();
+            }
+
+            function close(status) {
+                clearTarget();
+                save(status);
+                overlay.classList.remove("is-open", "has-target", "is-centered", "is-finished");
+                overlay.setAttribute("aria-hidden", "true");
+                if (previousFocus instanceof HTMLElement) previousFocus.focus();
+            }
+
+            nextButton.addEventListener("click", async () => {
+                if (index >= steps.length - 1) {
+                    close("completed");
+                    return;
+                }
+                index += 1;
+                await render();
+            });
+
+            backButton.addEventListener("click", async () => {
+                if (index <= 0) return;
+                index -= 1;
+                await render();
+            });
+
+            skipButton.addEventListener("click", () =>
+                close(index >= steps.length - 1 ? "completed" : "dismissed"));
+
+            closeButton.addEventListener("click", () => close("dismissed"));
+
+            openNextButton.addEventListener("click", () => {
+                const link = document.querySelector("[data-tour='next-action']");
+                const href = link instanceof HTMLAnchorElement ? link.href : null;
+                close("completed");
+                if (href) window.location.href = href;
+            });
+
+            if (restartButton) {
+                restartButton.addEventListener("click", () => start(true));
+            }
+
+            window.addEventListener("resize", () => {
+                if (overlay.classList.contains("is-open") && target) positionTarget(target);
+            });
+
+            document.addEventListener("scroll", () => {
+                if (overlay.classList.contains("is-open") && target) positionTarget(target);
+            }, true);
+
+            document.addEventListener("keydown", event => {
+                if (!overlay.classList.contains("is-open")) return;
+                if (event.key === "Escape") close("dismissed");
+                if (event.key === "ArrowRight") nextButton.click();
+                if (event.key === "ArrowLeft" && !backButton.disabled) backButton.click();
+            });
+
+            const force = new URLSearchParams(window.location.search).get("tour") === "1";
+            window.setTimeout(() => start(force), 450);
+        })();
+
+    </script>
 }

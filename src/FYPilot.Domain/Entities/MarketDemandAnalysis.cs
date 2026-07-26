@@ -1,4 +1,4 @@
-﻿namespace FYPilot.Domain.Entities;
+namespace FYPilot.Domain.Entities;
 
 public class MarketDemandAnalysis
 {
@@ -35,34 +35,10 @@ public class MarketDemandAnalysis
     public string RisksJson { get; set; } = "[]";
     public string Recommendation { get; set; } = string.Empty;
     public string NextStepsJson { get; set; } = "[]";
-    // These existing forecast columns now represent annual forecasting.
-    public string ForecastStatus { get; set; } = "insufficient-source-backed-history";
-    public bool ForecastReady { get; set; }
-    public bool ForecastReliable { get; set; }
-    public string? ForecastModel { get; set; }
-    public decimal? ForecastMae { get; set; }
-    public decimal? NaiveForecastMae { get; set; }
-    public string ForecastPointsJson { get; set; } = "[]";
-    public string? ForecastWarning { get; set; }
-    public DateTime? ForecastGeneratedAt { get; set; }
-
-    public string TrendDirection { get; set; } = "insufficient-data";
-    public string TrendStrength { get; set; } = "insufficient-data";
-
-    // ApplicationDbContext maps this to the legacy TrendSlopePerWeek column,
-    // so the already-applied database migration remains compatible.
-    public decimal? TrendSlopePerYear { get; set; }
-
-    public decimal? TrendTotalChange { get; set; }
-    public decimal? TrendVolatility { get; set; }
-    public decimal? TrendRSquared { get; set; }
-    public string? TrendSummary { get; set; }
 
     public DateTime AnalyzedAt { get; set; } = DateTime.UtcNow;
 
     public ProjectIdea ProjectIdea { get; set; } = null!;
     public ICollection<MarketDemandSource> Sources { get; set; } = [];
     public ICollection<MarketSimilarSolution> SimilarSolutions { get; set; } = [];
-    public ICollection<MarketTrendSignal> TrendSignals { get; set; } = [];
-    public ICollection<MarketDemandYearlyPoint> YearlyPoints { get; set; } = [];
 }

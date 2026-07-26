@@ -1,4 +1,4 @@
-﻿namespace FYPilot.Application.DTOs;
+namespace FYPilot.Application.DTOs;
 
 public sealed record AnalyzeMarketNeedsRequest(
     string ProjectTitle,
@@ -7,8 +7,6 @@ public sealed record AnalyzeMarketNeedsRequest(
     string Domain,
     string Technologies,
     string CountryContext,
-    int HistoryYears,
-    int ForecastYears,
     bool UseSearch
 );
 
@@ -28,64 +26,12 @@ public sealed record MarketNeedsSimilarSolutionDto(
     string Similarity
 );
 
-public sealed record MarketNeedsTrendSignalDto(
-    string Topic,
-    string Direction,
-    string Evidence,
-    string? SourceUrl
-);
-
 public sealed record MarketNeedsScoreBreakdownDto(
     int ProblemEvidence,
     int MarketFit,
     int UniversityValue,
     int CompetitionOpportunity,
     int TechnologyMomentum
-);
-
-public sealed record MarketNeedsYearlyPointDto(
-    int Year,
-    int ProblemSignal,
-    int AdoptionSignal,
-    int JobDemandSignal,
-    int TechnologyMomentumSignal,
-    decimal DemandIndex,
-    int ConfidenceScore,
-    string EvidenceSummary,
-    List<string> SourceUrls
-);
-
-public sealed record MarketNeedsAnnualForecastPointDto(
-    int Year,
-    decimal PredictedScore,
-    decimal LowerBound,
-    decimal UpperBound
-);
-
-public sealed record MarketNeedsAnnualTrendDto(
-    string Direction,
-    string Strength,
-    decimal SlopePerYear,
-    decimal TotalChange,
-    decimal Volatility,
-    decimal RSquared,
-    string Summary
-);
-
-public sealed record MarketNeedsAnnualForecastDto(
-    string Status,
-    bool ForecastReady,
-    bool ForecastReliable,
-    string? ModelUsed,
-    decimal? ModelMae,
-    decimal? NaiveMae,
-    decimal AverageYearlyConfidence,
-    int? HistoricalStartYear,
-    int? HistoricalEndYear,
-    int ForecastHorizonYears,
-    MarketNeedsAnnualTrendDto Trend,
-    List<MarketNeedsAnnualForecastPointDto> ForecastPoints,
-    string? Warning
 );
 
 public sealed record AnalyzeMarketNeedsResponse(
@@ -105,10 +51,6 @@ public sealed record AnalyzeMarketNeedsResponse(
     List<string> ProblemEvidence,
     List<MarketNeedsSimilarSolutionDto> SimilarSolutions,
     List<MarketNeedsSourceDto> Sources,
-    List<MarketNeedsTrendSignalDto> TrendSignals,
-    List<MarketNeedsYearlyPointDto> YearlyPoints,
-    MarketNeedsAnnualForecastDto AnnualForecast,
-    string HistoricalDataNote,
     string LebaneseMarketFit,
     string UniversityValue,
     List<string> Risks,

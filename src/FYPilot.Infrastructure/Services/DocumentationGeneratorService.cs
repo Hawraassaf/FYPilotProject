@@ -311,6 +311,14 @@ public class DocumentationGeneratorService : IDocumentationGeneratorService
               (quality.Warnings is { Count: > 0 } ? $"\nWarnings:\n{string.Join("\n", quality.Warnings.Select(w => $"- {w}"))}" : "")
             : $"Documentation Quality Score: {doc.DocumentationQualityScore}/100";
 
+        // Per-section provenance ("provider" vs "fallback") -- so a partial
+        // AI-provider outage is never silently presented as either fully
+        // AI-generated or fully generic; see the content-depth batch's
+        // "provider failure and partial results" fix.
+        var provenanceBlock = (doc.SectionProvenance is { Count: > 0 })
+            ? string.Join("\n", doc.SectionProvenance.Select(kv => $"- {kv.Key}: {kv.Value}"))
+            : "Not recorded for this generation.";
+
         var aiTechnicalReport =
             $"1. Architecture\n{architectureBlock}\n\n" +
             $"2. Module & Component Design\n{moduleBlock}\n\n" +
@@ -324,7 +332,8 @@ public class DocumentationGeneratorService : IDocumentationGeneratorService
             "9. Assumptions\n" + assumptionsBlock + "\n\n" +
             "10. Expected Outcomes\n" +
             string.Join("\n", doc.ExpectedOutcomes.Select(o => $"- {o}")) + "\n\n" +
-            $"11. Documentation Quality Assessment\n{qualityBlock}";
+            $"11. Documentation Quality Assessment\n{qualityBlock}\n\n" +
+            $"12. Generation Provenance (per section: provider vs. deterministic fallback)\n{provenanceBlock}";
 
         return new ProjectDocumentation
         {

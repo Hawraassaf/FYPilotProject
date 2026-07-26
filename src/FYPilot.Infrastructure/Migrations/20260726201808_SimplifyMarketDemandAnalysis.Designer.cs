@@ -3,6 +3,7 @@ using System;
 using FYPilot.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FYPilot.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260726201808_SimplifyMarketDemandAnalysis")]
+    partial class SimplifyMarketDemandAnalysis
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -954,10 +957,6 @@ namespace FYPilot.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("notes_to_prepare");
 
-                    b.Property<int?>("ProjectId")
-                        .HasColumnType("integer")
-                        .HasColumnName("project_id");
-
                     b.Property<DateTime?>("Reminder12HoursSentAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("reminder_12_hours_sent_at");
@@ -992,9 +991,7 @@ namespace FYPilot.Infrastructure.Migrations
 
                     b.HasIndex("StudentId");
 
-                    b.HasIndex("ProjectId", "ScheduledAt");
-
-                    b.HasIndex("SupervisorId", "ScheduledAt");
+                    b.HasIndex("SupervisorId");
 
                     b.ToTable("meetings");
                 });
@@ -1284,14 +1281,6 @@ namespace FYPilot.Infrastructure.Migrations
                     b.Property<int>("StudentId")
                         .HasColumnType("integer")
                         .HasColumnName("student_id");
-
-                    b.Property<string>("SupervisorAssignmentStatus")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)")
-                        .HasDefaultValue("unassigned")
-                        .HasColumnName("supervisor_assignment_status");
 
                     b.Property<int?>("SupervisorId")
                         .HasColumnType("integer")
@@ -2098,10 +2087,6 @@ namespace FYPilot.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("assigned_by_admin_id");
 
-                    b.Property<int?>("ProjectId")
-                        .HasColumnType("integer")
-                        .HasColumnName("project_id");
-
                     b.Property<DateTime?>("RejectedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("rejected_at");
@@ -2112,10 +2097,7 @@ namespace FYPilot.Infrastructure.Migrations
 
                     b.Property<string>("Status")
                         .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)")
-                        .HasDefaultValue("pending_admin")
+                        .HasColumnType("text")
                         .HasColumnName("status");
 
                     b.Property<int>("StudentId")
@@ -2139,13 +2121,9 @@ namespace FYPilot.Infrastructure.Migrations
 
                     b.HasIndex("AssignedByAdminId");
 
-                    b.HasIndex("ProjectId")
-                        .IsUnique()
-                        .HasFilter("\"project_id\" IS NOT NULL AND \"status\" IN ('pending_admin', 'active')");
-
                     b.HasIndex("StudentId");
 
-                    b.HasIndex("SupervisorId", "Status");
+                    b.HasIndex("SupervisorId");
 
                     b.ToTable("supervisor_assignments");
                 });
@@ -2181,20 +2159,13 @@ namespace FYPilot.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("originality_score");
 
-                    b.Property<int?>("ProjectId")
-                        .HasColumnType("integer")
-                        .HasColumnName("project_id");
-
                     b.Property<int>("SimilarityScore")
                         .HasColumnType("integer")
                         .HasColumnName("similarity_score");
 
                     b.Property<string>("Status")
                         .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)")
-                        .HasDefaultValue("pending")
+                        .HasColumnType("text")
                         .HasColumnName("status");
 
                     b.Property<int>("SupervisorId")
@@ -2209,11 +2180,7 @@ namespace FYPilot.Infrastructure.Migrations
 
                     b.HasIndex("IdeaId");
 
-                    b.HasIndex("ProjectId", "IdeaId")
-                        .IsUnique()
-                        .HasFilter("\"project_id\" IS NOT NULL");
-
-                    b.HasIndex("SupervisorId", "ProjectId");
+                    b.HasIndex("SupervisorId");
 
                     b.ToTable("supervisor_evaluations");
                 });
@@ -2719,23 +2686,15 @@ namespace FYPilot.Infrastructure.Migrations
 
             modelBuilder.Entity("FYPilot.Domain.Entities.Meeting", b =>
                 {
-                    b.HasOne("FYPilot.Domain.Entities.Project", "Project")
-                        .WithMany("Meetings")
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
                     b.HasOne("FYPilot.Domain.Entities.User", "Student")
                         .WithMany()
-                        .HasForeignKey("StudentId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .HasForeignKey("StudentId");
 
                     b.HasOne("FYPilot.Domain.Entities.User", "Supervisor")
                         .WithMany()
                         .HasForeignKey("SupervisorId")
-                        .OnDelete(DeleteBehavior.Restrict)
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("Project");
 
                     b.Navigation("Student");
 
@@ -3010,29 +2969,21 @@ namespace FYPilot.Infrastructure.Migrations
                 {
                     b.HasOne("FYPilot.Domain.Entities.User", "AssignedByAdmin")
                         .WithMany()
-                        .HasForeignKey("AssignedByAdminId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("FYPilot.Domain.Entities.Project", "Project")
-                        .WithMany("SupervisorAssignments")
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade);
+                        .HasForeignKey("AssignedByAdminId");
 
                     b.HasOne("FYPilot.Domain.Entities.User", "Student")
                         .WithMany()
                         .HasForeignKey("StudentId")
-                        .OnDelete(DeleteBehavior.Restrict)
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
                     b.HasOne("FYPilot.Domain.Entities.User", "Supervisor")
                         .WithMany()
                         .HasForeignKey("SupervisorId")
-                        .OnDelete(DeleteBehavior.Restrict)
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
                     b.Navigation("AssignedByAdmin");
-
-                    b.Navigation("Project");
 
                     b.Navigation("Student");
 
@@ -3047,11 +2998,6 @@ namespace FYPilot.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("FYPilot.Domain.Entities.Project", "Project")
-                        .WithMany("SupervisorEvaluations")
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
                     b.HasOne("FYPilot.Domain.Entities.User", "Supervisor")
                         .WithMany()
                         .HasForeignKey("SupervisorId")
@@ -3059,8 +3005,6 @@ namespace FYPilot.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Idea");
-
-                    b.Navigation("Project");
 
                     b.Navigation("Supervisor");
                 });
@@ -3184,15 +3128,9 @@ namespace FYPilot.Infrastructure.Migrations
 
                     b.Navigation("Invitations");
 
-                    b.Navigation("Meetings");
-
                     b.Navigation("Members");
 
                     b.Navigation("Milestones");
-
-                    b.Navigation("SupervisorAssignments");
-
-                    b.Navigation("SupervisorEvaluations");
 
                     b.Navigation("Tasks");
 

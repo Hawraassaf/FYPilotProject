@@ -21,8 +21,6 @@ router = APIRouter(tags=["Market Demand Intelligence"])
 def _build_review_context(request: MarketNeedsRequest) -> ReviewContext:
     trusted_structural_context = {
         "countryContext": request.country_context,
-        "historyYears": request.history_years,
-        "forecastYears": request.forecast_years,
         "useSearch": request.use_search,
     }
 
@@ -37,12 +35,10 @@ def _build_review_context(request: MarketNeedsRequest) -> ReviewContext:
     return ReviewContext(
         agent_name="MarketNeedsAgent",
         trusted_system_instructions=(
-            "MarketNeedsAgent: validates current market demand and builds "
-            "source-backed annual intelligence for a final year project "
-            "idea, grounded in live web research. The demand score, score "
-            "breakdown, yearly indices, and annual statistical forecast "
-            "are always computed deterministically, never written by the "
-            "LLM."
+            "MarketNeedsAgent: validates current market demand for a final "
+            "year project idea, grounded in live web research. The demand "
+            "score and score breakdown are always computed "
+            "deterministically, never written by the LLM."
         ),
         trusted_structural_context=trusted_structural_context,
         untrusted_project_text=untrusted_project_text,

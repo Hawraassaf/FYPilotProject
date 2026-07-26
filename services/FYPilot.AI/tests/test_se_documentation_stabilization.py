@@ -226,7 +226,13 @@ class TraceabilityRebuildTests(unittest.TestCase):
         for i in range(5, 11):
             frs.append(frs[0].model_copy(update={"id": f"FR-{i:02d}", "title": f"Extra requirement {i}"}))
         frs = self.agent._ensure_unique_ids(frs, "FR")
-        self.assertEqual(len(frs), 10)
+        # The base project-specific fallback (batch: content-depth) already
+        # derives one FR per canonical feature rather than a fixed count of
+        # 4, so the exact total here depends on how many features this
+        # fixture's text matches -- the invariant under test is "every FR,
+        # however many, appears in the traceability matrix", not a specific
+        # count.
+        self.assertGreaterEqual(len(frs), 10)
 
         use_cases = self.agent._fallback_use_cases(facts)
         tests = self.agent._fallback_tests(facts)
@@ -246,7 +252,13 @@ class AssumptionHonestyTests(unittest.TestCase):
         self.agent = SEDocumentationOrchestratorAgent()
 
     def test_inferred_entity_creates_an_assumption(self):
-        doc = self.agent.build_safe_fallback(_chatbot_request()).model_dump()
+        # _chatbot_request()'s text doesn't mention configurable settings, so
+        # extend it here (rather than the shared fixture used by ~24 other
+        # tests) with a configuration-flavored feature, which the canonical
+        # feature model marks "inferred" and links to a SystemSetting entity.
+        request = _chatbot_request()
+        request.selectedIdea.whyUseful += " Supports configurable confidence thresholds via system settings."
+        doc = self.agent.build_safe_fallback(request).model_dump()
         inferred_entity_names = {e["name"] for e in doc["databaseEntities"] if e["sourceClassification"] == "inferred"}
         self.assertTrue(inferred_entity_names)
         assumption_text = " ".join(a["item"] for a in doc["assumptions"])

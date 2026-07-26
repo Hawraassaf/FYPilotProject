@@ -13,6 +13,9 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <link rel="stylesheet"
+          href="~/css/student-onboarding-tour.css"
+          asp-append-version="true" />
 
     @RenderSection("Head", required: false)
 </head>
@@ -35,6 +38,7 @@
 
         string? navProfileImagePath = null;
         string? topbarProfileHref = null;
+        int? currentUserIdForOnboarding = null;
 
         if (isAuth)
         {
@@ -42,6 +46,8 @@
 
             if (int.TryParse(userIdValue, out var navUserId))
             {
+                currentUserIdForOnboarding = navUserId;
+
                 var currentUserName = await Db.Users
                     .AsNoTracking()
                     .Where(u => u.Id == navUserId)
@@ -76,13 +82,32 @@
             }
         }
 
-        string NavLink(string href, string icon, string label)
+        string NavLink(
+            string href,
+            string icon,
+            string label,
+            string? tourKey = null)
         {
-            var active = path.Equals(href, StringComparison.OrdinalIgnoreCase) ||
-                         (href != "/" && path.StartsWith(href, StringComparison.OrdinalIgnoreCase));
+            var active =
+                path.Equals(
+                    href,
+                    StringComparison.OrdinalIgnoreCase)
+                || (href != "/"
+                    && path.StartsWith(
+                        href,
+                        StringComparison.OrdinalIgnoreCase));
 
-            return $"<a href=\"{href}\" class=\"side-nav-link{(active ? " active" : "")}\">" +
-                   $"<i class=\"bi bi-{icon}\"></i><span>{label}</span></a>";
+            var tourAttribute =
+                string.IsNullOrWhiteSpace(tourKey)
+                    ? string.Empty
+                    : $" data-tour=\"{tourKey}\"";
+
+            return
+                $"<a href=\"{href}\" " +
+                $"class=\"side-nav-link{(active ? " active" : "")}\"" +
+                $"{tourAttribute}>" +
+                $"<i class=\"bi bi-{icon}\"></i>" +
+                $"<span>{label}</span></a>";
         }
 
         var initials = "U";
@@ -104,7 +129,12 @@
 
     @if (isAuth)
     {
-        <div class="app-shell d-flex">
+        <div class="app-shell d-flex"
+             data-student-onboarding
+             data-onboarding-role="@role"
+             data-onboarding-user-id="@(currentUserIdForOnboarding?.ToString() ?? "anonymous")"
+             data-onboarding-version="3"
+             data-onboarding-current-path="@path">
 
             <aside class="offcanvas-lg offcanvas-start app-sidebar d-flex flex-column flex-shrink-0"
                    tabindex="-1"
@@ -147,22 +177,22 @@
                         @if (role == "student")
                         {
                             <li><span class="side-nav-label">My Workspace</span></li>
-                            <li>@Html.Raw(NavLink("/Student/Dashboard", "grid", "Dashboard"))</li>
-                            <li>  @Html.Raw( NavLink( "/Student/MyProjects",  "folder2-open", "My Projects")) </li>
-                            <li>@Html.Raw(NavLink("/Student/SkillAssessment", "bar-chart-line", "Skill Assessment"))</li>
+                            <li>@Html.Raw(NavLink("/Student/Dashboard", "grid", "Dashboard", "dashboard-link"))</li>
+                            <li>  @Html.Raw( NavLink( "/Student/MyProjects",  "folder2-open", "My Projects", "my-projects")) </li>
+                            <li>@Html.Raw(NavLink("/Student/SkillAssessment", "bar-chart-line", "Skill Assessment", "skill-assessment"))</li>
 
                             <li><span class="side-nav-label">AI Planning</span></li>
-                            <li>@Html.Raw(NavLink("/Student/IdeaGenerator", "lightbulb", "Idea Generator"))</li>
-                            <li>@Html.Raw(NavLink("/Student/MarketDemand", "graph-up-arrow", "Market Demand"))</li>
-                            <li>@Html.Raw(NavLink("/Student/IdeaComparison", "columns-gap", "Idea Comparison"))</li>
-                            <li>@Html.Raw(NavLink("/Student/ProjectDNA", "diagram-3", "Project DNA"))</li>
-                            <li>@Html.Raw(NavLink("/Student/Roadmap", "map", "Roadmap"))</li>
-                            <li>@Html.Raw(NavLink("/Student/DocumentationGenerator", "journal-code", "SE Documentation"))</li>
+                            <li>@Html.Raw(NavLink("/Student/IdeaGenerator", "lightbulb", "Idea Generator", "idea-generator"))</li>
+                            <li>@Html.Raw(NavLink("/Student/MarketDemand", "graph-up-arrow", "Market Demand", "market-demand"))</li>
+                            <li>@Html.Raw(NavLink("/Student/IdeaComparison", "columns-gap", "Idea Comparison", "idea-comparison"))</li>
+                            <li>@Html.Raw(NavLink("/Student/ProjectDNA", "diagram-3", "Project DNA", "project-dna"))</li>
+                            <li>@Html.Raw(NavLink("/Student/Roadmap", "map", "Roadmap", "roadmap"))</li>
+                            <li>@Html.Raw(NavLink("/Student/DocumentationGenerator", "journal-code", "SE Documentation", "se-documentation"))</li>
 
                             <li><span class="side-nav-label">Project Support</span></li>
-                            <li>@Html.Raw(NavLink("/Student/MentorChat", "chat-dots", "Mentor Chat"))</li>
-                            <li>@Html.Raw(NavLink("/Student/DefenseSimulator", "shield-check", "Defense Simulator"))</li>
-                            <li>@Html.Raw(NavLink("/Student/Feedback", "chat-square-text", "Supervisor Feedback"))</li>
+                            <li>@Html.Raw(NavLink("/Student/MentorChat", "chat-dots", "Mentor Chat", "mentor-chat"))</li>
+                            <li>@Html.Raw(NavLink("/Student/DefenseSimulator", "shield-check", "Defense Simulator", "defense-simulator"))</li>
+                            <li>@Html.Raw(NavLink("/Student/Feedback", "chat-square-text", "Supervisor Feedback", "supervisor-feedback"))</li>
                         }
 
                         @if (role == "supervisor")
@@ -272,6 +302,17 @@
                     </div>
 
                     <div class="topbar-actions">
+                        @if (role == "student")
+                        {
+                            <button type="button"
+                                    class="topbar-tour-launch"
+                                    id="startStudentTourButton"
+                                    title="Open the FYPilot guided journey">
+                                <i class="bi bi-compass"></i>
+                                <span class="d-none d-md-inline">Guided Tour</span>
+                            </button>
+                        }
+
                         <form method="post" asp-page="/Account/Logout" class="d-none d-sm-block">
                             <button type="submit" class="topbar-logout">
                                 <i class="bi bi-box-arrow-right me-1"></i>
@@ -327,8 +368,15 @@
         @RenderBody()
     }
 
+    @if (isAuth && role == "student")
+    {
+        <partial name="_StudentOnboardingTour" />
+    }
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script src="~/js/site.js" asp-append-version="true"></script>
+    <script src="~/js/student-onboarding-tour.js"
+            asp-append-version="true"></script>
 
   
 

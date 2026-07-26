@@ -74,7 +74,7 @@ _NEEDS_DATA = {
         "competitionOpportunity": 60, "technologyMomentum": 65,
     },
     "targetSector": "Education", "problemEvidence": ["evidence"],
-    "yearlyEvidence": [], "similarSolutions": [], "trendSignals": [],
+    "similarSolutions": [],
     "lebaneseMarketFit": "fit", "universityValue": "value",
     "risks": [], "recommendation": "go", "nextSteps": [],
 }
@@ -130,8 +130,6 @@ class MarketNeedsSyncBridgeTests(unittest.TestCase):
             domain="Education",
             technologies="ASP.NET Core",
             countryContext="Lebanon",
-            historyYears=6,
-            forecastYears=3,
             useSearch=True,
         )
 
