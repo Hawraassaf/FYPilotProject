@@ -162,10 +162,61 @@
                 max-width: 500px !important;
                 padding: 2.75rem 3rem;
             }
+
+            .login-back-button {
+                position: absolute;
+                top: 1.25rem;
+                left: 1.25rem;
+                z-index: 10;
+                display: inline-flex;
+                align-items: center;
+                gap: .45rem;
+                min-height: 42px;
+                padding: .58rem .78rem;
+                border: 1px solid #E2E8F0;
+                border-radius: 12px;
+                color: #28385E;
+                background: rgba(255, 255, 255, .94);
+                font-size: .72rem;
+                font-weight: 800;
+                text-decoration: none;
+                box-shadow: 0 8px 22px rgba(15, 23, 42, .08);
+                backdrop-filter: blur(10px);
+                transition: transform .16s ease, background .16s ease, border-color .16s ease;
+            }
+
+                .login-back-button:hover {
+                    color: #173463;
+                    background: #FFFFFF;
+                    border-color: #BFCADA;
+                    transform: translateX(-2px);
+                }
+
+                .login-back-button i {
+                    font-size: .9rem;
+                }
+
+            @@media (max-width: 600px) {
+                .login-back-button {
+                    top: .8rem;
+                    left: .8rem;
+                }
+
+                    .login-back-button span {
+                        display: none;
+                    }
+            }
     </style>
 </head>
 
 <body>
+    <a asp-page="/Index"
+       class="login-back-button"
+       aria-label="Back to home page">
+        <i class="bi bi-arrow-left"></i>
+        <span>Back to Home</span>
+    </a>
+
     <div class="auth-wrapper">
         <div class="auth-card">
             <div class="text-center mb-4">

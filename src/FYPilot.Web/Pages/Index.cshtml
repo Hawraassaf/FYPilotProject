@@ -827,8 +827,11 @@
                                 </h1>
 
                                 <p class="hero-subtitle mb-0">
-                                    FYPilot helps students turn their skills and project preferences into realistic final year project ideas.
-                                    It supports idea generation, feasibility scoring, comparison, and roadmap planning in one structured academic workflow.
+                                    FYPilot guides students from early project uncertainty to a clear,
+                                    achievable FYP direction by combining their skills, interests, and
+                                    constraints with AI-powered idea generation, feasibility analysis,
+                                    market insights, planning tools,
+                                    documentation support, and defense preparation.
                                 </p>
                             </div>
 
@@ -869,6 +872,22 @@
 
                                                     <div class="mini-sidebar-item">
                                                         <i class="bi bi-map"></i>Roadmap
+                                                    </div>
+
+                                                    <div class="mini-sidebar-item">
+                                                        <i class="bi bi-graph-up-arrow"></i>Market Demand
+                                                    </div>
+
+                                                    <div class="mini-sidebar-item">
+                                                        <i class="bi bi-diagram-3"></i>Project DNA
+                                                    </div>
+
+                                                    <div class="mini-sidebar-item">
+                                                        <i class="bi bi-file-earmark-code"></i>SE Documentation
+                                                    </div>
+
+                                                    <div class="mini-sidebar-item">
+                                                        <i class="bi bi-robot"></i>Mentor Chat
                                                     </div>
                                                 </div>
                                             </div>
@@ -970,11 +989,11 @@
                                 @foreach (var word in new[] {
                                     "Skill Assessment", "AI Idea Generator", "Feasibility Engine", "Idea Comparison",
                                     "Lebanese Market Fit", "Dataset Awareness", "Smart Roadmap", "Defense Readiness",
-                                    "Project DNA", "Scope Optimization", "Supervisor Support", "Academic Workflow",
+                                    "Project DNA", "SE Documentation","Mentor Chat", "Supervisor Support", "Academic Workflow",
 
                                     "Skill Assessment", "AI Idea Generator", "Feasibility Engine", "Idea Comparison",
                                     "Lebanese Market Fit", "Dataset Awareness", "Smart Roadmap", "Defense Readiness",
-                                    "Project DNA", "Scope Optimization", "Supervisor Support", "Academic Workflow"
+                                    "Project DNA", "SE Documentation","Mentor Chat", "Supervisor Support", "Academic Workflow"
                                 })
                                 {
                                     <span class="module-word">@word</span>
@@ -998,10 +1017,26 @@
                         <div class="workflow-panel">
                             <div class="row g-3">
                                 @foreach (var step in new[] {
-                                    new { No = "01", Title = "Build Profile", Desc = "The student completes academic information, preferred domain, project goals, available time, team size, and target difficulty so the system understands the project context." },
-                                    new { No = "02", Title = "Assess Skills", Desc = "The student selects known technical skills and rates each one, allowing the system to identify strengths, weaknesses, and realistic project complexity." },
-                                    new { No = "03", Title = "Generate Ideas", Desc = "Project ideas are generated using the student profile and assessed skills, making the suggestions more personal, relevant, and achievable." },
-                                    new { No = "04", Title = "Compare & Select", Desc = "The student reviews ideas using feasibility, innovation, market demand, technologies, missing skills, and deliverables before selecting the final project direction." }
+                                    new {
+                                        No = "01",
+                                        Title = "Create Project Profile",
+                                        Desc = "Set up the project workspace, preferences, team details, goals, and skill assessment."
+                                    },
+                                    new {
+                                        No = "02",
+                                        Title = "Discover & Validate Ideas",
+                                        Desc = "Generate tailored ideas and compare feasibility, market demand, skills, and Project DNA."
+                                    },
+                                    new {
+                                        No = "03",
+                                        Title = "Plan & Build the Project",
+                                        Desc = "Follow the roadmap, prepare documentation, collaborate with teammates, and use Mentor Chat."
+                                    },
+                                    new {
+                                        No = "04",
+                                        Title = "Supervise & Prepare for Defense",
+                                        Desc = "Receive supervisor guidance, track feedback, review risks, and prepare with the Defense Simulator."
+                                    }
                                 })
                                 {
                                     <div class="col-md-6">
@@ -1096,43 +1131,43 @@
 
                                     <div class="footer-origin-label">
                                         <i class="bi bi-lightbulb"></i>
-                                        Why FYPilot exists
+                                        The purpose behind FYPilot
                                     </div>
 
                                     <h3 class="footer-title">
-                                        Better project ideas begin with the student.
+                                        Built from a real challenge faced by Computer Science students.
                                     </h3>
 
                                     <p class="footer-text">
-                                        FYPilot was built after seeing CS students struggle to find original,
-                                        realistic final-year project ideas — ones that match their skills and
-                                        reflect real needs in the Lebanese market.
+                                        FYPilot was created from the real need of Computer Science students to find
+                                        original, realistic FYP ideas that match their skills, interests, and local
+                                        market needs—then guide those ideas into structured, defense-ready projects.
                                     </p>
                                 </div>
 
-                                <!-- Right: Quote + Stats -->
+                                <!-- Right: Promise + Platform Value -->
                                 <div class="col-lg-6 d-flex flex-column gap-3">
                                     <div class="footer-quote">
                                         <div class="footer-quote-icon">
                                             <i class="bi bi-compass"></i>
                                         </div>
-                                        Our goal is to help students move from uncertainty to a project direction
-                                        that is achievable, meaningful, and locally relevant.
-                                        <div class="footer-signature">The FYPilot Mission</div>
+                                        From the first project idea to the final defense, every stage stays connected,
+                                        structured, and easier to manage.
+                                        <div class="footer-signature">The FYPilot Promise</div>
                                     </div>
 
                                     <div class="footer-stats">
                                         <div class="footer-stat">
-                                            <span class="footer-stat-num">100+</span>
-                                            <span class="footer-stat-label">Project ideas generated</span>
-                                        </div>
-                                        <div class="footer-stat">
-                                            <span class="footer-stat-num">LB</span>
-                                            <span class="footer-stat-label">Market-focused</span>
-                                        </div>
-                                        <div class="footer-stat">
                                             <span class="footer-stat-num">AI</span>
-                                            <span class="footer-stat-label">Skill-aware matching</span>
+                                            <span class="footer-stat-label">Personalized project intelligence</span>
+                                        </div>
+                                        <div class="footer-stat">
+                                            <span class="footer-stat-num">3 Roles</span>
+                                            <span class="footer-stat-label">Student, supervisor, and admin</span>
+                                        </div>
+                                        <div class="footer-stat">
+                                            <span class="footer-stat-num">End-to-End</span>
+                                            <span class="footer-stat-label">From idea to final defense</span>
                                         </div>
                                     </div>
                                 </div>
@@ -1143,9 +1178,11 @@
                         <div class="footer-bottom d-flex justify-content-between align-items-center flex-wrap gap-2">
                             <div>© @DateTime.Now.Year FYPilot. All rights reserved.</div>
                             <div>
-                                From student skills
+                                Plan smarter
                                 <span class="footer-dot"></span>
-                                to locally relevant FYP ideas
+                                Build with clarity
+                                <span class="footer-dot"></span>
+                                Defend with confidence
                             </div>
                         </div>
                     </div>

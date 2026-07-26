@@ -64,7 +64,7 @@
                 </div>
             }
 
-            <form method="post" class="idea2-settings-form">
+            <form method="post" class="idea2-settings-form" data-idea-loading-form data-loading-title="Generating Project Ideas">
                 @Html.AntiForgeryToken()
 
                 <input type="hidden"
@@ -196,7 +196,7 @@
                             </button>
                         </form>
 
-                        <form method="post" asp-page-handler="Regenerate">
+                        <form method="post" asp-page-handler="Regenerate" data-idea-loading-form data-loading-title="Regenerating Project Ideas">
                             @Html.AntiForgeryToken()
 
                             <input type="hidden"
@@ -879,8 +879,221 @@
         </section>
     </div>
 </div>
+
+<div class="idea-ai-loader"
+     id="ideaAiLoader"
+     hidden
+     aria-hidden="true">
+
+    <div class="idea-ai-loader-backdrop"></div>
+
+    <section class="idea-ai-loader-card"
+             role="status"
+             aria-live="polite"
+             aria-atomic="true">
+
+        <div class="idea-ai-loader-spinner"
+             aria-hidden="true">
+        </div>
+
+        <h2 id="ideaAiLoaderTitle">
+            Generating Project Ideas
+        </h2>
+
+        <p>
+            Please wait while FYPilot sends your profile,
+            assessed skills and project settings to the Python
+            AI agent.
+        </p>
+
+        <div class="idea-ai-loader-steps">
+            <div class="idea-ai-loader-step is-active"
+                 data-idea-loading-step="0">
+                <i class="bi bi-check2-circle"></i>
+                <span>Reading your project brief</span>
+            </div>
+
+            <div class="idea-ai-loader-step"
+                 data-idea-loading-step="1">
+                <i class="bi bi-cpu"></i>
+                <span>Sending to ProjectIdeaAgent</span>
+            </div>
+
+            <div class="idea-ai-loader-step"
+                 data-idea-loading-step="2">
+                <i class="bi bi-lightbulb"></i>
+                <span>Generating tailored FYP concepts</span>
+            </div>
+
+            <div class="idea-ai-loader-step"
+                 data-idea-loading-step="3">
+                <i class="bi bi-shield-check"></i>
+                <span>Validating feasibility and market relevance</span>
+            </div>
+        </div>
+
+        <small>
+            Keep this page open while your ideas are being prepared.
+        </small>
+    </section>
+</div>
+
 @section Head {
     <style>
+        /* Project-DNA-style full-page loading modal */
+        .idea-ai-loader {
+            position: fixed;
+            inset: 0;
+            z-index: 3000;
+            display: grid;
+            place-items: center;
+            padding: 1rem;
+        }
+
+            .idea-ai-loader[hidden] {
+                display: none !important;
+            }
+
+        .idea-ai-loader-backdrop {
+            position: absolute;
+            inset: 0;
+            background: rgba(38, 48, 65, .52);
+            backdrop-filter: blur(7px);
+        }
+
+        .idea-ai-loader-card {
+            width: min(100%, 610px);
+            position: relative;
+            z-index: 2;
+            padding: 2.1rem 2rem 1.7rem;
+            border: 1px solid rgba(255,255,255,.82);
+            border-radius: 30px;
+            color: #111827;
+            background: #ffffff;
+            box-shadow: 0 30px 85px rgba(15,23,42,.27);
+            text-align: center;
+            animation: ideaAiLoaderEnter .2s ease;
+        }
+
+        .idea-ai-loader-spinner {
+            width: 76px;
+            height: 76px;
+            margin: 0 auto 1.25rem;
+            border: 10px solid #eef1f5;
+            border-top-color: #28385e;
+            border-left-color: #28385e;
+            border-radius: 50%;
+            animation: ideaAiLoaderSpin .9s linear infinite;
+        }
+
+        .idea-ai-loader-card h2 {
+            margin: 0;
+            color: #111827;
+            font-size: clamp(1.55rem, 3vw, 2rem);
+            font-weight: 850;
+            letter-spacing: -.035em;
+        }
+
+        .idea-ai-loader-card > p {
+            max-width: 500px;
+            margin: .75rem auto 1.25rem;
+            color: #66758d;
+            font-size: .88rem;
+            line-height: 1.6;
+        }
+
+        .idea-ai-loader-steps {
+            display: grid;
+            gap: .65rem;
+        }
+
+        .idea-ai-loader-step {
+            min-height: 58px;
+            display: grid;
+            grid-template-columns: auto minmax(0,1fr);
+            align-items: center;
+            gap: .7rem;
+            padding: .8rem 1rem;
+            border: 1px solid #e6eaf0;
+            border-radius: 15px;
+            color: #70809a;
+            background: #fafbfd;
+            text-align: left;
+            font-size: .78rem;
+            transition: color .22s ease, background .22s ease, border-color .22s ease, transform .22s ease;
+        }
+
+            .idea-ai-loader-step i {
+                width: 24px;
+                text-align: center;
+                color: #7386a4;
+                font-size: .95rem;
+            }
+
+            .idea-ai-loader-step span {
+                font-weight: 650;
+            }
+
+            .idea-ai-loader-step.is-active {
+                border-color: #d4dce7;
+                color: #28385e;
+                background: #eef2f6;
+                transform: translateY(-1px);
+            }
+
+                .idea-ai-loader-step.is-active i,
+                .idea-ai-loader-step.is-active span {
+                    color: #28385e;
+                    font-weight: 800;
+                }
+
+        .idea-ai-loader-card > small {
+            display: block;
+            margin-top: 1rem;
+            color: #929cab;
+            font-size: .64rem;
+        }
+
+        body.idea-ai-loading {
+            overflow: hidden;
+        }
+
+        @@keyframes ideaAiLoaderSpin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        @@keyframes ideaAiLoaderEnter {
+            from {
+                opacity: 0;
+                transform: translateY(10px) scale(.985);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        @@media (max-width: 575.98px) {
+            .idea-ai-loader-card {
+                padding: 1.55rem 1rem 1.25rem;
+                border-radius: 24px;
+            }
+
+            .idea-ai-loader-spinner {
+                width: 64px;
+                height: 64px;
+                border-width: 8px;
+            }
+
+            .idea-ai-loader-step {
+                min-height: 54px;
+                padding: .72rem .8rem;
+            }
+        }
+
         /* Assessed-skills wrapping */
         .idea2-skills-panel {
             height: auto !important;
@@ -921,7 +1134,7 @@
             }
 
         /* Let the page scroll naturally instead of trapping expanded ideas
-                           inside a small internal viewport. */
+                                   inside a small internal viewport. */
         .idea2-accordion {
             max-height: none !important;
             overflow: visible !important;
@@ -933,8 +1146,8 @@
         }
 
         /* ───────────────────────────────────────────────────────────────
-                           Compact header scores
-                           ─────────────────────────────────────────────────────────────── */
+                                   Compact header scores
+                                   ─────────────────────────────────────────────────────────────── */
         .marketfp-header-score-group {
             display: flex;
             align-items: stretch;
@@ -1024,8 +1237,8 @@
         }
 
         /* ───────────────────────────────────────────────────────────────
-                           Market Insight shell
-                           ─────────────────────────────────────────────────────────────── */
+                                   Market Insight shell
+                                   ─────────────────────────────────────────────────────────────── */
         .marketfp-section {
             margin-top: 1.15rem;
             overflow: hidden;
@@ -1271,8 +1484,8 @@
             }
 
         /* ───────────────────────────────────────────────────────────────
-                           Evidence-backed state
-                           ─────────────────────────────────────────────────────────────── */
+                                   Evidence-backed state
+                                   ─────────────────────────────────────────────────────────────── */
         .marketfp-panel {
             padding: 1.15rem 1.2rem 1.2rem;
         }
@@ -1913,6 +2126,94 @@
     <partial name="_ValidationScriptsPartial" />
 
     <script>
+        (() => {
+            const loader = document.getElementById("ideaAiLoader");
+            const loaderTitle = document.getElementById("ideaAiLoaderTitle");
+            const loaderSteps = Array.from(document.querySelectorAll("[data-idea-loading-step]"));
+            let stepTimer = null;
+
+            function resetLoader() {
+                if (!loader) return;
+
+                loader.hidden = true;
+                loader.setAttribute("aria-hidden", "true");
+                document.body.classList.remove("idea-ai-loading");
+
+                if (stepTimer !== null) {
+                    window.clearInterval(stepTimer);
+                    stepTimer = null;
+                }
+
+                loaderSteps.forEach((step, index) => {
+                    step.classList.toggle("is-active", index === 0);
+                });
+
+                document.querySelectorAll("[data-idea-loading-form] button[type='submit']")
+                    .forEach(button => {
+                        button.disabled = false;
+                        button.removeAttribute("aria-busy");
+                        delete button.dataset.submitting;
+                    });
+            }
+
+            function showLoader(form) {
+                if (!loader) return;
+
+                const submitButton = form.querySelector("button[type='submit']");
+
+                if (submitButton) {
+                    submitButton.disabled = true;
+                    submitButton.setAttribute("aria-busy", "true");
+                    submitButton.dataset.submitting = "true";
+                }
+
+                if (loaderTitle) {
+                    loaderTitle.textContent = form.dataset.loadingTitle ?? "Generating Project Ideas";
+                }
+
+                loader.hidden = false;
+                loader.setAttribute("aria-hidden", "false");
+                document.body.classList.add("idea-ai-loading");
+
+                let activeStep = 0;
+
+                loaderSteps.forEach((step, index) => {
+                    step.classList.toggle("is-active", index === 0);
+                });
+
+                stepTimer = window.setInterval(() => {
+                    activeStep = Math.min(activeStep + 1, loaderSteps.length - 1);
+
+                    loaderSteps.forEach((step, index) => {
+                        step.classList.toggle("is-active", index === activeStep);
+                    });
+
+                    if (activeStep === loaderSteps.length - 1 && stepTimer !== null) {
+                        window.clearInterval(stepTimer);
+                        stepTimer = null;
+                    }
+                }, 1700);
+            }
+
+            document.querySelectorAll("[data-idea-loading-form]")
+                .forEach(form => {
+                    form.addEventListener("submit", event => {
+                        if (!form.checkValidity()) return;
+
+                        const submitButton = form.querySelector("button[type='submit']");
+
+                        if (submitButton?.dataset.submitting === "true") {
+                            event.preventDefault();
+                            return;
+                        }
+
+                        showLoader(form);
+                    });
+                });
+
+            window.addEventListener("pageshow", resetLoader);
+        })();
+
         setTimeout(function () {
             document.querySelectorAll(".idea2-alert").forEach(function (message) {
                 message.style.transition = "opacity 0.35s ease, transform 0.35s ease";

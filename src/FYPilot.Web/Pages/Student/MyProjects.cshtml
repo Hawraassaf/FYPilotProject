@@ -217,18 +217,14 @@
                                         <i class="bi bi-calendar3"></i>
 
                                         Invited
-                                        @invitation.CreatedAt
-                                        .ToLocalTime()
-                                        .ToString("MMM d, yyyy")
+                                        @invitation.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")
                                     </span>
 
                                     <span>
                                         <i class="bi bi-clock"></i>
 
                                         Expires
-                                        @invitation.ExpiresAt
-                                        .ToLocalTime()
-                                        .ToString("MMM d, yyyy")
+                                        @invitation.ExpiresAt.ToLocalTime().ToString("MMM d, yyyy")
                                     </span>
                                 </div>
                             </div>
@@ -411,8 +407,8 @@
                 {
                     <article class="project-card
                         @(project.IsActiveProject
-                                      ? "active-project-card"
-                                      : "")"
+                                           ? "active-project-card"
+                                           : "")"
                              data-project-card
                              data-name="@project.Title.ToLowerInvariant()"
                              data-idea="@project.SelectedIdeaTitle.ToLowerInvariant()"
@@ -463,13 +459,13 @@
                         <div class="project-badges">
                             <span class="role-badge
                                 @(project.Role == "owner"
-                                        ? "owner-badge"
-                                        : "collaborator-badge")">
+                                          ? "owner-badge"
+                                          : "collaborator-badge")">
 
                                 <i class="bi
                                 @(project.Role == "owner"
-                                          ? "bi-crown-fill"
-                                          : "bi-people-fill")"></i>
+                                             ? "bi-crown-fill"
+                                             : "bi-people-fill")"></i>
 
                                 @project.RoleLabel
                             </span>
@@ -479,8 +475,8 @@
 
                                 <i class="bi
                                 @(project.Status == "active"
-                                          ? "bi-circle-fill"
-                                          : "bi-clock")"></i>
+                                             ? "bi-circle-fill"
+                                             : "bi-clock")"></i>
 
                                 @project.StatusLabel
                             </span>
@@ -488,14 +484,14 @@
 
                         <div class="selected-idea-panel
                             @(project.HasSelectedIdea
-                                  ? "idea-selected"
-                                  : "idea-missing")">
+                                   ? "idea-selected"
+                                   : "idea-missing")">
 
                             <div class="selected-idea-icon">
                                 <i class="bi
                                 @(project.HasSelectedIdea
-                                          ? "bi-lightbulb-fill"
-                                          : "bi-lightbulb")"></i>
+                                             ? "bi-lightbulb-fill"
+                                             : "bi-lightbulb")"></i>
                             </div>
 
                             <div>
@@ -572,17 +568,13 @@
                             <span>
                                 <i class="bi bi-calendar3"></i>
                                 Created
-                                @project.CreatedAt
-                                .ToLocalTime()
-                                .ToString("MMM d, yyyy")
+                                @project.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")
                             </span>
 
                             <span>
                                 <i class="bi bi-arrow-clockwise"></i>
                                 Updated
-                                @project.UpdatedAt
-                                .ToLocalTime()
-                                .ToString("MMM d")
+                                @project.UpdatedAt.ToLocalTime().ToString("MMM d")
                             </span>
                         </div>
 
@@ -647,8 +639,8 @@
 
                                     <i class="bi
                                     @(project.IsActiveProject
-                                              ? "bi-arrow-right"
-                                              : "bi-box-arrow-up-right")"></i>
+                                                 ? "bi-arrow-right"
+                                                 : "bi-box-arrow-up-right")"></i>
                                 </button>
                             </form>
 
@@ -658,8 +650,8 @@
 
                                 <i class="bi
                                 @(project.Role == "owner"
-                                             ? "bi-person-plus"
-                                             : "bi-people")"></i>
+                                                ? "bi-person-plus"
+                                                : "bi-people")"></i>
 
                                 <span>
                                     @project.TeamActionText
@@ -780,8 +772,8 @@
             --projects-deep: #071d49;
             --projects-navy: #173463;
             --projects-steel: #516c8d;
-            --projects-primary: #155eef;
-            --projects-primary-dark: #0b4dd8;
+            --projects-primary: #28385E;
+            --projects-primary-dark: #173463;
             --projects-border: #e2e8f0;
             --projects-muted: #64748b;
             --projects-soft: #f6f8fb;
@@ -1156,7 +1148,7 @@
             place-items: center;
             border-radius: 13px;
             color: #fff;
-            background: linear-gradient( 135deg, var(--projects-primary), #558cff);
+            background: linear-gradient(135deg, var(--projects-navy), var(--projects-steel));
             font-size: 1.05rem;
         }
 
@@ -1438,7 +1430,7 @@
             padding: .42rem .65rem;
             border-bottom-left-radius: 11px;
             color: #fff;
-            background: linear-gradient( 135deg, #155eef, #4c83f4);
+            background: linear-gradient(135deg, var(--projects-navy), var(--projects-steel));
             font-size: .57rem;
             font-weight: 800;
         }
@@ -1732,7 +1724,7 @@
         .team-progress-value {
             height: 100%;
             border-radius: inherit;
-            background: linear-gradient( 90deg, var(--projects-primary), #6290f6);
+            background: linear-gradient(90deg, var(--projects-navy), var(--projects-steel));
         }
 
         .team-progress-row > span {
@@ -1773,7 +1765,7 @@
         .activity-line {
             width: 3px;
             border-radius: 999px;
-            background: #5d8df2;
+            background: var(--projects-steel);
         }
 
         .latest-activity span {
@@ -1832,7 +1824,7 @@
             height: 38px;
             border-radius: 11px;
             color: #fff;
-            background: linear-gradient( 135deg, #155eef, #527fd8);
+            background: linear-gradient(135deg, var(--projects-navy), var(--projects-steel));
             display: grid;
             place-items: center;
             box-shadow: 0 7px 14px rgba(21, 94, 239, .18);
@@ -1906,12 +1898,12 @@
         .open-project-button {
             border: 0;
             color: #fff;
-            background: linear-gradient( 135deg, var(--projects-primary), #3f79ef);
+            background: linear-gradient(135deg, var(--projects-navy), var(--projects-steel));
             box-shadow: 0 7px 15px rgba(21, 94, 239, .16);
         }
 
             .open-project-button:hover {
-                background: linear-gradient( 135deg, var(--projects-primary-dark), #2867df);
+                background: linear-gradient(135deg, var(--projects-deep), var(--projects-navy));
             }
 
         .team-project-button {
@@ -2066,7 +2058,7 @@
             place-items: center;
             border-radius: 13px;
             color: #fff;
-            background: linear-gradient( 135deg, var(--projects-primary), #558cff);
+            background: linear-gradient(135deg, var(--projects-navy), var(--projects-steel));
         }
 
         .project-modal-header h2 {

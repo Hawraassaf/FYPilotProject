@@ -171,7 +171,7 @@ public class IdeaGeneratorModel(
     public async Task<IActionResult> OnGetAsync(
        CancellationToken cancellationToken)
     {
-       
+
 
         var userId = UserId();
 
@@ -342,16 +342,75 @@ public class IdeaGeneratorModel(
             regenerate: false,
             previousIdeaTitles: []);
 
-        var aiResponse =
-            await aiServiceClient.GenerateIdeasAsync(
-                aiRequest);
+        GenerateIdeasResponse? aiResponse;
+
+        try
+        {
+            aiResponse =
+                await aiServiceClient.GenerateIdeasAsync(
+                    aiRequest);
+        }
+        catch (HttpRequestException exception)
+        {
+            logger.LogWarning(
+                exception,
+                "The idea-generation AI service could not be reached "
+                + "for project {ProjectId}, user {UserId}.",
+                ProjectId,
+                userId);
+
+            ErrorMessage =
+                "The AI idea generator is temporarily unavailable. "
+                + "Your project and existing ideas were not changed. "
+                + "Please try again when the AI service is running.";
+
+            return Page();
+        }
+        catch (TaskCanceledException exception)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                exception,
+                "The idea-generation AI request timed out "
+                + "for project {ProjectId}, user {UserId}.",
+                ProjectId,
+                userId);
+
+            ErrorMessage =
+                "The AI idea generator took too long to respond. "
+                + "Your project and existing ideas were not changed. "
+                + "Please try again.";
+
+            return Page();
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            return new EmptyResult();
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                exception,
+                "Unexpected idea-generation failure "
+                + "for project {ProjectId}, user {UserId}.",
+                ProjectId,
+                userId);
+
+            ErrorMessage =
+                "An unexpected error occurred while generating ideas. "
+                + "Your project and existing ideas were not changed.";
+
+            return Page();
+        }
 
         if (aiResponse?.Ideas == null ||
             !aiResponse.Ideas.Any())
         {
             ErrorMessage =
-                "AI service could not generate ideas. "
-                + "Make sure the Python AI service is running.";
+                "The AI service did not return any project ideas. "
+                + "Your existing ideas were not changed. "
+                + "Please try again.";
 
             return Page();
         }
@@ -501,16 +560,75 @@ public class IdeaGeneratorModel(
             regenerate: true,
             previousIdeaTitles: previousTitles);
 
-        var aiResponse =
-            await aiServiceClient.GenerateIdeasAsync(
-                aiRequest);
+        GenerateIdeasResponse? aiResponse;
+
+        try
+        {
+            aiResponse =
+                await aiServiceClient.GenerateIdeasAsync(
+                    aiRequest);
+        }
+        catch (HttpRequestException exception)
+        {
+            logger.LogWarning(
+                exception,
+                "The idea-regeneration AI service could not be reached "
+                + "for project {ProjectId}, user {UserId}.",
+                ProjectId,
+                userId);
+
+            ErrorMessage =
+                "The AI idea generator is temporarily unavailable. "
+                + "Your existing ideas were kept unchanged. "
+                + "Please try again when the AI service is running.";
+
+            return Page();
+        }
+        catch (TaskCanceledException exception)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                exception,
+                "The idea-regeneration AI request timed out "
+                + "for project {ProjectId}, user {UserId}.",
+                ProjectId,
+                userId);
+
+            ErrorMessage =
+                "The AI idea generator took too long to respond. "
+                + "Your existing ideas were kept unchanged. "
+                + "Please try again.";
+
+            return Page();
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            return new EmptyResult();
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                exception,
+                "Unexpected idea-regeneration failure "
+                + "for project {ProjectId}, user {UserId}.",
+                ProjectId,
+                userId);
+
+            ErrorMessage =
+                "An unexpected error occurred while regenerating ideas. "
+                + "Your existing ideas were kept unchanged.";
+
+            return Page();
+        }
 
         if (aiResponse?.Ideas == null ||
             !aiResponse.Ideas.Any())
         {
             ErrorMessage =
-                "AI service could not regenerate ideas. "
-                + "Make sure the Python AI service is running.";
+                "The AI service did not return any new project ideas. "
+                + "Your existing ideas were kept unchanged. "
+                + "Please try again.";
 
             return Page();
         }
@@ -1495,7 +1613,7 @@ public class IdeaGeneratorModel(
                 openIdeaId
             });
     }
- 
+
     private int UserId()
     {
         return int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
