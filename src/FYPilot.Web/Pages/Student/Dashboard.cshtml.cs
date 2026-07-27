@@ -103,15 +103,27 @@ public class DashboardModel(
             ?? "Student";
 
         /*
-         * A Dashboard without a project context is not allowed.
-         * The student must choose a project from My Projects.
+         * Use the projectId from the URL when it exists.
+         * Otherwise, restore the student's active project
+         * so sidebar navigation keeps the project context.
          */
         if (ProjectId <= 0)
         {
-            TempData["Error"] =
-                "Choose a project before opening its Dashboard.";
+            var activeProjectId =
+                await activeProjectService
+                    .GetActiveProjectIdAsync(
+                        userId.Value,
+                        cancellationToken);
 
-            return RedirectToPage("/Student/MyProjects");
+            if (!activeProjectId.HasValue)
+            {
+                TempData["Error"] =
+                    "Choose a project before opening its Dashboard.";
+
+                return RedirectToPage("/Student/MyProjects");
+            }
+
+            ProjectId = activeProjectId.Value;
         }
 
         /*

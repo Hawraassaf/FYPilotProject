@@ -69,7 +69,12 @@ public sealed record RoadmapWorkloadSummaryView(
 );
 
 [Authorize(Roles = "student")]
-public class RoadmapModel(ApplicationDbContext db, IAiServiceClient aiService) : PageModel
+public class RoadmapModel(
+    ApplicationDbContext db,
+    IAiServiceClient aiService,
+    IProjectAccessService projectAccessService,
+    IActiveProjectService activeProjectService)
+    : PageModel
 {
     /// <summary>
     /// Marks the one synthetic RoadmapPhase row (if any) that holds
@@ -79,6 +84,9 @@ public class RoadmapModel(ApplicationDbContext db, IAiServiceClient aiService) :
     /// from Phases and surfaced instead via DeferredTasks.
     /// </summary>
     public const string DeferredScopePhaseMarker = "__DEFERRED_SCOPE__";
+
+    [BindProperty(SupportsGet = true)]
+    public int ProjectId { get; set; }
 
     public ProjectIdea? Idea { get; private set; }
     public List<RoadmapPhase> Phases { get; private set; } = [];
@@ -125,17 +133,50 @@ public class RoadmapModel(ApplicationDbContext db, IAiServiceClient aiService) :
         _ => ("bg-secondary", review.Status),
     };
 
-    public async Task OnGetAsync(int? ideaId)
+    public async Task<IActionResult> OnGetAsync(
+        int? ideaId,
+        CancellationToken cancellationToken)
     {
         var userId = UserId();
-        await LoadPageDataAsync(userId, ideaId);
+
+        var contextResult =
+            await ResolveProjectContextAsync(
+                userId,
+                cancellationToken);
+
+        if (contextResult != null)
+        {
+            return contextResult;
+        }
+
+        await LoadPageDataAsync(userId);
+
+        await activeProjectService.RememberPageAsync(
+            userId,
+            ProjectId,
+            "/Student/Roadmap",
+            cancellationToken);
+
+        return Page();
     }
 
-    public async Task<IActionResult> OnPostGenerateAsync(int ideaId)
+    public async Task<IActionResult> OnPostGenerateAsync(
+        int ideaId,
+        CancellationToken cancellationToken)
     {
         var userId = UserId();
 
-        await LoadPageDataAsync(userId, ideaId);
+        var contextResult =
+            await ResolveProjectContextAsync(
+                userId,
+                cancellationToken);
+
+        if (contextResult != null)
+        {
+            return contextResult;
+        }
+
+        await LoadPageDataAsync(userId);
 
         if (Idea == null)
         {
@@ -165,7 +206,7 @@ public class RoadmapModel(ApplicationDbContext db, IAiServiceClient aiService) :
 
         var existingRoadmaps = await db.ProjectRoadmaps
             .Include(r => r.Phases)
-            .Where(r => r.IdeaId == ideaId && r.UserId == userId)
+            .Where(r => r.IdeaId == Idea.Id && r.UserId == userId)
             .ToListAsync();
 
         db.ProjectRoadmaps.RemoveRange(existingRoadmaps);
@@ -177,7 +218,7 @@ public class RoadmapModel(ApplicationDbContext db, IAiServiceClient aiService) :
 
         var roadmap = new ProjectRoadmap
         {
-            IdeaId = ideaId,
+            IdeaId = Idea.Id,
             UserId = userId,
             Phases = phases
         };
@@ -194,7 +235,7 @@ public class RoadmapModel(ApplicationDbContext db, IAiServiceClient aiService) :
                     ? reviewRunId
                     : Guid.NewGuid(),
                 UserId = userId,
-                ProjectIdeaId = ideaId,
+                ProjectIdeaId = Idea.Id,
                 MentorChatSessionId = null,
                 AgentName = "ProjectRoadmapAgent",
                 Status = review.Status,
@@ -223,21 +264,51 @@ public class RoadmapModel(ApplicationDbContext db, IAiServiceClient aiService) :
 
         var realPhaseCount = phases.Count(p => p.Name != DeferredScopePhaseMarker);
         TempData["Success"] = $"AI roadmap with {realPhaseCount} phases generated.";
-        return RedirectToPage(new { ideaId });
+        return RedirectToPage(
+            new
+            {
+                projectId = ProjectId,
+                ideaId = Idea.Id
+            });
     }
 
     public async Task<IActionResult> OnPostCompleteAsync(
        int phaseId,
-       int ideaId)
+       int ideaId,
+       CancellationToken cancellationToken)
     {
         var userId = UserId();
+
+        var contextResult =
+            await ResolveProjectContextAsync(
+                userId,
+                cancellationToken);
+
+        if (contextResult != null)
+        {
+            return contextResult;
+        }
+
+        await LoadPageDataAsync(userId);
+
+        if (Idea == null)
+        {
+            TempData["Error"] =
+                "Project idea was not found.";
+
+            return RedirectToPage(
+                new
+                {
+                    projectId = ProjectId
+                });
+        }
 
         var updatedRows = await db.RoadmapPhases
             .Where(p =>
                 p.Id == phaseId &&
                 p.Roadmap != null &&
                 p.Roadmap.UserId == userId &&
-                p.Roadmap.IdeaId == ideaId)
+                p.Roadmap.IdeaId == Idea.Id)
             .ExecuteUpdateAsync(updates => updates
                 .SetProperty(
                     p => p.IsCompleted,
@@ -250,7 +321,8 @@ public class RoadmapModel(ApplicationDbContext db, IAiServiceClient aiService) :
 
             return RedirectToPage(new
             {
-                ideaId
+                projectId = ProjectId,
+                ideaId = Idea.Id
             });
         }
 
@@ -259,19 +331,23 @@ public class RoadmapModel(ApplicationDbContext db, IAiServiceClient aiService) :
 
         return RedirectToPage(new
         {
-            ideaId
+            projectId = ProjectId,
+            ideaId = Idea.Id
         });
     }
 
-    private async Task LoadPageDataAsync(int userId, int? ideaId)
+    private async Task LoadPageDataAsync(int userId)
     {
-        Idea = ideaId.HasValue
-            ? await db.ProjectIdeas.FirstOrDefaultAsync(i => i.Id == ideaId && i.UserId == userId)
-            : await db.ProjectIdeas.FirstOrDefaultAsync(i => i.UserId == userId && i.IsSelected)
-              ?? await db.ProjectIdeas
-                  .Where(i => i.UserId == userId)
-                  .OrderByDescending(i => i.CreatedAt)
-                  .FirstOrDefaultAsync();
+        /*
+         * The active project's official idea is the
+         * source of truth for this page.
+         */
+        Idea = await db.Projects
+            .Where(project =>
+                project.Id == ProjectId)
+            .Select(project =>
+                project.ProjectIdea)
+            .FirstOrDefaultAsync();
 
         if (Idea == null)
         {
@@ -620,6 +696,51 @@ public class RoadmapModel(ApplicationDbContext db, IAiServiceClient aiService) :
                 IsCompleted = false
             })
             .ToList();
+    }
+
+    private async Task<IActionResult?>
+        ResolveProjectContextAsync(
+            int userId,
+            CancellationToken cancellationToken)
+    {
+        if (ProjectId <= 0)
+        {
+            var activeProjectId =
+                await activeProjectService
+                    .GetActiveProjectIdAsync(
+                        userId,
+                        cancellationToken);
+
+            if (!activeProjectId.HasValue)
+            {
+                TempData["Error"] =
+                    "Choose a project before opening "
+                    + "the Roadmap.";
+
+                return RedirectToPage(
+                    "/Student/MyProjects");
+            }
+
+            ProjectId = activeProjectId.Value;
+        }
+
+        var access =
+            await projectAccessService.GetAccessAsync(
+                ProjectId,
+                userId,
+                "student",
+                cancellationToken);
+
+        if (access == null)
+        {
+            TempData["Error"] =
+                "You do not have access to that project.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        return null;
     }
 
     private int UserId()

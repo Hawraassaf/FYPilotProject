@@ -22,12 +22,12 @@
             </p>
 
             <div class="pdna-empty-actions">
-                <a href="/Student/IdeaComparison" class="btn pdna-primary-btn">
+                <a href="/Student/IdeaComparison?projectId=@Model.ProjectId" class="btn pdna-primary-btn">
                     <i class="bi bi-check2-circle me-1"></i>
                     Choose an Idea
                 </a>
 
-                <a href="/Student/IdeaGenerator" class="btn pdna-outline-btn">
+                <a href="/Student/IdeaGenerator?projectId=@Model.ProjectId" class="btn pdna-outline-btn">
                     <i class="bi bi-stars me-1"></i>
                     Generate Ideas
                 </a>
@@ -101,6 +101,9 @@
 
                 <form method="post" asp-page-handler="Analyze" id="pdnaAnalyzeForm" class="pdna-generate-form">
                     @Html.AntiForgeryToken()
+                    <input type="hidden"
+                           name="projectId"
+                           value="@Model.ProjectId" />
                     <input type="hidden" name="ideaId" value="@Model.Idea.Id" />
 
                     <button type="submit" class="btn pdna-primary-btn w-100">
@@ -109,10 +112,10 @@
                     </button>
                 </form>
                 <a href="/Student/ProjectDetails?ideaId=@Model.Idea.Id" class="btn pdna-outline-btn w-100 mt-2">
-                  <i class="bi bi-file-earmark-text me-2"></i>
-                        View Project Details
+                    <i class="bi bi-file-earmark-text me-2"></i>
+                    View Project Details
                 </a>
-                
+
                 @if (Model.Analysis == null)
                 {
                     <div class="pdna-before-note">
@@ -338,12 +341,12 @@
                             <i class="bi bi-file-earmark-text me-1"></i>
                             View Project Details
                         </a>
-                        <a href="/Student/Roadmap?ideaId=@Model.Idea.Id" class="btn pdna-primary-btn">
+                        <a href="/Student/Roadmap?projectId=@Model.ProjectId&amp;ideaId=@Model.Idea.Id" class="btn pdna-primary-btn">
                             <i class="bi bi-map me-1"></i>
                             Continue to Roadmap
                         </a>
 
-                        <a href="/Student/DefenseSimulator?ideaId=@Model.Idea.Id" class="btn pdna-outline-btn">
+                        <a href="/Student/DefenseSimulator?projectId=@Model.ProjectId&amp;ideaId=@Model.Idea.Id" class="btn pdna-outline-btn">
                             <i class="bi bi-shield-check me-1"></i>
                             Prepare Defense
                         </a>

@@ -52,7 +52,7 @@
                 </p>
 
                 <div class="empty-dna-actions">
-                    <a class="btn btn-primary" asp-page="/Student/IdeaGenerator">
+                    <a class="btn btn-primary" asp-page="/Student/IdeaGenerator" asp-route-projectId="@Model.ProjectId">
                         <i class="bi bi-stars me-2"></i>
                         Generate Ideas
                     </a>
@@ -77,6 +77,9 @@ else
             <div class="ic3-hero-actions">
                 <form method="post" asp-page-handler="Compare" class="m-0">
                     @Html.AntiForgeryToken()
+                    <input type="hidden"
+                           name="projectId"
+                           value="@Model.ProjectId" />
 
                     <button type="submit" class="btn ic3-soft-btn">
                         <i class="bi bi-columns-gap me-1"></i>
@@ -84,7 +87,7 @@ else
                     </button>
                 </form>
 
-                <a href="/Student/IdeaGenerator" class="btn ic3-outline-btn">
+                <a href="/Student/IdeaGenerator?projectId=@Model.ProjectId" class="btn ic3-outline-btn">
                     <i class="bi bi-plus-circle me-1"></i>
                     Add Ideas
                 </a>
@@ -295,6 +298,9 @@ else
                             <div class="ic3-select-cell">
                                 <form method="post" asp-page-handler="Select">
                                     @Html.AntiForgeryToken()
+                                    <input type="hidden"
+                                           name="projectId"
+                                           value="@Model.ProjectId" />
                                     <input type="hidden" name="ideaId" value="@idea.Id" />
 
                                     <button type="submit"
@@ -333,6 +339,9 @@ else
 
                 <form method="post" asp-page-handler="Select" class="ic3-recommendation-action">
                     @Html.AntiForgeryToken()
+                    <input type="hidden"
+                           name="projectId"
+                           value="@Model.ProjectId" />
                     <input type="hidden" name="ideaId" id="ic3RecommendedIdeaId" value="@ideas.First().Id" />
 
                     <button type="submit" class="btn ic3-primary-btn">

@@ -176,10 +176,12 @@ public class IdeaGeneratorModel(
         var userId = UserId();
 
         /*
-         * The Idea Generator must always be opened inside
-         * one specific project.
+         * Use projectId from the URL when available.
+         * Otherwise restore the student's active project.
          */
-        if (ProjectId <= 0)
+        if (!await ResolveProjectIdAsync(
+                userId,
+                cancellationToken))
         {
             TempData["Error"] =
                 "Choose a project before opening "
@@ -235,7 +237,9 @@ public class IdeaGeneratorModel(
     {
         var userId = UserId();
 
-        if (ProjectId <= 0 ||
+        if (!await ResolveProjectIdAsync(
+                userId,
+                cancellationToken) ||
             !await LoadProjectContextAsync(
                 userId,
                 cancellationToken))
@@ -455,7 +459,9 @@ public class IdeaGeneratorModel(
     {
         var userId = UserId();
 
-        if (ProjectId <= 0 ||
+        if (!await ResolveProjectIdAsync(
+                userId,
+                cancellationToken) ||
             !await LoadProjectContextAsync(
                 userId,
                 cancellationToken))
@@ -512,7 +518,9 @@ public class IdeaGeneratorModel(
     {
         var userId = UserId();
 
-        if (ProjectId <= 0 ||
+        if (!await ResolveProjectIdAsync(
+                userId,
+                cancellationToken) ||
             !await LoadProjectContextAsync(
                 userId,
                 cancellationToken))
@@ -668,7 +676,9 @@ public class IdeaGeneratorModel(
     {
         var userId = UserId();
 
-        if (ProjectId <= 0)
+        if (!await ResolveProjectIdAsync(
+                userId,
+                cancellationToken))
         {
             TempData["Error"] =
                 "Choose a project before selecting an idea.";
@@ -983,9 +993,27 @@ public class IdeaGeneratorModel(
     {
         var userId = UserId();
 
+        if (!await ResolveProjectIdAsync(
+                userId,
+                cancellationToken) ||
+            !await LoadProjectContextAsync(
+                userId,
+                cancellationToken))
+        {
+            TempData["Error"] =
+                "You do not have access to that project.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
         var idea = await db.ProjectIdeas
             .FirstOrDefaultAsync(
-                i => i.Id == ideaId && i.UserId == userId,
+                item =>
+                    item.Id == ideaId &&
+                    item.UserId == userId &&
+                    item.GeneratedForProjectId ==
+                        ProjectId,
                 cancellationToken);
 
         if (idea == null)
@@ -1019,7 +1047,7 @@ public class IdeaGeneratorModel(
                     "preliminary idea-generation score is still available, but " +
                     "it is not a grounded regional analysis.";
 
-                return RedirectToPage(new { openIdeaId = ideaId });
+                return RedirectToGenerator(ideaId);
             }
 
             if (!string.Equals(response.Status, "ready", StringComparison.OrdinalIgnoreCase)
@@ -1032,7 +1060,7 @@ public class IdeaGeneratorModel(
                     "preliminary idea-generation score is still available, but " +
                     "it is not a grounded regional analysis.";
 
-                return RedirectToPage(new { openIdeaId = ideaId });
+                return RedirectToGenerator(ideaId);
             }
 
             var snapshot = BuildSnapshot(response, userId, ideaId);
@@ -1083,7 +1111,7 @@ public class IdeaGeneratorModel(
                 $"Regional demand footprint updated — {snapshot.Regions.Count} region(s) analyzed " +
                 $"with {response.Sources.Count} source(s).";
 
-            return RedirectToPage(new { openIdeaId = ideaId });
+            return RedirectToGenerator(ideaId);
         }
         catch (HttpRequestException exception)
         {
@@ -1126,7 +1154,7 @@ public class IdeaGeneratorModel(
             TempData["Error"] = "An unexpected error occurred while analyzing regional demand.";
         }
 
-        return RedirectToPage(new { openIdeaId = ideaId });
+        return RedirectToGenerator(ideaId);
     }
 
     private static MarketOpportunitySnapshot BuildSnapshot(
@@ -1577,6 +1605,31 @@ public class IdeaGeneratorModel(
             .GroupBy(r => r.ProjectIdeaId!.Value)
             .ToDictionary(group => group.Key, group => group.First());
     }
+    private async Task<bool> ResolveProjectIdAsync(
+        int userId,
+        CancellationToken cancellationToken)
+    {
+        if (ProjectId > 0)
+        {
+            return true;
+        }
+
+        var activeProjectId =
+            await activeProjectService
+                .GetActiveProjectIdAsync(
+                    userId,
+                    cancellationToken);
+
+        if (!activeProjectId.HasValue)
+        {
+            return false;
+        }
+
+        ProjectId = activeProjectId.Value;
+
+        return true;
+    }
+
     private async Task<bool> LoadProjectContextAsync(
     int userId,
     CancellationToken cancellationToken)

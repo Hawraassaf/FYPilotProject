@@ -15,9 +15,18 @@ namespace FYPilot.Web.Pages.Student;
 public class MentorChatModel(
     ApplicationDbContext db,
     IAiServiceClient aiService,
+    IProjectAccessService projectAccessService,
+    IActiveProjectService activeProjectService,
     ILogger<MentorChatModel> logger
 ) : PageModel
 {
+    [BindProperty(SupportsGet = true)]
+    public int ProjectId { get; set; }
+
+    public Project? CurrentProject { get; private set; }
+
+    public ProjectAccessResult? ProjectAccess { get; private set; }
+
     public List<ChatMessage> Messages { get; private set; } = [];
 
     public List<MentorChatSession> ChatSessions { get; private set; } = [];
@@ -83,30 +92,87 @@ public class MentorChatModel(
     [BindProperty]
     public string ConstraintsText { get; set; } = "";
 
-    public async Task OnGetAsync(int? ideaId, int? chatId)
+    public async Task<IActionResult> OnGetAsync(
+        int? ideaId,
+        int? chatId,
+        CancellationToken cancellationToken)
     {
-        await LoadAsync(ideaId, chatId, ensureChatExists: true);
+        if (!await LoadProjectContextAsync(
+                cancellationToken))
+        {
+            TempData["Error"] =
+                "Choose a project before opening "
+                + "Mentor Chat.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        await LoadAsync(
+            ideaId,
+            chatId,
+            ensureChatExists: true);
+
+        return Page();
     }
 
     public async Task<IActionResult> OnPostAsync(
         string? message,
         int? ideaId,
-        int? chatId)
+        int? chatId,
+        CancellationToken cancellationToken)
     {
-        return await HandleSendAsync(message, ideaId, chatId);
+        return await HandleSendAsync(
+            message,
+            ideaId,
+            chatId,
+            cancellationToken);
     }
 
     public async Task<IActionResult> OnPostSendAsync(
         string? message,
         int? ideaId,
-        int? chatId)
+        int? chatId,
+        CancellationToken cancellationToken)
     {
-        return await HandleSendAsync(message, ideaId, chatId);
+        return await HandleSendAsync(
+            message,
+            ideaId,
+            chatId,
+            cancellationToken);
     }
 
-    public async Task<IActionResult> OnPostNewChatAsync(int? ideaId)
+    public async Task<IActionResult> OnPostNewChatAsync(
+        int? ideaId,
+        CancellationToken cancellationToken)
     {
-        await LoadAsync(ideaId, chatId: null, ensureChatExists: false);
+        if (!await LoadProjectContextAsync(
+                cancellationToken))
+        {
+            TempData["Error"] =
+                "You do not have access to that project.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        await LoadAsync(
+            ideaId,
+            chatId: null,
+            ensureChatExists: false);
+
+        if (!SelectedIdeaId.HasValue)
+        {
+            ErrorMessage =
+                "Select an official project idea before "
+                + "starting a mentor conversation.";
+
+            return RedirectToPage(
+                new
+                {
+                    projectId = ProjectId
+                });
+        }
 
         var userId = UserId();
 
@@ -124,6 +190,7 @@ public class MentorChatModel(
 
         return RedirectToPage(new
         {
+            projectId = ProjectId,
             ideaId = SelectedIdeaId,
             chatId = chat.Id
         });
@@ -131,15 +198,34 @@ public class MentorChatModel(
 
     public async Task<IActionResult> OnPostDeleteChatAsync(
         int chatId,
-        int? ideaId)
+        int? ideaId,
+        CancellationToken cancellationToken)
     {
+        if (!await LoadProjectContextAsync(
+                cancellationToken))
+        {
+            TempData["Error"] =
+                "You do not have access to that project.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        await LoadAsync(
+            ideaId,
+            chatId: null,
+            ensureChatExists: false);
+
         var userId = UserId();
 
         var chat = await db.MentorChatSessions
-            .FirstOrDefaultAsync(s =>
-                s.Id == chatId &&
-                s.UserId == userId &&
-                s.DeletedAt == null);
+            .FirstOrDefaultAsync(
+                session =>
+                    session.Id == chatId &&
+                    session.UserId == userId &&
+                    session.IdeaId == SelectedIdeaId &&
+                    session.DeletedAt == null,
+                cancellationToken);
 
         if (chat == null)
         {
@@ -147,7 +233,8 @@ public class MentorChatModel(
 
             return RedirectToPage(new
             {
-                ideaId
+                projectId = ProjectId,
+                ideaId = SelectedIdeaId
             });
         }
 
@@ -155,7 +242,7 @@ public class MentorChatModel(
         chat.DeletedAt = DateTime.UtcNow;
         chat.UpdatedAt = DateTime.UtcNow;
 
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(cancellationToken);
 
         var nextChatId = await db.MentorChatSessions
             .AsNoTracking()
@@ -165,10 +252,12 @@ public class MentorChatModel(
                 s.DeletedAt == null)
             .OrderByDescending(s => s.UpdatedAt)
             .Select(s => (int?)s.Id)
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(
+                cancellationToken);
 
         return RedirectToPage(new
         {
+            projectId = ProjectId,
             ideaId = chat.IdeaId ?? ideaId,
             chatId = nextChatId
         });
@@ -177,9 +266,23 @@ public class MentorChatModel(
     private async Task<IActionResult> HandleSendAsync(
         string? message,
         int? ideaId,
-        int? chatId)
+        int? chatId,
+        CancellationToken cancellationToken)
     {
-        await LoadAsync(ideaId, chatId, ensureChatExists: true);
+        if (!await LoadProjectContextAsync(
+                cancellationToken))
+        {
+            TempData["Error"] =
+                "You do not have access to that project.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        await LoadAsync(
+            ideaId,
+            chatId,
+            ensureChatExists: true);
 
         var finalMessage = !string.IsNullOrWhiteSpace(MessageText)
             ? MessageText.Trim()
@@ -191,6 +294,7 @@ public class MentorChatModel(
 
             return RedirectToPage(new
             {
+                projectId = ProjectId,
                 ideaId = SelectedIdeaId,
                 chatId = CurrentChatId
             });
@@ -202,6 +306,7 @@ public class MentorChatModel(
 
             return RedirectToPage(new
             {
+                projectId = ProjectId,
                 ideaId = SelectedIdeaId
             });
         }
@@ -343,9 +448,64 @@ public class MentorChatModel(
         // Post/Redirect/Get prevents duplicate messages after browser refresh.
         return RedirectToPage(new
         {
+            projectId = ProjectId,
             ideaId = SelectedIdeaId,
             chatId = CurrentChat.Id
         });
+    }
+
+    private async Task<bool> LoadProjectContextAsync(
+        CancellationToken cancellationToken)
+    {
+        var userId = UserId();
+
+        if (ProjectId <= 0)
+        {
+            var activeProjectId =
+                await activeProjectService
+                    .GetActiveProjectIdAsync(
+                        userId,
+                        cancellationToken);
+
+            if (!activeProjectId.HasValue)
+            {
+                return false;
+            }
+
+            ProjectId = activeProjectId.Value;
+        }
+
+        ProjectAccess =
+            await projectAccessService.GetAccessAsync(
+                ProjectId,
+                userId,
+                "student",
+                cancellationToken);
+
+        if (ProjectAccess == null)
+        {
+            return false;
+        }
+
+        CurrentProject = await db.Projects
+            .AsNoTracking()
+            .Include(item => item.ProjectIdea)
+            .FirstOrDefaultAsync(
+                item => item.Id == ProjectId,
+                cancellationToken);
+
+        if (CurrentProject == null)
+        {
+            return false;
+        }
+
+        await activeProjectService.RememberPageAsync(
+            userId,
+            ProjectId,
+            "/Student/MentorChat",
+            cancellationToken);
+
+        return true;
     }
 
     private async Task LoadAsync(
@@ -364,31 +524,31 @@ public class MentorChatModel(
             .Where(s => s.UserId == userId)
             .ToListAsync();
 
-        Ideas = await db.ProjectIdeas
-            .AsNoTracking()
-            .Where(i => i.UserId == userId)
-            .OrderByDescending(i => i.CreatedAt)
-            .Take(12)
-            .ToListAsync();
+        /*
+         * Mentor Chat follows only the official idea selected
+         * for the active project. It must never fall back to
+         * an unrelated idea from the student's account.
+         */
+        SelectedIdea =
+            CurrentProject?.ProjectIdea;
 
-        SelectedIdea = ideaId.HasValue
-            ? await db.ProjectIdeas
-                .AsNoTracking()
-                .FirstOrDefaultAsync(i =>
-                    i.Id == ideaId.Value &&
-                    i.UserId == userId)
-            : await db.ProjectIdeas
-                .AsNoTracking()
-                .FirstOrDefaultAsync(i =>
-                    i.UserId == userId &&
-                    i.IsSelected)
-              ?? await db.ProjectIdeas
-                  .AsNoTracking()
-                  .Where(i => i.UserId == userId)
-                  .OrderByDescending(i => i.CreatedAt)
-                  .FirstOrDefaultAsync();
+        SelectedIdeaId =
+            SelectedIdea?.Id;
 
-        SelectedIdeaId = SelectedIdea?.Id;
+        Ideas =
+            SelectedIdea == null
+                ? []
+                : [SelectedIdea];
+
+        if (!SelectedIdeaId.HasValue)
+        {
+            ChatSessions = [];
+            CurrentChat = null;
+            Messages = [];
+            LatestReview = null;
+
+            return;
+        }
 
         ChatSessions = await db.MentorChatSessions
             .AsNoTracking()

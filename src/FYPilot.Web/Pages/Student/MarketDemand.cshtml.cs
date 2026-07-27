@@ -15,13 +15,22 @@ namespace FYPilot.Web.Pages.Student;
 public class MarketDemandModel(
     ApplicationDbContext db,
     IAiServiceClient aiServiceClient,
+    IProjectAccessService projectAccessService,
+    IActiveProjectService activeProjectService,
     ILogger<MarketDemandModel> logger) : PageModel
 {
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web);
 
     [BindProperty(SupportsGet = true)]
+    public int ProjectId { get; set; }
+
+    [BindProperty(SupportsGet = true)]
     public int IdeaId { get; set; }
+
+    public Project? CurrentProject { get; private set; }
+
+    public ProjectAccessResult? ProjectAccess { get; private set; }
 
     [BindProperty]
     public string CountryContext { get; set; } = "Lebanon";
@@ -58,10 +67,24 @@ public class MarketDemandModel(
     };
 
     public async Task<IActionResult> OnGetAsync(
-    CancellationToken cancellationToken)
+        CancellationToken cancellationToken)
     {
+        var userId = UserId();
+
+        if (!await LoadProjectContextAsync(
+                userId,
+                cancellationToken))
+        {
+            TempData["Error"] =
+                "Choose a project before opening "
+                + "Market Demand.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
         return await LoadPageAsync(
-            UserId(),
+            userId,
             cancellationToken);
     }
 
@@ -69,13 +92,38 @@ public class MarketDemandModel(
         CancellationToken cancellationToken)
     {
         var userId = UserId();
-        var idea = await db.ProjectIdeas.FirstOrDefaultAsync(
-            item => item.Id == IdeaId && item.UserId == userId,
-            cancellationToken);
+
+        if (!await LoadProjectContextAsync(
+                userId,
+                cancellationToken))
+        {
+            TempData["Error"] =
+                "You do not have access to that project.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        IdeaId =
+            CurrentProject!.ProjectIdeaId ?? 0;
+
+        var idea = await db.ProjectIdeas
+            .FirstOrDefaultAsync(
+                item =>
+                    item.Id == IdeaId &&
+                    CurrentProject.ProjectIdeaId ==
+                        item.Id,
+                cancellationToken);
 
         if (idea == null)
         {
-            return NotFound();
+            ErrorMessage =
+                "Select an official project idea before "
+                + "analyzing market demand.";
+
+            return await LoadPageAsync(
+                userId,
+                cancellationToken);
         }
 
         CountryContext = NormalizeCountry(CountryContext);
@@ -151,7 +199,12 @@ public class MarketDemandModel(
             TempData["Success"] =
                 $"Market intelligence saved with {analysis.Sources.Count} real source(s).";
 
-            return RedirectToPage(new { ideaId = idea.Id });
+            return RedirectToPage(
+                new
+                {
+                    projectId = ProjectId,
+                    ideaId = idea.Id
+                });
         }
         catch (HttpRequestException exception)
         {
@@ -183,34 +236,82 @@ public class MarketDemandModel(
         return await LoadPageAsync(userId, cancellationToken);
     }
 
+    private async Task<bool> LoadProjectContextAsync(
+        int userId,
+        CancellationToken cancellationToken)
+    {
+        if (ProjectId <= 0)
+        {
+            var activeProjectId =
+                await activeProjectService
+                    .GetActiveProjectIdAsync(
+                        userId,
+                        cancellationToken);
+
+            if (!activeProjectId.HasValue)
+            {
+                return false;
+            }
+
+            ProjectId = activeProjectId.Value;
+        }
+
+        ProjectAccess =
+            await projectAccessService.GetAccessAsync(
+                ProjectId,
+                userId,
+                "student",
+                cancellationToken);
+
+        if (ProjectAccess == null)
+        {
+            return false;
+        }
+
+        CurrentProject = await db.Projects
+            .AsNoTracking()
+            .Include(item => item.ProjectIdea)
+            .FirstOrDefaultAsync(
+                item => item.Id == ProjectId,
+                cancellationToken);
+
+        if (CurrentProject == null)
+        {
+            return false;
+        }
+
+        await activeProjectService.RememberPageAsync(
+            userId,
+            ProjectId,
+            "/Student/MarketDemand",
+            cancellationToken);
+
+        return true;
+    }
+
     private async Task<IActionResult> LoadPageAsync(
         int userId,
         CancellationToken cancellationToken)
     {
-        UserIdeas = await db.ProjectIdeas
-            .AsNoTracking()
-            .Where(item => item.UserId == userId)
-            .OrderByDescending(item => item.IsSelected)
-            .ThenByDescending(item => item.CreatedAt)
-            .Take(50)
-            .ToListAsync(cancellationToken);
+        UserIdeas =
+            CurrentProject?.ProjectIdea == null
+                ? []
+                : [CurrentProject.ProjectIdea];
 
         if (UserIdeas.Count == 0)
         {
+            IdeaId = 0;
+            Idea = null;
+
             return Page();
         }
 
-        if (IdeaId <= 0)
-        {
-            IdeaId = UserIdeas.FirstOrDefault(item => item.IsSelected)?.Id
-                ?? UserIdeas[0].Id;
-        }
-
-        Idea = UserIdeas.FirstOrDefault(item => item.Id == IdeaId);
-        if (Idea == null)
-        {
-            return NotFound();
-        }
+        /*
+         * Market Demand always follows the official idea
+         * selected for the active project.
+         */
+        IdeaId = CurrentProject!.ProjectIdeaId!.Value;
+        Idea = CurrentProject.ProjectIdea;
 
         LatestReview = await db.AiOutputReviews
             .AsNoTracking()

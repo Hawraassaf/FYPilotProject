@@ -180,11 +180,11 @@
                 {
                     <article class="pw-message
                         @(message.UserId == Model.CurrentUserId
-                                 ? "is-own"
-                                 : "")
+                                      ? "is-own"
+                                      : "")
                         @(message.IsDeleted
-                                 ? "is-deleted"
-                                 : "")"
+                                      ? "is-deleted"
+                                      : "")"
                              data-message-id="@message.Id"
                              data-user-id="@message.UserId">
 
@@ -282,8 +282,8 @@
                                             <span>
                                                 <i class="bi
                                                 @(attachment.IsImage
-                                                       ? "bi-image"
-                                                       : "bi-file-earmark")"></i>
+                                                          ? "bi-image"
+                                                          : "bi-file-earmark")"></i>
                                             </span>
 
                                             <div>

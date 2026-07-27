@@ -14,7 +14,9 @@ namespace FYPilot.Web.Pages.Student;
 [Authorize(Roles = "student")]
 public class DefenseSimulatorModel(
     ApplicationDbContext db,
-    IAiServiceClient aiService
+    IAiServiceClient aiService,
+    IProjectAccessService projectAccessService,
+    IActiveProjectService activeProjectService
 ) : PageModel
 {
     private static readonly JsonSerializerOptions SessionJsonOptions =
@@ -51,6 +53,9 @@ public class DefenseSimulatorModel(
         "schema_invalid" => ("bg-secondary", "Formatting issue"),
         _ => ("bg-secondary", review.Status),
     };
+
+    [BindProperty(SupportsGet = true)]
+    public int ProjectId { get; set; }
 
     [BindProperty]
     public int NumberOfQuestions { get; set; } = 3;
@@ -104,15 +109,33 @@ public class DefenseSimulatorModel(
             _ => "AI provider"
         };
 
-    public async Task OnGetAsync()
+    public async Task<IActionResult> OnGetAsync(
+        CancellationToken cancellationToken)
     {
-        await LoadContextAsync();
+        var contextResult =
+            await LoadContextAsync(cancellationToken);
+
+        if (contextResult != null)
+        {
+            return contextResult;
+        }
+
         LoadPracticeState();
+
+        return Page();
     }
 
-    public async Task<IActionResult> OnPostGenerateAsync()
+    public async Task<IActionResult> OnPostGenerateAsync(
+        CancellationToken cancellationToken)
     {
-        await LoadContextAsync();
+        var contextResult =
+            await LoadContextAsync(cancellationToken);
+
+        if (contextResult != null)
+        {
+            return contextResult;
+        }
+
         LoadPracticeState();
 
         if (Idea == null)
@@ -140,14 +163,26 @@ public class DefenseSimulatorModel(
         return Page();
     }
 
-    public async Task<IActionResult> OnPostRegenerateAsync()
+    public async Task<IActionResult> OnPostRegenerateAsync(
+        CancellationToken cancellationToken)
     {
-        await LoadContextAsync();
+        var contextResult =
+            await LoadContextAsync(cancellationToken);
+
+        if (contextResult != null)
+        {
+            return contextResult;
+        }
+
         LoadPracticeState();
 
         if (Idea == null || State.Questions.Count == 0)
         {
-            return RedirectToPage();
+            return RedirectToPage(
+                new
+                {
+                    projectId = ProjectId
+                });
         }
 
         NumberOfQuestions = Math.Clamp(State.NumberOfQuestions, 1, 5);
@@ -163,9 +198,17 @@ public class DefenseSimulatorModel(
         return Page();
     }
 
-    public async Task<IActionResult> OnPostEvaluateAsync()
+    public async Task<IActionResult> OnPostEvaluateAsync(
+        CancellationToken cancellationToken)
     {
-        await LoadContextAsync();
+        var contextResult =
+            await LoadContextAsync(cancellationToken);
+
+        if (contextResult != null)
+        {
+            return contextResult;
+        }
+
         LoadPracticeState();
 
         if (Idea == null)
@@ -249,10 +292,24 @@ public class DefenseSimulatorModel(
         return Page();
     }
 
-    public IActionResult OnPostReset()
+    public async Task<IActionResult> OnPostResetAsync(
+        CancellationToken cancellationToken)
     {
+        var contextResult =
+            await LoadContextAsync(cancellationToken);
+
+        if (contextResult != null)
+        {
+            return contextResult;
+        }
+
         HttpContext.Session.Remove(SessionKey());
-        return RedirectToPage();
+
+        return RedirectToPage(
+            new
+            {
+                projectId = ProjectId
+            });
     }
 
     private async Task GenerateQuestionSetAsync(
@@ -454,24 +511,89 @@ public class DefenseSimulatorModel(
             .ToList();
     }
 
-    private async Task LoadContextAsync()
+    private async Task<IActionResult?> LoadContextAsync(
+        CancellationToken cancellationToken = default)
     {
         var userId = UserId();
 
-        Idea = await db.ProjectIdeas
+        /*
+         * Use the projectId from the URL or submitted form
+         * when available. Otherwise restore the student's
+         * active project workspace.
+         */
+        if (ProjectId <= 0)
+        {
+            var activeProjectId =
+                await activeProjectService
+                    .GetActiveProjectIdAsync(
+                        userId,
+                        cancellationToken);
+
+            if (!activeProjectId.HasValue)
+            {
+                TempData["Error"] =
+                    "Choose a project before opening "
+                    + "the Defense Simulator.";
+
+                return RedirectToPage(
+                    "/Student/MyProjects");
+            }
+
+            ProjectId = activeProjectId.Value;
+        }
+
+        /*
+         * Never trust projectId directly. The student must
+         * still be an active owner or collaborator.
+         */
+        var access =
+            await projectAccessService.GetAccessAsync(
+                ProjectId,
+                userId,
+                "student",
+                cancellationToken);
+
+        if (access == null)
+        {
+            TempData["Error"] =
+                "You do not have access to that project.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        /*
+         * The Defense Simulator must use the idea selected
+         * for the active project, not any idea from another
+         * project owned by the same student.
+         */
+        var project = await db.Projects
             .AsNoTracking()
-            .FirstOrDefaultAsync(item =>
-                item.UserId == userId &&
-                item.IsSelected
-            )
-            ?? await db.ProjectIdeas
-                .AsNoTracking()
-                .Where(item => item.UserId == userId)
-                .OrderByDescending(item => item.CreatedAt)
-                .ThenByDescending(item => item.Id)
-                .FirstOrDefaultAsync();
+            .Include(item => item.ProjectIdea)
+            .FirstOrDefaultAsync(
+                item => item.Id == ProjectId,
+                cancellationToken);
+
+        if (project == null)
+        {
+            TempData["Error"] =
+                "The selected project could not be found.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        Idea = project.ProjectIdea;
 
         await LoadLatestReviewsAsync(userId);
+
+        await activeProjectService.RememberPageAsync(
+            userId,
+            ProjectId,
+            "/Student/DefenseSimulator",
+            cancellationToken);
+
+        return null;
     }
 
     private async Task LoadLatestReviewsAsync(int userId)
@@ -611,7 +733,7 @@ public class DefenseSimulatorModel(
     }
 
     private string SessionKey() =>
-        $"DefenseSimulator:{UserId()}";
+        $"DefenseSimulator:{UserId()}:{ProjectId}";
 
     private int UserId() =>
         int.Parse(

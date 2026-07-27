@@ -18,7 +18,7 @@ public class MyProjectsModel(
     ILogger<MyProjectsModel> logger) : PageModel
 {
     public List<ProjectCardViewModel> Projects { get; private set; } = [];
-    public List<PendingInvitationViewModel> PendingInvitations {  get;  private set;} = [];
+    public List<PendingInvitationViewModel> PendingInvitations { get; private set; } = [];
 
     public int PendingInvitationsCount =>
         PendingInvitations.Count;
@@ -53,7 +53,7 @@ public class MyProjectsModel(
             return RedirectToPage("/Account/Login");
         }
 
-        
+
 
         var currentUser = await db.Users
             .AsNoTracking()
@@ -447,18 +447,45 @@ public class MyProjectsModel(
             return RedirectToPage("/Account/Login");
         }
 
+        /*
+         * Validate that the logged-in student still has
+         * active access to the selected project before
+         * making it the current project workspace.
+         */
+        var access =
+            await projectAccessService.GetAccessAsync(
+                projectId,
+                userId.Value,
+                "student",
+                cancellationToken);
+
+        if (access == null)
+        {
+            TempData["Error"] =
+                "You do not have access to that project.";
+
+            return RedirectToPage();
+        }
+
+        /*
+         * Continue Project changes the active workspace.
+         * Every project-scoped page will use this project
+         * until the student continues another one.
+         */
         var destination =
-    await activeProjectService
-        .ActivateProjectAsync(
-            userId.Value,
-            projectId,
-            requestedPage: "/Student/Dashboard",
-            cancellationToken);
+            await activeProjectService
+                .ActivateProjectAsync(
+                    userId.Value,
+                    projectId,
+                    requestedPage:
+                        "/Student/Dashboard",
+                    cancellationToken);
 
         if (destination == null)
         {
             TempData["Error"] =
-                "You do not have access to that project.";
+                "The project could not be opened. "
+                + "Please try again.";
 
             return RedirectToPage();
         }
@@ -467,7 +494,8 @@ public class MyProjectsModel(
             destination.PageName,
             new
             {
-                projectId = destination.ProjectId
+                projectId =
+                    destination.ProjectId
             });
     }
 

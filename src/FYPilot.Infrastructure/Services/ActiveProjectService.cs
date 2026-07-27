@@ -31,6 +31,14 @@ public sealed class ActiveProjectService(
      {
         "/Student/Dashboard",
         "/Student/IdeaGenerator",
+        "/Student/IdeaComparison",
+        "/Student/MarketDemand",
+        "/Student/ProjectDNA",
+        "/Student/Roadmap",
+        "/Student/DocumentationGenerator",
+        "/Student/MentorChat",
+        "/Student/DefenseSimulator",
+        "/Student/Feedback",
         "/Student/TeamManagement",
         "/Student/ProjectWorkspace"
      };
@@ -142,6 +150,18 @@ public sealed class ActiveProjectService(
         return true;
     }
 
+    public async Task<int?> GetActiveProjectIdAsync(
+        int userId,
+        CancellationToken cancellationToken = default)
+    {
+        var destination =
+            await GetResumeDestinationAsync(
+                userId,
+                cancellationToken);
+
+        return destination?.ProjectId;
+    }
+
     public async Task<ActiveProjectDestination?>
         GetResumeDestinationAsync(
             int userId,
@@ -230,7 +250,7 @@ public sealed class ActiveProjectService(
     }
 
     private static void ClearUserProjectContext(
-      FYPilot.Domain.Entities.User user)
+        FYPilot.Domain.Entities.User user)
     {
         user.LastActiveProjectId = null;
         user.LastProjectPage = null;

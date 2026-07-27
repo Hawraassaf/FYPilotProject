@@ -30,12 +30,12 @@
                     Start practice
                 </a>
 
-                <a asp-page="/Student/IdeaGenerator" class="defense-button defense-button--ghost">
+                <a asp-page="/Student/IdeaGenerator" class="defense-button defense-button--ghost" asp-route-projectId="@Model.ProjectId">
                     <i class="bi bi-lightbulb"></i>
                     Change idea
                 </a>
 
-                <a asp-page="/Student/Dashboard" class="defense-button defense-button--ghost">
+                <a asp-page="/Student/Dashboard" class="defense-button defense-button--ghost" asp-route-projectId="@Model.ProjectId">
                     <i class="bi bi-grid"></i>
                     Dashboard
                 </a>
@@ -127,14 +127,14 @@
                 <i class="bi bi-shield-exclamation"></i>
             </div>
 
-            <span class="defense-kicker">Project required</span>
-            <h2>Select a project before starting a defense session.</h2>
+            <span class="defense-kicker">Project idea required</span>
+            <h2>Select an idea for this project before starting a defense session.</h2>
             <p>
                 The simulator needs your idea, technologies, target users, roadmap, and skills
                 to produce realistic professor-style questions.
             </p>
 
-            <a asp-page="/Student/IdeaGenerator" class="defense-button defense-button--primary">
+            <a asp-page="/Student/IdeaGenerator" class="defense-button defense-button--primary" asp-route-projectId="@Model.ProjectId">
                 <i class="bi bi-lightbulb"></i>
                 Select a project idea
             </a>
@@ -193,6 +193,9 @@
                           asp-page-handler="Generate"
                           id="defense-config-form"
                           class="defense-config-form">
+                        <input type="hidden"
+                               name="projectId"
+                               value="@Model.ProjectId" />
 
                         <fieldset class="defense-fieldset">
                             <legend>
@@ -310,6 +313,9 @@
 
                             <div class="defense-session__actions">
                                 <form method="post" asp-page-handler="Regenerate">
+                                    <input type="hidden"
+                                           name="projectId"
+                                           value="@Model.ProjectId" />
                                     <button type="submit" class="defense-button defense-button--secondary">
                                         <i class="bi bi-arrow-repeat"></i>
                                         Regenerate same fields
@@ -317,6 +323,9 @@
                                 </form>
 
                                 <form method="post" asp-page-handler="Reset">
+                                    <input type="hidden"
+                                           name="projectId"
+                                           value="@Model.ProjectId" />
                                     <button type="submit" class="defense-button defense-button--quiet">
                                         <i class="bi bi-sliders"></i>
                                         Choose different fields
@@ -412,6 +421,9 @@
                                               asp-page-handler="Evaluate"
                                               class="defense-answer-form"
                                               data-answer-form>
+                                            <input type="hidden"
+                                                   name="projectId"
+                                                   value="@Model.ProjectId" />
 
                                             <input type="hidden" name="QuestionIndex" value="@index" />
 
