@@ -17,6 +17,7 @@ namespace FYPilot.Web.Pages.Student;
 public class TeamManagementModel(
     ApplicationDbContext db,
     IProjectAccessService projectAccessService,
+    IActiveProjectService activeProjectService,
     INotificationService notificationService,
     ILogger<TeamManagementModel> logger)
     : PageModel
@@ -114,14 +115,29 @@ public class TeamManagementModel(
         }
 
 
+        /*
+         * Use projectId from the URL when available.
+         * Otherwise restore the student's active project.
+         */
         if (ProjectId <= 0)
         {
-            TempData["Error"] =
-                "Choose a valid project before "
-                + "opening team management.";
+            var activeProjectId =
+                await activeProjectService
+                    .GetActiveProjectIdAsync(
+                        userId.Value,
+                        cancellationToken);
 
-            return RedirectToPage(
-                "/Student/MyProjects");
+            if (!activeProjectId.HasValue)
+            {
+                TempData["Error"] =
+                    "Choose a valid project before "
+                    + "opening team management.";
+
+                return RedirectToPage(
+                    "/Student/MyProjects");
+            }
+
+            ProjectId = activeProjectId.Value;
         }
 
         ProjectAccess =
@@ -152,6 +168,12 @@ public class TeamManagementModel(
             return RedirectToPage(
                 "/Student/MyProjects");
         }
+
+        await activeProjectService.RememberPageAsync(
+            userId.Value,
+            ProjectId,
+            "/Student/TeamManagement",
+            cancellationToken);
 
         return Page();
     }

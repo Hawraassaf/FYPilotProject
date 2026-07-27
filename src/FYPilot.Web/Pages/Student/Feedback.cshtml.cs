@@ -14,6 +14,7 @@ namespace FYPilot.Web.Pages.Student;
 public class FeedbackModel(
     ApplicationDbContext db,
     IProjectAccessService projectAccessService,
+    IActiveProjectService activeProjectService,
     INotificationService notificationService,
     ILogger<FeedbackModel> logger)
     : PageModel
@@ -953,13 +954,9 @@ public class FeedbackModel(
             CancellationToken cancellationToken)
     {
         var lastActiveProjectId =
-            await db.Users
-                .AsNoTracking()
-                .Where(user =>
-                    user.Id == CurrentUserId)
-                .Select(user =>
-                    user.LastActiveProjectId)
-                .FirstOrDefaultAsync(
+            await activeProjectService
+                .GetActiveProjectIdAsync(
+                    CurrentUserId,
                     cancellationToken);
 
         if (lastActiveProjectId.HasValue &&
@@ -993,13 +990,9 @@ public class FeedbackModel(
         }
 
         var lastActiveProjectId =
-            await db.Users
-                .AsNoTracking()
-                .Where(user =>
-                    user.Id == CurrentUserId)
-                .Select(user =>
-                    user.LastActiveProjectId)
-                .FirstOrDefaultAsync(
+            await activeProjectService
+                .GetActiveProjectIdAsync(
+                    CurrentUserId,
                     cancellationToken);
 
         return lastActiveProjectId ?? 0;
@@ -1077,28 +1070,12 @@ public class FeedbackModel(
                 .FirstOrDefaultAsync(
                     cancellationToken);
 
-        var user =
-            await db.Users
-                .FirstOrDefaultAsync(
-                    item =>
-                        item.Id ==
-                            CurrentUserId,
-                    cancellationToken);
-
-        if (user != null)
-        {
-            user.LastActiveProjectId =
-                ProjectId;
-
-            user.LastProjectPage =
-                "/Student/Feedback";
-
-            user.LastProjectVisitedAtUtc =
-                DateTime.UtcNow;
-
-            await db.SaveChangesAsync(
+        await activeProjectService
+            .RememberPageAsync(
+                CurrentUserId,
+                ProjectId,
+                "/Student/Feedback",
                 cancellationToken);
-        }
 
         return true;
     }

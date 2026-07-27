@@ -14,9 +14,18 @@ namespace FYPilot.Web.Pages.Student;
 [Authorize(Roles = "student")]
 public class IdeaComparisonModel(
     ApplicationDbContext db,
-    IAiServiceClient aiService
+    IAiServiceClient aiService,
+    IProjectAccessService projectAccessService,
+    IActiveProjectService activeProjectService
 ) : PageModel
 {
+    [BindProperty(SupportsGet = true)]
+    public int ProjectId { get; set; }
+
+    public Project? CurrentProject { get; private set; }
+
+    public ProjectAccessResult? ProjectAccess { get; private set; }
+
     public List<ProjectIdea> Ideas { get; private set; } = [];
 
     public StudentProfile? Profile { get; private set; }
@@ -52,15 +61,52 @@ public class IdeaComparisonModel(
         _ => ("bg-secondary", review.Status),
     };
 
-    public async Task OnGetAsync()
+    public async Task<IActionResult> OnGetAsync(
+        CancellationToken cancellationToken)
     {
-        await LoadPageDataAsync();
+        var userId = UserId();
+
+        if (!await LoadProjectContextAsync(
+                userId,
+                cancellationToken))
+        {
+            TempData["Error"] =
+                "Choose a project before opening "
+                + "Idea Comparison.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        await LoadPageDataAsync(
+            userId,
+            cancellationToken);
+
         await LoadLatestReviewAsync();
+
+        return Page();
     }
 
-    public async Task<IActionResult> OnPostCompareAsync()
+    public async Task<IActionResult> OnPostCompareAsync(
+        CancellationToken cancellationToken)
     {
-        await LoadPageDataAsync();
+        var userId = UserId();
+
+        if (!await LoadProjectContextAsync(
+                userId,
+                cancellationToken))
+        {
+            TempData["Error"] =
+                "You do not have access to that project.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        await LoadPageDataAsync(
+            userId,
+            cancellationToken);
+
         await LoadLatestReviewAsync();
 
         if (Ideas.Count < 2)
@@ -140,76 +186,302 @@ public class IdeaComparisonModel(
             .FirstOrDefaultAsync();
     }
 
-    public async Task<IActionResult> OnPostSelectAsync(int ideaId)
+    public async Task<IActionResult> OnPostSelectAsync(
+        int ideaId,
+        CancellationToken cancellationToken)
     {
         var userId = UserId();
 
-        var ideaExists = await db.ProjectIdeas
-            .AnyAsync(i =>
-                i.Id == ideaId &&
-                i.UserId == userId);
-
-        if (!ideaExists)
+        if (!await LoadProjectContextAsync(
+                userId,
+                cancellationToken))
         {
             TempData["Error"] =
-                "The selected idea was not found or does not belong to your account.";
+                "You do not have access to that project.";
 
-            return RedirectToPage();
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        if (ProjectAccess?.IsOwner != true)
+        {
+            TempData["Error"] =
+                "Only the project owner can select "
+                + "the official project idea.";
+
+            return RedirectToPage(
+                new
+                {
+                    projectId = ProjectId
+                });
+        }
+
+        var idea = await db.ProjectIdeas
+            .FirstOrDefaultAsync(
+                item =>
+                    item.Id == ideaId &&
+                    item.GeneratedForProjectId ==
+                        ProjectId,
+                cancellationToken);
+
+        if (idea == null)
+        {
+            TempData["Error"] =
+                "The selected idea was not found "
+                + "inside this project.";
+
+            return RedirectToPage(
+                new
+                {
+                    projectId = ProjectId
+                });
         }
 
         await using var transaction =
-            await db.Database.BeginTransactionAsync();
+            await db.Database.BeginTransactionAsync(
+                cancellationToken);
 
-        await db.ProjectIdeas
-            .Where(i => i.UserId == userId)
-            .ExecuteUpdateAsync(update =>
-                update.SetProperty(
-                    idea => idea.IsSelected,
-                    false));
-
-        var updatedRows = await db.ProjectIdeas
-            .Where(i =>
-                i.Id == ideaId &&
-                i.UserId == userId)
-            .ExecuteUpdateAsync(update =>
-                update.SetProperty(
-                    idea => idea.IsSelected,
-                    true));
-
-        if (updatedRows != 1)
+        try
         {
-            await transaction.RollbackAsync();
+            var project = await db.Projects
+                .Include(item => item.ProjectIdea)
+                .FirstOrDefaultAsync(
+                    item => item.Id == ProjectId,
+                    cancellationToken);
+
+            if (project == null)
+            {
+                await transaction.RollbackAsync(
+                    cancellationToken);
+
+                TempData["Error"] =
+                    "The selected project could not be found.";
+
+                return RedirectToPage(
+                    "/Student/MyProjects");
+            }
+
+            if (project.ProjectIdeaId == idea.Id)
+            {
+                await transaction.RollbackAsync(
+                    cancellationToken);
+
+                TempData["Success"] =
+                    "This idea is already selected "
+                    + "for the project.";
+
+                return RedirectToPage(
+                    "/Student/Dashboard",
+                    new
+                    {
+                        projectId = ProjectId
+                    });
+            }
+
+            var previousIdeaId =
+                project.ProjectIdeaId;
+
+            var previousIdeaTitle =
+                project.ProjectIdea?.Title;
+
+            var now = DateTime.UtcNow;
+
+            await db.ProjectIdeas
+                .Where(item =>
+                    item.GeneratedForProjectId ==
+                        ProjectId)
+                .ExecuteUpdateAsync(
+                    update =>
+                        update.SetProperty(
+                            item => item.IsSelected,
+                            false),
+                    cancellationToken);
+
+            project.ProjectIdeaId = idea.Id;
+
+            if (string.Equals(
+                    project.Status,
+                    "draft",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                project.Status = "planning";
+            }
+
+            if (string.IsNullOrWhiteSpace(project.Title) ||
+                string.Equals(
+                    project.Title.Trim(),
+                    "Untitled Project",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                project.Title = idea.Title;
+            }
+
+            if (string.IsNullOrWhiteSpace(
+                    project.Description))
+            {
+                project.Description =
+                    !string.IsNullOrWhiteSpace(
+                        idea.ProblemStatement)
+                        ? idea.ProblemStatement
+                        : idea.WhyUseful;
+            }
+
+            if (string.IsNullOrWhiteSpace(
+                    project.Technologies))
+            {
+                project.Technologies =
+                    idea.RequiredTechnologies;
+            }
+
+            project.UpdatedAt = now;
+            idea.IsSelected = true;
+
+            var actorName =
+                User.FindFirst(
+                    ClaimTypes.Name)?.Value
+                ?? "The project owner";
+
+            var replacingIdea =
+                previousIdeaId.HasValue;
+
+            db.ProjectActivities.Add(
+                new ProjectActivity
+                {
+                    ProjectId = project.Id,
+                    UserId = userId,
+                    ActionType = replacingIdea
+                        ? "idea_replaced"
+                        : "idea_selected",
+                    Description = replacingIdea
+                        ? $"{actorName} replaced "
+                          + $"\"{previousIdeaTitle ?? "the previous idea"}\" "
+                          + $"with \"{idea.Title}\"."
+                        : $"{actorName} selected "
+                          + $"\"{idea.Title}\" as the "
+                          + "official project idea.",
+                    PreviousIdeaId = previousIdeaId,
+                    NewIdeaId = idea.Id,
+                    CreatedAtUtc = now
+                });
+
+            await db.SaveChangesAsync(
+                cancellationToken);
+
+            await transaction.CommitAsync(
+                cancellationToken);
+
+            await activeProjectService
+                .ActivateProjectAsync(
+                    userId,
+                    ProjectId,
+                    "/Student/Dashboard",
+                    cancellationToken);
+
+            TempData["Success"] = replacingIdea
+                ? "The project idea was replaced successfully."
+                : "The project idea was selected successfully.";
+
+            return RedirectToPage(
+                "/Student/Dashboard",
+                new
+                {
+                    projectId = ProjectId
+                });
+        }
+        catch
+        {
+            await transaction.RollbackAsync(
+                cancellationToken);
 
             TempData["Error"] =
-                "The project idea could not be selected. Please try again.";
+                "The project idea could not be selected. "
+                + "Please try again.";
 
-            return RedirectToPage();
+            return RedirectToPage(
+                new
+                {
+                    projectId = ProjectId
+                });
         }
-
-        await transaction.CommitAsync();
-
-        TempData["Success"] =
-            "Project idea selected successfully.";
-
-        return RedirectToPage();
     }
 
-    private async Task LoadPageDataAsync()
+    private async Task<bool> LoadProjectContextAsync(
+        int userId,
+        CancellationToken cancellationToken)
     {
-        var userId = UserId();
+        if (ProjectId <= 0)
+        {
+            var activeProjectId =
+                await activeProjectService
+                    .GetActiveProjectIdAsync(
+                        userId,
+                        cancellationToken);
 
+            if (!activeProjectId.HasValue)
+            {
+                return false;
+            }
+
+            ProjectId = activeProjectId.Value;
+        }
+
+        ProjectAccess =
+            await projectAccessService.GetAccessAsync(
+                ProjectId,
+                userId,
+                "student",
+                cancellationToken);
+
+        if (ProjectAccess == null)
+        {
+            return false;
+        }
+
+        CurrentProject = await db.Projects
+            .AsNoTracking()
+            .Include(item => item.ProjectIdea)
+            .FirstOrDefaultAsync(
+                item => item.Id == ProjectId,
+                cancellationToken);
+
+        if (CurrentProject == null)
+        {
+            return false;
+        }
+
+        await activeProjectService.RememberPageAsync(
+            userId,
+            ProjectId,
+            "/Student/IdeaComparison",
+            cancellationToken);
+
+        return true;
+    }
+
+    private async Task LoadPageDataAsync(
+        int userId,
+        CancellationToken cancellationToken)
+    {
         Profile = await db.StudentProfiles
-            .FirstOrDefaultAsync(p => p.UserId == userId);
+            .FirstOrDefaultAsync(
+                item => item.UserId == userId,
+                cancellationToken);
 
         Skills = await db.StudentSkills
-            .Where(s => s.UserId == userId)
-            .ToListAsync();
+            .Where(item => item.UserId == userId)
+            .ToListAsync(cancellationToken);
 
         Ideas = await db.ProjectIdeas
-            .Where(i => i.UserId == userId)
-            .OrderByDescending(i => i.CreatedAt)
+            .Where(item =>
+                item.GeneratedForProjectId == ProjectId ||
+                (
+                    CurrentProject!.ProjectIdeaId.HasValue &&
+                    item.Id ==
+                        CurrentProject.ProjectIdeaId.Value
+                ))
+            .OrderByDescending(item => item.CreatedAt)
             .Take(12)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
     }
 
     private IdeaComparisonRequest BuildComparisonRequest()

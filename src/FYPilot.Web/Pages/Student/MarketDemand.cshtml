@@ -460,7 +460,7 @@
         </div>
     }
 
-    <a href="/Student/IdeaGenerator" class="text-decoration-none d-inline-flex align-items-center gap-1 mb-2" style="color:var(--md-primary,#2457e6); font-weight:750; font-size:.85rem;">
+    <a href="/Student/IdeaGenerator?projectId=@Model.ProjectId" class="text-decoration-none d-inline-flex align-items-center gap-1 mb-2" style="color:var(--md-primary,#2457e6); font-weight:750; font-size:.85rem;">
         <i class="bi bi-arrow-left"></i>
         Back to Idea Generator
     </a>
@@ -498,9 +498,9 @@
     {
         <section class="md-card md-empty">
             <i class="bi bi-lightbulb"></i>
-            <h2>No project ideas found</h2>
-            <p>Generate an idea first, then return here to validate its market demand.</p>
-            <a asp-page="/Student/IdeaGenerator" class="md-btn text-decoration-none">Open Idea Generator</a>
+            <h2>No official project idea selected</h2>
+            <p>Select an idea for this active project, then return here to validate its market demand.</p>
+            <a asp-page="/Student/IdeaGenerator" class="md-btn text-decoration-none" asp-route-projectId="@Model.ProjectId">Open Idea Generator</a>
         </section>
     }
     else
@@ -508,6 +508,9 @@
         <section class="md-toolbar">
             <form method="post" asp-page-handler="Analyze">
                 @Html.AntiForgeryToken()
+                <input type="hidden"
+                       name="projectId"
+                       value="@Model.ProjectId" />
                 <div class="md-toolbar-grid">
                     <div class="md-field">
                         <label>Project idea</label>

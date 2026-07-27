@@ -12,8 +12,16 @@ using Microsoft.EntityFrameworkCore;
 namespace FYPilot.Web.Pages.Student;
 
 [Authorize(Roles = "student")]
-public class ProjectDNAModel(ApplicationDbContext db, IAiServiceClient aiService) : PageModel
+public class ProjectDNAModel(
+    ApplicationDbContext db,
+    IAiServiceClient aiService,
+    IProjectAccessService projectAccessService,
+    IActiveProjectService activeProjectService)
+    : PageModel
 {
+    [BindProperty(SupportsGet = true)]
+    public int ProjectId { get; set; }
+
     public ProjectIdea? Idea { get; private set; }
     public List<StudentSkill> StudentSkills { get; private set; } = [];
     public List<(string Label, int Value, string Color)> DnaDimensions { get; private set; } = [];
@@ -49,17 +57,50 @@ public class ProjectDNAModel(ApplicationDbContext db, IAiServiceClient aiService
 
     public record RiskItem(string Category, string Level, string Description, string Mitigation);
 
-    public async Task OnGetAsync(int? ideaId)
+    public async Task<IActionResult> OnGetAsync(
+        int? ideaId,
+        CancellationToken cancellationToken)
     {
         var userId = UserId();
-        await LoadPageDataAsync(userId, ideaId);
+
+        var contextResult =
+            await ResolveProjectContextAsync(
+                userId,
+                cancellationToken);
+
+        if (contextResult != null)
+        {
+            return contextResult;
+        }
+
+        await LoadPageDataAsync(userId);
+
+        await activeProjectService.RememberPageAsync(
+            userId,
+            ProjectId,
+            "/Student/ProjectDNA",
+            cancellationToken);
+
+        return Page();
     }
 
-    public async Task<IActionResult> OnPostAnalyzeAsync(int ideaId)
+    public async Task<IActionResult> OnPostAnalyzeAsync(
+        int ideaId,
+        CancellationToken cancellationToken)
     {
         var userId = UserId();
 
-        await LoadPageDataAsync(userId, ideaId);
+        var contextResult =
+            await ResolveProjectContextAsync(
+                userId,
+                cancellationToken);
+
+        if (contextResult != null)
+        {
+            return contextResult;
+        }
+
+        await LoadPageDataAsync(userId);
 
         if (Idea == null)
         {
@@ -88,7 +129,10 @@ public class ProjectDNAModel(ApplicationDbContext db, IAiServiceClient aiService
             Source = response.Source;
 
             ApplyAiAnalysis(response.Analysis);
-            await PersistReviewAsync(userId, ideaId, response);
+            await PersistReviewAsync(
+                userId,
+                Idea.Id,
+                response);
         }
         catch
         {
@@ -146,15 +190,19 @@ public class ProjectDNAModel(ApplicationDbContext db, IAiServiceClient aiService
             .FirstOrDefaultAsync();
     }
 
-    private async Task LoadPageDataAsync(int userId, int? ideaId)
+    private async Task LoadPageDataAsync(int userId)
     {
-        Idea = ideaId.HasValue
-            ? await db.ProjectIdeas
-                .AsNoTracking()
-                .FirstOrDefaultAsync(i => i.Id == ideaId && i.UserId == userId)
-            : await db.ProjectIdeas
-                .AsNoTracking()
-                .FirstOrDefaultAsync(i => i.UserId == userId && i.IsSelected);
+        /*
+         * The active project's official idea is the
+         * source of truth for this page.
+         */
+        Idea = await db.Projects
+            .AsNoTracking()
+            .Where(project =>
+                project.Id == ProjectId)
+            .Select(project =>
+                project.ProjectIdea)
+            .FirstOrDefaultAsync();
 
         StudentSkills = await db.StudentSkills
             .AsNoTracking()
@@ -254,6 +302,51 @@ public class ProjectDNAModel(ApplicationDbContext db, IAiServiceClient aiService
         }
 
         RequiredSkillsAnalysis = analysis.RequiredSkillsAnalysis ?? [];
+    }
+
+    private async Task<IActionResult?>
+        ResolveProjectContextAsync(
+            int userId,
+            CancellationToken cancellationToken)
+    {
+        if (ProjectId <= 0)
+        {
+            var activeProjectId =
+                await activeProjectService
+                    .GetActiveProjectIdAsync(
+                        userId,
+                        cancellationToken);
+
+            if (!activeProjectId.HasValue)
+            {
+                TempData["Error"] =
+                    "Choose a project before opening "
+                    + "Project DNA.";
+
+                return RedirectToPage(
+                    "/Student/MyProjects");
+            }
+
+            ProjectId = activeProjectId.Value;
+        }
+
+        var access =
+            await projectAccessService.GetAccessAsync(
+                ProjectId,
+                userId,
+                "student",
+                cancellationToken);
+
+        if (access == null)
+        {
+            TempData["Error"] =
+                "You do not have access to that project.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        return null;
     }
 
     private int UserId()

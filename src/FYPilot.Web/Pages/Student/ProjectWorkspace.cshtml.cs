@@ -137,7 +137,31 @@ public class ProjectWorkspaceModel(
         CurrentUserId =
             userId.Value;
 
-        
+        /*
+         * Use projectId from the URL when available.
+         * Otherwise restore the student's active project
+         * so workspace navigation keeps its context.
+         */
+        if (ProjectId <= 0)
+        {
+            var activeProjectId =
+                await activeProjectService
+                    .GetActiveProjectIdAsync(
+                        userId.Value,
+                        cancellationToken);
+
+            if (!activeProjectId.HasValue)
+            {
+                TempData["Error"] =
+                    "Choose a project before opening "
+                    + "the project workspace.";
+
+                return RedirectToPage(
+                    "/Student/MyProjects");
+            }
+
+            ProjectId = activeProjectId.Value;
+        }
 
         if (!await LoadWorkspaceAsync(
                 userId.Value,

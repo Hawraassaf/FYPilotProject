@@ -363,15 +363,48 @@
             }
 
     .fyc-msg {
+        width: 100%;
         display: flex;
         align-items: flex-start;
+        justify-content: flex-start;
         gap: 11px;
         margin-bottom: 22px;
     }
 
+        /* Student message: right side */
         .fyc-msg.is-user {
-            flex-direction: row-reverse;
+            justify-content: flex-end;
         }
+
+            /* Put the student avatar after the message bubble */
+            .fyc-msg.is-user .fyc-avatar {
+                order: 2;
+            }
+
+            .fyc-msg.is-user .fyc-bubble {
+                order: 1;
+                margin-left: auto;
+            }
+
+        /* Mentor and system messages: left side */
+        .fyc-msg.is-ai,
+        .fyc-msg.is-service,
+        .fyc-msg.is-thinking {
+            justify-content: flex-start;
+        }
+
+            .fyc-msg.is-ai .fyc-avatar,
+            .fyc-msg.is-service .fyc-avatar,
+            .fyc-msg.is-thinking .fyc-avatar {
+                order: 1;
+            }
+
+            .fyc-msg.is-ai .fyc-bubble,
+            .fyc-msg.is-service .fyc-bubble,
+            .fyc-msg.is-thinking .fyc-bubble {
+                order: 2;
+                margin-right: auto;
+            }
 
     .fyc-avatar {
         width: 32px;
@@ -626,6 +659,9 @@
                 <form method="post" asp-page-handler="NewChat">
                     @Html.AntiForgeryToken()
                     <input type="hidden"
+                           name="projectId"
+                           value="@Model.ProjectId" />
+                    <input type="hidden"
                            name="ideaId"
                            value="@Model.SelectedIdeaId" />
 
@@ -657,6 +693,7 @@
                         <div class="fyc-session @(isActive ? "is-active" : "")">
                             <a class="fyc-session-link"
                                asp-page="./MentorChat"
+                               asp-route-projectId="@Model.ProjectId"
                                asp-route-ideaId="@Model.SelectedIdeaId"
                                asp-route-chatId="@chat.Id"
                                title="@chat.Title">
@@ -672,10 +709,12 @@
                             </a>
 
                             <form method="post"
-                                  asp-page-handler="DeleteChat"
-                                  onsubmit="return confirm('Delete this conversation?');">
+                                  asp-page-handler="DeleteChat">
 
                                 @Html.AntiForgeryToken()
+                                <input type="hidden"
+                                       name="projectId"
+                                       value="@Model.ProjectId" />
 
                                 <input type="hidden"
                                        name="ideaId"
@@ -824,6 +863,9 @@
                   class="fyc-composer">
 
                 @Html.AntiForgeryToken()
+                <input type="hidden"
+                       name="projectId"
+                       value="@Model.ProjectId" />
 
                 <input type="hidden"
                        name="ideaId"
