@@ -17,14 +17,23 @@ public class DocumentationGeneratorModel : PageModel
 {
     private readonly IDocumentationGeneratorService _documentationGeneratorService;
     private readonly ApplicationDbContext _db;
+    private readonly IProjectAccessService _projectAccessService;
+    private readonly IActiveProjectService _activeProjectService;
 
     public DocumentationGeneratorModel(
         IDocumentationGeneratorService documentationGeneratorService,
-        ApplicationDbContext db)
+        ApplicationDbContext db,
+        IProjectAccessService projectAccessService,
+        IActiveProjectService activeProjectService)
     {
         _documentationGeneratorService = documentationGeneratorService;
         _db = db;
+        _projectAccessService = projectAccessService;
+        _activeProjectService = activeProjectService;
     }
+
+    [BindProperty(SupportsGet = true)]
+    public int ProjectId { get; set; }
 
     [BindProperty]
     public new GenerateDocumentationRequest Request { get; set; } = new();
@@ -70,6 +79,80 @@ public class DocumentationGeneratorModel : PageModel
         _ => ("bg-secondary", review.Status),
     };
 
+    private async Task<IActionResult?> LoadProjectContextAsync(
+        int userId,
+        CancellationToken cancellationToken)
+    {
+        /*
+         * Use projectId from the URL or posted form when
+         * available. Otherwise restore the student's active
+         * project workspace.
+         */
+        if (ProjectId <= 0)
+        {
+            var activeProjectId =
+                await _activeProjectService
+                    .GetActiveProjectIdAsync(
+                        userId,
+                        cancellationToken);
+
+            if (!activeProjectId.HasValue)
+            {
+                TempData["Error"] =
+                    "Choose a project before opening "
+                    + "SE Documentation.";
+
+                return RedirectToPage(
+                    "/Student/MyProjects");
+            }
+
+            ProjectId = activeProjectId.Value;
+        }
+
+        /*
+         * Never trust projectId directly from the request.
+         */
+        var access =
+            await _projectAccessService.GetAccessAsync(
+                ProjectId,
+                userId,
+                "student",
+                cancellationToken);
+
+        if (access == null)
+        {
+            TempData["Error"] =
+                "You do not have access to that project.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        var projectExists =
+            await _db.Projects
+                .AsNoTracking()
+                .AnyAsync(
+                    item => item.Id == ProjectId,
+                    cancellationToken);
+
+        if (!projectExists)
+        {
+            TempData["Error"] =
+                "The selected project could not be found.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        await _activeProjectService.RememberPageAsync(
+            userId,
+            ProjectId,
+            "/Student/DocumentationGenerator",
+            cancellationToken);
+
+        return null;
+    }
+
     private async Task LoadLatestReviewAsync(int ideaId, int userId)
     {
         LatestReview = await _db.AiOutputReviews
@@ -82,28 +165,47 @@ public class DocumentationGeneratorModel : PageModel
             .FirstOrDefaultAsync();
     }
 
-    public async Task OnGetAsync(int? projectIdeaId)
+    public async Task<IActionResult> OnGetAsync(
+        int? projectIdeaId,
+        CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
 
-        await LoadProjectIdeasAsync(userId);
+        var contextResult =
+            await LoadProjectContextAsync(
+                userId,
+                cancellationToken);
 
-        var ideaIdToLoad = projectIdeaId;
-
-        if (!ideaIdToLoad.HasValue || ideaIdToLoad.Value <= 0)
+        if (contextResult != null)
         {
-            var selectedIdea = ProjectIdeas.FirstOrDefault(idea =>
-                GetBoolValue(idea, "IsSelected", "Selected"));
-
-            if (selectedIdea != null)
-            {
-                ideaIdToLoad = GetIntValue(selectedIdea, "Id");
-            }
+            return contextResult;
         }
 
-        if (ideaIdToLoad.HasValue && ideaIdToLoad.Value > 0)
+        await LoadProjectIdeasAsync(
+            userId,
+            cancellationToken);
+
+        /*
+         * Documentation is scoped to the active project.
+         * A supplied idea ID is accepted only when it is the
+         * idea selected for this project.
+         */
+        var ideaIdToLoad =
+            projectIdeaId.HasValue &&
+            ProjectIdeas.Any(idea =>
+                idea.Id == projectIdeaId.Value)
+                ? projectIdeaId
+                : ProjectIdeas
+                    .Select(idea => (int?)idea.Id)
+                    .FirstOrDefault();
+
+        if (ideaIdToLoad.HasValue &&
+            ideaIdToLoad.Value > 0)
         {
-            await LoadSelectedIdeaIntoFormAsync(ideaIdToLoad.Value, userId);
+            await LoadSelectedIdeaIntoFormAsync(
+                ideaIdToLoad.Value,
+                userId,
+                cancellationToken);
         }
         else
         {
@@ -114,22 +216,48 @@ public class DocumentationGeneratorModel : PageModel
         }
 
         BuildProjectIdeaOptions();
+
+        return Page();
     }
 
-    public async Task<IActionResult> OnPostAsync()
+    public async Task<IActionResult> OnPostAsync(
+        CancellationToken cancellationToken)
     {
-        return await OnPostGenerateAsync();
+        return await OnPostGenerateAsync(
+            cancellationToken);
     }
 
-    public async Task<IActionResult> OnPostGenerateAsync()
+    public async Task<IActionResult> OnPostGenerateAsync(
+        CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
 
-        await LoadProjectIdeasAsync(userId);
+        var contextResult =
+            await LoadProjectContextAsync(
+                userId,
+                cancellationToken);
 
-        if (SelectedProjectIdeaId <= 0 && Request.ProjectIdeaId > 0)
+        if (contextResult != null)
         {
-            SelectedProjectIdeaId = Request.ProjectIdeaId;
+            return contextResult;
+        }
+
+        await LoadProjectIdeasAsync(
+            userId,
+            cancellationToken);
+
+        if (SelectedProjectIdeaId <= 0 &&
+            Request.ProjectIdeaId > 0)
+        {
+            SelectedProjectIdeaId =
+                Request.ProjectIdeaId;
+        }
+
+        if (SelectedProjectIdeaId <= 0 &&
+            ProjectIdeas.Count == 1)
+        {
+            SelectedProjectIdeaId =
+                ProjectIdeas[0].Id;
         }
 
         if (SelectedProjectIdeaId <= 0)
@@ -140,7 +268,10 @@ public class DocumentationGeneratorModel : PageModel
             return Page();
         }
 
-        var idea = await GetUserProjectIdeaAsync(SelectedProjectIdeaId, userId);
+        var idea = await GetUserProjectIdeaAsync(
+            SelectedProjectIdeaId,
+            userId,
+            cancellationToken);
 
         if (idea == null)
         {
@@ -192,20 +323,30 @@ public class DocumentationGeneratorModel : PageModel
         return Page();
     }
 
-    private async Task LoadProjectIdeasAsync(int userId)
+    private async Task LoadProjectIdeasAsync(
+        int userId,
+        CancellationToken cancellationToken)
     {
-        var allIdeas = await _db.Set<ProjectIdea>()
+        /*
+         * Load only the idea selected for the active project.
+         * This also supports collaborators because ownership of
+         * the idea is not used as the project-access rule.
+         */
+        var project = await _db.Projects
             .AsNoTracking()
-            .ToListAsync();
+            .Include(item => item.ProjectIdea)
+            .FirstOrDefaultAsync(
+                item =>
+                    item.Id == ProjectId &&
+                    item.Members.Any(member =>
+                        member.UserId == userId &&
+                        member.Status == "active"),
+                cancellationToken);
 
-        ProjectIdeas = allIdeas
-            .Where(idea =>
-            {
-                var ideaUserId = GetIntValue(idea, "UserId", "StudentId", "CreatedByUserId", "OwnerId");
-                return ideaUserId.HasValue && ideaUserId.Value == userId;
-            })
-            .OrderByDescending(idea => GetDateTimeValue(idea, "CreatedAt", "CreatedOn", "DateCreated") ?? DateTime.MinValue)
-            .ToList();
+        ProjectIdeas =
+            project?.ProjectIdea == null
+                ? []
+                : [project.ProjectIdea];
 
         BuildProjectIdeaOptions();
     }
@@ -242,9 +383,15 @@ public class DocumentationGeneratorModel : PageModel
         }
     }
 
-    private async Task LoadSelectedIdeaIntoFormAsync(int ideaId, int userId)
+    private async Task LoadSelectedIdeaIntoFormAsync(
+        int ideaId,
+        int userId,
+        CancellationToken cancellationToken)
     {
-        var idea = await GetUserProjectIdeaAsync(ideaId, userId);
+        var idea = await GetUserProjectIdeaAsync(
+            ideaId,
+            userId,
+            cancellationToken);
 
         if (idea == null)
         {
@@ -265,25 +412,24 @@ public class DocumentationGeneratorModel : PageModel
         await LoadLatestReviewAsync(ideaId, userId);
     }
 
-    private async Task<ProjectIdea?> GetUserProjectIdeaAsync(int ideaId, int userId)
+    private async Task<ProjectIdea?> GetUserProjectIdeaAsync(
+        int ideaId,
+        int userId,
+        CancellationToken cancellationToken)
     {
-        var idea = await _db.Set<ProjectIdea>()
+        var project = await _db.Projects
             .AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == ideaId);
+            .Include(item => item.ProjectIdea)
+            .FirstOrDefaultAsync(
+                item =>
+                    item.Id == ProjectId &&
+                    item.ProjectIdeaId == ideaId &&
+                    item.Members.Any(member =>
+                        member.UserId == userId &&
+                        member.Status == "active"),
+                cancellationToken);
 
-        if (idea == null)
-        {
-            return null;
-        }
-
-        var ideaUserId = GetIntValue(idea, "UserId", "StudentId", "CreatedByUserId", "OwnerId");
-
-        if (!ideaUserId.HasValue || ideaUserId.Value != userId)
-        {
-            return null;
-        }
-
-        return idea;
+        return project?.ProjectIdea;
     }
 
     private GenerateDocumentationRequest BuildRequestFromIdea(ProjectIdea idea)

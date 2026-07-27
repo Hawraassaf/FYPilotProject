@@ -141,7 +141,17 @@ public sealed class ActiveProjectService(
 
         return true;
     }
+    public async Task<int?> GetActiveProjectIdAsync(
+    int userId,
+    CancellationToken cancellationToken = default)
+    {
+        var destination =
+            await GetResumeDestinationAsync(
+                userId,
+                cancellationToken);
 
+        return destination?.ProjectId;
+    }
     public async Task<ActiveProjectDestination?>
         GetResumeDestinationAsync(
             int userId,

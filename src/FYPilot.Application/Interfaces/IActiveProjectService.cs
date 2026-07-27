@@ -19,6 +19,10 @@ public interface IActiveProjectService
     /// Remembers the page the student successfully visited
     /// inside a project.
     /// </summary>
+    /// 
+    Task<int?> GetActiveProjectIdAsync(
+    int userId,
+    CancellationToken cancellationToken = default);
     Task<bool> RememberPageAsync(
         int userId,
         int projectId,
