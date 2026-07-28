@@ -22,6 +22,10 @@ public class TeamManagementModel(
     ILogger<TeamManagementModel> logger)
     : PageModel
 {
+    private const int MaximumCollaborators = 20;
+    private const int MaximumProjectMembers =
+        MaximumCollaborators + 1;
+
     [BindProperty(SupportsGet = true)]
     public int ProjectId { get; set; }
 
@@ -35,6 +39,12 @@ public class TeamManagementModel(
         "Untitled Project";
 
     public int MaximumMembers { get; private set; } = 1;
+
+    public int CollaboratorCapacity =>
+        Math.Max(0, MaximumMembers - 1);
+
+    public int MaximumCollaboratorsAllowed =>
+        MaximumCollaborators;
 
     public List<MemberItem> ActiveMembers
     {
@@ -181,7 +191,7 @@ public class TeamManagementModel(
     public async Task<IActionResult>
         OnPostUpdateCapacityAsync(
             int projectId,
-            int maximumMembers,
+            int collaboratorCapacity,
             CancellationToken cancellationToken)
     {
         ProjectId = projectId;
@@ -194,13 +204,22 @@ public class TeamManagementModel(
                 "/Account/Login");
         }
 
-        if (maximumMembers is < 1 or > 3)
+        if (collaboratorCapacity is < 0 or >
+            MaximumCollaborators)
         {
             TempData["Error"] =
-                "Team size must be 1, 2, or 3.";
+                $"Choose between 0 and "
+                + $"{MaximumCollaborators} collaborators.";
 
             return RedirectToTeamPage();
         }
+
+        /*
+         * MaximumMembers stores the complete team:
+         * one owner plus the selected collaborators.
+         */
+        var maximumMembers =
+            collaboratorCapacity + 1;
 
         var access =
             await projectAccessService.GetAccessAsync(
@@ -308,7 +327,7 @@ public class TeamManagementModel(
                 Math.Clamp(
                     project.MaximumMembers,
                     1,
-                    3);
+                    MaximumProjectMembers);
 
             if (oldMaximum == maximumMembers)
             {
@@ -335,9 +354,11 @@ public class TeamManagementModel(
                     ActionType =
                         "team_capacity_updated",
                     Description =
-                        $"The project team size was changed "
-                        + $"from {oldMaximum} to "
-                        + $"{maximumMembers}.",
+                        $"The collaborator capacity was changed "
+                        + $"from {Math.Max(0, oldMaximum - 1)} "
+                        + $"to {collaboratorCapacity}. "
+                        + $"The complete team capacity is now "
+                        + $"{maximumMembers} member(s).",
                     CreatedAtUtc = now
                 });
 
@@ -348,20 +369,12 @@ public class TeamManagementModel(
                 cancellationToken);
 
             TempData["Success"] =
-                maximumMembers switch
-                {
-                    1 =>
-                        "The project is now configured "
-                        + "as an individual project.",
-
-                    2 =>
-                        "The project now supports the owner "
-                        + "and one collaborator.",
-
-                    _ =>
-                        "The project now supports the owner "
-                        + "and up to two collaborators."
-                };
+                collaboratorCapacity == 0
+                    ? "The project is now configured "
+                      + "for the owner only."
+                    : "The project now supports one owner "
+                      + $"and up to {collaboratorCapacity} "
+                      + "collaborator(s).";
 
             return RedirectToTeamPage();
         }
@@ -479,7 +492,7 @@ public class TeamManagementModel(
                 Math.Clamp(
                     project.MaximumMembers,
                     1,
-                    3);
+                    MaximumProjectMembers);
 
             if (project.MaximumMembers == 1)
             {
@@ -487,9 +500,10 @@ public class TeamManagementModel(
                     cancellationToken);
 
                 TempData["Error"] =
-                    "This is an individual project. "
-                    + "Change the team size to 2 or 3 "
-                    + "before inviting a collaborator.";
+                    "This project currently has no "
+                    + "collaborator positions. Increase "
+                    + "the collaborator capacity before "
+                    + "sending an invitation.";
 
                 return RedirectToTeamPage();
             }
@@ -1371,7 +1385,7 @@ public class TeamManagementModel(
             Math.Clamp(
                 project.MaximumMembers,
                 1,
-                3);
+                MaximumProjectMembers);
 
         ActiveMembers = project.Members
             .Where(member =>

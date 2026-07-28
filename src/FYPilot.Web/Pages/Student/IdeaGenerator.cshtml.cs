@@ -24,6 +24,9 @@ public class IdeaGeneratorModel(
     private const int IdeasPerView = 2;
     private const int IdeasPerGeneration = 4;
     private const int SharedCandidatePoolSize = 12;
+    private const int MaximumCollaborators = 20;
+    private const int MaximumProjectMembers =
+        MaximumCollaborators + 1;
 
     private string IdeaGroupSessionKey =>
         $"IdeaGroupIndex:{ProjectId}";
@@ -160,12 +163,6 @@ public class IdeaGeneratorModel(
         [Range(1, 60, ErrorMessage = "Available hours must be between 1 and 60.")]
         public int AvailableHours { get; set; } = 20;
 
-        [Range(
-    1,
-    3,
-    ErrorMessage =
-        "Team size must be between 1 and 3.")]
-        public int TeamSize { get; set; } = 1;
     }
 
     public async Task<IActionResult> OnGetAsync(
@@ -210,16 +207,6 @@ public class IdeaGeneratorModel(
          * the logged-in student.
          */
         await LoadProfileIntoInputAsync(userId);
-
-        /*
-         * Team size belongs to this project, so the
-         * project's saved value takes priority over the
-         * general profile value.
-         */
-        Input.TeamSize = Math.Clamp(
-            CurrentProject!.MaximumMembers,
-            1,
-            3);
 
         await LoadPageDataAsync(userId);
 
@@ -287,61 +274,11 @@ public class IdeaGeneratorModel(
 
         CurrentProject = project;
 
-        var activeMembersCount = await db.ProjectMembers
-            .AsNoTracking()
-            .CountAsync(
-                member =>
-                    member.ProjectId == ProjectId &&
-                    member.Status == "active",
-                cancellationToken);
-
-        if (activeMembersCount > 3)
-        {
-            ErrorMessage =
-                "This project contains more than the "
-                + "supported maximum of three members.";
-
-            return Page();
-        }
-
-        var selectedTeamSize =
-            Math.Clamp(Input.TeamSize, 1, 3);
-
         /*
-         * Only the owner changes project capacity.
-         * Collaborators use the saved project capacity.
+         * Team capacity is managed only from Team Management.
+         * Idea Generator reads the project's saved capacity
+         * as AI context and never changes it.
          */
-        if (ProjectAccess?.IsOwner == true)
-        {
-            if (selectedTeamSize < activeMembersCount)
-            {
-                ModelState.AddModelError(
-                    "Input.TeamSize",
-                    $"This project already has "
-                    + $"{activeMembersCount} active member(s).");
-
-                ErrorMessage =
-                    "Team size cannot be smaller than the "
-                    + "current number of active members.";
-
-                return Page();
-            }
-
-            project.MaximumMembers = selectedTeamSize;
-            project.UpdatedAt = DateTime.UtcNow;
-        }
-        else
-        {
-            selectedTeamSize = Math.Max(
-                Math.Clamp(
-                    project.MaximumMembers,
-                    1,
-                    3),
-                activeMembersCount);
-
-            Input.TeamSize = selectedTeamSize;
-        }
-
         var aiRequest = BuildAiRequest(
             regenerate: false,
             previousIdeaTitles: []);
@@ -533,11 +470,6 @@ public class IdeaGeneratorModel(
         }
 
         await LoadProfileIntoInputAsync(userId);
-
-        Input.TeamSize = Math.Clamp(
-            CurrentProject!.MaximumMembers,
-            1,
-            3);
 
         await LoadPageDataAsync(userId);
 
@@ -881,7 +813,7 @@ public class IdeaGeneratorModel(
                 Math.Clamp(
                     project.MaximumMembers,
                     1,
-                    3);
+                    MaximumProjectMembers);
 
             project.UpdatedAt = now;
 
@@ -1270,7 +1202,10 @@ public class IdeaGeneratorModel(
             TargetDifficulty: Input.TargetDifficulty.Trim().ToLowerInvariant(),
             PreferredStack: "ASP.NET Core Razor Pages, Python FastAPI, PostgreSQL",
             AvailableHoursPerWeek: Input.AvailableHours,
-            TeamMembers: Input.TeamSize,
+            TeamMembers: Math.Clamp(
+                CurrentProject?.MaximumMembers ?? 1,
+                1,
+                MaximumProjectMembers),
             ProjectGoals: "Build a useful final year project based on the student's skills and preferred domain.",
             Regenerate: regenerate,
             PreviousIdeaTitles: previousIdeaTitles,
@@ -1423,17 +1358,8 @@ public class IdeaGeneratorModel(
             .FirstOrDefaultAsync(
                 item => item.UserId == userId);
 
-        /*
-         * Even without a student profile, use the current
-         * project's saved team size.
-         */
         if (profile == null)
         {
-            Input.TeamSize = Math.Clamp(
-                CurrentProject?.MaximumMembers ?? 1,
-                1,
-                3);
-
             return;
         }
 
@@ -1467,18 +1393,7 @@ public class IdeaGeneratorModel(
             AvailableHours =
                 profile.AvailableHoursPerWeek <= 0
                     ? 20
-                    : profile.AvailableHoursPerWeek,
-
-            /*
-             * Project value has priority.
-             */
-            TeamSize = Math.Clamp(
-                CurrentProject?.MaximumMembers
-                ?? (profile.TeamMembers <= 0
-                    ? 1
-                    : profile.TeamMembers),
-                1,
-                3)
+                    : profile.AvailableHoursPerWeek
         };
     }
 

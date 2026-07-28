@@ -1,6 +1,10 @@
+@using System.Collections.Generic
+@using System.Linq
 @using Microsoft.EntityFrameworkCore
+@using FYPilot.Application.Interfaces
 @using FYPilot.Infrastructure.Data
 @inject ApplicationDbContext Db
+@inject IActiveProjectService ActiveProjectService
 
 <!DOCTYPE html>
 <html lang="en">
@@ -16,6 +20,367 @@
     <link rel="stylesheet"
           href="~/css/student-onboarding-tour.css"
           asp-append-version="true" />
+
+
+    <style>
+        /* Student active-project switcher — scoped to the top navigation. */
+        .app-topbar {
+            position: relative;
+        }
+
+        .topbar-project-switcher {
+            position: absolute;
+            left: 50%;
+            z-index: 1060;
+            width: min(390px, 34vw);
+            transform: translateX(-50%);
+        }
+
+        .topbar-project-trigger {
+            width: 100%;
+            min-height: 52px;
+            display: grid;
+            grid-template-columns: 38px minmax(0, 1fr) auto 18px;
+            align-items: center;
+            gap: 10px;
+            padding: 7px 12px 7px 8px;
+            color: #1f2d4d;
+            text-align: left;
+            background:
+                linear-gradient(180deg, #ffffff 0%, #f8faff 100%);
+            border: 1px solid #dce5f2;
+            border-radius: 15px;
+            box-shadow:
+                0 9px 24px rgba(30, 52, 91, .08),
+                inset 0 1px 0 rgba(255, 255, 255, .9);
+            transition:
+                border-color .18s ease,
+                box-shadow .18s ease,
+                transform .18s ease;
+        }
+
+        .topbar-project-trigger:hover,
+        .topbar-project-trigger[aria-expanded="true"] {
+            border-color: #9fb4d5;
+            box-shadow:
+                0 13px 30px rgba(30, 52, 91, .13),
+                0 0 0 3px rgba(81, 108, 141, .08);
+            transform: translateY(-1px);
+        }
+
+        .topbar-project-trigger:focus-visible {
+            outline: 3px solid rgba(81, 108, 141, .22);
+            outline-offset: 2px;
+        }
+
+        .topbar-project-trigger-icon {
+            width: 38px;
+            height: 38px;
+            display: grid;
+            place-items: center;
+            color: #ffffff;
+            background:
+                linear-gradient(145deg, #28385e, #516c8d);
+            border-radius: 12px;
+            box-shadow: 0 7px 16px rgba(40, 56, 94, .2);
+        }
+
+        .topbar-project-trigger-copy {
+            min-width: 0;
+        }
+
+        .topbar-project-trigger-copy small,
+        .topbar-project-trigger-copy strong {
+            display: block;
+        }
+
+        .topbar-project-trigger-copy small {
+            margin-bottom: 1px;
+            color: #8290a5;
+            font-size: .61rem;
+            font-weight: 800;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+        }
+
+        .topbar-project-trigger-copy strong {
+            overflow: hidden;
+            color: #18233e;
+            font-size: .79rem;
+            font-weight: 800;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .topbar-project-count {
+            min-width: 27px;
+            height: 27px;
+            display: grid;
+            place-items: center;
+            padding: 0 7px;
+            color: #405577;
+            background: #edf2f8;
+            border: 1px solid #dde6f1;
+            border-radius: 999px;
+            font-size: .65rem;
+            font-weight: 850;
+        }
+
+        .topbar-project-chevron {
+            color: #8190a5;
+            font-size: .72rem;
+            transition: transform .18s ease;
+        }
+
+        .topbar-project-trigger[aria-expanded="true"]
+        .topbar-project-chevron {
+            transform: rotate(180deg);
+        }
+
+        .topbar-project-menu {
+            width: min(430px, calc(100vw - 24px));
+            max-height: min(570px, calc(100vh - 110px));
+            margin-top: 10px !important;
+            padding: 0;
+            overflow: hidden;
+            background: rgba(255, 255, 255, .98);
+            border: 1px solid #dfe6f0;
+            border-radius: 18px;
+            box-shadow: 0 24px 58px rgba(24, 37, 66, .18);
+            backdrop-filter: blur(16px);
+        }
+
+        .topbar-project-menu-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 14px;
+            padding: 15px 16px 13px;
+            background:
+                radial-gradient(
+                    circle at 88% 8%,
+                    rgba(255, 255, 255, .17),
+                    transparent 27%),
+                linear-gradient(135deg, #28385e, #405577 72%, #516c8d);
+        }
+
+        .topbar-project-menu-head span,
+        .topbar-project-menu-head strong,
+        .topbar-project-menu-head small {
+            display: block;
+        }
+
+        .topbar-project-menu-head span {
+            color: rgba(255, 255, 255, .62);
+            font-size: .59rem;
+            font-weight: 850;
+            letter-spacing: .1em;
+            text-transform: uppercase;
+        }
+
+        .topbar-project-menu-head strong {
+            margin-top: 2px;
+            color: #ffffff;
+            font-size: .91rem;
+            font-weight: 820;
+        }
+
+        .topbar-project-menu-head small {
+            max-width: 270px;
+            margin-top: 3px;
+            color: rgba(255, 255, 255, .68);
+            font-size: .67rem;
+            line-height: 1.45;
+        }
+
+        .topbar-project-menu-total {
+            flex: 0 0 auto;
+            min-width: 38px;
+            height: 38px;
+            display: grid;
+            place-items: center;
+            color: #28385e;
+            background: #ffffff;
+            border-radius: 12px;
+            font-size: .72rem;
+            font-weight: 850;
+        }
+
+        .topbar-project-options {
+            max-height: 370px;
+            padding: 8px;
+            overflow-y: auto;
+        }
+
+        .topbar-project-option-form {
+            margin: 0;
+        }
+
+        .topbar-project-option {
+            width: 100%;
+            display: grid;
+            grid-template-columns: 38px minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 10px;
+            margin: 0;
+            padding: 10px;
+            color: #273650;
+            text-align: left;
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 13px;
+            transition:
+                background .16s ease,
+                border-color .16s ease,
+                transform .16s ease;
+        }
+
+        .topbar-project-option:hover {
+            background: #f4f7fb;
+            border-color: #e1e7f0;
+            transform: translateX(2px);
+        }
+
+        .topbar-project-option.is-active {
+            background:
+                linear-gradient(135deg, #eef3fa, #f8faff);
+            border-color: #cbd8e9;
+            box-shadow: inset 3px 0 0 #516c8d;
+        }
+
+        .topbar-project-option-icon {
+            width: 38px;
+            height: 38px;
+            display: grid;
+            place-items: center;
+            color: #516c8d;
+            background: #edf2f7;
+            border-radius: 12px;
+        }
+
+        .topbar-project-option.is-active
+        .topbar-project-option-icon {
+            color: #ffffff;
+            background: linear-gradient(145deg, #28385e, #516c8d);
+        }
+
+        .topbar-project-option-copy {
+            min-width: 0;
+        }
+
+        .topbar-project-option-copy strong,
+        .topbar-project-option-copy small {
+            display: block;
+        }
+
+        .topbar-project-option-copy strong {
+            overflow: hidden;
+            color: #17223d;
+            font-size: .76rem;
+            font-weight: 800;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .topbar-project-option-copy small {
+            overflow: hidden;
+            margin-top: 2px;
+            color: #7b889c;
+            font-size: .63rem;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .topbar-project-option-meta {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 4px;
+        }
+
+        .topbar-project-role,
+        .topbar-project-active-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 7px;
+            border-radius: 999px;
+            font-size: .55rem;
+            font-weight: 850;
+            white-space: nowrap;
+        }
+
+        .topbar-project-role {
+            color: #53657e;
+            background: #edf1f6;
+        }
+
+        .topbar-project-active-label {
+            color: #137957;
+            background: #e9f8f1;
+        }
+
+        .topbar-project-menu-footer {
+            padding: 9px;
+            background: #f8fafc;
+            border-top: 1px solid #e6ebf2;
+        }
+
+        .topbar-project-manage-link {
+            min-height: 39px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 7px;
+            color: #405577;
+            text-decoration: none;
+            border: 1px solid #dfe6ef;
+            border-radius: 11px;
+            background: #ffffff;
+            font-size: .68rem;
+            font-weight: 800;
+        }
+
+        .topbar-project-manage-link:hover {
+            color: #28385e;
+            background: #eef2f7;
+            border-color: #cfd9e7;
+        }
+
+        @@media (max-width: 1199.98px) {
+            .topbar-project-switcher {
+                position: static;
+                width: 265px;
+                margin-left: auto;
+                transform: none;
+            }
+        }
+
+        @@media (max-width: 899.98px) {
+            .topbar-project-switcher {
+                width: 205px;
+            }
+
+            .topbar-project-trigger {
+                grid-template-columns: 34px minmax(0, 1fr) 16px;
+            }
+
+            .topbar-project-trigger-icon {
+                width: 34px;
+                height: 34px;
+            }
+
+            .topbar-project-count {
+                display: none;
+            }
+        }
+
+        @@media (max-width: 639.98px) {
+            .topbar-project-switcher {
+                display: none;
+            }
+        }
+    </style>
 
     @RenderSection("Head", required: false)
 </head>
@@ -35,10 +400,21 @@
             StringComparison.OrdinalIgnoreCase);
 
         var path = Context.Request.Path.Value ?? "";
-
+        var projectSwitcherDestination =
+    ActiveProjectService.IsAllowedProjectPage(path)
+        ? path
+        : "/Student/Dashboard";
         string? navProfileImagePath = null;
         string? topbarProfileHref = null;
         int? currentUserIdForOnboarding = null;
+        int? activeProjectId = null;
+
+        var studentProjectSwitcherItems =
+            new List<(
+                int Id,
+                string Title,
+                string Role,
+                string IdeaTitle)>();
 
         if (isAuth)
         {
@@ -68,6 +444,75 @@
                         .Where(p => p.UserId == navUserId)
                         .Select(p => p.ProfileImagePath)
                         .FirstOrDefaultAsync();
+
+                    activeProjectId =
+                        await ActiveProjectService
+                            .GetActiveProjectIdAsync(
+                                navUserId);
+
+                    /*
+                     * Load only projects where the logged-in
+                     * student still has an active membership.
+                     * This is the same access scope used by
+                     * My Projects and Continue Project.
+                     */
+                    var accessibleProjects =
+                        await Db.Projects
+                            .AsNoTracking()
+                            .Where(project =>
+                                project.Members.Any(member =>
+                                    member.UserId == navUserId &&
+                                    member.Status == "active"))
+                            .Select(project => new
+                            {
+                                project.Id,
+                                project.Title,
+                                Role = project.Members
+                                    .Where(member =>
+                                        member.UserId == navUserId &&
+                                        member.Status == "active")
+                                    .Select(member => member.Role)
+                                    .FirstOrDefault(),
+
+                                IdeaTitle = project.ProjectIdea != null
+                                    ? project.ProjectIdea.Title
+                                    : null,
+
+                                project.UpdatedAt
+                            })
+                            .OrderByDescending(project =>
+                                project.UpdatedAt)
+                            .ThenByDescending(project =>
+                                project.Id)
+                            .ToListAsync();
+
+                    studentProjectSwitcherItems =
+                        accessibleProjects
+                            .OrderByDescending(project =>
+                                activeProjectId.HasValue &&
+                                project.Id ==
+                                    activeProjectId.Value)
+                            .ThenByDescending(project =>
+                                project.UpdatedAt)
+                            .ThenByDescending(project =>
+                                project.Id)
+                            .Select(project =>
+                                (
+                                    project.Id,
+                                    string.IsNullOrWhiteSpace(
+                                        project.Title)
+                                        ? "Untitled Project"
+                                        : project.Title.Trim(),
+                                    string.IsNullOrWhiteSpace(
+                                        project.Role)
+                                        ? "collaborator"
+                                        : project.Role.Trim(),
+                                    string.IsNullOrWhiteSpace(
+                                        project.IdeaTitle)
+                                        ? "No official idea selected"
+                                        : project.IdeaTitle.Trim()
+                                ))
+                            .ToList();
                 }
                 else if (role == "supervisor")
                 {
@@ -86,7 +531,8 @@
             string href,
             string icon,
             string label,
-            string? tourKey = null)
+            string? tourKey = null,
+            int? projectId = null)
         {
             var active =
                 path.Equals(
@@ -97,13 +543,18 @@
                         href,
                         StringComparison.OrdinalIgnoreCase));
 
+            var targetHref =
+                projectId.HasValue
+                    ? $"{href}?projectId={projectId.Value}"
+                    : href;
+
             var tourAttribute =
                 string.IsNullOrWhiteSpace(tourKey)
                     ? string.Empty
                     : $" data-tour=\"{tourKey}\"";
 
             return
-                $"<a href=\"{href}\" " +
+                $"<a href=\"{targetHref}\" " +
                 $"class=\"side-nav-link{(active ? " active" : "")}\"" +
                 $"{tourAttribute}>" +
                 $"<i class=\"bi bi-{icon}\"></i>" +
@@ -177,22 +628,22 @@
                         @if (role == "student")
                         {
                             <li><span class="side-nav-label">My Workspace</span></li>
-                            <li>@Html.Raw(NavLink("/Student/Dashboard", "grid", "Dashboard", "dashboard-link"))</li>
+                            <li>@Html.Raw(NavLink("/Student/Dashboard", "grid", "Dashboard", "dashboard-link", activeProjectId))</li>
                             <li>  @Html.Raw( NavLink( "/Student/MyProjects",  "folder2-open", "My Projects", "my-projects")) </li>
                             <li>@Html.Raw(NavLink("/Student/SkillAssessment", "bar-chart-line", "Skill Assessment", "skill-assessment"))</li>
 
                             <li><span class="side-nav-label">AI Planning</span></li>
-                            <li>@Html.Raw(NavLink("/Student/IdeaGenerator", "lightbulb", "Idea Generator", "idea-generator"))</li>
-                            <li>@Html.Raw(NavLink("/Student/MarketDemand", "graph-up-arrow", "Market Demand", "market-demand"))</li>
-                            <li>@Html.Raw(NavLink("/Student/IdeaComparison", "columns-gap", "Idea Comparison", "idea-comparison"))</li>
-                            <li>@Html.Raw(NavLink("/Student/ProjectDNA", "diagram-3", "Project DNA", "project-dna"))</li>
-                            <li>@Html.Raw(NavLink("/Student/Roadmap", "map", "Roadmap", "roadmap"))</li>
-                            <li>@Html.Raw(NavLink("/Student/DocumentationGenerator", "journal-code", "SE Documentation", "se-documentation"))</li>
+                            <li>@Html.Raw(NavLink("/Student/IdeaGenerator", "lightbulb", "Idea Generator", "idea-generator", activeProjectId))</li>
+                            <li>@Html.Raw(NavLink("/Student/MarketDemand", "graph-up-arrow", "Market Demand", "market-demand", activeProjectId))</li>
+                            <li>@Html.Raw(NavLink("/Student/IdeaComparison", "columns-gap", "Idea Comparison", "idea-comparison", activeProjectId))</li>
+                            <li>@Html.Raw(NavLink("/Student/ProjectDNA", "diagram-3", "Project DNA", "project-dna", activeProjectId))</li>
+                            <li>@Html.Raw(NavLink("/Student/Roadmap", "map", "Roadmap", "roadmap", activeProjectId))</li>
+                            <li>@Html.Raw(NavLink("/Student/DocumentationGenerator", "journal-code", "SE Documentation", "se-documentation", activeProjectId))</li>
 
                             <li><span class="side-nav-label">Project Support</span></li>
-                            <li>@Html.Raw(NavLink("/Student/MentorChat", "chat-dots", "Mentor Chat", "mentor-chat"))</li>
-                            <li>@Html.Raw(NavLink("/Student/DefenseSimulator", "shield-check", "Defense Simulator", "defense-simulator"))</li>
-                            <li>@Html.Raw(NavLink("/Student/Feedback", "chat-square-text", "Supervisor Feedback", "supervisor-feedback"))</li>
+                            <li>@Html.Raw(NavLink("/Student/MentorChat", "chat-dots", "Mentor Chat", "mentor-chat", activeProjectId))</li>
+                            <li>@Html.Raw(NavLink("/Student/DefenseSimulator", "shield-check", "Defense Simulator", "defense-simulator", activeProjectId))</li>
+                            <li>@Html.Raw(NavLink("/Student/Feedback", "chat-square-text", "Supervisor Feedback", "supervisor-feedback", activeProjectId))</li>
                         }
 
                         @if (role == "supervisor")
@@ -300,6 +751,142 @@
                             </div>
                         }
                     </div>
+
+
+                    @if (role == "student" &&
+                         studentProjectSwitcherItems.Count > 0)
+                    {
+                        var activeProjectItem =
+                            activeProjectId.HasValue
+                                ? studentProjectSwitcherItems
+                                    .FirstOrDefault(project =>
+                                        project.Id ==
+                                            activeProjectId.Value)
+                                : default;
+
+                        var activeProjectTitle =
+                            activeProjectItem.Id > 0
+                                ? activeProjectItem.Title
+                                : "Choose a project";
+
+                        <div class="dropdown topbar-project-switcher">
+                            <button type="button"
+                                    class="topbar-project-trigger"
+                                    data-bs-toggle="dropdown"
+                                    data-bs-auto-close="outside"
+                                    aria-expanded="false"
+                                    aria-label="Switch active project">
+
+                                <span class="topbar-project-trigger-icon">
+                                    <i class="bi bi-folder2-open"></i>
+                                </span>
+
+                                <span class="topbar-project-trigger-copy">
+                                    <small>Active project</small>
+                                    <strong title="@activeProjectTitle">
+                                        @activeProjectTitle
+                                    </strong>
+                                </span>
+
+                                <span class="topbar-project-count"
+                                      title="Accessible projects">
+                                    @studentProjectSwitcherItems.Count
+                                </span>
+
+                                <i class="bi bi-chevron-down topbar-project-chevron"></i>
+                            </button>
+
+                            <div class="dropdown-menu topbar-project-menu">
+                                <div class="topbar-project-menu-head">
+                                    <div>
+                                        <span>Project switcher</span>
+                                        <strong>Enter another workspace</strong>
+                                        <small>
+                                            Selecting a project uses the same secure
+                                            flow as Continue Project.
+                                        </small>
+                                    </div>
+
+                                    <div class="topbar-project-menu-total">
+                                        @studentProjectSwitcherItems.Count
+                                    </div>
+                                </div>
+
+                                <div class="topbar-project-options">
+                                    @foreach (var project
+                                        in studentProjectSwitcherItems)
+                                    {
+                                        var isActiveProject =
+                                            activeProjectId.HasValue &&
+                                            project.Id ==
+                                                activeProjectId.Value;
+
+                                        var roleLabel =
+                                            string.Equals(
+                                                project.Role,
+                                                "owner",
+                                                StringComparison.OrdinalIgnoreCase)
+                                                ? "Owner"
+                                                : "Collaborator";
+
+                                        <form method="post"
+                                              asp-page="/Student/MyProjects"
+                                              asp-page-handler="OpenProject"
+                                              class="topbar-project-option-form">
+
+                                            @Html.AntiForgeryToken()
+
+                                            <input type="hidden"
+                                                   name="projectId"
+                                                   value="@project.Id" />
+
+                                            <input type="hidden"
+                                                   name="requestedPage"
+                                                   value="@projectSwitcherDestination" />
+
+                                            <button type="submit"
+                                                    class="topbar-project-option @(isActiveProject ? "is-active" : "")"
+                                                    title="Open @project.Title">
+
+                                                <span class="topbar-project-option-icon">
+                                                    <i class="bi @(isActiveProject ? "bi-lightning-charge-fill" : "bi-folder2")"></i>
+                                                </span>
+
+                                                <span class="topbar-project-option-copy">
+                                                    <strong>@project.Title</strong>
+                                                    <small title="@project.IdeaTitle">
+                                                        @project.IdeaTitle
+                                                    </small>
+                                                </span>
+
+                                                <span class="topbar-project-option-meta">
+                                                    @if (isActiveProject)
+                                                    {
+                                                        <span class="topbar-project-active-label">
+                                                            <i class="bi bi-circle-fill"></i>
+                                                            Active
+                                                        </span>
+                                                    }
+
+                                                    <span class="topbar-project-role">
+                                                        @roleLabel
+                                                    </span>
+                                                </span>
+                                            </button>
+                                        </form>
+                                    }
+                                </div>
+
+                                <div class="topbar-project-menu-footer">
+                                    <a asp-page="/Student/MyProjects"
+                                       class="topbar-project-manage-link">
+                                        <i class="bi bi-grid"></i>
+                                        Manage all projects
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    }
 
                     <div class="topbar-actions">
                         @if (role == "student")

@@ -271,7 +271,6 @@ public class IdeaComparisonModel(
                     + "for the project.";
 
                 return RedirectToPage(
-                    "/Student/Dashboard",
                     new
                     {
                         projectId = ProjectId
@@ -374,7 +373,7 @@ public class IdeaComparisonModel(
                 .ActivateProjectAsync(
                     userId,
                     ProjectId,
-                    "/Student/Dashboard",
+                    "/Student/IdeaComparison",
                     cancellationToken);
 
             TempData["Success"] = replacingIdea
@@ -382,7 +381,6 @@ public class IdeaComparisonModel(
                 : "The project idea was selected successfully.";
 
             return RedirectToPage(
-                "/Student/Dashboard",
                 new
                 {
                     projectId = ProjectId

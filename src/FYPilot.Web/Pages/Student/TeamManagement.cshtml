@@ -276,19 +276,21 @@
                         <div>
                             <h2>
                                 <i class="bi bi-sliders"></i>
-                                Team Capacity
+                                Collaborator Capacity
                             </h2>
 
                             <p>
-                                The owner is included in the selected
-                                number.
+                                The project owner is always included.
+                                Choose how many collaborator positions
+                                this project needs.
                             </p>
                         </div>
                     </header>
 
                     <form method="post"
                           asp-page-handler="UpdateCapacity"
-                          class="team-form">
+                          class="team-form"
+                          data-capacity-form>
 
                         @Html.AntiForgeryToken()
 
@@ -296,33 +298,72 @@
                                name="projectId"
                                value="@Model.ProjectId" />
 
-                        <label for="maximumMembers">
-                            Maximum project members
+                        <label for="collaboratorCapacity">
+                            Number of collaborators needed
                         </label>
 
-                        <select id="maximumMembers"
-                                name="maximumMembers"
-                                class="form-select">
+                        <div class="capacity-picker">
+                            <button type="button"
+                                    class="capacity-step"
+                                    data-capacity-step="-1"
+                                    aria-label="Decrease collaborator capacity">
+                                <i class="bi bi-dash-lg"></i>
+                            </button>
 
-                            <option value="1"
-                                    selected="@(Model.MaximumMembers == 1)">
-                                1 — Individual project
-                            </option>
+                            <input id="collaboratorCapacity"
+                                   name="collaboratorCapacity"
+                                   type="number"
+                                   min="0"
+                                   max="@Model.MaximumCollaboratorsAllowed"
+                                   value="@Model.CollaboratorCapacity"
+                                   class="form-control capacity-value"
+                                   inputmode="numeric"
+                                   required />
 
-                            <option value="2"
-                                    selected="@(Model.MaximumMembers == 2)">
-                                2 — Owner + 1 collaborator
-                            </option>
+                            <button type="button"
+                                    class="capacity-step"
+                                    data-capacity-step="1"
+                                    aria-label="Increase collaborator capacity">
+                                <i class="bi bi-plus-lg"></i>
+                            </button>
+                        </div>
 
-                            <option value="3"
-                                    selected="@(Model.MaximumMembers == 3)">
-                                3 — Owner + 2 collaborators
-                            </option>
-                        </select>
+                        <div class="capacity-preview">
+                            <span>
+                                <i class="bi bi-person-fill"></i>
+                                1 owner
+                            </span>
+
+                            <i class="bi bi-plus"></i>
+
+                            <span>
+                                <i class="bi bi-people-fill"></i>
+                                <strong data-collaborator-preview>
+                                    @Model.CollaboratorCapacity
+                                </strong>
+                                collaborator(s)
+                            </span>
+
+                            <i class="bi bi-arrow-right"></i>
+
+                            <span class="capacity-total">
+                                <strong data-total-preview>
+                                    @Model.MaximumMembers
+                                </strong>
+                                total member(s)
+                            </span>
+                        </div>
+
+                        <small>
+                            Choose from 0 to
+                            @Model.MaximumCollaboratorsAllowed
+                            collaborators. Pending invitations continue
+                            to reserve positions.
+                        </small>
 
                         <button type="submit"
                                 class="btn btn-primary w-100">
-                            Save Team Size
+                            Save Collaborator Capacity
                         </button>
                     </form>
                 </section>
@@ -348,9 +389,10 @@
                             <i class="bi bi-person"></i>
 
                             <p>
-                                This project is configured for one
-                                member. Change the team capacity to
-                                2 or 3 before sending invitations.
+                                This project currently has no
+                                collaborator positions. Increase the
+                                collaborator capacity before sending
+                                invitations.
                             </p>
                         </div>
                     }
@@ -949,6 +991,89 @@
                     box-shadow: 0 11px 22px rgba(40,56,94,.20);
                 }
 
+        .capacity-picker {
+            display: grid;
+            grid-template-columns: 45px minmax(0, 1fr) 45px;
+            align-items: center;
+            gap: .55rem;
+        }
+
+        .capacity-step {
+            width: 45px;
+            height: 45px;
+            display: grid;
+            place-items: center;
+            border: 1px solid #D9E1EA;
+            border-radius: 11px;
+            color: var(--team-navy);
+            background: #F7F9FC;
+            font-size: .9rem;
+            transition: border-color .16s ease, background .16s ease, transform .16s ease;
+        }
+
+            .capacity-step:hover {
+                border-color: var(--team-steel);
+                background: #EEF2F6;
+                transform: translateY(-1px);
+            }
+
+        .capacity-value {
+            min-height: 52px !important;
+            text-align: center;
+            font-size: 1rem !important;
+            font-weight: 850;
+            appearance: textfield;
+        }
+
+            .capacity-value::-webkit-inner-spin-button,
+            .capacity-value::-webkit-outer-spin-button {
+                margin: 0;
+                appearance: none;
+            }
+
+        .capacity-preview {
+            min-height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: .42rem;
+            padding: .7rem;
+            border: 1px solid #E1E7EF;
+            border-radius: 12px;
+            color: #66758A;
+            background: #F8FAFC;
+            font-size: .64rem;
+            line-height: 1.4;
+        }
+
+            .capacity-preview span {
+                display: inline-flex;
+                align-items: center;
+                gap: .28rem;
+            }
+
+            .capacity-preview strong {
+                color: var(--team-navy);
+                font-weight: 850;
+            }
+
+            .capacity-preview > i {
+                color: #9AA4B2;
+            }
+
+            .capacity-preview .capacity-total {
+                padding: .28rem .48rem;
+                border-radius: 8px;
+                color: #FFFFFF;
+                background: linear-gradient( 135deg, var(--team-navy), var(--team-steel));
+                font-weight: 750;
+            }
+
+                .capacity-preview .capacity-total strong {
+                    color: #FFFFFF;
+                }
+
         .invitation-actions .btn-outline-danger {
             min-height: 34px;
             padding: .42rem .65rem;
@@ -1050,6 +1175,98 @@
 @section Scripts {
     <script>
         (() => {
+            const capacityForm =
+                document.querySelector("[data-capacity-form]");
+
+            const capacityInput =
+                document.getElementById(
+                    "collaboratorCapacity");
+
+            const collaboratorPreview =
+                document.querySelector(
+                    "[data-collaborator-preview]");
+
+            const totalPreview =
+                document.querySelector(
+                    "[data-total-preview]");
+
+            function updateCapacityPreview() {
+                if (!capacityInput) {
+                    return;
+                }
+
+                const minimum =
+                    Number(capacityInput.min || 0);
+
+                const maximum =
+                    Number(capacityInput.max || 20);
+
+                let value =
+                    Number.parseInt(
+                        capacityInput.value,
+                        10);
+
+                if (Number.isNaN(value)) {
+                    value = minimum;
+                }
+
+                value = Math.min(
+                    maximum,
+                    Math.max(minimum, value));
+
+                capacityInput.value =
+                    value.toString();
+
+                if (collaboratorPreview) {
+                    collaboratorPreview.textContent =
+                        value.toString();
+                }
+
+                if (totalPreview) {
+                    totalPreview.textContent =
+                        (value + 1).toString();
+                }
+            }
+
+            document
+                .querySelectorAll(
+                    "[data-capacity-step]")
+                .forEach(button => {
+                    button.addEventListener(
+                        "click",
+                        () => {
+                            if (!capacityInput) {
+                                return;
+                            }
+
+                            const step =
+                                Number.parseInt(
+                                    button.dataset
+                                        .capacityStep ?? "0",
+                                    10);
+
+                            const current =
+                                Number.parseInt(
+                                    capacityInput.value || "0",
+                                    10);
+
+                            capacityInput.value =
+                                (current + step).toString();
+
+                            updateCapacityPreview();
+                        });
+                });
+
+            capacityInput?.addEventListener(
+                "input",
+                updateCapacityPreview);
+
+            capacityForm?.addEventListener(
+                "submit",
+                updateCapacityPreview);
+
+            updateCapacityPreview();
+
             document
                 .querySelectorAll(
                     "[data-remove-member-form]")

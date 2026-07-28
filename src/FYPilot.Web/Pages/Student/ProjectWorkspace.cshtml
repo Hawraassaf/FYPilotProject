@@ -1269,6 +1269,51 @@
                 padding-left: .65rem;
             }
         }
+        /* =========================================================
+           FYPILOT THEME COLOR + CLEAN CHAT INPUT
+           ========================================================= */
+
+        .pw-page {
+            --pw-blue: #28385E;
+        }
+
+        /* Active Discussion navigation */
+        .pw-nav > a.is-active {
+            color: #ffffff;
+            background: linear-gradient( 135deg, #28385E, #516C8D);
+            box-shadow: 0 8px 18px rgba(40, 56, 94, .20);
+        }
+
+        /* Send message button */
+        .pw-send-button {
+            border-color: #28385E;
+            color: #ffffff;
+            background: linear-gradient( 135deg, #28385E, #516C8D);
+            box-shadow: 0 8px 18px rgba(40, 56, 94, .20);
+        }
+
+            .pw-send-button:hover:not(:disabled) {
+                border-color: #172F59;
+                background: linear-gradient( 135deg, #172F59, #405577);
+            }
+
+        /* Message input focus */
+        .pw-textarea-wrap textarea:focus {
+            border-color: #516C8D;
+            box-shadow: 0 0 0 3px rgba(81, 108, 141, .12);
+        }
+
+        /* Hide the small internal textarea scrollbar */
+        .pw-textarea-wrap textarea {
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+
+            .pw-textarea-wrap textarea::-webkit-scrollbar {
+                display: none;
+                width: 0;
+                height: 0;
+            }
     </style>
 }
 
