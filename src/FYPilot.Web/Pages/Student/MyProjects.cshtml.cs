@@ -17,6 +17,10 @@ public class MyProjectsModel(
     IActiveProjectService activeProjectService,
     ILogger<MyProjectsModel> logger) : PageModel
 {
+    private const int MaximumCollaborators = 20;
+    private const int MaximumProjectMembers =
+        MaximumCollaborators + 1;
+
     public List<ProjectCardViewModel> Projects { get; private set; } = [];
     public List<PendingInvitationViewModel> PendingInvitations { get; private set; } = [];
 
@@ -136,7 +140,7 @@ public class MyProjectsModel(
                         Math.Clamp(
                             invitation.Project.MaximumMembers,
                             1,
-                            3),
+                            MaximumProjectMembers),
 
                     CreatedAt:
                         invitation.CreatedAt,
@@ -212,7 +216,10 @@ public class MyProjectsModel(
                     .ToList();
 
                 var maximumMembers =
-                    Math.Clamp(project.MaximumMembers, 1, 3);
+                    Math.Clamp(
+                        project.MaximumMembers,
+                        1,
+                        MaximumProjectMembers);
 
                 var teamFillPercentage =
                     Math.Clamp(
@@ -332,18 +339,12 @@ public class MyProjectsModel(
 
                 return RedirectToPage();
             }
-            var selectedTeamSize = await db.StudentProfiles
-               .AsNoTracking()
-             .Where(profile =>
-                profile.UserId == user.Id)
-             .Select(profile =>
-              (int?)profile.TeamMembers)
-             .FirstOrDefaultAsync(cancellationToken);
-
-            var projectTeamSize = Math.Clamp(
-                selectedTeamSize ?? 1,
-                1,
-                3);
+            /*
+             * Every new project starts with one owner.
+             * The owner chooses the collaborator capacity
+             * later from Team Management.
+             */
+            const int projectTeamSize = 1;
             var now = DateTime.UtcNow;
 
 
@@ -438,6 +439,7 @@ public class MyProjectsModel(
     public async Task<IActionResult>
         OnPostOpenProjectAsync(
             int projectId,
+            string? requestedPage,
             CancellationToken cancellationToken)
     {
         var userId = CurrentUserId();
@@ -468,17 +470,28 @@ public class MyProjectsModel(
         }
 
         /*
-         * Continue Project changes the active workspace.
-         * Every project-scoped page will use this project
-         * until the student continues another one.
+         * The top navigation project switcher sends the
+         * current project page as requestedPage.
+         *
+         * The Continue Project button on My Projects does
+         * not send requestedPage, so it continues opening
+         * the selected project's Dashboard.
+         *
+         * Only whitelisted project pages are accepted.
          */
+        var safeRequestedPage =
+            activeProjectService.IsAllowedProjectPage(
+                requestedPage)
+                ? requestedPage
+                : "/Student/Dashboard";
+
         var destination =
             await activeProjectService
                 .ActivateProjectAsync(
                     userId.Value,
                     projectId,
                     requestedPage:
-                        "/Student/Dashboard",
+                        safeRequestedPage,
                     cancellationToken);
 
         if (destination == null)
@@ -786,7 +799,7 @@ public class MyProjectsModel(
             var maximumMembers = Math.Clamp(
                 project.MaximumMembers,
                 1,
-                3);
+                MaximumProjectMembers);
 
             var activeMembersCount =
                 await db.ProjectMembers.CountAsync(

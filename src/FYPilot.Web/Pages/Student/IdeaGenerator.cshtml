@@ -111,22 +111,15 @@
                         </div>
                     </div>
 
-                    <div class="idea2-two-cols">
-                        <div class="idea2-field">
-                            <label>Hours / Week</label>
-                            <input asp-for="Input.AvailableHours" type="number" min="1" max="60" class="form-control idea2-control" />
-                            <span asp-validation-for="Input.AvailableHours" class="text-danger small"></span>
-                        </div>
-
-                        <div class="idea2-field">
-                            <label>Team Size</label>
-                            <select asp-for="Input.TeamSize" class="form-select idea2-control">
-                                <option value="1">Solo</option>
-                                <option value="2">2 members</option>
-                                <option value="3">3 members</option>
-                            </select>
-                            <span asp-validation-for="Input.TeamSize" class="text-danger small"></span>
-                        </div>
+                    <div class="idea2-field">
+                        <label>Hours / Week</label>
+                        <input asp-for="Input.AvailableHours"
+                               type="number"
+                               min="1"
+                               max="60"
+                               class="form-control idea2-control" />
+                        <span asp-validation-for="Input.AvailableHours"
+                              class="text-danger small"></span>
                     </div>
 
                     <div class="idea2-skills-panel">
@@ -1133,21 +1126,134 @@
                 border-radius: 999px;
             }
 
-        /* Let the page scroll naturally instead of trapping expanded ideas
-                                           inside a small internal viewport. */
-        .idea2-accordion {
-            max-height: none !important;
-            overflow: visible !important;
-            padding-right: 0 !important;
+        /* ───────────────────────────────────────────────────────────────
+                   Desktop workspace layout
+                   - Settings stay compact on the left.
+                   - Every setting is shown underneath the previous one.
+                   - The Generate button follows the skills panel directly.
+                   - Generated idea details scroll inside the right panel.
+                   ─────────────────────────────────────────────────────────────── */
+        @@media (min-width: 1200px) {
+            .idea2-layout {
+                align-items: flex-start !important;
+                min-height: 0 !important;
+            }
+
+            .idea2-settings-card {
+                height: auto !important;
+                min-height: 0 !important;
+                max-height: none !important;
+                align-self: flex-start !important;
+                position: sticky;
+                top: 1rem;
+            }
+
+            .idea2-settings-form {
+                height: auto !important;
+                min-height: 0 !important;
+                display: flex !important;
+                flex-direction: column !important;
+            }
+
+            .idea2-form-scroll {
+                height: auto !important;
+                min-height: 0 !important;
+                max-height: none !important;
+                display: flex !important;
+                flex: 0 0 auto !important;
+                flex-direction: column !important;
+                gap: .78rem !important;
+                overflow: visible !important;
+                padding-bottom: 0 !important;
+            }
+
+            .idea2-two-cols {
+                display: grid !important;
+                grid-template-columns: minmax(0, 1fr) !important;
+                gap: .78rem !important;
+            }
+
+            .idea2-generate-footer {
+                position: static !important;
+                flex: 0 0 auto !important;
+                margin-top: .8rem !important;
+                padding-top: .8rem !important;
+            }
+
+            .idea2-results-card {
+                height: calc(100vh - 188px) !important;
+                min-height: 620px;
+                max-height: calc(100vh - 188px) !important;
+                display: flex !important;
+                flex-direction: column !important;
+                align-self: flex-start !important;
+                position: sticky;
+                top: 1rem;
+                overflow: hidden !important;
+            }
+
+            .idea2-results-header {
+                position: relative;
+                z-index: 3;
+                flex: 0 0 auto;
+                background: #ffffff;
+            }
+
+            .idea2-accordion {
+                min-height: 0 !important;
+                max-height: none !important;
+                flex: 1 1 auto !important;
+                overflow-x: hidden !important;
+                overflow-y: auto !important;
+                overscroll-behavior: contain;
+                scrollbar-gutter: stable;
+                scroll-behavior: smooth;
+                padding-right: .55rem !important;
+                padding-bottom: 1rem !important;
+            }
+
+                .idea2-accordion::-webkit-scrollbar {
+                    width: 7px;
+                }
+
+                .idea2-accordion::-webkit-scrollbar-track {
+                    background: #f2f4f8;
+                    border-radius: 999px;
+                }
+
+                .idea2-accordion::-webkit-scrollbar-thumb {
+                    background: #b8c3d3;
+                    border-radius: 999px;
+                }
+
+                    .idea2-accordion::-webkit-scrollbar-thumb:hover {
+                        background: #8fa0b8;
+                    }
         }
 
-        .idea2-results-card {
-            overflow: visible !important;
+        /*
+                 * On smaller screens, keep normal page scrolling so neither column
+                 * becomes cramped.
+                 */
+        @@media (max-width: 1199.98px) {
+            .idea2-settings-card,
+            .idea2-results-card {
+                position: static !important;
+                height: auto !important;
+                min-height: 0 !important;
+                max-height: none !important;
+            }
+
+            .idea2-accordion {
+                max-height: none !important;
+                overflow: visible !important;
+                padding-right: 0 !important;
+            }
         }
 
         /* ───────────────────────────────────────────────────────────────
-                                           Compact header scores
-                                           ─────────────────────────────────────────────────────────────── */
+                                                   Compact header scores
+                                                   ─────────────────────────────────────────────────────────────── */
         .marketfp-header-score-group {
             display: flex;
             align-items: stretch;
@@ -1237,8 +1343,8 @@
         }
 
         /* ───────────────────────────────────────────────────────────────
-                                           Market Insight shell
-                                           ─────────────────────────────────────────────────────────────── */
+                                                   Market Insight shell
+                                                   ─────────────────────────────────────────────────────────────── */
         .marketfp-section {
             margin-top: 1.15rem;
             overflow: hidden;
@@ -1484,8 +1590,8 @@
             }
 
         /* ───────────────────────────────────────────────────────────────
-                                           Evidence-backed state
-                                           ─────────────────────────────────────────────────────────────── */
+                                                   Evidence-backed state
+                                                   ─────────────────────────────────────────────────────────────── */
         .marketfp-panel {
             padding: 1.15rem 1.2rem 1.2rem;
         }
@@ -2225,6 +2331,42 @@
                 }, 350);
             });
         }, 2500);
+
+        /*
+         * Keep an opened idea at the top of the right-side scroll area.
+         * This prevents the whole page from jumping when a long idea expands.
+         */
+        document
+            .querySelectorAll("#ideaAccordion .collapse")
+            .forEach(collapseElement => {
+                collapseElement.addEventListener(
+                    "shown.bs.collapse",
+                    () => {
+                        const accordion =
+                            document.getElementById(
+                                "ideaAccordion");
+
+                        const ideaItem =
+                            collapseElement.closest(
+                                ".idea2-idea-item");
+
+                        if (!accordion ||
+                            !ideaItem ||
+                            window.innerWidth < 1200) {
+                            return;
+                        }
+
+                        const targetTop =
+                            Math.max(
+                                0,
+                                ideaItem.offsetTop - 8);
+
+                        accordion.scrollTo({
+                            top: targetTop,
+                            behavior: "smooth"
+                        });
+                    });
+            });
 
         // Market Insight — loading state on submit. Regional research can
         // take a few seconds, so the clicked button is disabled and shows a

@@ -36,12 +36,32 @@
     }
 
     .fyc-top {
+        position: relative;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 24px;
         margin-bottom: 18px;
+        padding: 22px 24px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, .12);
+        border-radius: 22px;
+        background: linear-gradient( 135deg, #17233f 0%, #28385E 58%, #516C8D 100%) !important;
+        background-image: linear-gradient( 135deg, #17233f 0%, #28385E 58%, #516C8D 100%) !important;
+        box-shadow: 0 18px 42px rgba(23, 35, 63, .16);
     }
+
+        /*
+         * Remove any square/grid decorations inherited from
+         * shared styles and keep the header visually clean.
+         */
+        .fyc-top::before,
+        .fyc-top::after {
+            content: none !important;
+            display: none !important;
+            background: none !important;
+            background-image: none !important;
+        }
 
     .fyc-brand,
     .fyc-project {
@@ -57,14 +77,15 @@
         display: grid;
         place-items: center;
         color: #fff;
-        background: var(--fyc-navy);
-        box-shadow: 0 10px 28px rgba(23, 35, 63, .18);
+        background: rgba(255, 255, 255, .10);
+        border: 1px solid rgba(255, 255, 255, .16);
+        box-shadow: 0 10px 28px rgba(11, 24, 51, .18);
         flex: 0 0 auto;
     }
 
     .fyc-brand h1 {
         margin: 0;
-        color: var(--fyc-navy);
+        color: #fff;
         font-size: 1.5rem;
         font-weight: 720;
         letter-spacing: -.03em;
@@ -72,7 +93,7 @@
 
     .fyc-brand p {
         margin: 3px 0 0;
-        color: var(--fyc-muted);
+        color: rgba(255, 255, 255, .70);
         font-size: .9rem;
     }
 
@@ -82,7 +103,8 @@
         padding: 11px 14px;
         border: 1px solid var(--fyc-border);
         border-radius: 15px;
-        background: #fff;
+        background: rgba(255, 255, 255, .96);
+        box-shadow: 0 10px 24px rgba(11, 24, 51, .10);
     }
 
         .fyc-project > i {
