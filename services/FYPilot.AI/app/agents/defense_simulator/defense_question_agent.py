@@ -8,12 +8,14 @@ class DefenseQuestionAgent:
     """
     Responsible only for generating defense questions.
 
-    Uses ProviderChain (Groq -> Gemini -> Ollama) so cloud providers are tried
-    before falling back to the slower local Ollama model.
+    Uses ProviderChain (DeepInfra -> Groq -> Ollama) so cloud providers are
+    tried before falling back to the slower local Ollama model. Question
+    generation is a short, simple prompt, so this uses the "light" DeepInfra
+    tier rather than the high-accuracy tier reserved for SE Documentation.
     """
 
     def __init__(self):
-        self.provider_chain = ProviderChain()
+        self.provider_chain = ProviderChain(tier="light")
         self.last_error: Optional[str] = None
         self.last_raw_response: Optional[str] = None
         self.last_provider: Optional[str] = None

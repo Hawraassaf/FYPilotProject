@@ -4,16 +4,19 @@ FYPilot LLM Provider Layer
 INF-1 / RTA-1 mini implementation.
 
 Provider order:
-1. GroqProvider
+1. DeepInfraProvider
+   - Paid, pay-per-use OpenAI-compatible endpoint (no free-tier rate limiting)
+   - Default model: meta-llama/Llama-3.3-70B-Instruct
+
+2. GroqProvider
    - Normal mode: llama-3.3-70b-versatile
    - Search mode: groq/compound-mini
 
-2. GeminiProvider
-   - Uses existing GeminiClient
-   - Can use Google Search grounding if available
-
 3. OllamaProvider
    - Local fallback using qwen2.5-coder:7b by default
+
+GeminiProvider still exists below (unused in the default chain) in case it
+needs to be re-added later -- see git history for when/why it was dropped.
 
 This file lets agents switch providers without rewriting every agent.
 """
@@ -341,6 +344,171 @@ class BaseProvider:
             search_used=False,
             search_failed=True,
         )
+
+
+class DeepInfraProvider(BaseProvider):
+    """
+    Primary cloud provider.
+
+    Paid, pay-per-use inference with no free-tier rate limiting -- unlike
+    Groq's free tier, which the on-demand/dev-tier gating made unreliable
+    during time-sensitive use (e.g. a live presentation).
+
+    OpenAI-compatible endpoint (https://api.deepinfra.com/v1/openai), so it
+    reuses the `openai` SDK already in requirements.txt instead of a new
+    dependency. Does not implement search_web -- DeepInfra has no built-in
+    web-search tool equivalent to Groq Compound.
+
+    Model defaults to DEEPINFRA_MODEL (or the tier-specific env var resolved
+    by _deepinfra_model_for_tier), but callers needing a specific model for
+    their task's accuracy/cost tradeoff can pass one explicitly -- see
+    ProviderChain(tier=...).
+    """
+
+    name = "deepinfra"
+
+    def __init__(self, model: str | None = None):
+        self.api_key = os.getenv("DEEPINFRA_API_KEY")
+
+        self.model = model or os.getenv(
+            "DEEPINFRA_MODEL",
+            "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        )
+
+        # Mirrors GroqProvider's SEC-3 per-call timeout rationale: a hung
+        # request must not block a review-pipeline attempt indefinitely.
+        self.timeout_seconds = float(os.getenv("DEEPINFRA_TIMEOUT_SECONDS", "60"))
+
+        self.enabled = bool(self.api_key)
+
+    def _client(self):
+        from openai import OpenAI
+
+        return OpenAI(
+            api_key=self.api_key,
+            base_url="https://api.deepinfra.com/v1/openai",
+            timeout=self.timeout_seconds,
+        )
+
+    def generate_json(
+        self,
+        prompt: str,
+        *,
+        use_search: bool = False,
+        max_tokens: int | None = None,
+    ) -> LLMResult:
+        if not self.enabled:
+            return LLMResult(
+                ok=False,
+                provider=self.name,
+                model=None,
+                text="",
+                data=None,
+                error="DEEPINFRA_API_KEY is missing",
+                search_used=False,
+                search_failed=use_search,
+            )
+
+        try:
+            system_message = (
+                "You are a precise JSON-only AI engine. "
+                "Return valid JSON only. "
+                "Do not use markdown. "
+                "Do not wrap the response in code fences."
+            )
+
+            response = self._client().chat.completions.create(
+                model=self.model,
+                temperature=0.2,
+                # Same rationale as GroqProvider: SE Documentation's richer
+                # sections pass an explicit higher budget so responses
+                # aren't silently truncated into invalid JSON.
+                max_tokens=max_tokens or 2200,
+                messages=[
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+
+            text = str(response.choices[0].message.content or "")
+            data = _parse_json(text)
+
+            return LLMResult(
+                ok=data is not None,
+                provider=self.name,
+                model=self.model,
+                text=text,
+                data=data,
+                error=None if data is not None else "DeepInfra returned invalid JSON.",
+                search_used=False,
+                search_failed=use_search,
+            )
+
+        except Exception as ex:
+            return LLMResult(
+                ok=False,
+                provider=self.name,
+                model=self.model,
+                text="",
+                data=None,
+                error=str(ex),
+                search_used=False,
+                search_failed=use_search,
+            )
+
+    def generate_text(
+        self,
+        prompt: str,
+        *,
+        use_search: bool = False,
+    ) -> LLMResult:
+        if not self.enabled:
+            return LLMResult(
+                ok=False,
+                provider=self.name,
+                model=None,
+                text="",
+                data=None,
+                error="DEEPINFRA_API_KEY is missing",
+                search_used=False,
+                search_failed=use_search,
+            )
+
+        try:
+            response = self._client().chat.completions.create(
+                model=self.model,
+                temperature=0.3,
+                max_tokens=1800,
+                messages=[
+                    {"role": "system", "content": "You are a helpful AI assistant."},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+
+            text = str(response.choices[0].message.content or "")
+
+            return LLMResult(
+                ok=True,
+                provider=self.name,
+                model=self.model,
+                text=text,
+                data=None,
+                error=None,
+                search_used=False,
+                search_failed=use_search,
+            )
+
+        except Exception as ex:
+            return LLMResult(
+                ok=False,
+                provider=self.name,
+                model=self.model,
+                text="",
+                data=None,
+                error=str(ex),
+                search_used=False,
+                search_failed=use_search,
+            )
 
 
 class GroqProvider(BaseProvider):
@@ -923,23 +1091,67 @@ class OllamaProvider(BaseProvider):
             )
 
 
+# Per-task accuracy/cost tier for the DeepInfra leg of the chain -- some
+# agents (SE Documentation) need the highest-accuracy model available,
+# others (Defense Simulator's question/evaluation prompts) don't, so a
+# single global DEEPINFRA_MODEL would either overpay everywhere or
+# underpower the agents that need it most. Each tier's model is still
+# overridable per-deployment via its own env var.
+_DEEPINFRA_TIER_DEFAULTS: dict[str, str] = {
+    # Highest-accuracy tier: strict-schema, high-stakes generation (SE Docs,
+    # Project Roadmap, Idea Generator).
+    # NOTE: DeepInfra's API requires the full "org/model" slug -- the bare
+    # display name from DeepInfra's own pricing table (e.g. "claude-opus-4-8")
+    # 404s as model_not_found. Verified live against the real API.
+    "high": "anthropic/claude-opus-4-8",
+    # Default tier: most agents (market needs, project DNA, market
+    # footprint, idea comparison) -- confirmed working, cheap, good
+    # instruction-following.
+    "standard": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+    # Lightweight tier: short, simple prompts (Defense Simulator).
+    "light": "google/gemma-3-12b-it",
+    # Mentor Chat tier: interactive, latency-sensitive, needs strong coding
+    # ability (generates codeBlocks) and broad multilingual support -- Qwen3
+    # Coder is a coding-specialized MoE model (fast for its size due to
+    # sparse activation) rather than a general dense model tuned for one
+    # of those three at the expense of the others.
+    "mentor": "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",
+}
+
+
+def _deepinfra_model_for_tier(tier: str) -> str:
+    resolved_tier = tier if tier in _DEEPINFRA_TIER_DEFAULTS else "standard"
+    env_key = f"DEEPINFRA_MODEL_{resolved_tier.upper()}"
+    return os.getenv(env_key, _DEEPINFRA_TIER_DEFAULTS[resolved_tier])
+
+
 class ProviderChain:
     """
     Provider cascade.
 
     Default order:
-    1. Groq
-    2. Gemini
+    1. DeepInfra
+    2. Groq
     3. Ollama
 
-    This makes Groq the main provider, Gemini the backup cloud provider,
-    and Ollama the local fallback.
+    This makes DeepInfra (paid, no free-tier rate limiting) the main
+    provider, Groq the backup cloud provider, and local Ollama the final
+    fallback. GeminiProvider is intentionally excluded from the default
+    chain -- pass providers explicitly to include it.
+
+    `tier` selects the DeepInfra model ("high" / "standard" / "light", see
+    _DEEPINFRA_TIER_DEFAULTS) and is ignored if `providers` is passed
+    explicitly.
     """
 
-    def __init__(self, providers: list[BaseProvider] | None = None):
+    def __init__(
+        self,
+        providers: list[BaseProvider] | None = None,
+        tier: str = "standard",
+    ):
         self.providers = providers or [
+            DeepInfraProvider(model=_deepinfra_model_for_tier(tier)),
             GroqProvider(),
-            GeminiProvider(),
             OllamaProvider(),
         ]
 

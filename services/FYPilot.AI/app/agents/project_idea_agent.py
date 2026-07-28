@@ -2,11 +2,15 @@
 ProjectIdeaAgent — real-time, skill-based FYP idea generation for FYPilot.
 
 Design:
-- ProviderChain is the primary generation layer.
-- Groq Compound Mini is used when real-time search is requested.
-- Gemini and Ollama remain fallbacks through ProviderChain.
+- ProviderChain (DeepInfra "high" tier -> Groq -> Ollama) is the primary
+  generation layer.
+- Groq Compound Mini is used when real-time search is requested (search_web()
+  skips DeepInfra/Ollama automatically since only Groq implements it).
 - A direct Ollama call remains as an emergency fallback.
-- Scores are calculated deterministically in Python.
+- Scores are calculated deterministically in Python. marketDemandScore is
+  grounded in the real search evidence (source count + recognized-domain
+  count) from that search, not just LLM-asserted relevance text -- see
+  _calculate_market_score.
 - Each generation returns exactly 4 ideas.
 - .NET displays 2 ideas at a time and shuffles between the saved 4.
 - Regenerate sends previousIdeaTitles so the agent avoids old ideas.
@@ -18,6 +22,7 @@ import logging
 import re
 from difflib import SequenceMatcher
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import requests
 from pydantic import BaseModel, Field
@@ -89,17 +94,47 @@ class ProjectIdeaAgent:
     Generates exactly 4 personalized FYP ideas.
 
     Provider priority:
-    1. Groq Compound Mini with real-time search
-    2. Gemini fallback
-    3. Ollama fallback through ProviderChain
-    4. Direct Ollama emergency fallback
-    5. Deterministic fallback ideas
+    1. Groq Compound Mini with real-time search (evidence-gathering step)
+    2. DeepInfra "high" tier -> Groq -> Ollama, in that order, for the
+       structured idea JSON itself (ProviderChain)
+    3. Direct Ollama emergency fallback
+    4. Deterministic fallback ideas
 
     Python cleans, validates, filters repetition, and calculates scores.
     """
 
+    # Same authoritative-source allowlist MarketNeedsAgent/MarketFootprintAgent
+    # use -- an idea's market score should only be treated as strongly
+    # evidence-backed when it cites sources from domains like these, not any
+    # URL Compound happens to return.
+    _recognized_domains = {
+        "worldbank.org",
+        "un.org",
+        "unesco.org",
+        "itu.int",
+        "oecd.org",
+        "who.int",
+        "gov.lb",
+        "aub.edu.lb",
+        "lau.edu.lb",
+        "liu.edu.lb",
+        "usek.edu.lb",
+        "usj.edu.lb",
+        "ul.edu.lb",
+        "weforum.org",
+        "gartner.com",
+        "mckinsey.com",
+        "statista.com",
+        "linkedin.com",
+        "ilo.org",
+        "imf.org",
+    }
+
     def __init__(self, model: str = "phi3"):
-        self.provider_chain = ProviderChain()
+        # "high" tier: this is the model students see first and build every
+        # downstream decision on (DNA, roadmap, mentor chat all key off the
+        # selected idea) -- it gets the same accuracy tier as SE Documentation.
+        self.provider_chain = ProviderChain(tier="high")
 
         # Direct Ollama emergency fallback.
         self.model = model
@@ -747,7 +782,9 @@ Return exactly this JSON structure with exactly 4 filled idea objects:
         market_score = self._calculate_market_score(
             lebanese_relevance,
             lebanese_sector,
-            problem
+            problem,
+            search_used=self.last_search_used,
+            sources=self.last_sources,
         )
 
         return ProjectIdea(
@@ -1098,23 +1135,76 @@ Return exactly this JSON structure with exactly 4 filled idea objects:
 
         return max(40.0, min(score, 95.0))
 
-    def _calculate_market_score(self, relevance: str, sector: str, problem: str) -> float:
+    def _calculate_market_score(
+        self,
+        relevance: str,
+        sector: str,
+        problem: str,
+        *,
+        search_used: bool,
+        sources: list[dict[str, str]],
+    ) -> float:
+        """
+        Deterministic market-demand score, grounded primarily in whether this
+        idea batch is actually backed by real live-search evidence -- not
+        purely on LLM-asserted relevance text. Previously this scored 50-95
+        from keyword matches alone, so a batch with zero real sources (search
+        failed, or every provider fell back) could still show a confident
+        "90% market demand" backed by nothing -- exactly the "not real
+        percentages" problem to avoid. Mirrors MarketNeedsAgent's
+        calculate_confidence_score (real source count + recognized-domain
+        count), adapted for one search shared across a whole idea batch.
+        """
+        recognized_domain_count = sum(
+            1
+            for source in sources
+            if self._is_recognized_domain(self._domain(source.get("url", "")))
+        )
+
+        if not search_used or not sources:
+            # No real evidence backing this batch -- cap firmly in an
+            # unverified low/medium band regardless of how confident the
+            # generated text reads.
+            ceiling = 55.0
+            score = 40.0
+        else:
+            ceiling = 95.0
+            score = (
+                55.0
+                + min(len(sources) / 6, 1) * 15
+                + min(recognized_domain_count / 3, 1) * 15
+            )
+
+        # Idea-specific relevance keywords now only modulate the
+        # evidence-grounded baseline above, instead of being the entire score.
         text = f"{relevance} {sector} {problem}".lower()
-        score = 60.0
 
         if "lebanon" in text or "lebanese" in text or "local" in text:
-            score += 10
-
-        if "education" in text or "student" in text or "university" in text:
-            score += 8
-
-        if "sme" in text or "business" in text or "market" in text:
-            score += 6
-
-        if "healthcare" in text or "finance" in text:
             score += 5
 
-        return max(50.0, min(score, 95.0))
+        if "education" in text or "student" in text or "university" in text:
+            score += 4
+
+        if "sme" in text or "business" in text or "market" in text:
+            score += 3
+
+        if "healthcare" in text or "finance" in text:
+            score += 3
+
+        return max(30.0, min(score, ceiling))
+
+    def _is_recognized_domain(self, domain: str) -> bool:
+        return any(
+            domain == known or domain.endswith(f".{known}")
+            for known in self._recognized_domains
+        )
+
+    @staticmethod
+    def _domain(url: str) -> str:
+        try:
+            return urlparse(str(url or "")).netloc.lower().removeprefix("www.")
+        except Exception:
+            return ""
 
     def _estimate_duration(self, profile: StudentProfile, difficulty: int) -> int:
         weeks = 10 + (difficulty * 2)

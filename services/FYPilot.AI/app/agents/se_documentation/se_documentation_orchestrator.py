@@ -682,7 +682,7 @@ _SCREEN_TEMPLATES: Dict[str, Dict[str, Any]] = {
 
 class SEDocumentationOrchestratorAgent:
     def __init__(self):
-        self.provider_chain = ProviderChain()
+        self.provider_chain = ProviderChain(tier="high")
         self.last_llm_used = False
         self.last_error: Optional[str] = None
         self.last_raw_llm_response: Optional[str] = None
@@ -771,15 +771,22 @@ class SEDocumentationOrchestratorAgent:
     # =========================================================================
 
     # Soft overall wall-clock budget for ALL section calls combined (retries
-    # included). Without this, a sustained provider outage -- both Groq and
-    # Gemini rate-limited, observed live during this batch's verification --
-    # combined with the "retry once" resilience fix could make a single
-    # request take up to ~7 sections x 2 attempts x (up to ~210s per attempt
-    # cascading through Groq -> Gemini -> Ollama), i.e. tens of minutes.
-    # Once this budget is spent, remaining/retry attempts are skipped and
-    # fall back to detailed deterministic content immediately instead of
-    # queuing another slow, likely-doomed network call.
-    _SECTIONS_TIME_BUDGET_SECONDS = 180.0
+    # included). Without this, a sustained provider outage combined with the
+    # "retry once" resilience fix could make a single request take tens of
+    # minutes. Once this budget is spent, remaining/retry attempts are
+    # skipped and fall back to detailed deterministic content immediately
+    # instead of queuing another slow, likely-doomed network call.
+    #
+    # Raised from 180s to 600s after a real measurement showed 180s was too
+    # tight for the "high" tier's claude-opus-4-8: a single section alone
+    # completes in ~7s in the normal case, but if DeepInfra fails validation
+    # for a section and the chain cascades to a rate-limited Groq before
+    # falling to Ollama, that one section's retries can burn most of a
+    # 180s budget, incorrectly starving every later section. This is a
+    # background "Generate Documentation" click, not a live chat -- a few
+    # extra minutes for a genuinely provider-generated document beats a fast
+    # but mostly-generic-fallback one.
+    _SECTIONS_TIME_BUDGET_SECONDS = 600.0
 
     def _generate_llm_sections(self, request: SEDocumentationRequest, facts: ProjectFacts) -> Dict[str, Any]:
         context = facts_context_text(facts)

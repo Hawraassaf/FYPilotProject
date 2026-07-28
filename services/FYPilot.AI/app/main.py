@@ -25,7 +25,7 @@ app = FastAPI(
     description=(
         "Python AI/Data Science backend for FYPilot. "
         "Core: /health, /analyze-skills. "
-        "Hybrid AI: Groq/Gemini cloud providers, local Ollama fallback, "
+        "Hybrid AI: DeepInfra/Groq cloud providers, local Ollama fallback, "
         "and trained ML features. "
         "Full ML: /ds/analytics/* and /ds/intelligence/* when dependencies "
         "are installed."

@@ -34,7 +34,7 @@ from app.review.registry import AgentReviewConfig, get_agent_config
 from app.review.review_decision_engine import ReviewDecisionEngine
 from app.review.reviewer_agent import ReviewerAgent
 from app.review.rewrite_agent import RewriteAgent
-from app.services.llm_provider import LLMResult
+from app.services.llm_provider import LLMResult, ProviderChain
 
 Candidate = dict[str, Any]
 ReviewedCandidate = tuple[Candidate, ReviewerFindings]
@@ -65,11 +65,19 @@ class ReviewPipeline:
         rewrite_agent: RewriteAgent | None = None,
         decision_engine: ReviewDecisionEngine | None = None,
         config: AgentReviewConfig | None = None,
+        tier: str = "standard",
     ):
+        # tier picks the DeepInfra model (see ProviderChain / see
+        # _DEEPINFRA_TIER_DEFAULTS) for the Reviewer/Rewrite stages -- it
+        # should match the Writer agent's own tier, since reviewing/fixing
+        # SE Documentation's high-stakes output deserves the same accuracy
+        # as generating it, while reviewing Defense Simulator's short
+        # answers doesn't need a high-tier model. Ignored when
+        # reviewer_agent/rewrite_agent are passed explicitly.
         self.agent_name = agent_name
         self.firewall = firewall or LlmFirewall()
-        self.reviewer_agent = reviewer_agent or ReviewerAgent()
-        self.rewrite_agent = rewrite_agent or RewriteAgent()
+        self.reviewer_agent = reviewer_agent or ReviewerAgent(ProviderChain(tier=tier))
+        self.rewrite_agent = rewrite_agent or RewriteAgent(ProviderChain(tier=tier))
         self.decision_engine = decision_engine or ReviewDecisionEngine()
         self.config = config or get_agent_config(agent_name)
 

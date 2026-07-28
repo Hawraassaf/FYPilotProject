@@ -208,11 +208,14 @@ class ProjectRoadmapAgent:
     AI-based Project Roadmap Generator.
 
     The LLM customizes phase design; Python owns structure, durations,
-    weekly expansion, and team responsibility derivation.
+    weekly expansion, and team responsibility derivation. Uses the "high"
+    DeepInfra tier -- the phase plan is the structural backbone every week
+    entry, deliverable, and team-responsibility derivation downstream is
+    built from, so it warrants the same accuracy tier as SE Documentation.
     """
 
     def __init__(self):
-        self.provider_chain = ProviderChain()
+        self.provider_chain = ProviderChain(tier="high")
 
         self.last_llm_used = False
         self.last_error = None

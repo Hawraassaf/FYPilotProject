@@ -106,7 +106,7 @@ def test_se_documentation_router():
 def generate_se_documentation(request: SEDocumentationRequest) -> Dict[str, Any]:
     agent = SEDocumentationAgent()
     context = _build_review_context(request)
-    pipeline = ReviewPipeline("SEDocumentationAgent")
+    pipeline = ReviewPipeline("SEDocumentationAgent", tier="high")
     result = pipeline.run(
         lambda: agent.generate_candidate(request),
         context,

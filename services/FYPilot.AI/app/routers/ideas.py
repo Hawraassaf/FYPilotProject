@@ -473,7 +473,7 @@ def generate_ideas(body: Dict[str, Any]):
         profile = _build_profile(body)
         agent = ProjectIdeaAgent()
         context = _build_review_context(profile)
-        pipeline = ReviewPipeline("ProjectIdeaAgent")
+        pipeline = ReviewPipeline("ProjectIdeaAgent", tier="high")
         result = pipeline.run(
             lambda: agent.generate_candidate(profile),
             context,

@@ -71,7 +71,7 @@ def _build_review_context(request: ProjectRoadmapRequest) -> ReviewContext:
 def generate_project_roadmap(request: ProjectRoadmapRequest):
     agent = ProjectRoadmapAgent()
     context = _build_review_context(request)
-    pipeline = ReviewPipeline("ProjectRoadmapAgent")
+    pipeline = ReviewPipeline("ProjectRoadmapAgent", tier="high")
 
     result = pipeline.run(
         lambda: agent.generate_candidate(request),

@@ -136,7 +136,7 @@ def fyp_chat(request: FypMentorRequest):
         }
 
     context = _build_review_context(request)
-    pipeline = ReviewPipeline("FypMentorAgent")
+    pipeline = ReviewPipeline("FypMentorAgent", tier="mentor")
 
     result = pipeline.run(
         lambda: mentor_agent.generate_candidate(request),

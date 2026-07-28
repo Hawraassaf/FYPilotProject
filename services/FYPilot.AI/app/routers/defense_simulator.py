@@ -125,7 +125,7 @@ def generate_defense_questions(
 ) -> Dict[str, Any]:
     orchestrator = DefenseSimulatorOrchestrator()
     context = _build_questions_review_context(request)
-    pipeline = ReviewPipeline("DefenseQuestionAgent")
+    pipeline = ReviewPipeline("DefenseQuestionAgent", tier="light")
     result = pipeline.run(
         lambda: orchestrator.generate_questions_candidate(request),
         context,
@@ -161,7 +161,7 @@ def evaluate_defense_answer(
 ) -> Dict[str, Any]:
     orchestrator = DefenseSimulatorOrchestrator()
     context = _build_evaluation_review_context(request)
-    pipeline = ReviewPipeline("DefenseEvaluatorAgent")
+    pipeline = ReviewPipeline("DefenseEvaluatorAgent", tier="light")
     result = pipeline.run(
         lambda: orchestrator.generate_evaluation_candidate(request),
         context,
