@@ -107,6 +107,10 @@ public class ChatMessage
     [Column("mentor_chat_session_id")] public int? MentorChatSessionId { get; set; }
     [Column("role")] public string Role { get; set; } = "user";
     [Column("content")] public string Content { get; set; } = "";
+    // Structured web-search sources (see IdeaEvidenceSourceDto), assistant
+    // messages only. Null when the message has no verified sources -- never
+    // set on user messages, never contains snippets/raw retrieved content.
+    [Column("sources_json")] public string? SourcesJson { get; set; }
     [Column("created_at")] public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     [ForeignKey(nameof(UserId))] public User? User { get; set; }
     [ForeignKey(nameof(MentorChatSessionId))] public MentorChatSession? MentorChatSession { get; set; }

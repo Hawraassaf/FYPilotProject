@@ -19,6 +19,7 @@ public class IdeaGeneratorModel(
     IAiServiceClient aiServiceClient,
     IProjectAccessService projectAccessService,
     IActiveProjectService activeProjectService,
+    IAdminIdeaContextService adminIdeaContextService,
     ILogger<IdeaGeneratorModel> logger) : PageModel
 {
     private const int IdeasPerView = 2;
@@ -69,6 +70,16 @@ public class IdeaGeneratorModel(
     /// immediately after a fresh generate/regenerate call.
     /// </summary>
     public IdeaEvidenceSummary? EvidenceSummary { get; private set; }
+
+    /// <summary>
+    /// Idea Generation Knowledge Base -- a compact, safe summary shown next
+    /// to EvidenceSummary (e.g. "Institutional context: 4 previous projects
+    /// checked"). Built only from safe count-only response metadata, never
+    /// full admin text. Null when the knowledge base wasn't used for this
+    /// generation (nothing to show, matches "no misleading admin-context-
+    /// used message" requirement).
+    /// </summary>
+    public string? AdminContextSummary { get; private set; }
 
     /// <summary>Latest Regional Demand Footprint snapshot per visible idea (ProjectIdeaId -> snapshot).</summary>
     public Dictionary<int, MarketOpportunitySnapshot> LatestMarketInsights { get; private set; } = [];
@@ -309,7 +320,7 @@ public class IdeaGeneratorModel(
          * Idea Generator reads the project's saved capacity
          * as AI context and never changes it.
          */
-        var aiRequest = BuildAiRequest(
+        var aiRequest = await BuildAiRequestAsync(
             regenerate: false,
             previousIdeaTitles: []);
 
@@ -404,6 +415,7 @@ public class IdeaGeneratorModel(
             .ToList();
 
         EvidenceSummary = BuildEvidenceSummary(aiResponse);
+        AdminContextSummary = BuildAdminContextSummary(aiResponse);
 
         var sourceText = aiResponse.LlmUsed
             ? "using the local AI model"
@@ -528,7 +540,7 @@ public class IdeaGeneratorModel(
             .Select(idea => idea.Title)
             .ToListAsync(cancellationToken);
 
-        var aiRequest = BuildAiRequest(
+        var aiRequest = await BuildAiRequestAsync(
             regenerate: true,
             previousIdeaTitles: previousTitles);
 
@@ -623,6 +635,7 @@ public class IdeaGeneratorModel(
             .ToList();
 
         EvidenceSummary = BuildEvidenceSummary(aiResponse);
+        AdminContextSummary = BuildAdminContextSummary(aiResponse);
 
         var sourceText = aiResponse.LlmUsed
             ? "using the local AI model"
@@ -1266,12 +1279,72 @@ public class IdeaGeneratorModel(
         };
     }
 
-    private GenerateIdeasRequest BuildAiRequest(bool regenerate, List<string> previousIdeaTitles)
+    /// <summary>
+    /// Compact, safe Idea Generation Knowledge Base summary -- built only
+    /// from count-only response metadata (never full admin text, private
+    /// exclusion reasons, or database IDs). Null when the knowledge base
+    /// wasn't used, so the UI never shows a misleading "admin context
+    /// used" message for a normal (unassisted) generation.
+    /// </summary>
+    private static string? BuildAdminContextSummary(GenerateIdeasResponse aiResponse)
     {
+        if (aiResponse.AdminContextUsed != true)
+        {
+            return null;
+        }
+
+        var parts = new List<string>();
+
+        if (aiResponse.GuidanceItemsUsed is int count and > 0)
+        {
+            parts.Add($"{count} guidance item(s)");
+        }
+
+        if (aiResponse.HistoricalProjectsChecked is int count2 and > 0)
+        {
+            parts.Add($"{count2} previous project(s) checked");
+        }
+
+        if (aiResponse.FutureOpportunitiesConsidered is int count3 and > 0)
+        {
+            parts.Add($"{count3} future opportunit{(count3 == 1 ? "y" : "ies")} considered");
+        }
+
+        return parts.Count > 0
+            ? $"Institutional knowledge considered · {string.Join(", ", parts)}"
+            : "Institutional knowledge considered";
+    }
+
+    private async Task<GenerateIdeasRequest> BuildAiRequestAsync(
+        bool regenerate,
+        List<string> previousIdeaTitles,
+        CancellationToken cancellationToken = default)
+    {
+        var major = Input.Major.Trim();
+        var preferredDomain = Input.PreferredDomain.Trim();
+
+        // Idea Generation Knowledge Base -- a retrieval failure here must
+        // never fail idea generation itself; AdminIdeaContextService
+        // already catches and logs internally, returning an empty context
+        // on any error, so the Idea Generator behaves exactly as it does
+        // today whenever the knowledge base is empty or unavailable.
+        var adminContext = await adminIdeaContextService.GetContextAsync(
+            new AdminIdeaContextQuery(
+                Major: major,
+                PreferredDomain: preferredDomain,
+                KeywordTokens: AssessedSkills.Select(s => s.SkillName).ToList()),
+            cancellationToken);
+
+        var hasAdminContext =
+            adminContext.Guidance.Count > 0 ||
+            adminContext.PreviousProjectsToAvoid.Count > 0 ||
+            adminContext.HistoricalProjectsForContext.Count > 0 ||
+            adminContext.FutureOpportunities.Count > 0;
+
         return new GenerateIdeasRequest(
-            Major: Input.Major.Trim(),
+            Major: major,
             ExperienceLevel: Input.ExperienceLevel.Trim().ToLowerInvariant(),
-            PreferredDomain: Input.PreferredDomain.Trim(),
+            PreferredDomain: preferredDomain,
             TargetDifficulty: Input.TargetDifficulty.Trim().ToLowerInvariant(),
             PreferredStack: "ASP.NET Core Razor Pages, Python FastAPI, PostgreSQL",
             AvailableHoursPerWeek: Input.AvailableHours,
@@ -1290,7 +1363,10 @@ public class IdeaGeneratorModel(
                     ProficiencyLevel: Math.Clamp(s.Rating, 1, 5)
                 ))
                 .ToList()
-        );
+        )
+        {
+            AdminContext = hasAdminContext ? adminContext : null,
+        };
     }
 
     private async Task PersistReviewAsync(int userId, GenerateIdeasResponse aiResponse)

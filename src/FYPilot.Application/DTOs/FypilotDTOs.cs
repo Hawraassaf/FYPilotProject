@@ -71,6 +71,50 @@ public record GenerateIdeasRequest(
     bool Regenerate,
     List<string> PreviousIdeaTitles,
     List<GenerateIdeaSkillDto> Skills
+)
+{
+    // Idea Generation Knowledge Base (see AdminIdeaContextService) --
+    // init-only body property, not a positional parameter, so existing
+    // `new GenerateIdeasRequest(...)` call sites keep working unchanged and
+    // default to null (no admin context) when the knowledge base is empty
+    // or unused. This is bounded, backend-selected contextual DATA for
+    // ProjectIdeaAgent -- never an executable prompt, never sent in full.
+    public AdminIdeaGenerationContextDto? AdminContext { get; init; }
+}
+
+// ── Idea Generation Knowledge Base: bounded admin context (see
+// AdminIdeaContextService for the selection/capping algorithm). Every list
+// here is already filtered to active, effective, relevant records and
+// capped -- the full knowledge base is never sent. Only fields
+// ProjectIdeaAgent actually needs are included: no database IDs, no
+// CreatedBy/admin details, no private exclusion reasons, no timestamps.
+public record AdminGuidanceContextDto(
+    string Title,
+    string Content,
+    string GuidanceType
+);
+
+public record HistoricalProjectContextDto(
+    string Title,
+    string ProblemStatement,
+    string? Domain,
+    string Technologies
+);
+
+public record FutureOpportunityContextDto(
+    string Title,
+    string Description,
+    string? SuggestedDomain,
+    string SuggestedTechnologies,
+    string? ResearchGap,
+    string ParentProjectTitle
+);
+
+public record AdminIdeaGenerationContextDto(
+    List<AdminGuidanceContextDto> Guidance,
+    List<HistoricalProjectContextDto> PreviousProjectsToAvoid,
+    List<HistoricalProjectContextDto> HistoricalProjectsForContext,
+    List<FutureOpportunityContextDto> FutureOpportunities
 );
 
 public record GenerateIdeaSkillDto(
@@ -109,6 +153,17 @@ public record GenerateIdeasResponse(
     public bool? SearchFirewallBlocked { get; init; }
     public List<string>? SearchFirewallFlags { get; init; }
     public List<IdeaEvidenceSourceDto>? Sources { get; init; }
+
+    // Idea Generation Knowledge Base -- safe, count-only traceability
+    // metadata (never full admin text, never database IDs, never
+    // CreatedBy details). Kept request-level on this existing response
+    // contract rather than added to AiOutputReview/Quality Passport, since
+    // this is per-generation-call metadata, not a persisted review outcome.
+    public bool? AdminContextUsed { get; init; }
+    public int? GuidanceItemsUsed { get; init; }
+    public int? HistoricalProjectsChecked { get; init; }
+    public int? ExcludedProjectsChecked { get; init; }
+    public int? FutureOpportunitiesConsidered { get; init; }
 }
 
 // Mirrors only the CONFIRMED fields of Python's source dicts (title, url,
@@ -765,7 +820,17 @@ public record FypMentorServiceResponse(
     AiQualityPassportDto? Review = null,
     string? Provider = null,
     string? ModelUsed = null
-);
+)
+{
+    // Structured, backend-validated web-search sources (see
+    // app/routers/fyp_chat.py's _build_response_sources) -- init-only body
+    // property, not a positional parameter, so an older Python response
+    // missing this field entirely still deserializes exactly as it did
+    // before this change. Reuses IdeaEvidenceSourceDto (title/url only,
+    // no snippet) -- same shape and same reasoning as GenerateIdeasResponse
+    // above.
+    public List<IdeaEvidenceSourceDto>? Sources { get; init; }
+}
 
 public record FypMentorAnswerDto(
     string Reply,

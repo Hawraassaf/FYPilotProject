@@ -840,7 +840,12 @@
                                 "could not respond",
                                 StringComparison.OrdinalIgnoreCase);
 
-                        <div class="fyc-msg @(isUser ? "is-user" : "is-ai") @(isServiceNotice ? "is-service" : "")">
+                        var messageSources = isUser
+                            ? new List<IdeaEvidenceSourceDto>()
+                            : MentorChatModel.ParseSources(msg.SourcesJson);
+
+                        <div class="fyc-msg @(isUser ? "is-user" : "is-ai") @(isServiceNotice ? "is-service" : "")"
+                             data-has-structured-sources="@(messageSources.Count > 0 ? "true" : "false")">
                             <div class="fyc-avatar @(isUser ? "is-user" : "is-ai")">
                                 <i class="bi @(isUser ? "bi-person" : "bi-stars")"></i>
                             </div>
@@ -869,6 +874,29 @@
                                 }
 
                                 <div class="fyc-text">@msg.Content</div>
+
+                                @if (messageSources.Count > 0)
+                                {
+                                    <details class="marketfp-source-disclosure">
+                                        <summary>
+                                            <span><i class="bi bi-journal-text"></i> Sources</span>
+                                            <small>@messageSources.Count source(s)</small>
+                                        </summary>
+                                        <ul class="marketfp-sources-list">
+                                            @foreach (var source in messageSources)
+                                            {
+                                                <li>
+                                                    <div>
+                                                        <a href="@source.Url"
+                                                           target="_blank"
+                                                           rel="noopener noreferrer"
+                                                           title="@source.Title">@source.Title</a>
+                                                    </div>
+                                                </li>
+                                            }
+                                        </ul>
+                                    </details>
+                                }
 
                                 <time>
                                     @msg.CreatedAt.ToLocalTime().ToString("HH:mm")
@@ -1061,7 +1089,22 @@
         function enhanceMentorSourceLinks() {
             document
                 .querySelectorAll(".fyc-msg.is-ai .fyc-text")
-                .forEach(renderMentorTextWithSourceLinks);
+                // Messages with a real structured Sources disclosure
+                // (server-rendered from ChatMessage.SourcesJson) already
+                // show real links there -- skip them here so a stray
+                // "Read: <title> - <url>" line left over in Content never
+                // renders a second, duplicate link. Only historical
+                // messages saved before this feature existed (no
+                // SourcesJson) still fall through to this JS parsing.
+                .forEach(function (textEl) {
+                    var messageRow = textEl.closest(".fyc-msg");
+
+                    if (messageRow && messageRow.dataset.hasStructuredSources === "true") {
+                        return;
+                    }
+
+                    renderMentorTextWithSourceLinks(textEl);
+                });
         }
 
         scrollMentorToBottom();

@@ -18,6 +18,7 @@ pipeline at all -- see FypMentorAgent.try_short_circuit_answer.
 
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter
 
@@ -27,6 +28,62 @@ from app.review.pipeline import ReviewPipeline
 from app.review.response import build_review_response, empty_review_response
 
 router = APIRouter(tags=["FYP Mentor Chat"])
+
+_MAX_RESPONSE_SOURCES = 6
+_MAX_SOURCE_TITLE_LENGTH = 180
+
+
+def _is_safe_source_url(url: str) -> bool:
+    """Absolute http(s) only -- rejects javascript:/data:/file:/relative/malformed URLs."""
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+
+def _build_response_sources(mentor_agent: FypMentorAgent, *, usable: bool) -> list[dict[str, str]]:
+    """
+    Validated, deduplicated, capped copy of the agent's own last_sources --
+    a NEW list is always built here, never the mutable agent-owned list
+    returned by reference. Only title/url are ever exposed -- never
+    snippets, retrieved page text, or prompt content.
+
+    Empty whenever there is no verified evidence actually reflected in the
+    final answer: no search ran, the search failed, the retrieved evidence
+    was blocked by the firewall, or the pipeline never produced a usable
+    answer at all (the deterministic safe fallback doesn't reference the
+    search step, so sources would be misleading attached to it).
+    """
+    if (
+        not usable
+        or not mentor_agent.last_search_used
+        or mentor_agent.last_search_failed
+        or mentor_agent.last_search_firewall_blocked
+    ):
+        return []
+
+    seen_urls: set[str] = set()
+    sources: list[dict[str, str]] = []
+
+    for source in mentor_agent.last_sources:
+        title = str(source.get("title") or "").strip()[:_MAX_SOURCE_TITLE_LENGTH]
+        url = str(source.get("url") or "").strip()
+
+        if not title or not url or not _is_safe_source_url(url):
+            continue
+
+        if url in seen_urls:
+            continue
+
+        seen_urls.add(url)
+        sources.append({"title": title, "url": url})
+
+        if len(sources) >= _MAX_RESPONSE_SOURCES:
+            break
+
+    return sources
 
 
 def _build_review_context(request: FypMentorRequest) -> ReviewContext:
@@ -132,6 +189,7 @@ def fyp_chat(request: FypMentorRequest):
             "searchFailed": False,
             "searchFirewallBlocked": False,
             "searchFirewallFlags": [],
+            "sources": [],
             "review": empty_review_response(
                 "Trivial exchange answered directly; not sent to an LLM or the review pipeline."
             ),
@@ -186,6 +244,10 @@ def fyp_chat(request: FypMentorRequest):
         "searchFailed": mentor_agent.last_search_failed,
         "searchFirewallBlocked": mentor_agent.last_search_firewall_blocked,
         "searchFirewallFlags": mentor_agent.last_search_firewall_flags,
+        # Structured, backend-validated sources -- never LLM-authored. The
+        # model no longer writes citations into suggestedNextActions (see
+        # fyp_mentor_agent.py's prompt); the UI renders this list directly.
+        "sources": _build_response_sources(mentor_agent, usable=result.usable),
         "review": build_review_response(result),
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "message": "Mentor response generated successfully",

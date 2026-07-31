@@ -3,6 +3,7 @@ using System;
 using FYPilot.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FYPilot.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260731191254_AddSourcesJsonToChatMessage")]
+    partial class AddSourcesJsonToChatMessage
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -507,222 +510,6 @@ namespace FYPilot.Infrastructure.Migrations
                     b.HasIndex("SupervisorId");
 
                     b.ToTable("google_calendar_tokens");
-                });
-
-            modelBuilder.Entity("FYPilot.Domain.Entities.HistoricalFypFutureOpportunity", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int?>("CreatedByUserId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Description")
-                        .IsRequired()
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
-                    b.Property<int>("HistoricalFypProjectId")
-                        .HasColumnType("integer");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<int>("Priority")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("ResearchGap")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<string>("SuggestedDomain")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("SuggestedTechnologies")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CreatedByUserId");
-
-                    b.HasIndex("HistoricalFypProjectId");
-
-                    b.HasIndex("IsActive");
-
-                    b.HasIndex("Priority");
-
-                    b.ToTable("historical_fyp_future_opportunities", (string)null);
-                });
-
-            modelBuilder.Entity("FYPilot.Domain.Entities.HistoricalFypProject", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<bool>("AllowAsInspiration")
-                        .HasColumnType("boolean");
-
-                    b.Property<int?>("CompletionYear")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int?>("CreatedByUserId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Domain")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<bool>("ExcludeSimilarIdeas")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("ExclusionReason")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Keywords")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
-
-                    b.Property<string>("Major")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("ProblemStatement")
-                        .IsRequired()
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
-                    b.Property<string>("ProjectStatus")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)");
-
-                    b.Property<string>("TargetUsers")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<string>("Technologies")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CompletionYear");
-
-                    b.HasIndex("CreatedByUserId");
-
-                    b.HasIndex("Domain");
-
-                    b.HasIndex("ExcludeSimilarIdeas");
-
-                    b.HasIndex("IsActive");
-
-                    b.HasIndex("Major");
-
-                    b.ToTable("historical_fyp_projects", (string)null);
-                });
-
-            modelBuilder.Entity("FYPilot.Domain.Entities.IdeaGenerationGuidance", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Content")
-                        .IsRequired()
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int?>("CreatedByUserId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Domain")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<DateTime?>("EffectiveFrom")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime?>("EffectiveUntil")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("GuidanceType")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("character varying(40)");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Major")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<int>("Priority")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CreatedByUserId");
-
-                    b.HasIndex("Domain");
-
-                    b.HasIndex("IsActive");
-
-                    b.HasIndex("Major");
-
-                    b.HasIndex("Priority");
-
-                    b.ToTable("idea_generation_guidances", (string)null);
                 });
 
             modelBuilder.Entity("FYPilot.Domain.Entities.MarketDemandAnalysis", b =>
@@ -2874,44 +2661,6 @@ namespace FYPilot.Infrastructure.Migrations
                     b.Navigation("Supervisor");
                 });
 
-            modelBuilder.Entity("FYPilot.Domain.Entities.HistoricalFypFutureOpportunity", b =>
-                {
-                    b.HasOne("FYPilot.Domain.Entities.User", "CreatedByUser")
-                        .WithMany()
-                        .HasForeignKey("CreatedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("FYPilot.Domain.Entities.HistoricalFypProject", "HistoricalFypProject")
-                        .WithMany("FutureOpportunities")
-                        .HasForeignKey("HistoricalFypProjectId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("CreatedByUser");
-
-                    b.Navigation("HistoricalFypProject");
-                });
-
-            modelBuilder.Entity("FYPilot.Domain.Entities.HistoricalFypProject", b =>
-                {
-                    b.HasOne("FYPilot.Domain.Entities.User", "CreatedByUser")
-                        .WithMany()
-                        .HasForeignKey("CreatedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("CreatedByUser");
-                });
-
-            modelBuilder.Entity("FYPilot.Domain.Entities.IdeaGenerationGuidance", b =>
-                {
-                    b.HasOne("FYPilot.Domain.Entities.User", "CreatedByUser")
-                        .WithMany()
-                        .HasForeignKey("CreatedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("CreatedByUser");
-                });
-
             modelBuilder.Entity("FYPilot.Domain.Entities.MarketDemandAnalysis", b =>
                 {
                     b.HasOne("FYPilot.Domain.Entities.ProjectIdea", "ProjectIdea")
@@ -3413,11 +3162,6 @@ namespace FYPilot.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("LastActiveProject");
-                });
-
-            modelBuilder.Entity("FYPilot.Domain.Entities.HistoricalFypProject", b =>
-                {
-                    b.Navigation("FutureOpportunities");
                 });
 
             modelBuilder.Entity("FYPilot.Domain.Entities.MarketDemandAnalysis", b =>

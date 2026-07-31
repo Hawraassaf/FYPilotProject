@@ -68,6 +68,14 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<FeedbackMessage> FeedbackMessages => Set<FeedbackMessage>();
 
+    // Idea Generation Knowledge Base (admin-curated institutional context
+    // retrieved into ProjectIdeaAgent -- see AdminIdeaContextService.
+    // Contextual retrieval and controlled prompting only; no model
+    // training or fine-tuning is involved.)
+    public DbSet<IdeaGenerationGuidance> IdeaGenerationGuidances => Set<IdeaGenerationGuidance>();
+    public DbSet<HistoricalFypProject> HistoricalFypProjects => Set<HistoricalFypProject>();
+    public DbSet<HistoricalFypFutureOpportunity> HistoricalFypFutureOpportunities => Set<HistoricalFypFutureOpportunity>();
+
     // Supervisor Assignment & Notifications
     public DbSet<SupervisorPreferenceBatch> SupervisorPreferenceBatches { get; set; }
     public DbSet<SupervisorPreference> SupervisorPreferences { get; set; }
@@ -699,6 +707,90 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
                 .OnDelete(DeleteBehavior.Cascade);
 
             entity.HasIndex(x => new { x.SnapshotId, x.RegionKey }).IsUnique();
+        });
+
+        modelBuilder.Entity<IdeaGenerationGuidance>(entity =>
+        {
+            entity.ToTable("idea_generation_guidances");
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Title).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.Content).HasMaxLength(4000).IsRequired();
+            entity.Property(x => x.GuidanceType).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.Major).HasMaxLength(100);
+            entity.Property(x => x.Domain).HasMaxLength(100);
+
+            entity.HasOne(x => x.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(x => x.CreatedByUserId)
+                // Audit-trail actor reference, not an owned child --
+                // deleting the admin's user account must never silently
+                // wipe out institutional guidance they authored.
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(x => x.IsActive);
+            entity.HasIndex(x => x.Major);
+            entity.HasIndex(x => x.Domain);
+            entity.HasIndex(x => x.Priority);
+        });
+
+        modelBuilder.Entity<HistoricalFypProject>(entity =>
+        {
+            entity.ToTable("historical_fyp_projects");
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Title).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.ProblemStatement).HasMaxLength(4000).IsRequired();
+            entity.Property(x => x.Major).HasMaxLength(100);
+            entity.Property(x => x.Domain).HasMaxLength(100);
+            entity.Property(x => x.TargetUsers).HasMaxLength(500);
+            entity.Property(x => x.Technologies).HasMaxLength(1000);
+            entity.Property(x => x.ProjectStatus).HasMaxLength(30).IsRequired();
+            entity.Property(x => x.Keywords).HasMaxLength(1000);
+            entity.Property(x => x.ExclusionReason).HasMaxLength(1000);
+
+            entity.HasOne(x => x.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(x => x.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(x => x.IsActive);
+            entity.HasIndex(x => x.Major);
+            entity.HasIndex(x => x.Domain);
+            entity.HasIndex(x => x.CompletionYear);
+            entity.HasIndex(x => x.ExcludeSimilarIdeas);
+        });
+
+        modelBuilder.Entity<HistoricalFypFutureOpportunity>(entity =>
+        {
+            entity.ToTable("historical_fyp_future_opportunities");
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Title).HasMaxLength(200).IsRequired();
+            entity.Property(x => x.Description).HasMaxLength(4000).IsRequired();
+            entity.Property(x => x.SuggestedDomain).HasMaxLength(100);
+            entity.Property(x => x.SuggestedTechnologies).HasMaxLength(1000);
+            entity.Property(x => x.ResearchGap).HasMaxLength(2000);
+
+            entity.HasOne(x => x.HistoricalFypProject)
+                .WithMany(x => x.FutureOpportunities)
+                .HasForeignKey(x => x.HistoricalFypProjectId)
+                // Deliberately Restrict, not Cascade, even though this is an
+                // owned-child relationship: an accidental HistoricalFypProject
+                // deletion must never silently erase the future-opportunity
+                // history attached to it. The admin UI only ever
+                // activates/deactivates projects, never hard-deletes one
+                // with children still attached.
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(x => x.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(x => x.IsActive);
+            entity.HasIndex(x => x.HistoricalFypProjectId);
+            entity.HasIndex(x => x.Priority);
         });
 
         modelBuilder.Entity<PasswordResetToken>(entity =>

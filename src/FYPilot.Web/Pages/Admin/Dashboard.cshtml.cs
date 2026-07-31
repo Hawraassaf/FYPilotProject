@@ -12,6 +12,7 @@ public class DashboardModel(ApplicationDbContext db) : PageModel
     private const int SupervisorCapacity = 4;
 
     public List<StatCard> Stats { get; private set; } = [];
+    public List<StatCard> KnowledgeBaseStats { get; private set; } = [];
     public List<AttentionCard> AttentionCards { get; private set; } = [];
     public List<SupervisorWorkloadRow> SupervisorWorkload { get; private set; } = [];
     public List<ProjectRiskRow> ProjectRisks { get; private set; } = [];
@@ -135,6 +136,32 @@ public class DashboardModel(ApplicationDbContext db) : PageModel
             new("Students", totalStudents.ToString(), "Student accounts", "person-badge", "purple"),
             new("Supervisors", totalSupervisors.ToString(), "Available reviewers", "person-check", "green"),
             new("Project Ideas", totalIdeas.ToString(), "Generated/submitted ideas", "stars", "yellow")
+        ];
+
+        // Idea Generation Knowledge Base -- compact summary only, does not
+        // affect the existing Action Queue/Stats sections above.
+        var activeGuidanceCount = await db.IdeaGenerationGuidances
+            .AsNoTracking()
+            .CountAsync(g => g.IsActive);
+
+        var historicalProjectsCount = await db.HistoricalFypProjects
+            .AsNoTracking()
+            .CountAsync();
+
+        var excludedProjectsCount = await db.HistoricalFypProjects
+            .AsNoTracking()
+            .CountAsync(p => p.IsActive && p.ExcludeSimilarIdeas);
+
+        var activeFutureOpportunitiesCount = await db.HistoricalFypFutureOpportunities
+            .AsNoTracking()
+            .CountAsync(o => o.IsActive);
+
+        KnowledgeBaseStats =
+        [
+            new("Active Guidance Items", activeGuidanceCount.ToString(), "Guiding idea generation", "lightbulb", "blue"),
+            new("Historical Projects", historicalProjectsCount.ToString(), "Registered previous FYP projects", "archive", "purple"),
+            new("Excluded Projects", excludedProjectsCount.ToString(), "Must not be generated again", "shield-exclamation", "red"),
+            new("Active Future Opportunities", activeFutureOpportunitiesCount.ToString(), "Available as inspiration", "signpost-split", "green")
         ];
 
         AttentionCards =

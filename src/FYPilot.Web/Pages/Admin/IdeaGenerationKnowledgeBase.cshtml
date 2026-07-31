@@ -1,0 +1,1614 @@
+@page
+@model FYPilot.Web.Pages.Admin.IdeaGenerationKnowledgeBaseModel
+@{
+    ViewData["Title"] = "Idea Generation Knowledge Base";
+    ViewData["Subtitle"] = "Simple institutional guidance for better project ideas.";
+
+    var guidanceActive = Model.ActiveTab == "guidance";
+    var projectsActive = Model.ActiveTab == "projects";
+    var opportunitiesActive = Model.ActiveTab == "opportunities";
+}
+
+<section class="ikb-page" data-active-tab="@Model.ActiveTab">
+
+    @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
+    {
+        <div class="ikb-alert is-success" role="alert">
+            <i class="bi bi-check-circle-fill"></i>
+            <div>
+                <strong>Changes saved</strong>
+                <span>@Model.SuccessMessage</span>
+            </div>
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+    {
+        <div class="ikb-alert is-danger" role="alert">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            <div>
+                <strong>Action could not be completed</strong>
+                <span>@Model.ErrorMessage</span>
+            </div>
+        </div>
+    }
+
+    <header class="ikb-hero">
+        <div>
+            <span class="ikb-kicker">FYPILOT ADMIN</span>
+            <h1>Idea Generation Knowledge Base</h1>
+            <p>
+                Add simple institutional context so FYPilot can generate more relevant,
+                original and practical Computer Science project ideas.
+            </p>
+
+            <div class="ikb-hero-tags">
+                <span><i class="bi bi-lightbulb"></i> Guide ideas</span>
+                <span><i class="bi bi-shield-check"></i> Prevent repetition</span>
+                <span><i class="bi bi-stars"></i> Preserve opportunities</span>
+            </div>
+        </div>
+
+        <div class="ikb-coverage">
+            <span>Active knowledge</span>
+            <strong>
+                @(Model.ActiveGuidanceCount
+                  + Model.HistoricalProjectsCount
+                  + Model.ActiveFutureOpportunitiesCount)
+            </strong>
+            <small>Total records available</small>
+        </div>
+    </header>
+
+    <section class="ikb-metrics">
+        <article>
+            <span class="metric-icon blue"><i class="bi bi-lightbulb"></i></span>
+            <div>
+                <small>Active Guidance</small>
+                <strong>@Model.ActiveGuidanceCount</strong>
+            </div>
+        </article>
+
+        <article>
+            <span class="metric-icon violet"><i class="bi bi-archive"></i></span>
+            <div>
+                <small>Previous Projects</small>
+                <strong>@Model.HistoricalProjectsCount</strong>
+            </div>
+        </article>
+
+        <article>
+            <span class="metric-icon red"><i class="bi bi-slash-circle"></i></span>
+            <div>
+                <small>Excluded Projects</small>
+                <strong>@Model.ExcludedProjectsCount</strong>
+            </div>
+        </article>
+
+        <article>
+            <span class="metric-icon green"><i class="bi bi-signpost-split"></i></span>
+            <div>
+                <small>Future Opportunities</small>
+                <strong>@Model.ActiveFutureOpportunitiesCount</strong>
+            </div>
+        </article>
+    </section>
+
+    <section class="ikb-workspace">
+        <nav class="ikb-tabs">
+            <ul class="nav" id="ikbTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link @(guidanceActive ? "active" : "")"
+                            id="guidance-tab"
+                            data-bs-toggle="tab"
+                            data-bs-target="#guidance-pane"
+                            type="button"
+                            role="tab"
+                            aria-selected="@(guidanceActive.ToString().ToLowerInvariant())">
+                        <i class="bi bi-lightbulb"></i>
+                        <span>
+                            <strong>Guidance</strong>
+                            <small>Tell the AI what to prefer or avoid</small>
+                        </span>
+                    </button>
+                </li>
+
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link @(projectsActive ? "active" : "")"
+                            id="projects-tab"
+                            data-bs-toggle="tab"
+                            data-bs-target="#projects-pane"
+                            type="button"
+                            role="tab"
+                            aria-selected="@(projectsActive.ToString().ToLowerInvariant())">
+                        <i class="bi bi-archive"></i>
+                        <span>
+                            <strong>Previous Projects</strong>
+                            <small>Save history and prevent duplicates</small>
+                        </span>
+                    </button>
+                </li>
+
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link @(opportunitiesActive ? "active" : "")"
+                            id="opportunities-tab"
+                            data-bs-toggle="tab"
+                            data-bs-target="#opportunities-pane"
+                            type="button"
+                            role="tab"
+                            aria-selected="@(opportunitiesActive.ToString().ToLowerInvariant())">
+                        <i class="bi bi-stars"></i>
+                        <span>
+                            <strong>Future Opportunities</strong>
+                            <small>Save useful next-step ideas</small>
+                        </span>
+                    </button>
+                </li>
+            </ul>
+        </nav>
+
+        <div class="tab-content ikb-content" id="ikbTabsContent">
+
+            @* ========================================================
+               Guidance
+               ======================================================== *@
+
+            <div class="tab-pane fade @(guidanceActive ? "show active" : "")"
+                 id="guidance-pane"
+                 role="tabpanel"
+                 aria-labelledby="guidance-tab">
+
+                <div class="ikb-section-heading">
+                    <div>
+                        <span>GUIDANCE</span>
+                        <h2>What should FYPilot consider?</h2>
+                        <p>Add one clear rule. Keep it short and direct.</p>
+                    </div>
+                    <strong>@Model.GuidanceItems.Count total</strong>
+                </div>
+
+                <div class="ikb-layout">
+                    <aside class="ikb-form-card">
+                        <header>
+                            <span><i class="bi bi-lightbulb"></i></span>
+                            <div>
+                                <small>@(Model.NewGuidance.Id > 0 ? "EDIT GUIDANCE" : "NEW GUIDANCE")</small>
+                                <h3>@(Model.NewGuidance.Id > 0 ? "Update the rule" : "Add one simple rule")</h3>
+                            </div>
+                        </header>
+
+                        <form method="post"
+                              asp-page-handler="CreateGuidance"
+                              class="ikb-form">
+
+                            <input type="hidden" asp-for="NewGuidance.Id" />
+
+                            <div class="ikb-field">
+                                <label asp-for="NewGuidance.Title">Rule title</label>
+                                <input asp-for="NewGuidance.Title"
+                                       class="form-control"
+                                       maxlength="200"
+                                       placeholder="Example: Prefer Lebanese problems" />
+                                <span asp-validation-for="NewGuidance.Title" class="text-danger"></span>
+                            </div>
+
+                            <div class="ikb-field">
+                                <label asp-for="NewGuidance.Content">What should the AI do?</label>
+                                <textarea asp-for="NewGuidance.Content"
+                                          class="form-control"
+                                          rows="4"
+                                          maxlength="4000"
+                                          placeholder="Example: Prefer ideas that solve real problems faced by Lebanese students or businesses."></textarea>
+                                <span asp-validation-for="NewGuidance.Content" class="text-danger"></span>
+                            </div>
+
+                            <div class="ikb-grid">
+                                <div class="ikb-field">
+                                    <label asp-for="NewGuidance.GuidanceType">Rule type</label>
+                                    <select asp-for="NewGuidance.GuidanceType" class="form-select">
+                                        @foreach (var type in FYPilot.Web.Pages.Admin.IdeaGenerationKnowledgeBaseModel.GuidanceTypes)
+                                        {
+                                            <option value="@type">@FormatLabel(type)</option>
+                                        }
+                                    </select>
+                                </div>
+
+                                <div class="ikb-field">
+                                    <label asp-for="NewGuidance.Domain">Domain</label>
+                                    <select asp-for="NewGuidance.Domain" class="form-select">
+                                        <option value="">All CS domains</option>
+                                        @foreach (var domain in FYPilot.Web.Pages.Admin.IdeaGenerationKnowledgeBaseModel.PreferredDomains)
+                                        {
+                                            <option value="@domain">@domain</option>
+                                        }
+                                    </select>
+                                    <span asp-validation-for="NewGuidance.Domain" class="text-danger"></span>
+                                </div>
+                            </div>
+
+                            <div class="ikb-field compact-field">
+                                <label asp-for="NewGuidance.Priority">Importance</label>
+                                <select asp-for="NewGuidance.Priority" class="form-select">
+                                    <option value="1">Low</option>
+                                    <option value="2">Normal</option>
+                                    <option value="3">Important</option>
+                                    <option value="4">High</option>
+                                    <option value="5">Critical</option>
+                                </select>
+                                <span asp-validation-for="NewGuidance.Priority" class="text-danger"></span>
+                            </div>
+
+                            <div class="ikb-actions">
+                                <button type="submit" class="ikb-primary-btn">
+                                    <i class="bi @(Model.NewGuidance.Id > 0 ? "bi-check2" : "bi-plus-lg")"></i>
+                                    @(Model.NewGuidance.Id > 0 ? "Save changes" : "Add guidance")
+                                </button>
+
+                                @if (Model.NewGuidance.Id > 0)
+                                {
+                                    <a asp-page="./IdeaGenerationKnowledgeBase"
+                                       asp-route-activeTab="guidance"
+                                       class="ikb-secondary-btn">
+                                        Cancel
+                                    </a>
+                                }
+                            </div>
+                        </form>
+                    </aside>
+
+                    <section class="ikb-library">
+                        <header>
+                            <div>
+                                <small>GUIDANCE LIBRARY</small>
+                                <h3>Saved rules</h3>
+                            </div>
+                            <strong>@Model.GuidanceItems.Count</strong>
+                        </header>
+
+                        @if (!Model.GuidanceItems.Any())
+                        {
+                            <div class="ikb-empty">
+                                <span><i class="bi bi-lightbulb"></i></span>
+                                <h3>No guidance yet</h3>
+                                <p>Add one short rule using the form.</p>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="ikb-records">
+                                @foreach (var item in Model.GuidanceItems)
+                                {
+                                    <article class="ikb-record @(item.IsActive ? "" : "is-inactive")">
+                                        <div class="record-top">
+                                            <div class="record-title">
+                                                <span><i class="bi bi-lightbulb"></i></span>
+                                                <div>
+                                                    <div class="record-badges">
+                                                        <em>@FormatLabel(item.GuidanceType)</em>
+                                                        <em class="@(item.IsActive ? "active" : "inactive")">
+                                                            @(item.IsActive ? "Active" : "Inactive")
+                                                        </em>
+                                                    </div>
+                                                    <h4>@item.Title</h4>
+                                                </div>
+                                            </div>
+
+                                            <div class="record-actions">
+                                                <a asp-page="./IdeaGenerationKnowledgeBase"
+                                                   asp-route-editGuidanceId="@item.Id">
+                                                    <i class="bi bi-pencil"></i>
+                                                    Edit
+                                                </a>
+
+                                                <form method="post"
+                                                      asp-page-handler="ToggleGuidanceActive"
+                                                      asp-route-id="@item.Id"
+                                                      onsubmit="return confirm('@(item.IsActive ? "Deactivate" : "Activate") this guidance item?');">
+                                                    <button type="submit" title="@(item.IsActive ? "Deactivate" : "Activate")">
+                                                        <i class="bi @(item.IsActive ? "bi-pause-circle" : "bi-play-circle")"></i>
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        </div>
+
+                                        <p>@Truncate(item.Content, 180)</p>
+
+                                        <footer>
+                                            <span><i class="bi bi-grid"></i> @(item.Domain ?? "All CS domains")</span>
+                                            <span><i class="bi bi-flag"></i> Priority @item.Priority</span>
+                                        </footer>
+                                    </article>
+                                }
+                            </div>
+                        }
+                    </section>
+                </div>
+            </div>
+
+            @* ========================================================
+               Previous Projects
+               ======================================================== *@
+
+            <div class="tab-pane fade @(projectsActive ? "show active" : "")"
+                 id="projects-pane"
+                 role="tabpanel"
+                 aria-labelledby="projects-tab">
+
+                <div class="ikb-section-heading">
+                    <div>
+                        <span>PROJECT HISTORY</span>
+                        <h2>Which projects already exist?</h2>
+                        <p>Add only the main details needed to recognize the project.</p>
+                    </div>
+                    <strong>@Model.HistoricalProjects.Count total</strong>
+                </div>
+
+                <div class="ikb-layout">
+                    <aside class="ikb-form-card">
+                        <header>
+                            <span><i class="bi bi-archive"></i></span>
+                            <div>
+                                <small>@(Model.NewProject.Id > 0 ? "EDIT PROJECT" : "NEW PROJECT")</small>
+                                <h3>@(Model.NewProject.Id > 0 ? "Update the project" : "Register a previous project")</h3>
+                            </div>
+                        </header>
+
+                        <form method="post"
+                              asp-page-handler="CreateProject"
+                              class="ikb-form">
+
+                            <input type="hidden" asp-for="NewProject.Id" />
+
+                            <div class="ikb-field">
+                                <label asp-for="NewProject.Title">Project title</label>
+                                <input asp-for="NewProject.Title"
+                                       class="form-control"
+                                       maxlength="200"
+                                       placeholder="Example: AI Student Advising Chatbot" />
+                                <span asp-validation-for="NewProject.Title" class="text-danger"></span>
+                            </div>
+
+                            <div class="ikb-field">
+                                <label asp-for="NewProject.ProblemStatement">What did the project do?</label>
+                                <textarea asp-for="NewProject.ProblemStatement"
+                                          class="form-control"
+                                          rows="4"
+                                          maxlength="4000"
+                                          placeholder="Write one short description of the problem and solution."></textarea>
+                                <span asp-validation-for="NewProject.ProblemStatement" class="text-danger"></span>
+                            </div>
+
+                            <div class="ikb-grid">
+                                <div class="ikb-field">
+                                    <label asp-for="NewProject.Domain">Domain</label>
+                                    <select asp-for="NewProject.Domain" class="form-select">
+                                        <option value="">General Software System</option>
+                                        @foreach (var domain in FYPilot.Web.Pages.Admin.IdeaGenerationKnowledgeBaseModel.PreferredDomains)
+                                        {
+                                            <option value="@domain">@domain</option>
+                                        }
+                                    </select>
+                                    <span asp-validation-for="NewProject.Domain" class="text-danger"></span>
+                                </div>
+
+                                <div class="ikb-field">
+                                    <label asp-for="NewProject.ProjectStatus">Status</label>
+                                    <select asp-for="NewProject.ProjectStatus" class="form-select">
+                                        @foreach (var status in FYPilot.Web.Pages.Admin.IdeaGenerationKnowledgeBaseModel.ProjectStatuses)
+                                        {
+                                            <option value="@status">@FormatLabel(status)</option>
+                                        }
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="ikb-field compact-field">
+                                <label asp-for="NewProject.CompletionYear">Year</label>
+                                <input asp-for="NewProject.CompletionYear"
+                                       type="number"
+                                       class="form-control"
+                                       min="2000"
+                                       max="2100"
+                                       placeholder="@DateTime.UtcNow.Year" />
+                                <span asp-validation-for="NewProject.CompletionYear" class="text-danger"></span>
+                            </div>
+
+                            <div class="ikb-choice-list">
+                                <label class="ikb-choice">
+                                    <input asp-for="NewProject.ExcludeSimilarIdeas"
+                                           class="form-check-input"
+                                           type="checkbox" />
+                                    <span class="choice-icon danger">
+                                        <i class="bi bi-slash-circle"></i>
+                                    </span>
+                                    <span>
+                                        <strong>Prevent similar ideas</strong>
+                                        <small>Do not generate projects that are too similar.</small>
+                                    </span>
+                                </label>
+
+                                <label class="ikb-choice">
+                                    <input asp-for="NewProject.AllowAsInspiration"
+                                           class="form-check-input"
+                                           type="checkbox" />
+                                    <span class="choice-icon success">
+                                        <i class="bi bi-stars"></i>
+                                    </span>
+                                    <span>
+                                        <strong>Allow as inspiration</strong>
+                                        <small>Use it only to inspire a meaningfully different idea.</small>
+                                    </span>
+                                </label>
+                            </div>
+
+                            <div class="ikb-actions">
+                                <button type="submit" class="ikb-primary-btn">
+                                    <i class="bi @(Model.NewProject.Id > 0 ? "bi-check2" : "bi-plus-lg")"></i>
+                                    @(Model.NewProject.Id > 0 ? "Save changes" : "Register project")
+                                </button>
+
+                                @if (Model.NewProject.Id > 0)
+                                {
+                                    <a asp-page="./IdeaGenerationKnowledgeBase"
+                                       asp-route-activeTab="projects"
+                                       class="ikb-secondary-btn">
+                                        Cancel
+                                    </a>
+                                }
+                            </div>
+                        </form>
+                    </aside>
+
+                    <section class="ikb-library">
+                        <header>
+                            <div>
+                                <small>PROJECT LIBRARY</small>
+                                <h3>Previous FYP projects</h3>
+                            </div>
+                            <strong>@Model.HistoricalProjects.Count</strong>
+                        </header>
+
+                        @if (!Model.HistoricalProjects.Any())
+                        {
+                            <div class="ikb-empty">
+                                <span><i class="bi bi-archive"></i></span>
+                                <h3>No previous projects</h3>
+                                <p>Add the first project using the simple form.</p>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="ikb-records">
+                                @foreach (var project in Model.HistoricalProjects)
+                                {
+                                    <article class="ikb-record @(project.IsActive ? "" : "is-inactive")">
+                                        <div class="record-top">
+                                            <div class="record-title">
+                                                <span><i class="bi bi-folder2-open"></i></span>
+                                                <div>
+                                                    <div class="record-badges">
+                                                        <em>@FormatLabel(project.ProjectStatus)</em>
+
+                                                        @if (project.ExcludeSimilarIdeas)
+                                                        {
+                                                            <em class="danger">Excluded</em>
+                                                        }
+
+                                                        @if (project.AllowAsInspiration)
+                                                        {
+                                                            <em class="opportunity">Inspiration</em>
+                                                        }
+                                                    </div>
+                                                    <h4>@project.Title</h4>
+                                                </div>
+                                            </div>
+
+                                            <div class="record-actions">
+                                                <a asp-page="./IdeaGenerationKnowledgeBase"
+                                                   asp-route-editProjectId="@project.Id">
+                                                    <i class="bi bi-pencil"></i>
+                                                    Edit
+                                                </a>
+
+                                                <form method="post"
+                                                      asp-page-handler="ToggleProjectActive"
+                                                      asp-route-id="@project.Id"
+                                                      onsubmit="return confirm('@(project.IsActive ? "Deactivate" : "Activate") this project?');">
+                                                    <button type="submit" title="@(project.IsActive ? "Deactivate" : "Activate")">
+                                                        <i class="bi @(project.IsActive ? "bi-pause-circle" : "bi-play-circle")"></i>
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        </div>
+
+                                        <p>@Truncate(project.ProblemStatement, 190)</p>
+
+                                        <footer>
+                                            <span><i class="bi bi-grid"></i> @(project.Domain ?? "General Software System")</span>
+                                            <span><i class="bi bi-calendar3"></i> @(project.CompletionYear?.ToString() ?? "Year not set")</span>
+                                            <span><i class="bi bi-signpost-split"></i> @project.FutureOpportunities.Count opportunities</span>
+                                        </footer>
+                                    </article>
+                                }
+                            </div>
+                        }
+                    </section>
+                </div>
+            </div>
+
+            @* ========================================================
+               Future Opportunities
+               ======================================================== *@
+
+            <div class="tab-pane fade @(opportunitiesActive ? "show active" : "")"
+                 id="opportunities-pane"
+                 role="tabpanel"
+                 aria-labelledby="opportunities-tab">
+
+                <div class="ikb-section-heading">
+                    <div>
+                        <span>FUTURE OPPORTUNITIES</span>
+                        <h2>What could be built next?</h2>
+                        <p>Save one clear extension connected to a previous project.</p>
+                    </div>
+                    <strong>@Model.FutureOpportunities.Count total</strong>
+                </div>
+
+                <div class="ikb-layout">
+                    <aside class="ikb-form-card">
+                        <header>
+                            <span><i class="bi bi-stars"></i></span>
+                            <div>
+                                <small>@(Model.NewOpportunity.Id > 0 ? "EDIT OPPORTUNITY" : "NEW OPPORTUNITY")</small>
+                                <h3>@(Model.NewOpportunity.Id > 0 ? "Update the opportunity" : "Add a future direction")</h3>
+                            </div>
+                        </header>
+
+                        @if (!Model.HistoricalProjects.Any())
+                        {
+                            <div class="ikb-form-empty">
+                                <span><i class="bi bi-folder-plus"></i></span>
+                                <h3>Add a previous project first</h3>
+                                <p>Every future opportunity must be linked to one project.</p>
+                                <button type="button"
+                                        class="ikb-primary-btn"
+                                        data-open-tab="projects-tab">
+                                    Open Previous Projects
+                                </button>
+                            </div>
+                        }
+                        else
+                        {
+                            <form method="post"
+                                  asp-page-handler="CreateOpportunity"
+                                  class="ikb-form">
+
+                                <input type="hidden" asp-for="NewOpportunity.Id" />
+
+                                <div class="ikb-field">
+                                    <label asp-for="NewOpportunity.HistoricalFypProjectId">Previous project</label>
+                                    <select asp-for="NewOpportunity.HistoricalFypProjectId" class="form-select">
+                                        <option value="0">Choose a project</option>
+                                        @foreach (var project in Model.HistoricalProjects)
+                                        {
+                                            <option value="@project.Id">@project.Title</option>
+                                        }
+                                    </select>
+                                    <span asp-validation-for="NewOpportunity.HistoricalFypProjectId" class="text-danger"></span>
+                                </div>
+
+                                <div class="ikb-field">
+                                    <label asp-for="NewOpportunity.Title">Opportunity title</label>
+                                    <input asp-for="NewOpportunity.Title"
+                                           class="form-control"
+                                           maxlength="200"
+                                           placeholder="Example: Add Lebanese Arabic voice support" />
+                                    <span asp-validation-for="NewOpportunity.Title" class="text-danger"></span>
+                                </div>
+
+                                <div class="ikb-field">
+                                    <label asp-for="NewOpportunity.Description">What could be added next?</label>
+                                    <textarea asp-for="NewOpportunity.Description"
+                                              class="form-control"
+                                              rows="4"
+                                              maxlength="4000"
+                                              placeholder="Write one short description of the future extension."></textarea>
+                                    <span asp-validation-for="NewOpportunity.Description" class="text-danger"></span>
+                                </div>
+
+                                <div class="ikb-grid">
+                                    <div class="ikb-field">
+                                        <label asp-for="NewOpportunity.SuggestedDomain">Domain</label>
+                                        <select asp-for="NewOpportunity.SuggestedDomain" class="form-select">
+                                            <option value="">Any CS domain</option>
+                                            @foreach (var domain in FYPilot.Web.Pages.Admin.IdeaGenerationKnowledgeBaseModel.PreferredDomains)
+                                            {
+                                                <option value="@domain">@domain</option>
+                                            }
+                                        </select>
+                                        <span asp-validation-for="NewOpportunity.SuggestedDomain" class="text-danger"></span>
+                                    </div>
+
+                                    <div class="ikb-field">
+                                        <label asp-for="NewOpportunity.Priority">Importance</label>
+                                        <select asp-for="NewOpportunity.Priority" class="form-select">
+                                            <option value="1">Low</option>
+                                            <option value="2">Normal</option>
+                                            <option value="3">Important</option>
+                                            <option value="4">High</option>
+                                            <option value="5">Critical</option>
+                                        </select>
+                                        <span asp-validation-for="NewOpportunity.Priority" class="text-danger"></span>
+                                    </div>
+                                </div>
+
+                                <div class="ikb-actions">
+                                    <button type="submit" class="ikb-primary-btn">
+                                        <i class="bi @(Model.NewOpportunity.Id > 0 ? "bi-check2" : "bi-plus-lg")"></i>
+                                        @(Model.NewOpportunity.Id > 0 ? "Save changes" : "Add opportunity")
+                                    </button>
+
+                                    @if (Model.NewOpportunity.Id > 0)
+                                    {
+                                        <a asp-page="./IdeaGenerationKnowledgeBase"
+                                           asp-route-activeTab="opportunities"
+                                           class="ikb-secondary-btn">
+                                            Cancel
+                                        </a>
+                                    }
+                                </div>
+                            </form>
+                        }
+                    </aside>
+
+                    <section class="ikb-library">
+                        <header>
+                            <div>
+                                <small>OPPORTUNITY LIBRARY</small>
+                                <h3>Saved future directions</h3>
+                            </div>
+                            <strong>@Model.FutureOpportunities.Count</strong>
+                        </header>
+
+                        @if (!Model.FutureOpportunities.Any())
+                        {
+                            <div class="ikb-empty">
+                                <span><i class="bi bi-stars"></i></span>
+                                <h3>No future opportunities</h3>
+                                <p>Add the first future direction using the form.</p>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="ikb-records">
+                                @foreach (var opportunity in Model.FutureOpportunities)
+                                {
+                                    <article class="ikb-record @(opportunity.IsActive ? "" : "is-inactive")">
+                                        <div class="record-top">
+                                            <div class="record-title">
+                                                <span><i class="bi bi-stars"></i></span>
+                                                <div>
+                                                    <div class="record-badges">
+                                                        <em class="opportunity">Future direction</em>
+                                                        <em class="@(opportunity.IsActive ? "active" : "inactive")">
+                                                            @(opportunity.IsActive ? "Active" : "Inactive")
+                                                        </em>
+                                                    </div>
+                                                    <h4>@opportunity.Title</h4>
+                                                </div>
+                                            </div>
+
+                                            <div class="record-actions">
+                                                <a asp-page="./IdeaGenerationKnowledgeBase"
+                                                   asp-route-editOpportunityId="@opportunity.Id">
+                                                    <i class="bi bi-pencil"></i>
+                                                    Edit
+                                                </a>
+
+                                                <form method="post"
+                                                      asp-page-handler="ToggleOpportunityActive"
+                                                      asp-route-id="@opportunity.Id"
+                                                      onsubmit="return confirm('@(opportunity.IsActive ? "Deactivate" : "Activate") this future opportunity?');">
+                                                    <button type="submit" title="@(opportunity.IsActive ? "Deactivate" : "Activate")">
+                                                        <i class="bi @(opportunity.IsActive ? "bi-pause-circle" : "bi-play-circle")"></i>
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        </div>
+
+                                        <p>@Truncate(opportunity.Description, 185)</p>
+
+                                        <div class="parent-project">
+                                            <i class="bi bi-diagram-3"></i>
+                                            <span>From:</span>
+                                            <strong>@opportunity.HistoricalFypProject.Title</strong>
+                                        </div>
+
+                                        <footer>
+                                            <span><i class="bi bi-grid"></i> @(opportunity.SuggestedDomain ?? "Any CS domain")</span>
+                                            <span><i class="bi bi-flag"></i> Priority @opportunity.Priority</span>
+                                        </footer>
+                                    </article>
+                                }
+                            </div>
+                        }
+                    </section>
+                </div>
+            </div>
+        </div>
+    </section>
+</section>
+
+@functions {
+    private static string Truncate(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Length <= maxLength
+            ? value
+            : value[..maxLength] + "...";
+    }
+
+    private static string FormatLabel(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var result = new System.Text.StringBuilder();
+
+        for (var index = 0; index < value.Length; index++)
+        {
+            var current = value[index];
+
+            if (index > 0
+                && char.IsUpper(current)
+                && !char.IsWhiteSpace(value[index - 1]))
+            {
+                result.Append(' ');
+            }
+
+            result.Append(current);
+        }
+
+        return result.ToString();
+    }
+}
+
+<style>
+    .ikb-page {
+        --navy: #173565;
+        --navy-dark: #10284f;
+        --navy-light: #3d5f96;
+        --blue-soft: #edf3fb;
+        --surface: #ffffff;
+        --page: #f5f8fc;
+        --border: #dce5f0;
+        --text: #10213c;
+        --muted: #68788f;
+        --success: #18865a;
+        --danger: #cb4650;
+        --shadow: 0 10px 26px rgba(19, 46, 87, 0.07);
+
+        width: 100%;
+        padding-bottom: 2.5rem;
+        color: var(--text);
+    }
+
+    .ikb-page *,
+    .ikb-page *::before,
+    .ikb-page *::after {
+        box-sizing: border-box;
+    }
+
+    .ikb-alert {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.7rem;
+        margin-bottom: 0.8rem;
+        padding: 0.8rem 0.9rem;
+        border: 1px solid;
+        border-radius: 14px;
+    }
+
+    .ikb-alert i {
+        margin-top: 0.1rem;
+    }
+
+    .ikb-alert div {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .ikb-alert strong {
+        font-size: 0.8rem;
+    }
+
+    .ikb-alert span {
+        margin-top: 0.08rem;
+        font-size: 0.7rem;
+    }
+
+    .ikb-alert.is-success {
+        color: #13613f;
+        border-color: #bfe7d2;
+        background: #effaf4;
+    }
+
+    .ikb-alert.is-danger {
+        color: #9e2e37;
+        border-color: #f0c9cd;
+        background: #fff3f4;
+    }
+
+    .ikb-hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 190px;
+        align-items: center;
+        gap: 1rem;
+        padding: 1rem 1.15rem;
+        color: #ffffff;
+        border-radius: 24px;
+        background:
+            radial-gradient(circle at 5% 0%, rgba(100, 148, 225, 0.20), transparent 26%),
+            linear-gradient(135deg, var(--navy-dark), var(--navy-light));
+        box-shadow: var(--shadow);
+    }
+
+    .ikb-kicker {
+        font-size: 0.62rem;
+        font-weight: 800;
+        letter-spacing: 0.13em;
+    }
+
+    .ikb-hero h1 {
+        margin: 0.22rem 0 0;
+        font-size: clamp(1.55rem, 2.8vw, 2.25rem);
+        font-weight: 800;
+        line-height: 1.05;
+        letter-spacing: -0.04em;
+    }
+
+    .ikb-hero p {
+        max-width: 760px;
+        margin: 0.45rem 0 0;
+        color: rgba(255, 255, 255, 0.82);
+        font-size: 0.78rem;
+        line-height: 1.55;
+    }
+
+    .ikb-hero-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+        margin-top: 0.7rem;
+    }
+
+    .ikb-hero-tags span {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.32rem;
+        padding: 0.38rem 0.52rem;
+        font-size: 0.62rem;
+        font-weight: 700;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 9px;
+        background: rgba(255, 255, 255, 0.08);
+    }
+
+    .ikb-coverage {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        min-height: 110px;
+        padding: 0.7rem;
+        text-align: center;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.11);
+    }
+
+    .ikb-coverage span,
+    .ikb-coverage small {
+        color: rgba(255, 255, 255, 0.78);
+        font-size: 0.61rem;
+    }
+
+    .ikb-coverage strong {
+        margin: 0.2rem 0;
+        font-size: 2.25rem;
+        line-height: 1;
+    }
+
+    .ikb-metrics {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.7rem;
+        margin-top: 0.75rem;
+    }
+
+    .ikb-metrics article {
+        display: flex;
+        align-items: center;
+        gap: 0.65rem;
+        padding: 0.7rem;
+        border: 1px solid var(--border);
+        border-radius: 17px;
+        background: #ffffff;
+        box-shadow: 0 5px 15px rgba(19, 46, 87, 0.04);
+    }
+
+    .metric-icon {
+        display: grid;
+        flex: 0 0 39px;
+        width: 39px;
+        height: 39px;
+        place-items: center;
+        border-radius: 12px;
+    }
+
+    .metric-icon.blue { color: #3767ad; background: #eaf1fd; }
+    .metric-icon.violet { color: #7256b5; background: #f0ecfc; }
+    .metric-icon.red { color: #bf414b; background: #ffeded; }
+    .metric-icon.green { color: #18845a; background: #e9f8f1; }
+
+    .ikb-metrics small {
+        display: block;
+        color: var(--muted);
+        font-size: 0.61rem;
+        font-weight: 700;
+    }
+
+    .ikb-metrics strong {
+        display: block;
+        margin-top: 0.08rem;
+        font-size: 1.35rem;
+        line-height: 1;
+    }
+
+    .ikb-workspace {
+        margin-top: 0.75rem;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 22px;
+        background: #ffffff;
+        box-shadow: var(--shadow);
+    }
+
+    .ikb-tabs {
+        padding: 0.55rem;
+        border-bottom: 1px solid var(--border);
+        background: #f4f7fb;
+    }
+
+    .ikb-tabs .nav {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.45rem;
+    }
+
+    .ikb-tabs .nav-link {
+        display: grid;
+        width: 100%;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+        gap: 0.55rem;
+        padding: 0.58rem 0.68rem;
+        color: var(--muted);
+        text-align: left;
+        border: 1px solid transparent;
+        border-radius: 12px;
+        background: transparent;
+    }
+
+    .ikb-tabs .nav-link.active {
+        color: #ffffff;
+        background: linear-gradient(135deg, var(--navy-dark), var(--navy-light));
+        box-shadow: 0 7px 16px rgba(20, 49, 94, 0.16);
+    }
+
+    .ikb-tabs .nav-link > i {
+        display: grid;
+        width: 31px;
+        height: 31px;
+        place-items: center;
+        border-radius: 10px;
+        background: rgba(48, 80, 130, 0.09);
+    }
+
+    .ikb-tabs .nav-link.active > i {
+        background: rgba(255, 255, 255, 0.13);
+    }
+
+    .ikb-tabs .nav-link span {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+    }
+
+    .ikb-tabs strong {
+        font-size: 0.67rem;
+    }
+
+    .ikb-tabs small {
+        overflow: hidden;
+        margin-top: 0.05rem;
+        color: #8d99a9;
+        font-size: 0.54rem;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .ikb-tabs .nav-link.active small {
+        color: rgba(255, 255, 255, 0.70);
+    }
+
+    .ikb-content {
+        padding: 0.85rem;
+    }
+
+    .ikb-section-heading {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 0.7rem;
+        padding-bottom: 0.65rem;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .ikb-section-heading span {
+        color: var(--navy-light);
+        font-size: 0.56rem;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+    }
+
+    .ikb-section-heading h2 {
+        margin: 0.08rem 0 0;
+        font-size: 0.95rem;
+        font-weight: 800;
+    }
+
+    .ikb-section-heading p {
+        margin: 0.12rem 0 0;
+        color: var(--muted);
+        font-size: 0.62rem;
+    }
+
+    .ikb-section-heading > strong {
+        padding: 0.28rem 0.5rem;
+        color: var(--navy);
+        font-size: 0.6rem;
+        border-radius: 999px;
+        background: var(--blue-soft);
+    }
+
+    .ikb-layout {
+        display: grid;
+        grid-template-columns: minmax(340px, 0.9fr) minmax(0, 1.15fr);
+        align-items: start;
+        gap: 0.75rem;
+    }
+
+    .ikb-form-card,
+    .ikb-library {
+        min-width: 0;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: #ffffff;
+        box-shadow: 0 5px 16px rgba(19, 46, 87, 0.04);
+    }
+
+    .ikb-form-card > header,
+    .ikb-library > header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.65rem;
+        padding: 0.7rem;
+        border-bottom: 1px solid var(--border);
+        background: linear-gradient(135deg, #edf3fb, #f9fbfe);
+    }
+
+    .ikb-form-card > header {
+        justify-content: flex-start;
+    }
+
+    .ikb-form-card > header > span {
+        display: grid;
+        flex: 0 0 36px;
+        width: 36px;
+        height: 36px;
+        place-items: center;
+        color: var(--navy);
+        border-radius: 11px;
+        background: #ffffff;
+    }
+
+    .ikb-form-card header small,
+    .ikb-library header small {
+        display: block;
+        color: var(--navy-light);
+        font-size: 0.52rem;
+        font-weight: 800;
+        letter-spacing: 0.11em;
+    }
+
+    .ikb-form-card header h3,
+    .ikb-library header h3 {
+        margin: 0.08rem 0 0;
+        font-size: 0.78rem;
+        font-weight: 800;
+    }
+
+    .ikb-library header > strong {
+        font-size: 0.65rem;
+    }
+
+    .ikb-form {
+        padding: 0.75rem;
+        background: linear-gradient(180deg, #ffffff, #fbfdff);
+    }
+
+    .ikb-field {
+        margin-bottom: 0.65rem;
+    }
+
+    .ikb-field:last-child {
+        margin-bottom: 0;
+    }
+
+    .ikb-field label {
+        display: block;
+        margin-bottom: 0.3rem;
+        color: #223653;
+        font-size: 0.65rem;
+        font-weight: 800;
+    }
+
+    .ikb-field .form-control,
+    .ikb-field .form-select {
+        min-height: 41px;
+        padding: 0.55rem 0.68rem;
+        color: var(--text);
+        font-size: 0.69rem;
+        border: 1px solid #cfdae8;
+        border-radius: 11px;
+        background-color: #ffffff;
+        box-shadow: none;
+    }
+
+    .ikb-field textarea.form-control {
+        min-height: 98px;
+        line-height: 1.5;
+        resize: vertical;
+    }
+
+    .ikb-field .form-control:focus,
+    .ikb-field .form-select:focus {
+        border-color: #7290bb;
+        box-shadow: 0 0 0 3px rgba(52, 89, 145, 0.09);
+    }
+
+    .ikb-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.6rem;
+    }
+
+    .compact-field {
+        max-width: 230px;
+    }
+
+    .text-danger {
+        display: block;
+        margin-top: 0.22rem;
+        font-size: 0.56rem;
+    }
+
+    .ikb-choice-list {
+        display: grid;
+        gap: 0.5rem;
+        margin-top: 0.15rem;
+    }
+
+    .ikb-choice {
+        display: grid;
+        grid-template-columns: auto auto minmax(0, 1fr);
+        align-items: flex-start;
+        gap: 0.52rem;
+        padding: 0.58rem;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: #f8fbff;
+        cursor: pointer;
+    }
+
+    .ikb-choice .form-check-input {
+        margin-top: 0.45rem;
+    }
+
+    .ikb-choice .form-check-input:checked {
+        border-color: var(--navy);
+        background-color: var(--navy);
+    }
+
+    .choice-icon {
+        display: grid;
+        width: 31px;
+        height: 31px;
+        place-items: center;
+        border-radius: 10px;
+    }
+
+    .choice-icon.danger {
+        color: var(--danger);
+        background: #fff0f1;
+    }
+
+    .choice-icon.success {
+        color: var(--success);
+        background: #eaf8f1;
+    }
+
+    .ikb-choice strong {
+        display: block;
+        font-size: 0.63rem;
+    }
+
+    .ikb-choice small {
+        display: block;
+        margin-top: 0.08rem;
+        color: var(--muted);
+        font-size: 0.54rem;
+        line-height: 1.4;
+    }
+
+    .ikb-actions {
+        display: flex;
+        gap: 0.45rem;
+        margin-top: 0.75rem;
+    }
+
+    .ikb-primary-btn,
+    .ikb-secondary-btn {
+        display: inline-flex;
+        min-height: 40px;
+        align-items: center;
+        justify-content: center;
+        gap: 0.35rem;
+        padding: 0.58rem 0.72rem;
+        font-size: 0.65rem;
+        font-weight: 800;
+        text-decoration: none;
+        border-radius: 11px;
+        cursor: pointer;
+    }
+
+    .ikb-primary-btn {
+        flex: 1;
+        color: #ffffff;
+        border: 1px solid var(--navy);
+        background: linear-gradient(135deg, var(--navy-dark), var(--navy-light));
+        box-shadow: 0 7px 15px rgba(20, 49, 94, 0.16);
+    }
+
+    .ikb-primary-btn:hover {
+        color: #ffffff;
+    }
+
+    .ikb-secondary-btn {
+        color: var(--navy);
+        border: 1px solid var(--border);
+        background: #ffffff;
+    }
+
+    .ikb-form-empty,
+    .ikb-empty {
+        display: flex;
+        min-height: 320px;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        padding: 1.5rem;
+        text-align: center;
+    }
+
+    .ikb-form-empty > span,
+    .ikb-empty > span {
+        display: grid;
+        width: 48px;
+        height: 48px;
+        place-items: center;
+        margin-bottom: 0.6rem;
+        color: var(--navy);
+        font-size: 1.05rem;
+        border-radius: 15px;
+        background: var(--blue-soft);
+    }
+
+    .ikb-form-empty h3,
+    .ikb-empty h3 {
+        margin: 0;
+        font-size: 0.78rem;
+    }
+
+    .ikb-form-empty p,
+    .ikb-empty p {
+        max-width: 280px;
+        margin: 0.25rem 0 0.65rem;
+        color: var(--muted);
+        font-size: 0.6rem;
+        line-height: 1.45;
+    }
+
+    .ikb-records {
+        display: grid;
+        gap: 0.55rem;
+        padding: 0.65rem;
+    }
+
+    .ikb-record {
+        padding: 0.7rem;
+        border: 1px solid var(--border);
+        border-radius: 15px;
+        background: linear-gradient(180deg, #ffffff, #f9fbfe);
+        transition: 150ms ease;
+    }
+
+    .ikb-record:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 7px 18px rgba(19, 46, 87, 0.06);
+    }
+
+    .ikb-record.is-inactive {
+        opacity: 0.6;
+    }
+
+    .record-top {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 0.65rem;
+    }
+
+    .record-title {
+        display: flex;
+        min-width: 0;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+
+    .record-title > span {
+        display: grid;
+        flex: 0 0 31px;
+        width: 31px;
+        height: 31px;
+        place-items: center;
+        color: var(--navy);
+        border-radius: 10px;
+        background: var(--blue-soft);
+    }
+
+    .record-title h4 {
+        margin: 0.2rem 0 0;
+        font-size: 0.68rem;
+        font-weight: 800;
+        line-height: 1.35;
+    }
+
+    .record-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.25rem;
+    }
+
+    .record-badges em {
+        padding: 0.18rem 0.36rem;
+        color: var(--navy);
+        font-size: 0.49rem;
+        font-style: normal;
+        font-weight: 800;
+        border-radius: 999px;
+        background: var(--blue-soft);
+    }
+
+    .record-badges em.active {
+        color: var(--success);
+        background: #eaf8f1;
+    }
+
+    .record-badges em.inactive {
+        color: #6f7b8c;
+        background: #edf0f4;
+    }
+
+    .record-badges em.danger {
+        color: var(--danger);
+        background: #fff0f1;
+    }
+
+    .record-badges em.opportunity {
+        color: #14796e;
+        background: #e8f8f4;
+    }
+
+    .record-actions {
+        display: flex;
+        flex: 0 0 auto;
+        gap: 0.3rem;
+    }
+
+    .record-actions form {
+        margin: 0;
+    }
+
+    .record-actions a,
+    .record-actions button {
+        display: inline-flex;
+        min-height: 28px;
+        align-items: center;
+        justify-content: center;
+        gap: 0.25rem;
+        padding: 0.3rem 0.42rem;
+        color: var(--navy);
+        font-size: 0.54rem;
+        font-weight: 750;
+        text-decoration: none;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #ffffff;
+    }
+
+    .ikb-record > p {
+        margin: 0.5rem 0 0;
+        color: var(--muted);
+        font-size: 0.59rem;
+        line-height: 1.5;
+    }
+
+    .ikb-record footer {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem 0.65rem;
+        margin-top: 0.5rem;
+        padding-top: 0.45rem;
+        border-top: 1px solid #e8eef5;
+    }
+
+    .ikb-record footer span {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.24rem;
+        color: #758399;
+        font-size: 0.52rem;
+    }
+
+    .ikb-record footer i {
+        color: var(--navy-light);
+    }
+
+    .parent-project {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.3rem;
+        margin-top: 0.5rem;
+        padding: 0.45rem 0.5rem;
+        color: var(--muted);
+        font-size: 0.52rem;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #f5f8fc;
+    }
+
+    .parent-project i {
+        color: var(--navy-light);
+    }
+
+    .parent-project strong {
+        color: var(--text);
+    }
+
+    @@media (max-width: 1100px) {
+        .ikb-metrics {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .ikb-layout {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @@media (max-width: 760px) {
+        .ikb-hero {
+            grid-template-columns: 1fr;
+        }
+
+        .ikb-coverage {
+            min-height: 90px;
+        }
+
+        .ikb-metrics,
+        .ikb-tabs .nav,
+        .ikb-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .ikb-section-heading,
+        .record-top {
+            align-items: flex-start;
+            flex-direction: column;
+        }
+
+        .compact-field {
+            max-width: none;
+        }
+
+        .record-actions {
+            width: 100%;
+        }
+
+        .record-actions a,
+        .record-actions form,
+        .record-actions button {
+            flex: 1;
+        }
+    }
+</style>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            const query = new URLSearchParams(window.location.search);
+            const activeTab = query.get("activeTab");
+
+            const tabMap = {
+                guidance: "guidance-tab",
+                projects: "projects-tab",
+                opportunities: "opportunities-tab"
+            };
+
+            let targetTabId = tabMap[activeTab] || null;
+
+            if (query.has("editGuidanceId")) {
+                targetTabId = "guidance-tab";
+            } else if (query.has("editProjectId")) {
+                targetTabId = "projects-tab";
+            } else if (query.has("editOpportunityId")) {
+                targetTabId = "opportunities-tab";
+            }
+
+            if (targetTabId && window.bootstrap?.Tab) {
+                const tab = document.getElementById(targetTabId);
+
+                if (tab) {
+                    bootstrap.Tab.getOrCreateInstance(tab).show();
+                }
+            }
+
+            document
+                .querySelectorAll("[data-open-tab]")
+                .forEach(function (button) {
+                    button.addEventListener("click", function () {
+                        const tab = document.getElementById(
+                            button.getAttribute("data-open-tab")
+                        );
+
+                        if (tab && window.bootstrap?.Tab) {
+                            bootstrap.Tab.getOrCreateInstance(tab).show();
+                        }
+                    });
+                });
+        });
+    </script>
+}

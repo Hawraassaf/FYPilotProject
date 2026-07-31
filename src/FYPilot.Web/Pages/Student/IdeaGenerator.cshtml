@@ -250,6 +250,16 @@
                     </div>
                 }
 
+                @if (Model.AdminContextSummary is not null)
+                {
+                    <div class="idea2-evidence-row">
+                        <span class="idea2-evidence-status">
+                            <i class="bi bi-mortarboard"></i>
+                            @Model.AdminContextSummary
+                        </span>
+                    </div>
+                }
+
                 <div class="idea2-accordion" id="ideaAccordion">
                     @for (var i = 0; i < Model.GeneratedIdeas.Count; i++)
                     {

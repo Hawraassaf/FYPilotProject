@@ -398,6 +398,10 @@ public class MentorChatModel(
             MentorChatSessionId = CurrentChat.Id,
             Role = "assistant",
             Content = assistantContent,
+            // Structured sources -- assistant messages only, never the user
+            // message above. Null (not the raw response) whenever nothing
+            // valid survives BuildSourcesJson's validation.
+            SourcesJson = BuildSourcesJson(MentorResponse?.Sources),
             CreatedAt = DateTime.UtcNow
         });
 
@@ -876,13 +880,21 @@ public class MentorChatModel(
     {
         var content = answer.Reply;
 
-        if (answer.SuggestedNextActions.Any())
+        // Sources are now rendered separately as a structured block (see
+        // ParseSources/SourcesJson below) -- the prompt no longer asks the
+        // model to write "Read: <title> - <url>" actions, but this filter
+        // stays as defense-in-depth so a stray citation-shaped action never
+        // duplicates what the structured Sources disclosure already shows.
+        var plainActions = answer.SuggestedNextActions
+            .Where(a => !LooksLikeSourceCitation(a))
+            .ToList();
+
+        if (plainActions.Count > 0)
         {
             content += "\n\nSuggested next actions:\n";
             content += string.Join(
                 "\n",
-                answer.SuggestedNextActions
-                    .Select(a => $"- {a}"));
+                plainActions.Select(a => $"- {a}"));
         }
 
         if (!string.IsNullOrWhiteSpace(answer.Warning))
@@ -905,6 +917,92 @@ public class MentorChatModel(
         }
 
         return content;
+    }
+
+    private static bool LooksLikeSourceCitation(string action) =>
+        action.StartsWith("Read:", StringComparison.OrdinalIgnoreCase) ||
+        action.Contains("http://", StringComparison.OrdinalIgnoreCase) ||
+        action.Contains("https://", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsSafeHttpUrl(string? value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri)
+        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    private static string SafeText(string? value, int maximumLength)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+        var clean = value.Trim();
+        return clean.Length <= maximumLength ? clean : clean[..maximumLength];
+    }
+
+    private const int MaximumStoredSources = 6;
+
+    /// <summary>
+    /// Validates, deduplicates, and caps sources before persisting them --
+    /// defense-in-depth even though the Python side already applies the
+    /// same rules (see app/routers/fyp_chat.py's _build_response_sources).
+    /// Returns null (not "[]") when nothing valid survives, so ChatMessage.
+    /// SourcesJson stays null for ordinary messages.
+    /// </summary>
+    private static string? BuildSourcesJson(List<IdeaEvidenceSourceDto>? sources)
+    {
+        var safeSources = (sources ?? [])
+            .Where(s => IsSafeHttpUrl(s.Url) && !string.IsNullOrWhiteSpace(s.Title))
+            .GroupBy(s => s.Url, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .Take(MaximumStoredSources)
+            .Select(s => new { title = SafeText(s.Title, 200), url = s.Url })
+            .ToList();
+
+        return safeSources.Count > 0
+            ? JsonSerializer.Serialize(safeSources)
+            : null;
+    }
+
+    /// <summary>
+    /// Deserializes a stored ChatMessage.SourcesJson value back into
+    /// IdeaEvidenceSourceDto entries for Razor rendering. Never throws --
+    /// malformed/corrupt JSON safely yields an empty list instead of
+    /// breaking page rendering. Re-validates and re-deduplicates at read
+    /// time as well (defense-in-depth, matches BuildSourcesJson above).
+    /// </summary>
+    public static List<IdeaEvidenceSourceDto> ParseSources(string? sourcesJson)
+    {
+        if (string.IsNullOrWhiteSpace(sourcesJson))
+        {
+            return [];
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(sourcesJson);
+            var results = new List<IdeaEvidenceSourceDto>();
+
+            foreach (var item in document.RootElement.EnumerateArray())
+            {
+                var title = item.TryGetProperty("title", out var titleProp)
+                    ? titleProp.GetString() ?? ""
+                    : "";
+                var url = item.TryGetProperty("url", out var urlProp)
+                    ? urlProp.GetString() ?? ""
+                    : "";
+
+                if (!string.IsNullOrWhiteSpace(title) && IsSafeHttpUrl(url))
+                {
+                    results.Add(new IdeaEvidenceSourceDto(title, url));
+                }
+            }
+
+            return results
+                .GroupBy(s => s.Url, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .Take(MaximumStoredSources)
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
     }
 
     private static string BuildChatTitle(string message)

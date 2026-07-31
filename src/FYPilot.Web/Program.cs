@@ -175,6 +175,11 @@ builder.Services.AddScoped<
     IActiveProjectService,
     ActiveProjectService>();
 
+// ── Idea Generation Knowledge Base ────────────────────────────────────────────
+builder.Services.AddScoped<
+    IAdminIdeaContextService,
+    AdminIdeaContextService>();
+
 // ── Background Workers ────────────────────────────────────────────────────────
 builder.Services.AddHostedService<MeetingReminderWorker>();
 

@@ -66,6 +66,19 @@
         </div>
     </header>
 
+    <section class="ikb-summary-row" aria-label="Idea Generation Knowledge Base summary">
+        @foreach (var stat in Model.KnowledgeBaseStats)
+        {
+            <a href="/Admin/IdeaGenerationKnowledgeBase" class="ikb-summary-card ikb-@stat.ColorClass">
+                <i class="bi bi-@stat.Icon"></i>
+                <div>
+                    <strong>@stat.Value</strong>
+                    <span>@stat.Label</span>
+                </div>
+            </a>
+        }
+    </section>
+
     <section class="mission-header">
         <div>
             <span class="mini-label">Academic Workflow</span>
@@ -272,6 +285,68 @@
             --mc-red: #B91C1C;
             --mc-orange: #C2410C;
             --mc-yellow: #92400E;
+        }
+
+        .ikb-summary-row {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: .75rem;
+            margin-bottom: 1rem;
+        }
+
+        .ikb-summary-card {
+            display: flex;
+            align-items: center;
+            gap: .75rem;
+            padding: .85rem 1rem;
+            border-radius: 16px;
+            border: 1px solid var(--mc-border);
+            background: #fff;
+            text-decoration: none;
+            color: inherit;
+            transition: box-shadow .15s ease, transform .15s ease;
+        }
+
+        .ikb-summary-card:hover {
+            box-shadow: 0 10px 24px rgba(17, 24, 39, .08);
+            transform: translateY(-1px);
+        }
+
+        .ikb-summary-card i {
+            font-size: 1.35rem;
+            width: 42px;
+            height: 42px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            flex-shrink: 0;
+        }
+
+        .ikb-summary-card div {
+            display: flex;
+            flex-direction: column;
+            line-height: 1.2;
+        }
+
+        .ikb-summary-card strong {
+            font-size: 1.15rem;
+        }
+
+        .ikb-summary-card span {
+            font-size: .78rem;
+            color: var(--mc-muted);
+        }
+
+        .ikb-blue i { background: #E5EDFF; color: #2952CC; }
+        .ikb-purple i { background: #F1E8FF; color: #7C3AED; }
+        .ikb-red i { background: #FDE8E8; color: var(--mc-red); }
+        .ikb-green i { background: #E3F5EC; color: var(--mc-green); }
+
+        @@media (max-width: 992px) {
+            .ikb-summary-row {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
         }
 
         .mission-page {
