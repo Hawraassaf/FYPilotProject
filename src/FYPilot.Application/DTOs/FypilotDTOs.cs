@@ -92,6 +92,33 @@ public record GenerateIdeasResponse(
     string? Provider = null,
     string? ModelUsed = null,
     AiQualityPassportDto? Review = null
+)
+{
+    // Evidence-transparency metadata (Priority 3). Added as init-only body
+    // properties -- NOT positional constructor parameters -- since
+    // GenerateIdeasResponse is only ever produced by JSON deserialization
+    // (repo-wide search confirmed zero manual `new GenerateIdeasResponse(...)`
+    // call sites), so there is no positional-argument caller to break either
+    // way; init properties are still the safer, no-op-if-absent choice.
+    // All nullable so an older Python response (missing these fields
+    // entirely) deserializes exactly as it did before this change.
+    public bool? SearchUsed { get; init; }
+    public bool? SearchFailed { get; init; }
+    public bool? GroundedInLiveData { get; init; }
+    public int? SourceCount { get; init; }
+    public bool? SearchFirewallBlocked { get; init; }
+    public List<string>? SearchFirewallFlags { get; init; }
+    public List<IdeaEvidenceSourceDto>? Sources { get; init; }
+}
+
+// Mirrors only the CONFIRMED fields of Python's source dicts (title, url,
+// snippet -- see services/FYPilot.AI/app/services/llm_provider.py). Snippet
+// is deliberately NOT mapped here: it is retrieved third-party web content
+// that must never be displayed (per the Priority 1/2 firewall work), so it
+// is kept out of the .NET response entirely rather than mapped-but-unused.
+public record IdeaEvidenceSourceDto(
+    string Title,
+    string Url
 );
 
 public record GeneratedIdeaDto(

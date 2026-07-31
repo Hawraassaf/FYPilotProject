@@ -211,6 +211,45 @@
                     </div>
                 </div>
 
+                @if (Model.EvidenceSummary is not null)
+                {
+                    <div class="idea2-evidence-row">
+                        <span class="idea2-evidence-status">
+                            <i class="bi bi-shield-check"></i>
+                            @Model.EvidenceSummary.Status
+                        </span>
+
+                        @if (Model.EvidenceSummary.Sources.Any())
+                        {
+                            <details class="marketfp-source-disclosure idea2-evidence-disclosure">
+                                <summary>
+                                    <span>
+                                        <i class="bi bi-journal-text"></i>
+                                        Sources used
+                                    </span>
+                                    <small>@Model.EvidenceSummary.SourceCount source(s)</small>
+                                </summary>
+
+                                <ul class="marketfp-sources-list">
+                                    @foreach (var source in Model.EvidenceSummary.Sources)
+                                    {
+                                        <li>
+                                            <div>
+                                                <a href="@source.Url"
+                                                   target="_blank"
+                                                   rel="noopener noreferrer"
+                                                   title="@source.Title">
+                                                    @source.Title
+                                                </a>
+                                            </div>
+                                        </li>
+                                    }
+                                </ul>
+                            </details>
+                        }
+                    </div>
+                }
+
                 <div class="idea2-accordion" id="ideaAccordion">
                     @for (var i = 0; i < Model.GeneratedIdeas.Count; i++)
                     {

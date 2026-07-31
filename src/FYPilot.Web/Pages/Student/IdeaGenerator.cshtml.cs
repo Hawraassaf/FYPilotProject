@@ -57,6 +57,19 @@ public class IdeaGeneratorModel(
     public List<ProjectIdea> GeneratedIdeas { get; private set; } = [];
     public List<StudentSkill> AssessedSkills { get; private set; } = [];
 
+    /// <summary>
+    /// Evidence-transparency summary for the AI response that produced
+    /// <see cref="GeneratedIdeas"/> in THIS request/render cycle only --
+    /// populated in OnPostAsync/OnPostRegenerateAsync right where
+    /// GeneratedIdeas itself is set, from the same GenerateIdeasResponse.
+    /// Both handlers return Page() (not a redirect), so this plain
+    /// PageModel property survives to the Razor render without needing
+    /// TempData, session, or database persistence. Null on a normal page
+    /// load (OnGetAsync never sets it) -- the indicator only ever shows
+    /// immediately after a fresh generate/regenerate call.
+    /// </summary>
+    public IdeaEvidenceSummary? EvidenceSummary { get; private set; }
+
     /// <summary>Latest Regional Demand Footprint snapshot per visible idea (ProjectIdeaId -> snapshot).</summary>
     public Dictionary<int, MarketOpportunitySnapshot> LatestMarketInsights { get; private set; } = [];
 
@@ -163,6 +176,23 @@ public class IdeaGeneratorModel(
         [Range(1, 60, ErrorMessage = "Available hours must be between 1 and 60.")]
         public int AvailableHours { get; set; } = 20;
 
+    }
+
+    /// <summary>
+    /// Request-scoped, display-safe summary of ProjectIdeaAgent's web-search
+    /// evidence for the most recent generation/regeneration call. Never
+    /// carries firewall rule names, provider keys, internal error details,
+    /// prompts, or raw retrieved content -- only a precomputed, student-safe
+    /// status line and a validated, capped list of (title, URL) sources.
+    /// </summary>
+    public sealed class IdeaEvidenceSummary
+    {
+        public required string Status { get; init; }
+
+        /// <summary>Count of the VALIDATED safe sources actually displayed, not the raw sourceCount the AI service reported.</summary>
+        public int SourceCount { get; init; }
+
+        public List<IdeaEvidenceSourceDto> Sources { get; init; } = [];
     }
 
     public async Task<IActionResult> OnGetAsync(
@@ -372,6 +402,8 @@ public class IdeaGeneratorModel(
             .OrderBy(idea => idea.Id)
             .Take(IdeasPerView)
             .ToList();
+
+        EvidenceSummary = BuildEvidenceSummary(aiResponse);
 
         var sourceText = aiResponse.LlmUsed
             ? "using the local AI model"
@@ -589,6 +621,8 @@ public class IdeaGeneratorModel(
             .OrderBy(idea => idea.Id)
             .Take(IdeasPerView)
             .ToList();
+
+        EvidenceSummary = BuildEvidenceSummary(aiResponse);
 
         var sourceText = aiResponse.LlmUsed
             ? "using the local AI model"
@@ -1191,6 +1225,45 @@ public class IdeaGeneratorModel(
         if (string.IsNullOrWhiteSpace(value)) return string.Empty;
         var clean = value.Trim();
         return clean.Length <= maximumLength ? clean : clean[..maximumLength];
+    }
+
+    private const int MaximumEvidenceSourcesDisplayed = 5;
+
+    /// <summary>
+    /// Builds a student-safe evidence-transparency summary from the raw AI
+    /// response. Status precedence (highest first): firewall-blocked ->
+    /// search-failed -> grounded-with-validated-sources -> preliminary.
+    /// SourceCount reflects the VALIDATED safe-source list actually shown,
+    /// never the raw, unvalidated sourceCount the AI service reported.
+    /// </summary>
+    private static IdeaEvidenceSummary BuildEvidenceSummary(GenerateIdeasResponse aiResponse)
+    {
+        var safeSources = (aiResponse.Sources ?? [])
+            .Where(source => IsSafeHttpUrl(source.Url))
+            .Select(source => new IdeaEvidenceSourceDto(
+                SafeText(source.Title, 200),
+                source.Url))
+            .Take(MaximumEvidenceSourcesDisplayed)
+            .ToList();
+
+        var status = aiResponse switch
+        {
+            { SearchFirewallBlocked: true } =>
+                "Live evidence excluded for safety · preliminary estimate",
+            { SearchFailed: true } =>
+                "Live evidence unavailable · preliminary estimate",
+            { GroundedInLiveData: true } when safeSources.Count > 0 =>
+                $"Evidence-grounded · {safeSources.Count} source(s)",
+            _ =>
+                "Preliminary estimate · no live evidence",
+        };
+
+        return new IdeaEvidenceSummary
+        {
+            Status = status,
+            SourceCount = safeSources.Count,
+            Sources = safeSources,
+        };
     }
 
     private GenerateIdeasRequest BuildAiRequest(bool regenerate, List<string> previousIdeaTitles)

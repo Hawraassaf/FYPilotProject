@@ -3,17 +3,31 @@ FYPilot LLM Provider Layer
 
 INF-1 / RTA-1 mini implementation.
 
-Provider order:
+There are TWO completely separate provider chains. They never substitute
+for each other -- a search provider never generates the final agent
+answer, and a generation provider never performs live web search.
+
+GENERATION chain (ProviderChain.providers, used by generate_json/generate_text):
 1. DeepInfraProvider
    - Paid, pay-per-use OpenAI-compatible endpoint (no free-tier rate limiting)
    - Default model: meta-llama/Llama-3.3-70B-Instruct
 
 2. GroqProvider
-   - Normal mode: llama-3.3-70b-versatile
-   - Search mode: groq/compound-mini
+   - Normal mode: llama-3.3-70b-versatile (this is the generation fallback --
+     NOT groq/compound-mini, which is search-only, see below)
 
 3. OllamaProvider
    - Local fallback using qwen2.5-coder:7b by default
+
+WEB-SEARCH chain (ProviderChain.search_providers, used only by search_web()):
+1. BraveSearchProvider
+   - Brave's LLM Context API -- primary web-search provider
+
+2. GroqProvider (search_web mode only)
+   - Search mode: groq/compound-mini -- secondary/fallback web search only,
+     never used for normal generation
+
+3. (no further fallback -- callers proceed with no live evidence)
 
 GeminiProvider still exists below (unused in the default chain) in case it
 needs to be re-added later -- see git history for when/why it was dropped.
@@ -509,6 +523,242 @@ class DeepInfraProvider(BaseProvider):
                 search_used=False,
                 search_failed=use_search,
             )
+
+
+class BraveSearchProvider(BaseProvider):
+    """
+    Primary WEB-SEARCH provider -- NOT a generation provider.
+
+    This class deliberately does not override generate_json/generate_text
+    (they raise NotImplementedError via BaseProvider), and this instance is
+    NEVER placed in ProviderChain.providers (the generation chain) -- only
+    in ProviderChain.search_providers. This keeps web search and answer
+    generation as two genuinely separate chains, per design: Brave must
+    never generate the final agent answer.
+
+    Uses Brave's LLM Context API (POST /res/v1/llm/context), which returns
+    pre-extracted snippets directly -- no separate page-fetch step is
+    needed or performed.
+    """
+
+    name = "brave"
+
+    def __init__(self):
+        self.api_key = os.getenv("BRAVE_SEARCH_API_KEY")
+
+        self.enabled = (
+            os.getenv("BRAVE_SEARCH_ENABLED", "true").strip().lower() == "true"
+            and bool(self.api_key)
+        )
+
+        self.timeout_seconds = float(os.getenv("BRAVE_SEARCH_TIMEOUT_SECONDS", "30"))
+        self.max_urls = int(os.getenv("BRAVE_SEARCH_MAX_URLS", "8"))
+        self.max_tokens = int(os.getenv("BRAVE_SEARCH_MAX_TOKENS", "4096"))
+        self.country = os.getenv("BRAVE_SEARCH_COUNTRY", "").strip()
+        self.language = os.getenv("BRAVE_SEARCH_LANGUAGE", "en").strip()
+
+        self.endpoint = "https://api.search.brave.com/res/v1/llm/context"
+        self.model_name = "brave-llm-context"
+
+    # Confirmed empirically against the live Brave LLM Context API: queries
+    # of 360 chars succeeded, 373 chars returned HTTP 422 (Unprocessable
+    # Entity) -- the real boundary sits between the two. 320 is a safe
+    # margin below it. Existing agent queries (e.g. FypMentorAgent's
+    # instructional wrapper around the student's question, up to ~373
+    # chars) previously exceeded Brave's real limit although comfortably
+    # under this class's old 400-char cap -- this is the fix for that.
+    _MAX_QUERY_LENGTH = 320
+
+    @staticmethod
+    def _clean_query(query: str) -> str:
+        """
+        Send only the intended search query to Brave -- never the full agent
+        prompt. Strips control characters and collapses whitespace without
+        altering the query's meaning; truncated to _MAX_QUERY_LENGTH to
+        respect Brave's real query-length restriction (see comment above).
+        """
+        text = query or ""
+        cleaned = "".join(ch for ch in text if ch == "\n" or ch == "\t" or ch >= " ")
+        cleaned = " ".join(cleaned.split()).strip()
+        return cleaned[:BraveSearchProvider._MAX_QUERY_LENGTH]
+
+    def search_web(self, query: str) -> LLMResult:
+        if not self.enabled:
+            reason = (
+                "BRAVE_SEARCH_API_KEY is missing"
+                if not self.api_key
+                else "Brave search is disabled by configuration"
+            )
+            return LLMResult(
+                ok=False,
+                provider=self.name,
+                model=self.model_name,
+                text="",
+                data=None,
+                error=reason,
+                search_used=False,
+                search_failed=True,
+            )
+
+        clean_query = self._clean_query(query)
+
+        if not clean_query:
+            return LLMResult(
+                ok=False,
+                provider=self.name,
+                model=self.model_name,
+                text="",
+                data=None,
+                error="Empty search query after sanitization",
+                search_used=False,
+                search_failed=True,
+            )
+
+        request_body: dict[str, Any] = {
+            "q": clean_query,
+            "count": 10,
+            "maximum_number_of_urls": self.max_urls,
+            "maximum_number_of_tokens": self.max_tokens,
+            "maximum_number_of_snippets": 24,
+            "maximum_number_of_tokens_per_url": 1024,
+            "maximum_number_of_snippets_per_url": 3,
+            "context_threshold_mode": "balanced",
+        }
+
+        # Do not send empty optional fields.
+        if self.country:
+            request_body["country"] = self.country
+        if self.language:
+            request_body["language"] = self.language
+
+        try:
+            # Exactly one request per search_web() call -- no retries, no
+            # parallel Brave+Groq calls. On any failure below, ProviderChain
+            # (not this class) moves on to Groq.
+            response = requests.post(
+                self.endpoint,
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    # Never logged -- see _request_error(), which only ever
+                    # records the exception TYPE, never headers or the key.
+                    "X-Subscription-Token": self.api_key,
+                },
+                json=request_body,
+                timeout=self.timeout_seconds,
+            )
+        except requests.exceptions.Timeout:
+            return self._search_error("Brave search request timed out")
+        except requests.exceptions.RequestException as ex:
+            return self._search_error(f"Brave search connection error: {type(ex).__name__}")
+
+        if response.status_code != 200:
+            # Covers 400, 401/403, 429, and 5xx alike -- all are simply
+            # "Brave unsuccessful", never distinguished further to callers,
+            # and never expose response body content (which could echo the
+            # request or account details).
+            return self._search_error(f"Brave search returned HTTP {response.status_code}")
+
+        try:
+            payload = response.json()
+        except ValueError:
+            return self._search_error("Brave search returned invalid JSON")
+
+        sources = self._parse_response(payload)
+
+        if not sources:
+            return self._search_error("Brave search returned no usable safe sources")
+
+        return LLMResult(
+            ok=True,
+            provider=self.name,
+            model=self.model_name,
+            text="",
+            data=None,
+            error=None,
+            search_used=True,
+            search_failed=False,
+            sources=sources,
+        )
+
+    def _search_error(self, message: str) -> LLMResult:
+        return LLMResult(
+            ok=False,
+            provider=self.name,
+            model=self.model_name,
+            text="",
+            data=None,
+            error=message,
+            search_used=False,
+            search_failed=True,
+        )
+
+    def _parse_response(self, payload: Any) -> list[dict[str, str]]:
+        """
+        Parses the documented Brave LLM Context response shape:
+        grounding.generic[] (url, title, snippets[]) plus an optional
+        sources{} map keyed by URL for extra metadata.
+
+        Maps into the project's EXISTING SearchSource contract (see
+        _source_from_mapping/_deduplicate_sources above: {title, url,
+        snippet}) rather than a new, incompatible model -- every downstream
+        consumer (agents' _format_sources_for_prompt, the .NET
+        IdeaEvidenceSourceDto mapping) already expects exactly these three
+        keys. Hostname/date fields Brave may provide are deliberately not
+        added to this shared dict: nothing downstream reads them today, and
+        inventing new keys here would make Brave sources incompatible with
+        every existing consumer of Groq-produced sources.
+        """
+        if not isinstance(payload, dict):
+            return []
+
+        grounding = payload.get("grounding")
+        if not isinstance(grounding, dict):
+            return []
+
+        generic = grounding.get("generic")
+        if not isinstance(generic, list):
+            return []
+
+        source_metadata = payload.get("sources")
+        metadata_by_url: dict[str, dict[str, Any]] = {}
+        if isinstance(source_metadata, dict):
+            for key, value in source_metadata.items():
+                if isinstance(value, dict):
+                    metadata_by_url[_clean_url(str(key))] = value
+
+        found: list[dict[str, str]] = []
+
+        for item in generic:
+            if not isinstance(item, dict):
+                continue
+
+            url = _clean_url(str(item.get("url") or ""))
+            if not url:
+                continue
+
+            title = str(item.get("title") or "").strip()
+
+            snippets = item.get("snippets")
+            snippet_text = ""
+            if isinstance(snippets, list):
+                snippet_text = " ".join(
+                    str(snippet).strip()
+                    for snippet in snippets[:3]
+                    if str(snippet).strip()
+                )[:500]
+
+            if not title:
+                meta = metadata_by_url.get(url, {})
+                title = str(meta.get("title") or "").strip()
+
+            found.append({
+                "title": (title or _fallback_title_from_url(url))[:240],
+                "url": url,
+                "snippet": snippet_text,
+            })
+
+        return _deduplicate_sources(found, limit=self.max_urls)
 
 
 class GroqProvider(BaseProvider):
@@ -1127,9 +1377,9 @@ def _deepinfra_model_for_tier(tier: str) -> str:
 
 class ProviderChain:
     """
-    Provider cascade.
+    Two genuinely separate provider cascades, both owned by this class.
 
-    Default order:
+    GENERATION chain (self.providers, used by generate_json/generate_text):
     1. DeepInfra
     2. Groq
     3. Ollama
@@ -1139,15 +1389,27 @@ class ProviderChain:
     fallback. GeminiProvider is intentionally excluded from the default
     chain -- pass providers explicitly to include it.
 
-    `tier` selects the DeepInfra model ("high" / "standard" / "light", see
-    _DEEPINFRA_TIER_DEFAULTS) and is ignored if `providers` is passed
-    explicitly.
+    `tier` selects the DeepInfra model ("high" / "standard" / "light" /
+    "mentor", see _DEEPINFRA_TIER_DEFAULTS) and is ignored if `providers`
+    is passed explicitly. Brave is never part of this chain -- it has no
+    generate_json/generate_text implementation and must never generate an
+    agent's final answer.
+
+    WEB-SEARCH chain (self.search_providers, used only by search_web()):
+    1. Brave (BraveSearchProvider) -- primary
+    2. Groq (search_web mode, groq/compound-mini) -- fallback
+    (no further fallback -- callers proceed with no live evidence)
+
+    Kept as a genuinely separate list from `self.providers` so a change to
+    one chain (e.g. swapping the primary search provider) can never affect
+    the other (e.g. which model answers a student's question).
     """
 
     def __init__(
         self,
         providers: list[BaseProvider] | None = None,
         tier: str = "standard",
+        search_providers: list[BaseProvider] | None = None,
     ):
         self.providers = providers or [
             DeepInfraProvider(model=_deepinfra_model_for_tier(tier)),
@@ -1155,20 +1417,24 @@ class ProviderChain:
             OllamaProvider(),
         ]
 
+        self.search_providers = search_providers or [
+            BraveSearchProvider(),
+            GroqProvider(),
+        ]
+
     def search_web(self, query: str) -> LLMResult:
         """
-        Run direct web search with the first provider that implements it.
-
-        In the default chain this is Groq Compound Mini. Generation providers
-        are not silently substituted for the search provider because the API
-        must report whether real source URLs were actually obtained.
+        Run direct web search with the first search_providers entry that
+        succeeds: Brave first, Groq Compound second, matching the class
+        docstring's WEB-SEARCH chain. Generation providers are never
+        substituted for the search chain (this loop no longer touches
+        self.providers at all) because the API must report whether real
+        source URLs were actually obtained, and because Brave/Groq search
+        must stay fully independent of which generation provider is active.
         """
         errors: list[str] = []
 
-        for provider in self.providers:
-            if provider.__class__.search_web is BaseProvider.search_web:
-                continue
-
+        for provider in self.search_providers:
             result = provider.search_web(query)
 
             if result.ok and result.search_used and result.sources:

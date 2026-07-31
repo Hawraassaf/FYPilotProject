@@ -964,8 +964,109 @@
             });
         }
 
+        function isSafeHttpUrl(value) {
+            try {
+                const parsed = new URL(value);
+
+                return (
+                    parsed.protocol === "http:" ||
+                    parsed.protocol === "https:");
+            } catch (e) {
+                return false;
+            }
+        }
+
+        // Titles may themselves contain hyphens (e.g. "AI-DRIVEN ..."), so
+        // this looks for the literal " - http://" / " - https://" separator
+        // instead of splitting on every hyphen in the line.
+        function parseReadSourceLine(line) {
+            const bulletMatch = /^-\s+/.exec(line);
+            const bullet = bulletMatch ? bulletMatch[0] : "";
+            const rest = line.slice(bullet.length);
+
+            if (!rest.startsWith("Read:")) {
+                return null;
+            }
+
+            const afterLabel = rest.slice("Read:".length);
+
+            const httpsIndex = afterLabel.indexOf(" - https://");
+            const httpIndex = afterLabel.indexOf(" - http://");
+
+            const candidates = [httpsIndex, httpIndex].filter(
+                index => index !== -1);
+
+            if (candidates.length === 0) {
+                return null;
+            }
+
+            const separatorIndex = Math.min(...candidates);
+            const title = afterLabel.slice(0, separatorIndex).trim();
+            const url = afterLabel.slice(separatorIndex + 3).trim();
+
+            if (!title || !url || !isSafeHttpUrl(url)) {
+                return null;
+            }
+
+            return { bullet: bullet, title: title, url: url };
+        }
+
+        // Rebuilds a message bubble's text using only createElement /
+        // textContent / setAttribute (never innerHTML or Html.Raw), so
+        // "Read: <title> - <url>" source actions become real links while
+        // every other line -- including unparsed or invalid ones -- is
+        // kept as plain text exactly as the server rendered it.
+        function renderMentorTextWithSourceLinks(container) {
+            const originalText = container.textContent;
+
+            if (originalText.indexOf("Read:") === -1) {
+                return;
+            }
+
+            const lines = originalText.split("\n");
+            const fragment = document.createDocumentFragment();
+
+            lines.forEach(function (line, index) {
+                const parsed = parseReadSourceLine(line);
+
+                if (parsed) {
+                    if (parsed.bullet) {
+                        fragment.appendChild(
+                            document.createTextNode(parsed.bullet));
+                    }
+
+                    fragment.appendChild(
+                        document.createTextNode("Read: "));
+
+                    const link = document.createElement("a");
+                    link.setAttribute("href", parsed.url);
+                    link.setAttribute("target", "_blank");
+                    link.setAttribute("rel", "noopener noreferrer");
+                    link.textContent = parsed.title;
+
+                    fragment.appendChild(link);
+                } else {
+                    fragment.appendChild(document.createTextNode(line));
+                }
+
+                if (index < lines.length - 1) {
+                    fragment.appendChild(document.createTextNode("\n"));
+                }
+            });
+
+            container.textContent = "";
+            container.appendChild(fragment);
+        }
+
+        function enhanceMentorSourceLinks() {
+            document
+                .querySelectorAll(".fyc-msg.is-ai .fyc-text")
+                .forEach(renderMentorTextWithSourceLinks);
+        }
+
         scrollMentorToBottom();
         resizeMentorInput();
+        enhanceMentorSourceLinks();
 
         if (fycInput) {
             fycInput.addEventListener(

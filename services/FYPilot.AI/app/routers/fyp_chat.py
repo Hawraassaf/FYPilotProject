@@ -128,6 +128,10 @@ def fyp_chat(request: FypMentorRequest):
             "provider": None,
             "modelUsed": None,
             "ollamaError": None,
+            "searchUsed": False,
+            "searchFailed": False,
+            "searchFirewallBlocked": False,
+            "searchFirewallFlags": [],
             "review": empty_review_response(
                 "Trivial exchange answered directly; not sent to an LLM or the review pipeline."
             ),
@@ -138,8 +142,23 @@ def fyp_chat(request: FypMentorRequest):
     context = _build_review_context(request)
     pipeline = ReviewPipeline("FypMentorAgent", tier="mentor")
 
+    def _run_writer():
+        candidate = mentor_agent.generate_candidate(request)
+
+        # generate_candidate() runs chat() internally, which performs the
+        # web search lazily -- last_sources is only populated once this
+        # call returns. Mutate the list ReviewContext already holds
+        # in place (never reassign context.allowed_source_metadata) so the
+        # SAME list object guarded_call captured before this closure ran
+        # reflects the real sources by the time it runs the output-side
+        # URL policy check (see app/review/registry.py's url_mode for
+        # FypMentorAgent).
+        context.allowed_source_metadata[:] = mentor_agent.last_sources
+
+        return candidate
+
     result = pipeline.run(
-        lambda: mentor_agent.generate_candidate(request),
+        _run_writer,
         context,
         writer_trusted_parts=context.trusted_text_fields(),
         writer_untrusted_parts=context.untrusted_text_fields(),
@@ -157,6 +176,16 @@ def fyp_chat(request: FypMentorRequest):
         "provider": mentor_agent.last_provider,
         "modelUsed": mentor_agent.last_model_used,
         "ollamaError": mentor_agent.last_error,
+        # Response metadata (NOT persisted anywhere -- no AiOutputReview column
+        # backs these fields today) describing the web-search step, if one
+        # ran. searchFirewallBlocked/searchFirewallFlags are distinct from
+        # searchFailed: a firewall rejection means retrieval succeeded but
+        # the content was excluded as unsafe, never a search/provider
+        # failure. Flags are rule names only -- never the matched content.
+        "searchUsed": mentor_agent.last_search_used,
+        "searchFailed": mentor_agent.last_search_failed,
+        "searchFirewallBlocked": mentor_agent.last_search_firewall_blocked,
+        "searchFirewallFlags": mentor_agent.last_search_firewall_flags,
         "review": build_review_response(result),
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "message": "Mentor response generated successfully",

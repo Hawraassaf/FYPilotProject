@@ -406,6 +406,15 @@ def _response_to_dict(ideas, agent: ProjectIdeaAgent, review: Dict[str, Any] | N
     sources = list(getattr(agent, "last_sources", []) or [])
     grounded = bool(search_used and sources)
 
+    # Firewall status for the retrieved-evidence scan (see ProjectIdeaAgent
+    # .generate_ideas()). Response metadata only -- NOT persisted anywhere
+    # (no AiOutputReview column backs these fields today). Distinct from
+    # search_failed: a firewall block means retrieval succeeded but the
+    # content was excluded as unsafe, never a search/provider failure.
+    # Flags are rule names only -- never the matched content.
+    search_firewall_blocked = bool(getattr(agent, "last_search_firewall_blocked", False))
+    search_firewall_flags = list(getattr(agent, "last_search_firewall_flags", []) or [])
+
     if grounded and search_provider == "groq":
         source = "groq-compound-realtime"
     else:
@@ -444,6 +453,8 @@ def _response_to_dict(ideas, agent: ProjectIdeaAgent, review: Dict[str, Any] | N
         "searchProviderKey": search_provider,
         "searchModelUsed": search_model_used,
         "searchError": search_error,
+        "searchFirewallBlocked": search_firewall_blocked,
+        "searchFirewallFlags": search_firewall_flags,
         "sources": sources,
         "sourceCount": len(sources),
         "groundedInLiveData": grounded,

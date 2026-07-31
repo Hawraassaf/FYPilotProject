@@ -339,11 +339,12 @@ def ds_health():
             "for all optional ML features."
         ),
         "architecture": {
-            "cloud_ai": (
-                "Groq/Gemini provider chain for current-information features"
+            "generation": (
+                "DeepInfra (primary) -> Groq (fallback) -> Ollama (local fallback)"
             ),
-            "local_llm": (
-                "Ollama fallback for repeated project-context features"
+            "web_search": (
+                "Brave LLM Context (primary) -> Groq Compound (fallback) -- "
+                "search only, never used for answer generation"
             ),
             "trained_ml": (
                 "Skill Match Predictor and analytics when enabled"

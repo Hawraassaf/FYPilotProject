@@ -13,6 +13,14 @@ The agent:
 - Gates an optional Groq Compound web-search step (see _should_search_web)
   for questions that need current external facts rather than just project
   context, mirroring ProjectIdeaAgent/MarketNeedsAgent's search_web() usage.
+- Scans retrieved web-search content with the central LlmFirewall
+  (app/llm_firewall/firewall.py) immediately before it's embedded in the
+  final prompt -- this content is retrieved AFTER ReviewPipeline's own
+  input-firewall pass (which only sees the original request), so without
+  this in-agent scan it would otherwise reach the LLM unscanned. Note:
+  this reuses the same firewall rules used everywhere else in the app
+  (secrets + prompt-injection phrases); it does not add HTML/script/XSS
+  detection, which the central firewall does not currently provide.
 - Validates AI responses and returns safe fallback answers.
 """
 
@@ -25,6 +33,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from app.llm_firewall.firewall import LlmFirewall
 from app.services.llm_provider import LLMResult, ProviderChain
 
 logger = logging.getLogger("fypilot-mentor-agent")
@@ -170,6 +179,13 @@ class FypMentorAgent:
         self.last_search_error: Optional[str] = None
         self.last_sources: list[dict[str, Any]] = []
 
+        # Firewall check on retrieved web content (see chat()) -- distinct
+        # from last_search_failed: a firewall rejection means retrieval
+        # SUCCEEDED but the content was excluded as unsafe, which is a
+        # different condition than a provider/network search failure.
+        self.last_search_firewall_blocked = False
+        self.last_search_firewall_flags: list[str] = []
+
         self.allowed_intents = {
             "general_fyp_help",
             "idea_explanation",
@@ -312,6 +328,15 @@ class FypMentorAgent:
         return None
 
     def chat(self, request: FypMentorRequest) -> FypMentorAnswer:
+        # Full reset of every request-scoped field at the top of every call.
+        # FypMentorAgent is instantiated fresh per HTTP request in
+        # app/routers/fyp_chat.py (confirmed: the only instantiation site in
+        # the codebase, created inside the request handler, never a shared
+        # singleton or module-level instance) -- so no cross-request
+        # leakage is possible today. This reset is kept complete anyway as
+        # defensive hardening, and so the SAME instance can be safely reused
+        # across sequential chat() calls (see
+        # test_fyp_mentor_web_search_firewall.py's state-reset tests).
         self.last_llm_used = False
         self.last_error = None
         self.last_raw_llm_response = None
@@ -323,6 +348,8 @@ class FypMentorAgent:
         self.last_search_model_used = None
         self.last_search_error = None
         self.last_sources = []
+        self.last_search_firewall_blocked = False
+        self.last_search_firewall_flags = []
 
         short_circuit = self.try_short_circuit_answer(request)
 
@@ -334,7 +361,7 @@ class FypMentorAgent:
         if self._should_search_web(request.message):
             try:
                 search_result = self.provider_chain.search_web(
-                    self._build_search_query(request.message)
+                    self._build_search_query(request)
                 )
 
                 self.last_search_provider = (
@@ -356,6 +383,39 @@ class FypMentorAgent:
                 logger.exception("Mentor web search failed.")
 
             search_context = self._format_sources_for_prompt(self.last_sources)
+
+            # Scan exactly what will be embedded in the final prompt, using
+            # the SAME central LlmFirewall every other agent/stage uses (no
+            # new detection rules added here -- see the audit note on
+            # HTML/script content not being a covered category today).
+            # This closes the timing gap: guarded_call's own inspect_prompt
+            # runs before this agent's internal search ever executes, so
+            # retrieved content was never scanned before this fix.
+            if self.last_sources:
+                verdict = LlmFirewall().inspect_prompt(
+                    trusted_parts={},
+                    untrusted_parts={"web_search_results": search_context},
+                )
+
+                if verdict.has_blocking_finding():
+                    # A firewall rejection is distinct from a search
+                    # failure: retrieval succeeded, the content was
+                    # deliberately excluded as unsafe. last_search_failed
+                    # stays False; only last_search_firewall_blocked is set.
+                    # Only rule names are ever stored -- never the matched
+                    # content itself (matches FirewallFinding's own
+                    # contract in app/llm_firewall/models.py).
+                    self.last_search_used = False
+                    self.last_search_failed = False
+                    self.last_search_firewall_blocked = True
+                    self.last_search_firewall_flags = [
+                        finding.rule for finding in verdict.findings
+                    ]
+                    self.last_search_error = (
+                        "Retrieved web content was excluded by the content firewall."
+                    )
+                    self.last_sources = []
+                    search_context = self._format_sources_for_prompt([])
 
         prompt = self._build_prompt(request, search_context=search_context)
 
@@ -487,11 +547,14 @@ GROUNDING AND ACCURACY RULES:
 - Keep advice suitable for the student's team size, available hours, experience, and missing skills.
 - Do not recommend unnecessary technologies that contradict the selected stack.
 - Do not expose secrets, passwords, API keys, connection strings, or private data.
-- If LIVE WEB SEARCH RESULTS are provided, use them only as supporting evidence for
-  current facts (library versions, current best practices, external documentation).
-  Never let them override or contradict the authoritative project context above.
+- If LIVE WEB SEARCH RESULTS are provided, they were already retrieved for the
+  student -- do not tell the student to go search Google Scholar, IEEE Xplore,
+  or similar themselves. Instead, mention what the retrieved sources cover in
+  your reply, and surface the actual sources (see OUTPUT RULES for
+  suggestedNextActions). Use them as supporting evidence for current facts;
+  never let them override or contradict the authoritative project context above.
   If no search results were provided, do not invent current version numbers,
-  release dates, or citations.
+  release dates, or citations, and do not claim that specific sources exist.
 
 ROADMAP-HELP RULES:
 - Identify the next incomplete roadmap phase.
@@ -554,6 +617,11 @@ OUTPUT RULES:
 - confidence must be an integer from 0 to 95.
 - usedContext must list only context sections actually used.
 - suggestedNextActions must contain 0 to 4 short actions.
+- If LIVE WEB SEARCH RESULTS are provided, at least 2 (up to 4) entries in
+  suggestedNextActions must be in the exact form "Read: <title> - <url>",
+  using the title and url copied verbatim from the LIVE WEB SEARCH RESULTS
+  list -- never an invented, guessed, or paraphrased title or url. These
+  count toward the 0 to 4 limit above.
 - assumptions must contain 0 to 4 short assumptions.
 - warning must be an empty string when no warning is needed.
 - codeBlocks must be empty unless code was explicitly requested.
@@ -1460,19 +1528,67 @@ STUDENT QUESTION:
             "cost of",
             "trending",
             "industry standard",
+            # Research/literature-help phrasing -- a core FYP mentoring use
+            # case (finding academic sources for a thesis/report) that the
+            # original keyword set entirely missed, causing the model to
+            # improvise a "here's how to search yourself" answer with no
+            # search attempted at all.
+            "find sources",
+            "find research",
+            "find studies",
+            "find papers",
+            "find information about",
+            "research paper",
+            "research papers",
+            "academic source",
+            "academic sources",
+            "literature review",
+            "case studies",
+            "existing research",
+            "prior work",
+            "related work",
+            "peer-reviewed",
+            "google scholar",
+            "help me research",
+            "help me find",
+            "look up",
         ]
 
         return any(term in text for term in search_terms)
 
-    def _build_search_query(self, message: str) -> str:
-        """Small, dedicated Compound search request -- mirrors ProjectIdeaAgent."""
-        return (
-            "Use live web search. Find 3 to 6 current, credible sources that "
-            "directly help answer this final-year-project mentoring question: "
-            f"\"{message.strip()[:400]}\". Prioritize official documentation, "
-            "reputable technical sources, and recent release/version "
-            "information. Summarize each source briefly and include its real URL."
-        )
+    def _build_search_query(self, request: FypMentorRequest) -> str:
+        """
+        Small, dedicated Compound/Brave search request -- mirrors
+        ProjectIdeaAgent. Puts the student's actual project TOPIC (selected
+        idea title/domain) first, ahead of the raw message text, because:
+
+        1. Brave's real query-length limit truncates from the end (see
+           BraveSearchProvider._MAX_QUERY_LENGTH) -- if the topic were
+           appended after a long message, it could be cut off entirely.
+        2. A generic meta-request like "help me find sources for my idea"
+           contains no actual subject matter on its own -- without the
+           project topic, Brave/Groq search for the literal phrase "find
+           sources" and return irrelevant generic results (e.g. articles
+           about how to search, not about the project's actual domain).
+        """
+        topic_parts = []
+
+        if request.selectedIdea is not None:
+            if request.selectedIdea.title.strip():
+                topic_parts.append(request.selectedIdea.title.strip())
+            if request.selectedIdea.domain.strip():
+                topic_parts.append(request.selectedIdea.domain.strip())
+
+        topic = " - ".join(topic_parts)
+        message = request.message.strip()
+
+        if topic:
+            return (
+                f"{topic}: {message[:200]}. Find current, credible academic "
+                "or technical sources with real URLs."
+            )
+
+        return f"{message[:280]} Find current, credible sources with real URLs."
 
     def _format_sources_for_prompt(self, sources: list[dict[str, Any]]) -> str:
         """Convert real search results into a compact generation context."""

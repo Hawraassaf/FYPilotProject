@@ -3706,6 +3706,31 @@ body,
     margin: 0.3rem 0 0;
 }
 
+.idea2-evidence-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 1rem;
+}
+
+.idea2-evidence-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.75rem;
+    border-radius: 999px;
+    background: #F1F5F9;
+    border: 1px solid #E2E8F0;
+    color: #334155;
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.idea2-evidence-disclosure {
+    margin: 0;
+}
+
 .idea2-warning {
     flex-shrink: 0;
     padding: 0.95rem;

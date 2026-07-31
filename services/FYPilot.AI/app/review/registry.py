@@ -1110,7 +1110,14 @@ AGENT_REGISTRY: dict[str, AgentReviewConfig] = {
     "FypMentorAgent": AgentReviewConfig(
         schema=FypMentorAnswer,
         max_rewrites=1,
-        url_mode="no_urls_allowed",
+        # Like MarketFootprintAgent/MarketNeedsAgent below, suggestedNextActions
+        # can legitimately contain real source URLs ("Read: <title> - <url>"),
+        # copied verbatim from live search results, never LLM-invented. The
+        # router (fyp_chat.py) populates allowed_source_metadata from the
+        # Writer's own last_sources right after generate_candidate() runs,
+        # since -- unlike the Market agents -- Mentor Chat's search happens
+        # lazily inside chat() itself rather than up front in the router.
+        url_mode="source_metadata_only",
         allow_unreviewed_output=False,
         known_risky_claims=_MENTOR_KNOWN_RISKY_CLAIMS,
         mandatory_fields=["reply"],
