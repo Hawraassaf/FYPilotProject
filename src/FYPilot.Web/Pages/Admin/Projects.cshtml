@@ -1,0 +1,1394 @@
+﻿@page
+@model FYPilot.Web.Pages.Admin.ProjectsModel
+@{
+    ViewData["Title"] = "Project Directory";
+    ViewData["Subtitle"] =
+        "Review every project, owner, collaborator, and assigned supervisor";
+}
+
+<section class="apd-page">
+    <header class="apd-hero">
+        <div>
+            <span class="apd-kicker">
+                Administration · Project oversight
+            </span>
+
+            <h1>All Project Workspaces</h1>
+
+            <p>
+                Review every project created in FYPilot. Open a
+                project row to see its official idea, owner,
+                collaborators, and supervisor assignment.
+            </p>
+        </div>
+
+        <div class="apd-hero-summary">
+            <span>Platform projects</span>
+            <strong>@Model.Stats.TotalProjects</strong>
+            <small>
+                @Model.Stats.WithAssignedSupervisor supervised
+                · @Model.Stats.WithoutAssignedSupervisor without
+                an active supervisor
+            </small>
+        </div>
+    </header>
+
+    <section class="apd-stats"
+             aria-label="Project directory statistics">
+        <article>
+            <div class="apd-stat-icon">
+                <i class="bi bi-folder2-open"></i>
+            </div>
+
+            <div>
+                <span>Total Projects</span>
+                <strong>@Model.Stats.TotalProjects</strong>
+                <small>All project workspaces</small>
+            </div>
+        </article>
+
+        <article>
+            <div class="apd-stat-icon">
+                <i class="bi bi-lightbulb"></i>
+            </div>
+
+            <div>
+                <span>Official Ideas</span>
+                <strong>@Model.Stats.WithSelectedIdea</strong>
+                <small>Projects with a selected idea</small>
+            </div>
+        </article>
+
+        <article>
+            <div class="apd-stat-icon">
+                <i class="bi bi-people"></i>
+            </div>
+
+            <div>
+                <span>Collaborative</span>
+                <strong>@Model.Stats.CollaborativeProjects</strong>
+                <small>Projects with collaborators</small>
+            </div>
+        </article>
+
+        <article>
+            <div class="apd-stat-icon">
+                <i class="bi bi-person-check"></i>
+            </div>
+
+            <div>
+                <span>Supervised</span>
+                <strong>@Model.Stats.WithAssignedSupervisor</strong>
+                <small>Active supervisor assignments</small>
+            </div>
+        </article>
+    </section>
+
+    <section class="apd-directory">
+        <header class="apd-directory-head">
+            <div>
+                <span class="apd-kicker">
+                    Project directory
+                </span>
+
+                <h2>Ownership and team structure</h2>
+
+                <p>
+                    Projects are numbered in creation order.
+                    Select the arrow to open the full information.
+                </p>
+            </div>
+
+            <span class="apd-result-count"
+                  id="apdResultCount">
+                @Model.Projects.Count
+                @(Model.Projects.Count == 1
+                    ? "project"
+                    : "projects")
+            </span>
+        </header>
+
+        <div class="apd-toolbar">
+            <label class="apd-search">
+                <i class="bi bi-search"></i>
+
+                <input type="search"
+                       id="apdSearch"
+                       placeholder="Search project, owner, collaborator, supervisor..."
+                       autocomplete="off" />
+            </label>
+
+            <label class="apd-filter">
+                <span class="visually-hidden">
+                    Filter by project status
+                </span>
+
+                <select id="apdStatusFilter">
+                    <option value="all">
+                        All project statuses
+                    </option>
+
+                    @foreach (var status
+                        in Model.AvailableStatuses)
+                    {
+                        <option value="@status.Value">
+                            @status.Label
+                        </option>
+                    }
+                </select>
+
+                <i class="bi bi-chevron-down"></i>
+            </label>
+
+            <label class="apd-filter">
+                <span class="visually-hidden">
+                    Filter by supervisor status
+                </span>
+
+                <select id="apdSupervisorFilter">
+                    <option value="all">
+                        All supervisor statuses
+                    </option>
+                    <option value="assigned">
+                        Assigned
+                    </option>
+                    <option value="pending">
+                        Pending approval
+                    </option>
+                    <option value="unassigned">
+                        Not assigned
+                    </option>
+                </select>
+
+                <i class="bi bi-chevron-down"></i>
+            </label>
+        </div>
+
+        @if (!Model.Projects.Any())
+        {
+            <div class="apd-empty">
+                <div>
+                    <i class="bi bi-folder-x"></i>
+                </div>
+
+                <h2>No projects have been created yet</h2>
+
+                <p>
+                    Projects will appear here immediately after
+                    students create their workspaces.
+                </p>
+            </div>
+        }
+        else
+        {
+            <div class="apd-list"
+                 id="apdProjectList">
+
+                @foreach (var project
+                    in Model.Projects)
+                {
+                    var supervisorFilter =
+                        project.HasActiveSupervisor
+                            ? "assigned"
+                            : project.SupervisorStatus
+                                is "pending_admin"
+                                or "requested"
+                                    ? "pending"
+                                    : "unassigned";
+
+                    var detailsId =
+                        $"apd-project-details-{project.ProjectId}";
+
+                    <article class="apd-project-card"
+                             data-project-card
+                             data-status="@project.Status"
+                             data-supervisor-status="@supervisorFilter"
+                             data-search="@project.SearchText">
+
+                        <button type="button"
+                                class="apd-project-toggle"
+                                data-project-toggle
+                                aria-expanded="false"
+                                aria-controls="@detailsId">
+
+                            <span class="apd-project-number">
+                                @project.DisplayNumber
+                            </span>
+
+                            <span class="apd-project-heading">
+                                <small>
+                                    Project #@project.DisplayNumber
+                                </small>
+
+                                <strong title="@project.Title">
+                                    @project.Title
+                                </strong>
+
+                                <span>
+                                    <i class="bi bi-tag"></i>
+                                    @project.Domain
+                                </span>
+                            </span>
+
+                            <span class="apd-project-summary">
+                                <span class="apd-status
+                                    @project.StatusCssClass">
+                                    @project.StatusLabel
+                                </span>
+
+                                <span>
+                                    <i class="bi bi-people"></i>
+                                    @project.ActiveMemberCount
+                                    /@project.MaximumMembers
+                                </span>
+                            </span>
+
+                            <i class="bi bi-chevron-down
+                                apd-chevron">
+                            </i>
+                        </button>
+
+                        <div class="apd-project-details"
+                             id="@detailsId"
+                             data-project-details
+                             hidden>
+
+                            <section class="apd-idea">
+                                <div>
+                                    <span>
+                                        Official selected idea
+                                    </span>
+
+                                    <strong>
+                                        @project.SelectedIdeaTitle
+                                    </strong>
+                                </div>
+
+                                @if (!project.HasSelectedIdea)
+                                {
+                                    <small>
+                                        The project does not have an
+                                        official selected idea yet.
+                                    </small>
+                                }
+                                else
+                                {
+                                    <small>
+                                        @project.Description
+                                    </small>
+                                }
+                            </section>
+
+                            <div class="apd-people-grid">
+                                <section class="apd-person-panel">
+                                    <header>
+                                        <span class="apd-panel-icon">
+                                            <i class="bi bi-crown"></i>
+                                        </span>
+
+                                        <div>
+                                            <small>Project owner</small>
+                                        </div>
+                                    </header>
+
+                                    <div class="apd-contact">
+                                        <span class="apd-avatar">
+                                            @project.OwnerInitials
+                                        </span>
+
+                                        <div>
+                                            <strong>
+                                                @project.OwnerName
+                                            </strong>
+
+                                            <span>
+                                                @(string.IsNullOrWhiteSpace(
+                                                    project.OwnerEmail)
+                                                    ? "Email unavailable"
+                                                    : project.OwnerEmail)
+                                            </span>
+                                        </div>
+                                    </div>
+                                </section>
+
+                                <section class="apd-person-panel">
+                                    <header>
+                                        <span class="apd-panel-icon">
+                                            <i class="bi bi-people"></i>
+                                        </span>
+
+                                        <div>
+                                            <small>
+                                                Active collaborators
+                                            </small>
+
+                                            <strong>
+                                                @project.Collaborators.Count
+                                                @(project.Collaborators.Count == 1
+                                                    ? "member"
+                                                    : "members")
+                                            </strong>
+                                        </div>
+                                    </header>
+
+                                    @if (!project.Collaborators.Any())
+                                    {
+                                        <div class="apd-person-empty">
+                                            <i class="bi bi-person-dash"></i>
+                                            Owner-only project
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div class="apd-collaborators">
+                                            @foreach (var member
+                                                in project.Collaborators)
+                                            {
+                                                <div class="apd-collaborator"
+                                                     title="@member.Email">
+                                                    <span>
+                                                        @member.Initials
+                                                    </span>
+
+                                                    <div>
+                                                        <strong>
+                                                            @member.FullName
+                                                        </strong>
+
+                                                        <small>
+                                                            @member.Email
+                                                        </small>
+                                                    </div>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </section>
+
+                                <section class="apd-person-panel
+                                    apd-supervisor-panel">
+                                    <header class="apd-supervisor-head">
+                                        <span class="apd-panel-icon">
+                                            <i class="bi bi-person-check"></i>
+                                        </span>
+
+                                        <div>
+                                            <small>
+                                                Assigned supervisor
+                                            </small>
+                                        </div>
+
+                                        <a asp-page="/Admin/SupervisorAssignments"
+                                           class="apd-manage-link"
+                                           title="Manage supervisor assignment">
+                                            <i class="bi bi-person-gear"></i>
+                                            <span>Manage</span>
+                                        </a>
+                                    </header>
+
+                                    <div class="apd-supervisor-state">
+                                        <span class="apd-supervisor-badge
+                                            @project.SupervisorStatusCssClass">
+                                            <i class="bi
+                                                @(project.HasActiveSupervisor
+                                                   ? "bi-check-circle"
+                                                   : project.SupervisorStatus
+                                                       is "pending_admin"
+                                                       or "requested"
+                                                       ? "bi-hourglass-split"
+                                                       : "bi-dash-circle")">
+                                            </i>
+
+                                            @project.SupervisorStatusLabel
+                                        </span>
+
+                                        <strong>
+                                            @project.SupervisorName
+                                        </strong>
+
+                                        @if (project.HasActiveSupervisor &&
+                                             !string.IsNullOrWhiteSpace(
+                                                 project.SupervisorEmail))
+                                        {
+                                            <small>
+                                                @project.SupervisorEmail
+                                            </small>
+                                        }
+                                    </div>
+                                </section>
+                            </div>
+                        </div>
+                    </article>
+                }
+            </div>
+
+            <div class="apd-filter-empty"
+                 id="apdFilterEmpty">
+                <div>
+                    <i class="bi bi-search"></i>
+                </div>
+
+                <h2>No matching projects</h2>
+
+                <p>
+                    Change the search phrase or one of the filters.
+                </p>
+            </div>
+        }
+    </section>
+</section>
+
+@section Head {
+    <style>
+        :root {
+            --apd-deep: #17233F;
+            --apd-navy: #28385E;
+            --apd-steel: #516C8D;
+            --apd-text: #14213A;
+            --apd-muted: #6F7D94;
+            --apd-border: #E1E7EF;
+            --apd-soft: #F5F7FA;
+            --apd-green: #168A68;
+            --apd-shadow: 0 14px 36px rgba(30, 45, 75, .07);
+        }
+
+        .apd-page {
+            max-width: 1500px;
+            margin: 0 auto;
+            padding-bottom: 2rem;
+            color: var(--apd-text);
+        }
+
+        .apd-hero {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(230px, .3fr);
+            gap: 1rem;
+            align-items: center;
+            padding: 1.1rem 1.25rem;
+            color: #FFFFFF;
+            background: radial-gradient( circle at 92% 4%, rgba(255,255,255,.07), transparent 29%), linear-gradient( 128deg, var(--apd-deep), var(--apd-navy) 58%, #405577);
+            border: 1px solid rgba(255,255,255,.10);
+            border-radius: 21px;
+            box-shadow: 0 17px 40px rgba(23,35,63,.17);
+        }
+
+        .apd-kicker {
+            display: block;
+            color: var(--apd-steel);
+            font-size: .65rem;
+            font-weight: 850;
+            letter-spacing: .1em;
+            text-transform: uppercase;
+        }
+
+        .apd-hero .apd-kicker {
+            color: rgba(255,255,255,.64);
+        }
+
+        .apd-hero h1 {
+            margin: .23rem 0 0;
+            font-size: clamp(1.6rem,3vw,2.25rem);
+            font-weight: 900;
+            letter-spacing: -.045em;
+        }
+
+        .apd-hero p {
+            max-width: 800px;
+            margin: .42rem 0 0;
+            color: rgba(255,255,255,.70);
+            font-size: .78rem;
+            line-height: 1.5;
+        }
+
+        .apd-hero-summary {
+            padding: .8rem;
+            background: rgba(255,255,255,.065);
+            border: 1px solid rgba(255,255,255,.12);
+            border-radius: 15px;
+        }
+
+            .apd-hero-summary span,
+            .apd-hero-summary strong,
+            .apd-hero-summary small {
+                display: block;
+            }
+
+            .apd-hero-summary span {
+                color: rgba(255,255,255,.60);
+                font-size: .6rem;
+                font-weight: 800;
+                letter-spacing: .08em;
+                text-transform: uppercase;
+            }
+
+            .apd-hero-summary strong {
+                margin-top: .14rem;
+                font-size: 1.65rem;
+                font-weight: 900;
+                line-height: 1;
+            }
+
+            .apd-hero-summary small {
+                margin-top: .28rem;
+                color: rgba(255,255,255,.66);
+                font-size: .63rem;
+                line-height: 1.4;
+            }
+
+        .apd-stats {
+            display: grid;
+            grid-template-columns: repeat(4,minmax(0,1fr));
+            gap: .75rem;
+            margin-top: .8rem;
+        }
+
+            .apd-stats article {
+                display: grid;
+                grid-template-columns: auto minmax(0,1fr);
+                gap: .65rem;
+                align-items: center;
+                min-height: 82px;
+                padding: .8rem;
+                background: #FFFFFF;
+                border: 1px solid var(--apd-border);
+                border-radius: 15px;
+                box-shadow: var(--apd-shadow);
+            }
+
+        .apd-stat-icon,
+        .apd-panel-icon {
+            display: grid;
+            place-items: center;
+            color: var(--apd-navy);
+            background: #EEF2F6;
+        }
+
+        .apd-stat-icon {
+            width: 42px;
+            height: 42px;
+            border-radius: 12px;
+        }
+
+        .apd-stats span,
+        .apd-stats strong,
+        .apd-stats small {
+            display: block;
+        }
+
+        .apd-stats span {
+            color: var(--apd-muted);
+            font-size: .61rem;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .apd-stats strong {
+            margin-top: .04rem;
+            font-size: 1.22rem;
+            font-weight: 900;
+        }
+
+        .apd-stats small {
+            margin-top: .1rem;
+            color: #8A96A8;
+            font-size: .58rem;
+        }
+
+        .apd-directory {
+            margin-top: .8rem;
+            padding: .95rem;
+            background: #FFFFFF;
+            border: 1px solid var(--apd-border);
+            border-radius: 19px;
+            box-shadow: var(--apd-shadow);
+        }
+
+        .apd-directory-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: flex-end;
+        }
+
+            .apd-directory-head h2 {
+                margin: .15rem 0 0;
+                font-size: 1.1rem;
+                font-weight: 900;
+            }
+
+            .apd-directory-head p {
+                margin: .22rem 0 0;
+                color: var(--apd-muted);
+                font-size: .68rem;
+            }
+
+        .apd-result-count {
+            padding: .37rem .6rem;
+            color: var(--apd-navy);
+            background: #EEF2F6;
+            border-radius: 999px;
+            font-size: .63rem;
+            font-weight: 850;
+            white-space: nowrap;
+        }
+
+        .apd-toolbar {
+            display: grid;
+            grid-template-columns: minmax(280px,1.6fr) repeat(2,minmax(175px,.55fr));
+            gap: .62rem;
+            margin-top: .8rem;
+        }
+
+        .apd-search,
+        .apd-filter {
+            min-height: 43px;
+            display: grid;
+            align-items: center;
+            background: #FBFCFE;
+            border: 1px solid #D9E1EB;
+            border-radius: 11px;
+        }
+
+            .apd-search:focus-within,
+            .apd-filter:focus-within {
+                border-color: var(--apd-steel);
+                box-shadow: 0 0 0 3px rgba(81,108,141,.10);
+            }
+
+        .apd-search {
+            grid-template-columns: auto minmax(0,1fr);
+            gap: .55rem;
+            padding: 0 .8rem;
+        }
+
+            .apd-search i {
+                color: #8491A5;
+            }
+
+            .apd-search input,
+            .apd-filter select {
+                width: 100%;
+                height: 41px;
+                color: #334155;
+                background: transparent;
+                border: 0;
+                outline: 0;
+                font-size: .69rem;
+            }
+
+        .apd-filter {
+            grid-template-columns: minmax(0,1fr) auto;
+            padding: 0 .7rem;
+        }
+
+            .apd-filter select {
+                appearance: none;
+                cursor: pointer;
+            }
+
+            .apd-filter i {
+                color: #7B879A;
+                pointer-events: none;
+            }
+
+        .apd-list {
+            display: grid;
+            gap: .55rem;
+            max-height: calc(100vh - 430px);
+            margin-top: .8rem;
+            padding-right: .25rem;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(81,108,141,.35) transparent;
+        }
+
+            .apd-list::-webkit-scrollbar {
+                width: 5px;
+            }
+
+            .apd-list::-webkit-scrollbar-track {
+                background: transparent;
+            }
+
+            .apd-list::-webkit-scrollbar-thumb {
+                background: rgba(81,108,141,.32);
+                border-radius: 999px;
+            }
+
+        .apd-project-card {
+            overflow: hidden;
+            background: #FFFFFF;
+            border: 1px solid var(--apd-border);
+            border-radius: 14px;
+            box-shadow: 0 7px 18px rgba(31,46,76,.045);
+        }
+
+            .apd-project-card.is-open {
+                border-color: #C9D3E0;
+                box-shadow: 0 12px 28px rgba(31,46,76,.08);
+            }
+
+        .apd-project-toggle {
+            width: 100%;
+            display: grid;
+            grid-template-columns: auto minmax(0,1fr) auto auto;
+            gap: .68rem;
+            align-items: center;
+            padding: .72rem .78rem;
+            color: var(--apd-text);
+            background: #FFFFFF;
+            border: 0;
+            text-align: left;
+            cursor: pointer;
+        }
+
+            .apd-project-toggle:hover {
+                background: #F8FAFC;
+            }
+
+        .apd-project-number {
+            width: 38px;
+            height: 38px;
+            display: grid;
+            place-items: center;
+            color: #FFFFFF;
+            background: linear-gradient( 145deg, var(--apd-navy), var(--apd-steel));
+            border-radius: 11px;
+            font-size: .72rem;
+            font-weight: 900;
+        }
+
+        .apd-project-heading {
+            min-width: 0;
+        }
+
+            .apd-project-heading small,
+            .apd-project-heading strong,
+            .apd-project-heading > span {
+                display: block;
+            }
+
+            .apd-project-heading small {
+                color: #8A96A8;
+                font-size: .52rem;
+                font-weight: 850;
+                letter-spacing: .06em;
+                text-transform: uppercase;
+            }
+
+            .apd-project-heading strong {
+                margin-top: .08rem;
+                overflow: hidden;
+                font-size: .8rem;
+                font-weight: 900;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .apd-project-heading > span {
+                margin-top: .12rem;
+                overflow: hidden;
+                color: var(--apd-muted);
+                font-size: .58rem;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+        .apd-project-summary {
+            display: flex;
+            align-items: center;
+            gap: .45rem;
+            color: var(--apd-muted);
+            font-size: .59rem;
+            white-space: nowrap;
+        }
+
+        .apd-status,
+        .apd-supervisor-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: .28rem;
+            padding: .28rem .48rem;
+            border-radius: 999px;
+            font-size: .57rem;
+            font-weight: 850;
+            white-space: nowrap;
+        }
+
+            .apd-status.is-active,
+            .apd-status.is-complete {
+                color: #087154;
+                background: #E8F7F1;
+            }
+
+            .apd-status.is-progress,
+            .apd-status.is-planning {
+                color: #405577;
+                background: #EEF2F6;
+            }
+
+            .apd-status.is-archived {
+                color: #6B7280;
+                background: #F0F1F3;
+            }
+
+            .apd-status.is-draft {
+                color: #64748B;
+                background: #F1F4F7;
+            }
+
+        .apd-chevron {
+            color: var(--apd-steel);
+            transition: transform .18s ease;
+        }
+
+        .apd-project-toggle[aria-expanded="true"]
+        .apd-chevron {
+            transform: rotate(180deg);
+        }
+
+        .apd-project-details {
+            padding: 0 .78rem .78rem;
+            border-top: 1px solid #E8ECF2;
+            animation: apdReveal .18s ease;
+        }
+
+        .apd-idea {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: .75rem;
+            margin-top: .72rem;
+            padding: .62rem .68rem;
+            background: #F6F8FB;
+            border: 1px solid #E4E9F0;
+            border-radius: 11px;
+        }
+
+            .apd-idea span,
+            .apd-idea strong,
+            .apd-idea small {
+                display: block;
+            }
+
+            .apd-idea span {
+                color: #8995A7;
+                font-size: .53rem;
+                font-weight: 800;
+                letter-spacing: .05em;
+                text-transform: uppercase;
+            }
+
+            .apd-idea strong {
+                margin-top: .12rem;
+                font-size: .7rem;
+            }
+
+            .apd-idea small {
+                max-width: 47%;
+                color: var(--apd-muted);
+                font-size: .59rem;
+                line-height: 1.42;
+            }
+
+        .apd-people-grid {
+            display: grid;
+            grid-template-columns: repeat(3,minmax(0,1fr));
+            gap: .62rem;
+            margin-top: .62rem;
+        }
+
+        .apd-person-panel {
+            min-width: 0;
+            padding: .65rem;
+            background: #FFFFFF;
+            border: 1px solid #E3E8EF;
+            border-radius: 12px;
+        }
+
+            .apd-person-panel > header {
+                display: grid;
+                grid-template-columns: auto minmax(0,1fr);
+                gap: .46rem;
+                align-items: center;
+            }
+
+        .apd-panel-icon {
+            width: 31px;
+            height: 31px;
+            border-radius: 9px;
+        }
+
+        .apd-person-panel header small,
+        .apd-person-panel header strong {
+            display: block;
+        }
+
+        .apd-person-panel header small {
+            color: #8A96A8;
+            font-size: .52rem;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .apd-person-panel header strong {
+            margin-top: .08rem;
+            font-size: .64rem;
+        }
+
+        .apd-contact {
+            display: grid;
+            grid-template-columns: auto minmax(0,1fr);
+            gap: .46rem;
+            align-items: center;
+            margin-top: .55rem;
+        }
+
+        .apd-avatar,
+        .apd-collaborator > span {
+            display: grid;
+            place-items: center;
+            color: #FFFFFF;
+            background: linear-gradient( 145deg, var(--apd-navy), var(--apd-steel));
+            border-radius: 50%;
+            font-weight: 850;
+        }
+
+        .apd-avatar {
+            width: 32px;
+            height: 32px;
+            font-size: .56rem;
+        }
+
+        .apd-contact strong,
+        .apd-contact div > span,
+        .apd-collaborator strong,
+        .apd-collaborator small {
+            display: block;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .apd-contact strong {
+            font-size: .64rem;
+        }
+
+        .apd-contact div > span {
+            margin-top: .1rem;
+            color: var(--apd-muted);
+            font-size: .56rem;
+        }
+
+        .apd-collaborators {
+            max-height: 105px;
+            display: grid;
+            gap: .32rem;
+            margin-top: .5rem;
+            padding-right: .12rem;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(81,108,141,.35) transparent;
+        }
+
+        .apd-collaborator {
+            min-width: 0;
+            display: grid;
+            grid-template-columns: auto minmax(0,1fr);
+            gap: .4rem;
+            align-items: center;
+            padding: .32rem;
+            background: #F8FAFC;
+            border-radius: 8px;
+        }
+
+            .apd-collaborator > span {
+                width: 27px;
+                height: 27px;
+                font-size: .48rem;
+            }
+
+            .apd-collaborator strong {
+                font-size: .6rem;
+            }
+
+            .apd-collaborator small {
+                margin-top: .06rem;
+                color: var(--apd-muted);
+                font-size: .51rem;
+            }
+
+        .apd-person-empty {
+            display: flex;
+            align-items: center;
+            gap: .32rem;
+            margin-top: .55rem;
+            padding: .45rem;
+            color: var(--apd-muted);
+            background: #F8FAFC;
+            border-radius: 8px;
+            font-size: .58rem;
+        }
+
+        .apd-supervisor-state {
+            display: grid;
+            gap: .22rem;
+            margin-top: .52rem;
+        }
+
+        .apd-supervisor-badge {
+            width: fit-content;
+        }
+
+            .apd-supervisor-badge.is-assigned {
+                color: #087154;
+                background: #E8F7F1;
+            }
+
+            .apd-supervisor-badge.is-pending {
+                color: #9A6508;
+                background: #FFF5DC;
+            }
+
+            .apd-supervisor-badge.is-unassigned {
+                color: #64748B;
+                background: #F1F4F7;
+            }
+
+        .apd-supervisor-state > strong {
+            font-size: .64rem;
+        }
+
+        .apd-supervisor-state > small {
+            overflow: hidden;
+            color: var(--apd-muted);
+            font-size: .55rem;
+            text-overflow: ellipsis;
+        }
+
+        .apd-supervisor-head {
+            grid-template-columns: auto minmax(0,1fr) auto !important;
+        }
+
+        .apd-manage-link {
+            width: fit-content;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .28rem;
+            margin: 0;
+            padding: .34rem .46rem;
+            color: var(--apd-navy);
+            background: #EEF2F6;
+            border-radius: 8px;
+            font-size: .54rem;
+            font-weight: 800;
+            line-height: 1;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+            .apd-manage-link:hover {
+                color: var(--apd-deep);
+                background: #E4EAF1;
+            }
+
+        .apd-empty,
+        .apd-filter-empty {
+            min-height: 280px;
+            display: grid;
+            place-items: center;
+            align-content: center;
+            text-align: center;
+        }
+
+        .apd-filter-empty {
+            display: none;
+        }
+
+            .apd-empty > div,
+            .apd-filter-empty > div {
+                width: 64px;
+                height: 64px;
+                display: grid;
+                place-items: center;
+                color: var(--apd-navy);
+                background: #EEF2F6;
+                border-radius: 19px;
+                font-size: 1.35rem;
+            }
+
+            .apd-empty h2,
+            .apd-filter-empty h2 {
+                margin: .65rem 0 0;
+                font-size: .96rem;
+                font-weight: 900;
+            }
+
+            .apd-empty p,
+            .apd-filter-empty p {
+                max-width: 440px;
+                margin: .25rem 0 0;
+                color: var(--apd-muted);
+                font-size: .66rem;
+            }
+
+        @@keyframes apdReveal {
+            from {
+                opacity: 0;
+                transform: translateY(-5px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @@media (max-width: 1100px) {
+            .apd-stats {
+                grid-template-columns: repeat(2,minmax(0,1fr));
+            }
+
+            .apd-toolbar {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .apd-search {
+                grid-column: 1 / -1;
+            }
+
+            .apd-people-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @@media (max-width: 760px) {
+            .apd-hero {
+                grid-template-columns: 1fr;
+                padding: .95rem;
+            }
+
+            .apd-directory-head {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .apd-toolbar,
+            .apd-stats {
+                grid-template-columns: 1fr;
+            }
+
+            .apd-search {
+                grid-column: auto;
+            }
+
+            .apd-list {
+                max-height: none;
+                overflow: visible;
+            }
+
+            .apd-project-toggle {
+                grid-template-columns: auto minmax(0,1fr) auto;
+            }
+
+            .apd-project-summary {
+                grid-column: 2 / -1;
+                justify-self: start;
+            }
+
+            .apd-idea {
+                flex-direction: column;
+            }
+
+                .apd-idea small {
+                    max-width: none;
+                }
+
+            .apd-manage-link span {
+                display: none;
+            }
+
+            .apd-manage-link {
+                width: 30px;
+                height: 30px;
+                padding: 0;
+            }
+        }
+    </style>
+}
+
+@section Scripts {
+    <script>
+        (() => {
+            const list =
+                document.getElementById(
+                    "apdProjectList");
+
+            if (!list) {
+                return;
+            }
+
+            const searchInput =
+                document.getElementById(
+                    "apdSearch");
+
+            const statusFilter =
+                document.getElementById(
+                    "apdStatusFilter");
+
+            const supervisorFilter =
+                document.getElementById(
+                    "apdSupervisorFilter");
+
+            const resultCount =
+                document.getElementById(
+                    "apdResultCount");
+
+            const emptyState =
+                document.getElementById(
+                    "apdFilterEmpty");
+
+            const cards = Array.from(
+                list.querySelectorAll(
+                    "[data-project-card]"));
+
+            function setCardOpen(
+                card,
+                open) {
+
+                const button =
+                    card.querySelector(
+                        "[data-project-toggle]");
+
+                const details =
+                    card.querySelector(
+                        "[data-project-details]");
+
+                if (!button || !details) {
+                    return;
+                }
+
+                button.setAttribute(
+                    "aria-expanded",
+                    open ? "true" : "false");
+
+                details.hidden = !open;
+
+                card.classList.toggle(
+                    "is-open",
+                    open);
+            }
+
+            cards.forEach(card => {
+                const button =
+                    card.querySelector(
+                        "[data-project-toggle]");
+
+                button?.addEventListener(
+                    "click",
+                    () => {
+                        const shouldOpen =
+                            button.getAttribute(
+                                "aria-expanded") !==
+                            "true";
+
+                        cards.forEach(otherCard => {
+                            if (otherCard !== card) {
+                                setCardOpen(
+                                    otherCard,
+                                    false);
+                            }
+                        });
+
+                        setCardOpen(
+                            card,
+                            shouldOpen);
+                    });
+            });
+
+            function applyFilters() {
+                const query =
+                    (searchInput?.value ?? "")
+                        .trim()
+                        .toLowerCase();
+
+                const selectedStatus =
+                    statusFilter?.value ?? "all";
+
+                const selectedSupervisor =
+                    supervisorFilter?.value ?? "all";
+
+                let visibleCount = 0;
+
+                cards.forEach(card => {
+                    const searchable =
+                        (card.dataset.search ?? "")
+                            .toLowerCase();
+
+                    const matchesSearch =
+                        query.length === 0 ||
+                        searchable.includes(query);
+
+                    const matchesStatus =
+                        selectedStatus === "all" ||
+                        card.dataset.status ===
+                            selectedStatus;
+
+                    const matchesSupervisor =
+                        selectedSupervisor === "all" ||
+                        card.dataset
+                            .supervisorStatus ===
+                            selectedSupervisor;
+
+                    const visible =
+                        matchesSearch &&
+                        matchesStatus &&
+                        matchesSupervisor;
+
+                    card.hidden = !visible;
+
+                    if (!visible) {
+                        setCardOpen(
+                            card,
+                            false);
+                    }
+                    else {
+                        visibleCount++;
+                    }
+                });
+
+                if (resultCount) {
+                    resultCount.textContent =
+                        `${visibleCount} ${
+                            visibleCount === 1
+                                ? "project"
+                                : "projects"
+                        }`;
+                }
+
+                if (emptyState) {
+                    emptyState.style.display =
+                        visibleCount === 0
+                            ? "grid"
+                            : "none";
+                }
+            }
+
+            searchInput?.addEventListener(
+                "input",
+                applyFilters);
+
+            statusFilter?.addEventListener(
+                "change",
+                applyFilters);
+
+            supervisorFilter?.addEventListener(
+                "change",
+                applyFilters);
+
+            applyFilters();
+        })();
+    </script>
+}

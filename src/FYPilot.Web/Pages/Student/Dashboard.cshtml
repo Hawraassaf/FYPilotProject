@@ -80,13 +80,7 @@
         <div class="nova-orb nova-orb-b"></div>
         <div class="nova-orb nova-orb-c"></div>
 
-        <div class="nova-topbar">
-            <div class="nova-live-label">
-                <span class="nova-live-pulse"></span>
-                FYPilot Project OS
-            </div>
-
-        </div>
+       
 
         <div class="nova-hero-grid">
             <div class="nova-project-identity">
@@ -2822,9 +2816,9 @@
         }
 
         /* =========================================================
-                           READABILITY PASS — slightly larger typography
-                           Keeps the same layout, spacing, colors, and interactions.
-                           ========================================================= */
+                                   READABILITY PASS — slightly larger typography
+                                   Keeps the same layout, spacing, colors, and interactions.
+                                   ========================================================= */
 
         .nova-live-label {
             font-size: .72rem;
@@ -3422,12 +3416,12 @@
 
 
         /* =========================================================
-                           DASHBOARD CLARITY UPGRADE
-                           - Deterministic KPI content
-                           - Wider, more readable live stream
-                           - Larger intelligence universe
-                           - Attention Center removed from markup
-                           ========================================================= */
+                                   DASHBOARD CLARITY UPGRADE
+                                   - Deterministic KPI content
+                                   - Wider, more readable live stream
+                                   - Larger intelligence universe
+                                   - Attention Center removed from markup
+                                   ========================================================= */
 
         .nova-main-action-copy em {
             display: block;
@@ -3591,6 +3585,219 @@
 
             .nova-feature-node {
                 min-height: 76px;
+            }
+        }
+
+        /* =========================================================
+                   DASHBOARD TOP HERO ONLY
+                   - Compact height
+                   - FYPilot navy/steel palette
+                   - No bright electric blue
+                   - No square/grid background
+                   - All dashboard sections below remain unchanged
+                   ========================================================= */
+
+        .nova-dashboard {
+            --theme-hero: radial-gradient( circle at 88% 10%, rgba(255,255,255,.08), transparent 30% ), radial-gradient( circle at 42% 115%, rgba(81,108,141,.20), transparent 34% ), linear-gradient( 128deg, #17233F 0%, #28385E 58%, #405577 100% );
+        }
+
+        .nova-top-deck {
+            background: var(--theme-hero) !important;
+            border: 1px solid rgba(255,255,255,.10);
+            border-radius: 22px;
+            box-shadow: 0 16px 38px rgba(23,35,63,.18);
+        }
+
+            /* Remove the square/grid pattern completely. */
+            .nova-top-deck .nova-mesh {
+                display: none !important;
+                background: none !important;
+                background-image: none !important;
+            }
+
+            /* Remove the bright decorative blue/cyan/violet orbs. */
+            .nova-top-deck .nova-orb {
+                display: none !important;
+                animation: none !important;
+            }
+
+        .nova-topbar {
+            min-height: 0;
+            padding: .5rem .9rem;
+            border-bottom-color: rgba(255,255,255,.08);
+        }
+
+        .nova-live-label {
+            color: rgba(255,255,255,.68);
+            font-size: .64rem;
+        }
+
+        .nova-live-pulse {
+            background: #8ED6B2;
+            box-shadow: 0 0 0 4px rgba(142,214,178,.10);
+        }
+
+            .nova-live-pulse::after {
+                border-color: rgba(142,214,178,.34);
+            }
+
+        .nova-hero-grid {
+            grid-template-columns: minmax(0,1.6fr) minmax(245px,.4fr);
+            gap: 1rem;
+            padding: .85rem 1.05rem 1rem;
+        }
+
+        .nova-project-chip {
+            padding: .3rem .5rem;
+            color: #DCE6F1;
+            background: rgba(255,255,255,.07);
+            border-color: rgba(255,255,255,.14);
+        }
+
+        .nova-project-identity h1 {
+            max-width: 880px;
+            margin-top: .55rem;
+            font-size: clamp(1.55rem,2.65vw,2.2rem);
+            line-height: 1.04;
+        }
+
+        .nova-project-meta {
+            margin-top: .52rem;
+            gap: .38rem .75rem;
+            color: rgba(255,255,255,.68);
+            font-size: .69rem;
+        }
+
+        .nova-project-identity > p {
+            max-width: 800px;
+            margin-top: .48rem;
+            color: rgba(255,255,255,.66);
+            font-size: .76rem;
+            line-height: 1.48;
+        }
+
+        .nova-hero-actions {
+            gap: .52rem;
+            margin-top: .65rem;
+        }
+
+        .nova-main-action {
+            min-width: min(100%,390px);
+            gap: .58rem;
+            padding: .5rem .62rem;
+            border-radius: 12px;
+            box-shadow: 0 10px 24px rgba(8,18,38,.18);
+        }
+
+            .nova-main-action:hover {
+                box-shadow: 0 14px 30px rgba(8,18,38,.23);
+            }
+
+        .nova-main-action-icon {
+            width: 31px;
+            height: 31px;
+            background: linear-gradient(135deg,#28385E,#516C8D);
+            border-radius: 9px;
+        }
+
+        .nova-main-action-copy small {
+            font-size: .56rem;
+        }
+
+        .nova-main-action-copy strong {
+            font-size: .74rem;
+        }
+
+        .nova-main-action-copy em {
+            max-width: 470px;
+            margin-top: .08rem;
+            font-size: .57rem;
+        }
+
+        .nova-ghost-action {
+            min-height: 42px;
+            padding-inline: .72rem;
+            color: #F5F7FA;
+            background: rgba(255,255,255,.06);
+            border-color: rgba(255,255,255,.16);
+            border-radius: 11px;
+            font-size: .64rem;
+        }
+
+            .nova-ghost-action:hover {
+                color: #17233F;
+                background: #FFFFFF;
+            }
+
+        .nova-project-summary {
+            gap: .5rem;
+            padding: .7rem;
+            background: rgba(255,255,255,.065);
+            border-color: rgba(255,255,255,.12);
+            border-radius: 15px;
+        }
+
+        .nova-summary-heading > div:first-child strong {
+            font-size: 1.36rem;
+        }
+
+        .nova-summary-ring {
+            width: 50px;
+            height: 50px;
+            background: conic-gradient( #8ED6B2 calc(var(--summary-progress) * 1%), rgba(255,255,255,.12) 0 );
+            box-shadow: 0 0 16px rgba(142,214,178,.18);
+        }
+
+            .nova-summary-ring::before {
+                inset: 5px;
+                background: #28385E;
+            }
+
+        .nova-summary-progress {
+            padding: .48rem;
+            background: rgba(255,255,255,.045);
+        }
+
+        .nova-summary-progress-track span {
+            background: linear-gradient(90deg,#8ED6B2,#A8BDD1);
+        }
+
+        .nova-summary-checklist {
+            gap: .25rem;
+        }
+
+            .nova-summary-checklist > div {
+                padding: .34rem .42rem;
+                background: rgba(255,255,255,.035);
+                border-radius: 8px;
+                font-size: .57rem;
+            }
+
+                .nova-summary-checklist > div.is-complete {
+                    color: #D8F3E5;
+                }
+
+                    .nova-summary-checklist > div.is-complete i {
+                        color: #8ED6B2;
+                    }
+
+        @@media (max-width: 1080px) {
+            .nova-hero-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @@media (max-width: 780px) {
+            .nova-topbar {
+                padding: .48rem .75rem;
+            }
+
+            .nova-hero-grid {
+                padding: .78rem;
+            }
+
+            .nova-project-identity h1 {
+                font-size: clamp(1.45rem,7vw,1.95rem);
             }
         }
 

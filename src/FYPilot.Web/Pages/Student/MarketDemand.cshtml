@@ -15,8 +15,8 @@
         --md-ink: #102a43;
         --md-text: #334e68;
         --md-muted: #6b7c93;
-        --md-primary: #2457e6;
-        --md-primary-dark: #173e70;
+        --md-primary: #28385E;
+        --md-primary-dark: #172F59;
         --md-bg: #f4f7fb;
         --md-card: #fff;
         --md-border: #dfe8f3;
@@ -29,17 +29,17 @@
     .md-page {
         background: var(--md-bg);
         border-radius: 24px;
-        padding: 22px;
+        padding: 10px 22px 22px;
         min-height: calc(100vh - 80px);
     }
 
     .md-hero {
         position: relative;
         overflow: hidden;
-        padding: 28px;
+        padding: 22px 26px;
         border-radius: 22px;
         color: #fff;
-        background: linear-gradient(125deg, #102a43 0%, #173e70 55%, #2457e6 130%);
+        background: linear-gradient(125deg, #17233F 0%, #28385E 58%, #405577 100%);
         box-shadow: var(--md-shadow);
         margin-bottom: 16px;
     }
@@ -60,7 +60,7 @@
         font-weight: 900;
         letter-spacing: .12em;
         text-transform: uppercase;
-        color: #a9c3ff;
+        color: #D5DEE8;
         margin-bottom: 6px;
     }
 
@@ -74,6 +74,12 @@
         max-width: 760px;
         margin: 0;
         color: rgba(255,255,255,.78);
+    }
+
+    .md-back-link {
+        margin-top: 0;
+        margin-bottom: .45rem;
+        line-height: 1.2;
     }
 
     .md-card,
@@ -104,7 +110,7 @@
         display: grid;
         place-items: center;
         color: var(--md-primary);
-        background: #edf3ff;
+        background: #EEF2F6;
         flex: 0 0 auto;
     }
 
@@ -171,8 +177,8 @@
         gap: 8px;
         color: #fff;
         font-weight: 850;
-        background: linear-gradient(135deg, var(--md-primary), #173eae);
-        box-shadow: 0 10px 20px rgba(36,87,230,.2);
+        background: linear-gradient(135deg, var(--md-primary), #516C8D);
+        box-shadow: 0 10px 20px rgba(40,56,94,.18);
     }
 
         .md-btn:hover {
@@ -184,16 +190,20 @@
         padding: 4px 2px 14px;
     }
 
-        .md-project h2 {
-            color: var(--md-ink);
-            margin: 0 0 4px;
-            font-weight: 900;
-        }
+    .md-selected-kicker {
+        color: var(--md-primary);
+    }
 
-        .md-project p {
-            color: var(--md-muted);
-            margin: 0;
-        }
+    .md-project h2 {
+        color: var(--md-ink);
+        margin: 0 0 4px;
+        font-weight: 900;
+    }
+
+    .md-project p {
+        color: var(--md-muted);
+        margin: 0;
+    }
 
     .md-kpis {
         display: grid;
@@ -422,7 +432,7 @@
 
     @@media (max-width: 760px) {
         .md-page {
-            padding: 12px;
+            padding: 8px 12px 12px;
             border-radius: 16px;
         }
 
@@ -460,7 +470,7 @@
         </div>
     }
 
-    <a href="/Student/IdeaGenerator?projectId=@Model.ProjectId" class="text-decoration-none d-inline-flex align-items-center gap-1 mb-2" style="color:var(--md-primary,#2457e6); font-weight:750; font-size:.85rem;">
+    <a href="/Student/IdeaGenerator?projectId=@Model.ProjectId" class="md-back-link text-decoration-none d-inline-flex align-items-center gap-1" style="color:var(--md-primary,#28385E); font-weight:750; font-size:.85rem;">
         <i class="bi bi-arrow-left"></i>
         Back to Idea Generator
     </a>
@@ -540,7 +550,7 @@
         @if (Model.Idea != null)
         {
             <section class="md-project">
-                <div class="md-kicker text-primary mb-1">Selected idea</div>
+                <div class="md-kicker md-selected-kicker mb-1">Selected idea</div>
                 <h2 class="h4">@Model.Idea.Title</h2>
                 <p>@Model.Idea.ProblemStatement</p>
             </section>
@@ -674,7 +684,7 @@
         datasets: [{
         label: "Score",
         data: breakdown.map(item => item.value),
-        backgroundColor: ["#2457e6", "#118a66", "#704eaa", "#d08a13", "#28a4bd"],
+        backgroundColor: ["#28385E", "#118a66", "#704eaa", "#d08a13", "#28a4bd"],
         borderRadius: 8
         }]
         },

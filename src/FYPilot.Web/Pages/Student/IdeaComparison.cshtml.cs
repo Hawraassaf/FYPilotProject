@@ -19,6 +19,8 @@ public class IdeaComparisonModel(
     IActiveProjectService activeProjectService
 ) : PageModel
 {
+    private const int MaximumProjectMembers = 21;
+
     [BindProperty(SupportsGet = true)]
     public int ProjectId { get; set; }
 
@@ -261,10 +263,58 @@ public class IdeaComparisonModel(
                     "/Student/MyProjects");
             }
 
-            if (project.ProjectIdeaId == idea.Id)
+            var previousIdeaId =
+                project.ProjectIdeaId;
+
+            var previousIdeaTitle =
+                project.ProjectIdea?.Title;
+
+            var alreadySelected =
+                previousIdeaId == idea.Id;
+
+            /*
+             * Project.ProjectIdeaId is the authoritative selected
+             * idea. Keep the older IsSelected flags synchronized
+             * so legacy pages and stored records cannot show two
+             * selected ideas at the same time.
+             *
+             * Including previousIdeaId is important for legacy ideas
+             * whose GeneratedForProjectId was not populated.
+             */
+            var relatedIdeas =
+                await db.ProjectIdeas
+                    .Where(item =>
+                        item.GeneratedForProjectId ==
+                            ProjectId ||
+                        item.Id == idea.Id ||
+                        (
+                            previousIdeaId.HasValue &&
+                            item.Id ==
+                                previousIdeaId.Value
+                        ))
+                    .ToListAsync(
+                        cancellationToken);
+
+            foreach (var relatedIdea in relatedIdeas)
             {
-                await transaction.RollbackAsync(
+                relatedIdea.IsSelected =
+                    relatedIdea.Id == idea.Id;
+            }
+
+            if (alreadySelected)
+            {
+                await db.SaveChangesAsync(
                     cancellationToken);
+
+                await transaction.CommitAsync(
+                    cancellationToken);
+
+                await activeProjectService
+                    .ActivateProjectAsync(
+                        userId,
+                        ProjectId,
+                        "/Student/IdeaComparison",
+                        cancellationToken);
 
                 TempData["Success"] =
                     "This idea is already selected "
@@ -277,24 +327,7 @@ public class IdeaComparisonModel(
                     });
             }
 
-            var previousIdeaId =
-                project.ProjectIdeaId;
-
-            var previousIdeaTitle =
-                project.ProjectIdea?.Title;
-
             var now = DateTime.UtcNow;
-
-            await db.ProjectIdeas
-                .Where(item =>
-                    item.GeneratedForProjectId ==
-                        ProjectId)
-                .ExecuteUpdateAsync(
-                    update =>
-                        update.SetProperty(
-                            item => item.IsSelected,
-                            false),
-                    cancellationToken);
 
             project.ProjectIdeaId = idea.Id;
 
@@ -306,14 +339,12 @@ public class IdeaComparisonModel(
                 project.Status = "planning";
             }
 
-            if (string.IsNullOrWhiteSpace(project.Title) ||
-                string.Equals(
-                    project.Title.Trim(),
-                    "Untitled Project",
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                project.Title = idea.Title;
-            }
+            /*
+             * The official selected idea defines the project title.
+             * When the owner replaces the idea, update the title used
+             * by the Dashboard and project switcher immediately.
+             */
+            project.Title = idea.Title;
 
             if (string.IsNullOrWhiteSpace(
                     project.Description))
@@ -333,7 +364,6 @@ public class IdeaComparisonModel(
             }
 
             project.UpdatedAt = now;
-            idea.IsSelected = true;
 
             var actorName =
                 User.FindFirst(
@@ -377,8 +407,10 @@ public class IdeaComparisonModel(
                     cancellationToken);
 
             TempData["Success"] = replacingIdea
-                ? "The project idea was replaced successfully."
-                : "The project idea was selected successfully.";
+                ? "The project idea was changed successfully. "
+                  + "The project title was updated."
+                : "The project idea was selected successfully. "
+                  + "The project title was updated.";
 
             return RedirectToPage(
                 new
@@ -469,15 +501,26 @@ public class IdeaComparisonModel(
             .Where(item => item.UserId == userId)
             .ToListAsync(cancellationToken);
 
+        var selectedIdeaId =
+            CurrentProject!.ProjectIdeaId;
+
         Ideas = await db.ProjectIdeas
             .Where(item =>
                 item.GeneratedForProjectId == ProjectId ||
                 (
-                    CurrentProject!.ProjectIdeaId.HasValue &&
+                    selectedIdeaId.HasValue &&
                     item.Id ==
-                        CurrentProject.ProjectIdeaId.Value
+                        selectedIdeaId.Value
                 ))
-            .OrderByDescending(item => item.CreatedAt)
+            /*
+             * Always keep the official selected idea in the
+             * visible comparison list, even when it is older
+             * than the newest twelve generated ideas.
+             */
+            .OrderByDescending(item =>
+                selectedIdeaId.HasValue &&
+                item.Id == selectedIdeaId.Value)
+            .ThenByDescending(item => item.CreatedAt)
             .Take(12)
             .ToListAsync(cancellationToken);
     }
@@ -528,7 +571,10 @@ public class IdeaComparisonModel(
         return new IdeaComparisonRequest(
             StudentMajor: GetString(Profile, "Major"),
             ExperienceLevel: GetString(Profile, "ExperienceLevel"),
-            TeamSize: GetInt(Profile, 1, "TeamMembers", "TeamSize"),
+            TeamSize: Math.Clamp(
+                CurrentProject?.MaximumMembers ?? 1,
+                1,
+                MaximumProjectMembers),
             AvailableHoursPerWeek: GetInt(Profile, 10, "AvailableHoursPerWeek"),
             StudentSkills: studentSkills,
             SkillRatings: skillRatings,

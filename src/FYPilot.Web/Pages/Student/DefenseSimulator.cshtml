@@ -2153,6 +2153,106 @@
                 flex-direction: column;
             }
         }
+        /* =========================================================
+                   DEFENSE SIMULATOR — COMPACT TOP HERO ONLY
+                   Keeps all content, colors, actions, stats, and page logic.
+                   Everything below the hero remains unchanged.
+                   ========================================================= */
+
+        .defense-hero {
+            gap: 1rem;
+            margin-bottom: .85rem;
+            padding: .9rem 1.15rem;
+            border-radius: 22px;
+        }
+
+            .defense-hero h1 {
+                max-width: 820px;
+                margin-top: .38rem;
+                font-size: clamp(1.55rem, 2.35vw, 2.15rem);
+                line-height: 1.08;
+            }
+
+            .defense-hero p {
+                max-width: 780px;
+                margin-top: .55rem;
+                font-size: .82rem;
+                line-height: 1.5;
+            }
+
+        .defense-hero__eyebrow {
+            font-size: .64rem;
+        }
+
+        .defense-live-dot {
+            width: 7px;
+            height: 7px;
+            box-shadow: 0 0 0 5px rgba(191, 219, 254, .14);
+        }
+
+        .defense-hero__actions {
+            gap: .5rem;
+            margin-top: .72rem;
+        }
+
+        .defense-hero .defense-button {
+            min-height: 38px;
+            padding: .55rem .78rem;
+            border-radius: 11px;
+            font-size: .72rem;
+        }
+
+        .defense-hero__stats {
+            grid-template-columns: repeat(3, minmax(82px, 1fr));
+            gap: .48rem;
+            min-width: 275px;
+        }
+
+            .defense-hero__stats article {
+                padding: .7rem .6rem;
+                border-radius: 16px;
+            }
+
+            .defense-hero__stats span {
+                font-size: 1.38rem;
+            }
+
+            .defense-hero__stats small {
+                margin-top: .26rem;
+                font-size: .62rem;
+            }
+
+        .defense-hero::after {
+            right: -105px;
+            bottom: -165px;
+            width: 280px;
+            height: 280px;
+        }
+
+        @@media (max-width: 1200px) {
+            .defense-hero {
+                padding: .9rem 1rem;
+            }
+
+            .defense-hero__stats {
+                min-width: 0;
+            }
+        }
+
+        @@media (max-width: 700px) {
+            .defense-hero {
+                padding: .85rem;
+            }
+
+                .defense-hero h1 {
+                    font-size: clamp(1.4rem, 7vw, 1.85rem);
+                }
+
+                .defense-hero p {
+                    font-size: .78rem;
+                }
+        }
+
     </style>
 }
 
