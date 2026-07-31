@@ -8,6 +8,14 @@
 
     var ideas = Model.Ideas;
 
+    /*
+     * The project's official idea foreign key is the source
+     * of truth. ProjectIdea.IsSelected is only a compatibility
+     * flag and may contain stale data from older selections.
+     */
+    var selectedIdeaId =
+        Model.CurrentProject?.ProjectIdeaId;
+
     var metricDefinitions = new[]
     {
         new { Key = "feasibility", Label = "Feasibility", Icon = "bar-chart-line", Description = "Achievable with your time and resources." },
@@ -23,7 +31,7 @@
         title = idea.Title,
         domain = idea.Domain,
         difficulty = idea.DifficultyLevel,
-        selected = idea.IsSelected,
+        selected = selectedIdeaId == idea.Id,
         scores = new Dictionary<string, int>
         {
             ["feasibility"] = ClampScore(idea.FeasibilityScore),
@@ -255,7 +263,9 @@ else
                     @for (var i = 0; i < ideas.Count; i++)
                     {
                         var idea = ideas[i];
-                        var isSelected = idea.IsSelected;
+
+                        var isSelected =
+                            selectedIdeaId == idea.Id;
 
                         <div class="ic3-idea-row @(isSelected ? "selected" : "")"
                              data-idea-row="@idea.Id">
@@ -305,53 +315,59 @@ else
 
                                     <button type="submit"
                                             class="ic3-pick-btn @(isSelected ? "picked" : "")"
-                                            title="Select this idea">
-                                        @if (isSelected)
-                                        {
-                                            <i class="bi bi-check-circle-fill"></i>
-                                            <span>Selected</span>
-                                        }
-                                        else
-                                        {
-                                            <i class="bi bi-circle"></i>
-                                            <span>Select</span>
-                                        }
-                                    </button>
-                                </form>
-                            </div>
-                        </div>
+                                            title="@(isSelected
+                                                                                            ? "This is the official project idea"
+                                                                                            : "Select this idea")"
+                        disabled="@(
+                        isSelected
+                            ? "disabled"
+                            : null)">
+                    @if (isSelected)
+                    {
+                        <i class="bi bi-check-circle-fill"></i>
+                        <span>Selected</span>
                     }
-                </div>
-            </div>
-
-            <div class="ic3-recommendation-card">
-                <div class="ic3-recommendation-icon">
-                    <i class="bi bi-award"></i>
-                </div>
-
-                <div>
-                    <div class="ic3-kicker">Recommended Based On Selected Metrics</div>
-                    <h3 id="ic3RecommendedTitle">Best matching idea</h3>
-                    <p id="ic3RecommendedText">
-                        The recommendation updates when you choose comparison metrics.
-                    </p>
-                </div>
-
-                <form method="post" asp-page-handler="Select" class="ic3-recommendation-action">
-                    @Html.AntiForgeryToken()
-                    <input type="hidden"
-                           name="projectId"
-                           value="@Model.ProjectId" />
-                    <input type="hidden" name="ideaId" id="ic3RecommendedIdeaId" value="@ideas.First().Id" />
-
-                    <button type="submit" class="btn ic3-primary-btn">
-                        <i class="bi bi-check2-circle me-1"></i>
-                        Select Recommended
-                    </button>
-                </form>
-            </div>
+                    else
+                    {
+                        <i class="bi bi-circle"></i>
+                        <span>Select</span>
+                    }
+                </button>
+            </form>
         </div>
-    </section>
+    </div>
+}
+</div>
+</div>
+
+<div class="ic3-recommendation-card">
+    <div class="ic3-recommendation-icon">
+        <i class="bi bi-award"></i>
+    </div>
+
+    <div>
+        <div class="ic3-kicker">Recommended Based On Selected Metrics</div>
+        <h3 id="ic3RecommendedTitle">Best matching idea</h3>
+        <p id="ic3RecommendedText">
+            The recommendation updates when you choose comparison metrics.
+        </p>
+    </div>
+
+    <form method="post" asp-page-handler="Select" class="ic3-recommendation-action">
+        @Html.AntiForgeryToken()
+        <input type="hidden"
+               name="projectId"
+               value="@Model.ProjectId" />
+        <input type="hidden" name="ideaId" id="ic3RecommendedIdeaId" value="@ideas.First().Id" />
+
+        <button type="submit" class="btn ic3-primary-btn">
+            <i class="bi bi-check2-circle me-1"></i>
+            Select Recommended
+        </button>
+    </form>
+</div>
+</div>
+</section>
 }
 @section Head {
     <style>
@@ -455,6 +471,11 @@ else
                         background: #EEF2F6 !important;
                         border-color: #D8DEE9 !important;
                     }
+
+        .ic3-pick-btn.picked:disabled {
+            opacity: 1;
+            cursor: default;
+        }
 
         @@media (max-width: 767px) {
             .empty-dna-layout {

@@ -380,6 +380,47 @@
                 display: none;
             }
         }
+
+        /* =========================================================
+           SIMPLE SIDEBAR SCROLLBAR
+           Keeps the sidebar scrollable when browser zoom makes the
+           navigation taller, but removes the heavy default scrollbar.
+           ========================================================= */
+
+        .sidebar-scroll {
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            scroll-behavior: smooth;
+            scrollbar-width: thin;
+            scrollbar-color:
+                rgba(255, 255, 255, .26)
+                transparent;
+        }
+
+        .sidebar-scroll::-webkit-scrollbar {
+            width: 5px;
+        }
+
+        .sidebar-scroll::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .sidebar-scroll::-webkit-scrollbar-thumb {
+            min-height: 42px;
+            background: rgba(255, 255, 255, .24);
+            border: 1px solid transparent;
+            border-radius: 999px;
+            background-clip: padding-box;
+        }
+
+        .sidebar-scroll:hover::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, .40);
+            background-clip: padding-box;
+        }
+
+        .sidebar-scroll::-webkit-scrollbar-corner {
+            background: transparent;
+        }
     </style>
 
     @RenderSection("Head", required: false)
@@ -674,6 +715,14 @@
                                         "/Admin/Users",
                                         "people",
                                         "Users"))
+                            </li>
+
+                            <li>
+                                @Html.Raw(
+                                    NavLink(
+                                        "/Admin/Projects",
+                                        "folder2-open",
+                                        "Projects"))
                             </li>
 
                             <li>

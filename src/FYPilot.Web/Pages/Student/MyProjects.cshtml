@@ -407,8 +407,8 @@
                 {
                     <article class="project-card
                         @(project.IsActiveProject
-                                                ? "active-project-card"
-                                                : "")"
+                                                     ? "active-project-card"
+                                                     : "")"
                              data-project-card
                              data-name="@project.Title.ToLowerInvariant()"
                              data-idea="@project.SelectedIdeaTitle.ToLowerInvariant()"
@@ -459,13 +459,13 @@
                         <div class="project-badges">
                             <span class="role-badge
                                 @(project.Role == "owner"
-                                            ? "owner-badge"
-                                            : "collaborator-badge")">
+                                              ? "owner-badge"
+                                              : "collaborator-badge")">
 
                                 <i class="bi
                                 @(project.Role == "owner"
-                                                ? "bi-crown-fill"
-                                                : "bi-people-fill")"></i>
+                                                   ? "bi-crown-fill"
+                                                   : "bi-people-fill")"></i>
 
                                 @project.RoleLabel
                             </span>
@@ -475,8 +475,8 @@
 
                                 <i class="bi
                                 @(project.Status == "active"
-                                                ? "bi-circle-fill"
-                                                : "bi-clock")"></i>
+                                                   ? "bi-circle-fill"
+                                                   : "bi-clock")"></i>
 
                                 @project.StatusLabel
                             </span>
@@ -484,14 +484,14 @@
 
                         <div class="selected-idea-panel
                             @(project.HasSelectedIdea
-                                    ? "idea-selected"
-                                    : "idea-missing")">
+                                     ? "idea-selected"
+                                     : "idea-missing")">
 
                             <div class="selected-idea-icon">
                                 <i class="bi
                                 @(project.HasSelectedIdea
-                                                ? "bi-lightbulb-fill"
-                                                : "bi-lightbulb")"></i>
+                                                   ? "bi-lightbulb-fill"
+                                                   : "bi-lightbulb")"></i>
                             </div>
 
                             <div>
@@ -639,8 +639,8 @@
 
                                     <i class="bi
                                     @(project.IsActiveProject
-                                                    ? "bi-arrow-right"
-                                                    : "bi-box-arrow-up-right")"></i>
+                                                       ? "bi-arrow-right"
+                                                       : "bi-box-arrow-up-right")"></i>
                                 </button>
                             </form>
 
@@ -650,8 +650,8 @@
 
                                 <i class="bi
                                 @(project.Role == "owner"
-                                                   ? "bi-person-plus"
-                                                   : "bi-people")"></i>
+                                                      ? "bi-person-plus"
+                                                      : "bi-people")"></i>
 
                                 <span>
                                     @project.TeamActionText
@@ -2302,6 +2302,115 @@
                 width: 100%;
             }
         }
+        /* =========================================================
+                   MY PROJECTS — COMPACT THEME HERO ONLY
+                   Keeps every section below the hero unchanged.
+                   ========================================================= */
+
+        .projects-hero {
+            min-height: 0;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 1rem;
+            margin-bottom: .9rem;
+            padding: 1.05rem 1.2rem;
+            border-radius: 20px;
+            background: radial-gradient( circle at 88% 12%, rgba(255,255,255,.07), transparent 28% ), linear-gradient( 128deg, #17233F 0%, #28385E 60%, #405577 100% );
+            box-shadow: 0 16px 38px rgba(23,35,63,.17);
+        }
+
+        .projects-hero-content {
+            max-width: 860px;
+        }
+
+        .projects-hero .page-eyebrow {
+            margin-bottom: .2rem;
+            color: rgba(255,255,255,.66);
+            font-size: .62rem;
+        }
+
+        .projects-hero h1 {
+            font-size: clamp(1.65rem, 3vw, 2.35rem);
+            letter-spacing: -.04em;
+            line-height: 1.05;
+        }
+
+        .projects-hero p {
+            max-width: 760px;
+            margin-top: .5rem;
+            color: rgba(255,255,255,.70);
+            font-size: .78rem;
+            line-height: 1.5;
+        }
+
+        .hero-feature-list {
+            gap: .42rem;
+            margin-top: .72rem;
+        }
+
+            .hero-feature-list span {
+                gap: .32rem;
+                padding: .34rem .56rem;
+                border-color: rgba(255,255,255,.13);
+                background: rgba(255,255,255,.06);
+                font-size: .58rem;
+            }
+
+        .create-project-button {
+            min-width: 220px;
+            gap: .65rem;
+            padding: .68rem .78rem;
+            border-radius: 14px;
+            color: #28385E;
+            box-shadow: 0 11px 25px rgba(7,18,38,.17);
+        }
+
+            .create-project-button:hover {
+                transform: translateY(-1px);
+            }
+
+        .create-button-icon {
+            width: 39px;
+            height: 39px;
+            border-radius: 11px;
+            background: linear-gradient(135deg,#28385E,#516C8D);
+            font-size: .92rem;
+        }
+
+        .create-project-button strong {
+            font-size: .73rem;
+        }
+
+        .create-project-button small {
+            margin-top: .12rem;
+            font-size: .57rem;
+        }
+
+        /* Remove the decorative bright-blue circles. */
+        .projects-hero .hero-orb {
+            display: none !important;
+        }
+
+        @@media (max-width: 980px) {
+            .projects-hero {
+                grid-template-columns: 1fr;
+                padding: 1rem;
+            }
+
+            .create-project-button {
+                width: 100%;
+            }
+        }
+
+        @@media (max-width: 760px) {
+            .projects-hero {
+                padding: .9rem;
+            }
+
+                .projects-hero h1 {
+                    font-size: clamp(1.5rem, 7vw, 2rem);
+                }
+        }
+
     </style>
 }
 

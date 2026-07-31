@@ -393,6 +393,111 @@
     }
 </div>
 
+
+@section Head {
+    <style>
+        /* =========================================================
+                   PROJECT DNA — FIXED DESKTOP WORKSPACE
+                   ========================================================= */
+
+        @@media (min-width: 992px) {
+            /*
+                     * Keep both columns inside the visible workspace instead
+                     * of allowing a long DNA report to extend the whole page.
+                     */
+            .pdna-page .pdna-shell {
+                height: calc(100vh - 175px);
+                min-height: 590px;
+                align-items: stretch !important;
+                overflow: hidden;
+            }
+            /*
+                     * Keep the Selected Idea card exactly aligned with the
+                     * analysis panel at the top and bottom of the workspace.
+                     */
+            .pdna-page .pdna-idea-card {
+                align-self: stretch !important;
+                height: 100%;
+                min-height: 0 !important;
+                max-height: 100%;
+                overflow-y: auto;
+                overscroll-behavior: contain;
+                scrollbar-width: thin;
+                scrollbar-color: #516C8D #EEF2F6;
+            }
+
+            .pdna-page .pdna-idea-top {
+                margin-top: 0 !important;
+            }
+            /*
+                     * The large report area now stays fixed at the same level
+                     * as the selected-idea card and scrolls internally.
+                     */
+            .pdna-page .pdna-analysis-card {
+                height: 100%;
+                min-height: 0 !important;
+                max-height: 100%;
+                overflow-x: hidden !important;
+                overflow-y: auto !important;
+                overscroll-behavior: contain;
+                scrollbar-gutter: stable;
+                scrollbar-width: thin;
+                scrollbar-color: #516C8D #EEF2F6;
+            }
+
+            .pdna-page .pdna-waiting-state {
+                min-height: 100%;
+            }
+
+            .pdna-page .pdna-analysis-card::-webkit-scrollbar,
+            .pdna-page .pdna-idea-card::-webkit-scrollbar {
+                width: 7px;
+            }
+
+            .pdna-page .pdna-analysis-card::-webkit-scrollbar-track,
+            .pdna-page .pdna-idea-card::-webkit-scrollbar-track {
+                background: #EEF2F6;
+                border-radius: 999px;
+            }
+
+            .pdna-page .pdna-analysis-card::-webkit-scrollbar-thumb,
+            .pdna-page .pdna-idea-card::-webkit-scrollbar-thumb {
+                background: #516C8D;
+                border-radius: 999px;
+            }
+
+                .pdna-page .pdna-analysis-card::-webkit-scrollbar-thumb:hover,
+                .pdna-page .pdna-idea-card::-webkit-scrollbar-thumb:hover {
+                    background: #28385E;
+                }
+        }
+
+        /*
+                 * On tablets and phones, keep normal document scrolling so
+                 * the two columns do not become cramped.
+                 */
+        @@media (max-width: 991.98px) {
+            .pdna-page .pdna-shell {
+                height: auto !important;
+                min-height: 0 !important;
+                overflow: visible !important;
+            }
+
+            .pdna-page .pdna-idea-card,
+            .pdna-page .pdna-analysis-card {
+                height: auto !important;
+                min-height: 0 !important;
+                max-height: none !important;
+                overflow: visible !important;
+            }
+
+            .pdna-page .pdna-idea-top {
+                margin-top: 0 !important;
+            }
+        }
+    </style>
+}
+
 @section Scripts {
     <script>
         const dnaForm = document.getElementById("pdnaAnalyzeForm");
