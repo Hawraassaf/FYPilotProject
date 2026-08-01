@@ -42,12 +42,13 @@ public class FeedbackChatHub(
                 context.Project.Id),
             Context.ConnectionAborted);
 
-        if (context.Evaluation != null)
+        if (context.Evaluation != null &&
+            context.Project.SupervisorId.HasValue)
         {
             await MarkSeenInternalAsync(
-                context.Evaluation.Id,
                 context.Project.Id,
                 context.Evaluation.IdeaId,
+                context.Project.SupervisorId.Value,
                 userId);
         }
     }
@@ -112,17 +113,16 @@ public class FeedbackChatHub(
         }
 
         /*
-         * A supervisor may create the first pending
-         * evaluation when starting the discussion.
-         *
-         * A student cannot create an evaluation.
+         * Chat messages belong to an existing evaluation.
+         * Starting a discussion must never create a hidden
+         * evaluation round.
          */
         var context =
             await ResolveFeedbackContextAsync(
                 ideaId,
                 evaluationId,
                 userId,
-                createEvaluationForSupervisor: true);
+                createEvaluationForSupervisor: false);
 
         if (context?.Evaluation == null)
         {
@@ -140,6 +140,21 @@ public class FeedbackChatHub(
         if (replyToMessageId.HasValue &&
             replyToMessageId.Value > 0)
         {
+            var projectEvaluationIds =
+                await db.SupervisorEvaluations
+                    .AsNoTracking()
+                    .Where(item =>
+                        item.ProjectId ==
+                            context.Project.Id &&
+                        item.IdeaId ==
+                            evaluation.IdeaId &&
+                        item.SupervisorId ==
+                            evaluation.SupervisorId)
+                    .Select(item =>
+                        item.Id)
+                    .ToListAsync(
+                        Context.ConnectionAborted);
+
             replyMessage =
                 await db.FeedbackMessages
                     .AsNoTracking()
@@ -147,8 +162,8 @@ public class FeedbackChatHub(
                         message =>
                             message.Id ==
                                 replyToMessageId.Value &&
-                            message.EvaluationId ==
-                                evaluation.Id &&
+                            projectEvaluationIds.Contains(
+                                message.EvaluationId) &&
                             message.DeletedAt == null,
                         Context.ConnectionAborted);
 
@@ -156,7 +171,8 @@ public class FeedbackChatHub(
             {
                 throw new HubException(
                     "The message being replied to "
-                    + "is unavailable.");
+                    + "is unavailable in this project "
+                    + "discussion.");
             }
         }
 
@@ -606,10 +622,15 @@ public class FeedbackChatHub(
             return;
         }
 
+        if (!context.Project.SupervisorId.HasValue)
+        {
+            return;
+        }
+
         await MarkSeenInternalAsync(
-            context.Evaluation.Id,
             context.Project.Id,
             ideaId,
+            context.Project.SupervisorId.Value,
             userId);
     }
 
@@ -674,12 +695,18 @@ public class FeedbackChatHub(
             await db.SupervisorEvaluations
                 .Include(item =>
                     item.Idea)
+                .Where(item =>
+                    item.ProjectId ==
+                        project.Id &&
+                    item.IdeaId ==
+                        ideaId &&
+                    item.SupervisorId ==
+                        project.SupervisorId)
+                .OrderByDescending(item =>
+                    item.UpdatedAt)
+                .ThenByDescending(item =>
+                    item.Id)
                 .FirstOrDefaultAsync(
-                    item =>
-                        item.ProjectId ==
-                            project.Id &&
-                        item.IdeaId ==
-                            ideaId,
                     Context.ConnectionAborted);
 
         if (evaluation != null)
@@ -696,109 +723,13 @@ public class FeedbackChatHub(
         }
 
         /*
-         * Only the official project supervisor can
-         * create the first evaluation.
+         * No evaluation exists yet. The supervisor must
+         * save an evaluation from the Feedback Workspace
+         * before the project discussion can begin.
          */
-        if (!createEvaluationForSupervisor ||
-            !RoleName().Equals(
-                "supervisor",
-                StringComparison.OrdinalIgnoreCase) ||
-            project.SupervisorId !=
-                userId)
-        {
-            return new FeedbackContext(
-                project,
-                null);
-        }
-
-        var now =
-            DateTime.UtcNow;
-
-        evaluation =
-            new SupervisorEvaluation
-            {
-                ProjectId =
-                    project.Id,
-
-                IdeaId =
-                    ideaId,
-
-                SupervisorId =
-                    userId,
-
-                Status =
-                    "pending",
-
-                Comment =
-                    "",
-
-                ImprovementSuggestions =
-                    "",
-
-                OriginalityScore =
-                    0,
-
-                SimilarityScore =
-                    0,
-
-                CreatedAt =
-                    now,
-
-                UpdatedAt =
-                    now
-            };
-
-        db.SupervisorEvaluations.Add(
-            evaluation);
-
-        try
-        {
-            await db.SaveChangesAsync(
-                Context.ConnectionAborted);
-        }
-        catch (DbUpdateException exception)
-        {
-            /*
-             * Two browser tabs may attempt to create
-             * the same evaluation simultaneously.
-             *
-             * The unique ProjectId + IdeaId index
-             * protects the database. Reload the row
-             * that won the race.
-             */
-            logger.LogDebug(
-                exception,
-                "Evaluation creation race for project "
-                + "{ProjectId} and idea {IdeaId}.",
-                project.Id,
-                ideaId);
-
-            db.Entry(evaluation).State =
-                EntityState.Detached;
-
-            evaluation =
-                await db.SupervisorEvaluations
-                    .Include(item =>
-                        item.Idea)
-                    .FirstOrDefaultAsync(
-                        item =>
-                            item.ProjectId ==
-                                project.Id &&
-                            item.IdeaId ==
-                                ideaId,
-                        Context.ConnectionAborted);
-
-            if (evaluation == null)
-            {
-                throw new HubException(
-                    "The project evaluation could "
-                    + "not be created.");
-            }
-        }
-
         return new FeedbackContext(
             project,
-            evaluation);
+            null);
     }
 
     private async Task<Project?>
@@ -939,19 +870,39 @@ public class FeedbackChatHub(
     }
 
     private async Task MarkSeenInternalAsync(
-        int evaluationId,
         int projectId,
         int ideaId,
+        int supervisorId,
         int userId)
     {
+        var evaluationIds =
+            await db.SupervisorEvaluations
+                .AsNoTracking()
+                .Where(evaluation =>
+                    evaluation.ProjectId ==
+                        projectId &&
+                    evaluation.IdeaId ==
+                        ideaId &&
+                    evaluation.SupervisorId ==
+                        supervisorId)
+                .Select(evaluation =>
+                    evaluation.Id)
+                .ToListAsync(
+                    Context.ConnectionAborted);
+
+        if (evaluationIds.Count == 0)
+        {
+            return;
+        }
+
         var now =
             DateTime.UtcNow;
 
         var messages =
             await db.FeedbackMessages
                 .Where(message =>
-                    message.EvaluationId ==
-                        evaluationId &&
+                    evaluationIds.Contains(
+                        message.EvaluationId) &&
                     message.SenderUserId !=
                         userId &&
                     message.SeenAt == null &&
@@ -992,7 +943,6 @@ public class FeedbackChatHub(
             new
             {
                 projectId,
-                evaluationId,
                 ideaId,
                 seenByUserId =
                     userId,

@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace FYPilot.Web.Pages.Supervisor;
 
@@ -322,119 +323,51 @@ public class IdeaReviewModel(
         var similarityScore =
             EvaluationInput.SimilarityScore ?? 0;
 
-        var evaluation =
-            await db.SupervisorEvaluations
-                .FirstOrDefaultAsync(
-                    item =>
-                        item.ProjectId ==
-                            project.Id &&
-                        item.IdeaId ==
-                            idea.Id,
-                    cancellationToken);
-
-        var isNewEvaluation =
-            evaluation == null;
-
-        var previousStatus =
-            evaluation == null
-                ? "pending"
-                : NormalizeStatus(
-                    evaluation.Status);
-
-        var previousComment =
-            evaluation?.Comment ?? "";
-
-        var previousSuggestions =
-            evaluation?.ImprovementSuggestions ?? "";
-
-        var previousOriginality =
-            evaluation?.OriginalityScore ?? 0;
-
-        var previousSimilarity =
-            evaluation?.SimilarityScore ?? 0;
-
-        if (evaluation == null)
-        {
-            evaluation =
-                new SupervisorEvaluation
-                {
-                    ProjectId =
-                        project.Id,
-
-                    IdeaId =
-                        idea.Id,
-
-                    SupervisorId =
-                        supervisorId,
-
-                    CreatedAt =
-                        DateTime.UtcNow
-                };
-
-            db.SupervisorEvaluations.Add(
-                evaluation);
-        }
-
-        var hasMeaningfulChanges =
-            isNewEvaluation ||
-            !string.Equals(
-                previousStatus,
-                status,
-                StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(
-                previousComment,
-                comment,
-                StringComparison.Ordinal) ||
-            !string.Equals(
-                previousSuggestions,
-                suggestions,
-                StringComparison.Ordinal) ||
-            previousOriginality !=
-                originalityScore ||
-            previousSimilarity !=
-                similarityScore;
-
-        if (!hasMeaningfulChanges)
-        {
-            TempData["Success"] =
-                "The evaluation already contains these "
-                + "values. No duplicate notification "
-                + "was sent.";
-
-            return RedirectToSelectedProject(
-                project.Id,
-                idea.Id);
-        }
-
         var now =
             DateTime.UtcNow;
 
-        evaluation.ProjectId =
-            project.Id;
+        /*
+         * Every submitted evaluation is a new review round.
+         *
+         * Previous evaluations are never overwritten, so
+         * students can open the complete evaluation history.
+         */
+        var evaluation =
+            new SupervisorEvaluation
+            {
+                ProjectId =
+                    project.Id,
 
-        evaluation.IdeaId =
-            idea.Id;
+                IdeaId =
+                    idea.Id,
 
-        evaluation.SupervisorId =
-            supervisorId;
+                SupervisorId =
+                    supervisorId,
 
-        evaluation.Status =
-            status;
+                Status =
+                    status,
 
-        evaluation.Comment =
-            comment;
+                Comment =
+                    comment,
 
-        evaluation.ImprovementSuggestions =
-            suggestions;
+                ImprovementSuggestions =
+                    suggestions,
 
-        evaluation.OriginalityScore =
-            originalityScore;
+                OriginalityScore =
+                    originalityScore,
 
-        evaluation.SimilarityScore =
-            similarityScore;
+                SimilarityScore =
+                    similarityScore,
 
-        evaluation.UpdatedAt =
-            now;
+                CreatedAt =
+                    now,
+
+                UpdatedAt =
+                    now
+            };
+
+        db.SupervisorEvaluations.Add(
+            evaluation);
 
         db.ProjectActivities.Add(
             new ProjectActivity
@@ -446,13 +379,12 @@ public class IdeaReviewModel(
                     supervisorId,
 
                 ActionType =
-                    isNewEvaluation
-                        ? "evaluation_created"
-                        : "evaluation_updated",
+                    "evaluation_created",
 
                 Description =
-                    $"Supervisor evaluation saved with "
-                    + $"status \"{status}\".",
+                    $"A new supervisor evaluation round "
+                    + $"was saved with status "
+                    + $"\"{status}\".",
 
                 CreatedAtUtc =
                     now
@@ -465,16 +397,52 @@ public class IdeaReviewModel(
         }
         catch (DbUpdateException exception)
         {
-            logger.LogWarning(
-                exception,
-                "Could not save evaluation for project "
-                + "{ProjectId} and idea {IdeaId}.",
-                project.Id,
-                idea.Id);
+            var postgresException =
+                exception.InnerException
+                    as PostgresException
+                ?? exception.GetBaseException()
+                    as PostgresException;
 
-            TempData["Error"] =
-                "The evaluation could not be saved. "
-                + "Please refresh and try again.";
+            if (postgresException?.SqlState ==
+                PostgresErrorCodes.UniqueViolation)
+            {
+                logger.LogError(
+                    exception,
+                    "A legacy unique constraint blocked "
+                    + "a new evaluation round. "
+                    + "ProjectId: {ProjectId}, "
+                    + "IdeaId: {IdeaId}, "
+                    + "Constraint: {ConstraintName}.",
+                    project.Id,
+                    idea.Id,
+                    postgresException
+                        .ConstraintName);
+
+                TempData["Error"] =
+                    "The database still has the old "
+                    + "one-evaluation-only constraint. "
+                    + "Apply the "
+                    + "AllowMultipleSupervisorEvaluations "
+                    + "migration, then try again.";
+            }
+            else
+            {
+                logger.LogError(
+                    exception,
+                    "Could not save a new evaluation "
+                    + "round. ProjectId: {ProjectId}, "
+                    + "IdeaId: {IdeaId}, "
+                    + "DatabaseMessage: {DatabaseMessage}.",
+                    project.Id,
+                    idea.Id,
+                    exception.GetBaseException()
+                        .Message);
+
+                TempData["Error"] =
+                    "The new evaluation could not be "
+                    + "saved. Check the application log "
+                    + "for the database error.";
+            }
 
             return RedirectToSelectedProject(
                 project.Id,
@@ -494,8 +462,9 @@ public class IdeaReviewModel(
             cancellationToken);
 
         TempData["Success"] =
-            "Evaluation saved successfully. "
-            + "All active project members were notified.";
+            "A new evaluation was saved successfully. "
+            + "The evaluation form is ready for "
+            + "another review round.";
 
         return RedirectToSelectedProject(
             project.Id,
@@ -707,6 +676,9 @@ public class IdeaReviewModel(
                             .OrderByDescending(
                                 evaluation =>
                                     evaluation.UpdatedAt)
+                            .ThenByDescending(
+                                evaluation =>
+                                    evaluation.Id)
                             .First());
 
         TotalIdeas =
@@ -859,6 +831,13 @@ public class IdeaReviewModel(
         Evaluation =
             selectedEvaluation;
 
+        /*
+         * Evaluation keeps the latest saved review for the
+         * status shown in the project queue.
+         *
+         * EvaluationInput is deliberately reset so the
+         * supervisor starts a fresh evaluation round.
+         */
         EvaluationInput =
             new EvaluationInputModel
             {
@@ -869,27 +848,19 @@ public class IdeaReviewModel(
                     SelectedIdea.Id,
 
                 Status =
-                    Evaluation?.Status
-                    ?? "pending",
+                    "pending",
 
                 Comment =
-                    Evaluation?.Comment,
+                    "",
 
                 ImprovementSuggestions =
-                    Evaluation
-                        ?.ImprovementSuggestions,
+                    "",
 
                 OriginalityScore =
-                    Evaluation != null &&
-                    Evaluation.OriginalityScore > 0
-                        ? Evaluation.OriginalityScore
-                        : null,
+                    null,
 
                 SimilarityScore =
-                    Evaluation != null &&
-                    Evaluation.SimilarityScore > 0
-                        ? Evaluation.SimilarityScore
-                        : null
+                    null
             };
 
         MessageInput =
@@ -1087,14 +1058,25 @@ public class IdeaReviewModel(
             int supervisorId,
             CancellationToken cancellationToken)
     {
+        /*
+         * Discussion messages belong to the latest
+         * evaluation round. Never select an older round
+         * randomly when several evaluations exist.
+         */
         var evaluation =
             await db.SupervisorEvaluations
+                .Where(item =>
+                    item.ProjectId ==
+                        projectId &&
+                    item.IdeaId ==
+                        ideaId &&
+                    item.SupervisorId ==
+                        supervisorId)
+                .OrderByDescending(item =>
+                    item.UpdatedAt)
+                .ThenByDescending(item =>
+                    item.Id)
                 .FirstOrDefaultAsync(
-                    item =>
-                        item.ProjectId ==
-                            projectId &&
-                        item.IdeaId ==
-                            ideaId,
                     cancellationToken);
 
         if (evaluation != null)
@@ -1156,12 +1138,18 @@ public class IdeaReviewModel(
 
             var existing =
                 await db.SupervisorEvaluations
+                    .Where(item =>
+                        item.ProjectId ==
+                            projectId &&
+                        item.IdeaId ==
+                            ideaId &&
+                        item.SupervisorId ==
+                            supervisorId)
+                    .OrderByDescending(item =>
+                        item.UpdatedAt)
+                    .ThenByDescending(item =>
+                        item.Id)
                     .FirstOrDefaultAsync(
-                        item =>
-                            item.ProjectId ==
-                                projectId &&
-                            item.IdeaId ==
-                                ideaId,
                         cancellationToken);
 
             if (existing != null)
@@ -1218,16 +1206,16 @@ public class IdeaReviewModel(
                         recipient.UserId,
 
                     title:
-                        "Project Evaluation Updated",
+                        "New Project Evaluation",
 
                     message:
-                        $"{supervisorName} updated the "
+                        $"{supervisorName} added a new "
                         + $"evaluation for project "
                         + $"\"{projectTitle}\". "
                         + $"Status: {statusLabel}.",
 
                     type:
-                        "project_evaluation_updated",
+                        "project_evaluation_created",
 
                     url:
                         $"/Student/Feedback"
@@ -1238,7 +1226,7 @@ public class IdeaReviewModel(
                         true,
 
                     emailSubject:
-                        $"Evaluation updated for "
+                        $"New evaluation for "
                         + projectTitle,
 
                     emailHtmlBody:
@@ -1540,7 +1528,7 @@ public class IdeaReviewModel(
                         padding:26px;">
                 <h2 style="color:#28385E;
                            margin-top:0;">
-                    Project Evaluation Updated
+                    New Project Evaluation
                 </h2>
 
                 <p style="color:#475569;
@@ -1550,7 +1538,7 @@ public class IdeaReviewModel(
 
                 <p style="color:#475569;
                           line-height:1.7;">
-                    {Encode(supervisorName)} updated the
+                    {Encode(supervisorName)} added a new
                     evaluation for
                     <strong>{Encode(projectTitle)}</strong>.
                 </p>

@@ -91,17 +91,6 @@
 
                 <h1>@Model.ProjectTitle</h1>
 
-                <div class="nova-project-meta">
-                    <span><i class="bi bi-person-badge"></i>@Model.AccessRoleLabel</span>
-                    <span><i class="bi bi-activity"></i>@Model.ProjectStatus</span>
-                    <span><i class="bi bi-people"></i>@Model.ActiveMembersCount/@Model.MaximumMembers collaborators</span>
-                </div>
-
-                <p>
-                    One connected workspace for project intelligence, planning, engineering,
-                    collaboration, and defense preparation.
-                </p>
-
                 <div class="nova-hero-actions">
                     <a asp-page="@nextActionPage"
                        asp-route-projectId="@Model.ProjectId"
@@ -206,10 +195,6 @@
                 <p>Choose a stage to see its purpose, current state, and recommended action.</p>
             </div>
 
-            <div class="nova-progress-pill">
-                <span>@readiness%</span>
-                planning ready
-            </div>
         </header>
 
         <div class="nova-journey-map">
@@ -619,7 +604,6 @@
                 <div class="nova-core-emblem">
                     <img src="/image/FYPilot_logo.png" alt="" />
                     <strong>FYPilot</strong>
-                    <span>AI Project OS</span>
                 </div>
 
                 <div class="nova-core-signal signal-a"></div>
@@ -1302,8 +1286,8 @@
         }
 
         .nova-metric-card {
-            --metric-accent: var(--nova-primary);
-            --metric-accent-bg: rgba(52,104,245,.1);
+            --metric-accent: #28385E;
+            --metric-accent-bg: rgba(40,56,94,.09);
             position: relative;
             display: grid;
             grid-template-columns: auto minmax(0,1fr) auto;
@@ -1313,7 +1297,7 @@
             padding: .9rem;
             color: var(--theme-text);
             background: var(--theme-card);
-            border: 1px solid var(--theme-border);
+            border: 1px solid rgba(81,108,141,.17);
             border-radius: 15px;
             box-shadow: 0 14px 35px rgba(35,52,83,.07);
             backdrop-filter: blur(14px);
@@ -1330,19 +1314,24 @@
                 background: var(--metric-accent);
             }
 
+            /*
+                     * Theme-only accent shades:
+                     * navy → slate → steel → muted blue-grey.
+                     * No orange, purple, cyan or unrelated colors.
+                     */
             .nova-metric-card:nth-of-type(2) {
-                --metric-accent: var(--nova-cyan);
-                --metric-accent-bg: rgba(47,212,224,.12);
+                --metric-accent: #405577;
+                --metric-accent-bg: rgba(64,85,119,.10);
             }
 
             .nova-metric-card:nth-of-type(3) {
-                --metric-accent: var(--nova-primary-2);
-                --metric-accent-bg: rgba(138,92,246,.12);
+                --metric-accent: #516C8D;
+                --metric-accent-bg: rgba(81,108,141,.11);
             }
 
             .nova-metric-card:nth-of-type(4) {
-                --metric-accent: var(--nova-amber);
-                --metric-accent-bg: rgba(245,165,49,.13);
+                --metric-accent: #73859A;
+                --metric-accent-bg: rgba(115,133,154,.12);
             }
 
             .nova-metric-card:hover {
@@ -1376,12 +1365,17 @@
         }
 
         .nova-metric-copy strong {
+            display: block;
+            max-width: 100%;
             margin-top: .08rem;
+            overflow: hidden;
             color: var(--theme-text);
-            font-size: 1.28rem;
+            font-size: 1.16rem;
             font-weight: 930;
             line-height: 1.1;
             font-variant-numeric: tabular-nums;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .nova-metric-copy small {
@@ -2069,27 +2063,32 @@
             text-align: center;
         }
 
-            .nova-mini-empty strong,
-            .nova-mini-empty span {
-                display: block;
-            }
+        .nova-activity-wide .nova-mini-empty {
+            flex: 1 1 auto;
+            min-height: 0;
+        }
 
-            .nova-mini-empty strong {
-                margin-top: .5rem;
-                color: var(--theme-text);
-                font-size: .71rem;
-            }
+        .nova-mini-empty strong,
+        .nova-mini-empty span {
+            display: block;
+        }
 
-            .nova-mini-empty span {
-                margin-top: .15rem;
-                color: var(--theme-muted);
-                font-size: .59rem;
-            }
+        .nova-mini-empty strong {
+            margin-top: .5rem;
+            color: var(--theme-text);
+            font-size: .71rem;
+        }
 
-            .nova-mini-empty > i {
-                color: var(--nova-primary);
-                font-size: 1.4rem;
-            }
+        .nova-mini-empty span {
+            margin-top: .15rem;
+            color: var(--theme-muted);
+            font-size: .59rem;
+        }
+
+        .nova-mini-empty > i {
+            color: var(--nova-primary);
+            font-size: 1.4rem;
+        }
 
         .nova-capability-filter {
             display: inline-flex;
@@ -2269,37 +2268,88 @@
 
         .nova-universe-core {
             position: relative;
-            height: 350px;
+            min-width: 0;
+            height: 390px;
             display: grid;
             place-items: center;
+            overflow: visible;
         }
 
+        /*
+                 * Stronger orbit visibility:
+                 * thicker theme-colored rings, unequal dash patterns,
+                 * moving orbit markers and subtle glow make rotation
+                 * obvious even when the browser is zoomed to 90%.
+                 */
         .nova-core-rings {
             position: absolute;
-            border: 1px dashed rgba(52,104,245,.24);
+            display: block;
+            border: 2px dashed rgba(81,108,141,.58);
             border-radius: 50%;
+            opacity: 1;
+            filter: drop-shadow(0 0 8px rgba(81,108,141,.18));
+            transform-origin: center;
+            will-change: transform;
+            pointer-events: none;
         }
+
+            .nova-core-rings::before {
+                content: "";
+                position: absolute;
+                left: 50%;
+                top: -6px;
+                width: 11px;
+                height: 11px;
+                transform: translateX(-50%);
+                background: #516C8D;
+                border: 2px solid #F7F9FC;
+                border-radius: 50%;
+                box-shadow: 0 0 0 4px rgba(81,108,141,.12), 0 0 14px rgba(81,108,141,.48);
+            }
+
+            .nova-core-rings::after {
+                content: "";
+                position: absolute;
+                inset: -3px;
+                border: 3px solid transparent;
+                border-top-color: rgba(40,56,94,.56);
+                border-right-color: rgba(81,108,141,.18);
+                border-radius: 50%;
+            }
 
         .ring-a {
-            width: 180px;
-            height: 180px;
-            animation: novaRotate 18s linear infinite;
+            width: 205px;
+            height: 205px;
+            border-color: rgba(40,56,94,.64);
+            animation: novaRotate 10s linear infinite;
         }
+
+            .ring-a::before {
+                background: #28385E;
+            }
 
         .ring-b {
-            width: 250px;
-            height: 250px;
-            border-color: rgba(47,212,224,.22);
-            animation: novaRotate 25s linear infinite reverse;
+            width: 285px;
+            height: 285px;
+            border-color: rgba(81,108,141,.58);
+            animation: novaRotate 15s linear infinite reverse;
         }
 
+            .ring-b::before {
+                background: #516C8D;
+            }
+
         .ring-c {
-            width: 320px;
-            height: 320px;
-            border-color: rgba(138,92,246,.18);
-            opacity: .7;
-            animation: novaRotate 34s linear infinite;
+            width: 365px;
+            height: 365px;
+            border-color: rgba(132,153,176,.60);
+            opacity: .94;
+            animation: novaRotate 21s linear infinite;
         }
+
+            .ring-c::before {
+                background: #8499B0;
+            }
 
         .nova-core-emblem {
             z-index: 2;
@@ -2329,15 +2379,9 @@
             }
 
             .nova-core-emblem strong {
-                margin-top: .28rem;
-                font-size: .94rem;
+                margin-top: .38rem;
+                font-size: 1rem;
                 font-weight: 900;
-            }
-
-            .nova-core-emblem span {
-                margin-top: .1rem;
-                color: rgba(255,255,255,.6);
-                font-size: .62rem;
             }
 
         .nova-core-signal {
@@ -2816,9 +2860,9 @@
         }
 
         /* =========================================================
-                                   READABILITY PASS — slightly larger typography
-                                   Keeps the same layout, spacing, colors, and interactions.
-                                   ========================================================= */
+                                           READABILITY PASS — slightly larger typography
+                                           Keeps the same layout, spacing, colors, and interactions.
+                                           ========================================================= */
 
         .nova-live-label {
             font-size: .72rem;
@@ -3044,11 +3088,7 @@
         }
 
         .nova-core-emblem strong {
-            font-size: .76rem;
-        }
-
-        .nova-core-emblem span {
-            font-size: .51rem;
+            font-size: .88rem;
         }
 
         .nova-dock-trigger {
@@ -3416,12 +3456,12 @@
 
 
         /* =========================================================
-                                   DASHBOARD CLARITY UPGRADE
-                                   - Deterministic KPI content
-                                   - Wider, more readable live stream
-                                   - Larger intelligence universe
-                                   - Attention Center removed from markup
-                                   ========================================================= */
+                                           DASHBOARD CLARITY UPGRADE
+                                           - Deterministic KPI content
+                                           - Wider, more readable live stream
+                                           - Larger intelligence universe
+                                           - Attention Center removed from markup
+                                           ========================================================= */
 
         .nova-main-action-copy em {
             display: block;
@@ -3444,10 +3484,15 @@
 
         .nova-activity-wide {
             grid-column: 1 / -1;
-            min-height: 330px;
+            height: 390px;
+            min-height: 390px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
 
             .nova-activity-wide .nova-section-header-small {
+                flex: 0 0 auto;
                 padding: 1.05rem 1.2rem;
             }
 
@@ -3466,8 +3511,35 @@
             }
 
             .nova-activity-wide .nova-activity-list {
+                flex: 1 1 auto;
+                min-height: 0;
                 padding: .4rem 1.2rem 1.1rem;
+                overflow-y: auto;
+                overscroll-behavior: contain;
+                scrollbar-width: thin;
+                scrollbar-color: rgba(81,108,141,.42) transparent;
             }
+
+                .nova-activity-wide
+                .nova-activity-list::-webkit-scrollbar {
+                    width: 6px;
+                }
+
+                .nova-activity-wide
+                .nova-activity-list::-webkit-scrollbar-track {
+                    background: transparent;
+                }
+
+                .nova-activity-wide
+                .nova-activity-list::-webkit-scrollbar-thumb {
+                    background: rgba(81,108,141,.34);
+                    border-radius: 999px;
+                }
+
+                    .nova-activity-wide
+                    .nova-activity-list::-webkit-scrollbar-thumb:hover {
+                        background: rgba(40,56,94,.52);
+                    }
 
             .nova-activity-wide .nova-activity-item {
                 grid-template-columns: 17px minmax(0, 1fr);
@@ -3537,12 +3609,22 @@
             }
 
             .nova-universe-core {
-                height: 315px;
+                height: 360px;
+            }
+
+            .ring-a {
+                width: 190px;
+                height: 190px;
+            }
+
+            .ring-b {
+                width: 265px;
+                height: 265px;
             }
 
             .ring-c {
-                width: 285px;
-                height: 285px;
+                width: 340px;
+                height: 340px;
             }
         }
 
@@ -3552,7 +3634,7 @@
             }
 
             .nova-universe-core {
-                height: 300px;
+                height: 360px;
             }
 
             .nova-universe-column {
@@ -3561,6 +3643,30 @@
         }
 
         @@media (max-width: 780px) {
+            .nova-universe-core {
+                height: 330px;
+            }
+
+            .ring-a {
+                width: 170px;
+                height: 170px;
+            }
+
+            .ring-b {
+                width: 235px;
+                height: 235px;
+            }
+
+            .ring-c {
+                width: 305px;
+                height: 305px;
+            }
+
+            .nova-activity-wide {
+                height: 350px;
+                min-height: 350px;
+            }
+
             .nova-main-action-copy em {
                 white-space: normal;
             }
@@ -3589,19 +3695,20 @@
         }
 
         /* =========================================================
-                   DASHBOARD TOP HERO ONLY
-                   - Compact height
-                   - FYPilot navy/steel palette
-                   - No bright electric blue
-                   - No square/grid background
-                   - All dashboard sections below remain unchanged
-                   ========================================================= */
+                           DASHBOARD TOP HERO ONLY
+                           - Compact height
+                           - FYPilot navy/steel palette
+                           - No bright electric blue
+                           - No square/grid background
+                           - All dashboard sections below remain unchanged
+                           ========================================================= */
 
         .nova-dashboard {
             --theme-hero: radial-gradient( circle at 88% 10%, rgba(255,255,255,.08), transparent 30% ), radial-gradient( circle at 42% 115%, rgba(81,108,141,.20), transparent 34% ), linear-gradient( 128deg, #17233F 0%, #28385E 58%, #405577 100% );
         }
 
         .nova-top-deck {
+            min-height: 245px;
             background: var(--theme-hero) !important;
             border: 1px solid rgba(255,255,255,.10);
             border-radius: 22px;
@@ -3642,9 +3749,10 @@
             }
 
         .nova-hero-grid {
+            min-height: 245px;
             grid-template-columns: minmax(0,1.6fr) minmax(245px,.4fr);
-            gap: 1rem;
-            padding: .85rem 1.05rem 1rem;
+            gap: 1.1rem;
+            padding: 1.05rem 1.15rem 1.15rem;
         }
 
         .nova-project-chip {
@@ -3656,8 +3764,8 @@
 
         .nova-project-identity h1 {
             max-width: 880px;
-            margin-top: .55rem;
-            font-size: clamp(1.55rem,2.65vw,2.2rem);
+            margin-top: .65rem;
+            font-size: clamp(1.65rem,2.8vw,2.35rem);
             line-height: 1.04;
         }
 
@@ -3677,8 +3785,8 @@
         }
 
         .nova-hero-actions {
-            gap: .52rem;
-            margin-top: .65rem;
+            gap: .56rem;
+            margin-top: .85rem;
         }
 
         .nova-main-action {
@@ -3782,6 +3890,11 @@
                     }
 
         @@media (max-width: 1080px) {
+            .nova-top-deck,
+            .nova-hero-grid {
+                min-height: 0;
+            }
+
             .nova-hero-grid {
                 grid-template-columns: 1fr;
             }
@@ -3799,6 +3912,72 @@
             .nova-project-identity h1 {
                 font-size: clamp(1.45rem,7vw,1.95rem);
             }
+        }
+
+        /* =========================================================
+                   DASHBOARD SOFT TYPOGRAPHY
+                   - Removes the heavy/bold appearance across the page
+                   - Keeps only a light hierarchy for titles and headings
+                   ========================================================= */
+
+        .nova-dashboard,
+        .nova-dashboard *,
+        .student-tour-overlay,
+        .student-tour-overlay * {
+            font-weight: 400 !important;
+            font-synthesis: none;
+        }
+
+        .nova-project-identity h1 {
+            font-weight: 700 !important;
+        }
+
+        .nova-section-header h2,
+        .nova-core-card h2,
+        .nova-trust-card h2,
+        .nova-modal h2,
+        .student-tour-card h2,
+        .nova-core-copy h3,
+        .nova-journey-detail h3,
+        .nova-no-idea h3 {
+            font-weight: 600 !important;
+        }
+
+        .nova-dashboard strong,
+        .nova-dashboard b,
+        .student-tour-overlay strong,
+        .student-tour-overlay b,
+        .nova-metric-copy strong,
+        .nova-summary-heading strong,
+        .nova-score-columns strong,
+        .nova-feature-node strong,
+        .nova-activity-copy strong,
+        .nova-core-emblem strong {
+            font-weight: 600 !important;
+        }
+
+        .nova-project-chip,
+        .nova-section-kicker,
+        .nova-main-action-copy small,
+        .nova-main-action-copy strong,
+        .nova-progress-pill,
+        .nova-journey-node strong,
+        .nova-small-link,
+        .nova-domain-chip,
+        .nova-solid-btn,
+        .nova-outline-btn,
+        .nova-live-status,
+        .nova-capability-filter button,
+        .nova-dock-trigger,
+        .nova-quick-dock a,
+        .nova-trust-more,
+        .topbar-tour-launch,
+        .student-tour-kicker,
+        .student-tour-skip,
+        .student-tour-back,
+        .student-tour-next,
+        .student-tour-open-next {
+            font-weight: 500 !important;
         }
 
     </style>

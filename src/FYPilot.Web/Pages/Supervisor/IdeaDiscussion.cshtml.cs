@@ -90,6 +90,12 @@ public class IdeaDiscussionModel(
         int ideaId,
         CancellationToken cancellationToken)
     {
+        SuccessMessage =
+            TempData["Success"] as string;
+
+        ErrorMessage =
+            TempData["Error"] as string;
+
         await LoadDiscussionAsync(
             projectId,
             ideaId,
@@ -182,11 +188,28 @@ public class IdeaDiscussionModel(
         }
 
         var evaluation =
-            await GetOrCreateEvaluationAsync(
+            await GetLatestEvaluationAsync(
                 project.Id,
                 project.ProjectIdea.Id,
                 supervisorId,
                 cancellationToken);
+
+        if (evaluation == null)
+        {
+            TempData["Error"] =
+                "Save the first project evaluation "
+                + "before starting the discussion.";
+
+            return RedirectToPage(
+                new
+                {
+                    projectId =
+                        project.Id,
+
+                    ideaId =
+                        project.ProjectIdea.Id
+                });
+        }
 
         db.FeedbackMessages.Add(
             new FeedbackMessage
@@ -272,18 +295,29 @@ public class IdeaDiscussionModel(
                 project,
                 cancellationToken);
 
-        Evaluation =
+        var evaluations =
             await db.SupervisorEvaluations
                 .AsNoTracking()
-                .FirstOrDefaultAsync(
-                    evaluation =>
-                        evaluation.ProjectId ==
-                            project.Id &&
-                        evaluation.IdeaId ==
-                            Idea.Id &&
-                        evaluation.SupervisorId ==
-                            supervisorId,
+                .Where(evaluation =>
+                    evaluation.ProjectId ==
+                        project.Id &&
+                    evaluation.IdeaId ==
+                        Idea.Id &&
+                    evaluation.SupervisorId ==
+                        supervisorId)
+                .OrderByDescending(evaluation =>
+                    evaluation.UpdatedAt)
+                .ThenByDescending(evaluation =>
+                    evaluation.Id)
+                .ToListAsync(
                     cancellationToken);
+
+        /*
+         * The latest evaluation is the target for any
+         * new message sent from this page.
+         */
+        Evaluation =
+            evaluations.FirstOrDefault();
 
         MessageInput =
             new MessageInputModel
@@ -301,14 +335,27 @@ public class IdeaDiscussionModel(
             return;
         }
 
+        var evaluationIds =
+            evaluations
+                .Select(evaluation =>
+                    evaluation.Id)
+                .ToList();
+
+        /*
+         * All evaluation rounds share one continuous
+         * project discussion. Messages must survive
+         * refresh, navigation and later evaluations.
+         */
         var rawMessages =
             await db.FeedbackMessages
                 .AsNoTracking()
                 .Where(message =>
-                    message.EvaluationId ==
-                        Evaluation.Id)
+                    evaluationIds.Contains(
+                        message.EvaluationId))
                 .OrderBy(message =>
                     message.CreatedAt)
+                .ThenBy(message =>
+                    message.Id)
                 .ToListAsync(
                     cancellationToken);
 
@@ -363,6 +410,12 @@ public class IdeaDiscussionModel(
                         message.SenderUserId ==
                         supervisorId;
 
+                    var projectMember =
+                        ProjectMembers.FirstOrDefault(
+                            member =>
+                                member.UserId ==
+                                    message.SenderUserId);
+
                     return new FeedbackMessageItem
                     {
                         Id =
@@ -380,7 +433,12 @@ public class IdeaDiscussionModel(
                         SenderRole =
                             isSupervisor
                                 ? "Supervisor"
-                                : "Student",
+                                : string.Equals(
+                                    projectMember?.Role,
+                                    "owner",
+                                    StringComparison.OrdinalIgnoreCase)
+                                    ? "Owner"
+                                    : "Collaborator",
 
                         IsSupervisor =
                             isSupervisor,
@@ -552,103 +610,27 @@ public class IdeaDiscussionModel(
             .ToList();
     }
 
-    private async Task<SupervisorEvaluation>
-        GetOrCreateEvaluationAsync(
+    private async Task<SupervisorEvaluation?>
+        GetLatestEvaluationAsync(
             int projectId,
             int ideaId,
             int supervisorId,
             CancellationToken cancellationToken)
     {
-        var evaluation =
-            await db.SupervisorEvaluations
-                .FirstOrDefaultAsync(
-                    item =>
-                        item.ProjectId ==
-                            projectId &&
-                        item.IdeaId ==
-                            ideaId,
-                    cancellationToken);
-
-        if (evaluation != null)
-        {
-            return evaluation;
-        }
-
-        var now =
-            DateTime.UtcNow;
-
-        evaluation =
-            new SupervisorEvaluation
-            {
-                ProjectId =
-                    projectId,
-
-                IdeaId =
-                    ideaId,
-
-                SupervisorId =
-                    supervisorId,
-
-                Status =
-                    "pending",
-
-                Comment =
-                    "",
-
-                ImprovementSuggestions =
-                    "",
-
-                OriginalityScore =
-                    0,
-
-                SimilarityScore =
-                    0,
-
-                CreatedAt =
-                    now,
-
-                UpdatedAt =
-                    now
-            };
-
-        db.SupervisorEvaluations.Add(
-            evaluation);
-
-        try
-        {
-            await db.SaveChangesAsync(
+        return await db.SupervisorEvaluations
+            .Where(item =>
+                item.ProjectId ==
+                    projectId &&
+                item.IdeaId ==
+                    ideaId &&
+                item.SupervisorId ==
+                    supervisorId)
+            .OrderByDescending(item =>
+                item.UpdatedAt)
+            .ThenByDescending(item =>
+                item.Id)
+            .FirstOrDefaultAsync(
                 cancellationToken);
-
-            return evaluation;
-        }
-        catch (DbUpdateException exception)
-        {
-            logger.LogDebug(
-                exception,
-                "Evaluation creation race for project "
-                + "{ProjectId}.",
-                projectId);
-
-            db.Entry(evaluation).State =
-                EntityState.Detached;
-
-            var existing =
-                await db.SupervisorEvaluations
-                    .FirstOrDefaultAsync(
-                        item =>
-                            item.ProjectId ==
-                                projectId &&
-                            item.IdeaId ==
-                                ideaId,
-                        cancellationToken);
-
-            if (existing != null)
-            {
-                return existing;
-            }
-
-            throw;
-        }
     }
 
     private async Task NotifyProjectMembersAsync(
