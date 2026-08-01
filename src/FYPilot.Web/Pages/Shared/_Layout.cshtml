@@ -421,6 +421,170 @@
         .sidebar-scroll::-webkit-scrollbar-corner {
             background: transparent;
         }
+        /* =========================================================
+           TOPBAR PROJECT SWITCHER — OVERFLOW FIX
+           Scoped only to student topbars that have a project switcher.
+           ========================================================= */
+
+        .app-topbar.has-project-switcher {
+            display: grid !important;
+            grid-template-columns:
+                minmax(180px, 1fr)
+                minmax(280px, 520px)
+                auto;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .app-topbar.has-project-switcher
+        > .d-flex:first-child {
+            min-width: 0;
+            overflow: hidden;
+        }
+
+        .app-topbar.has-project-switcher
+        .page-heading {
+            min-width: 0;
+            max-width: 100%;
+            overflow: hidden;
+        }
+
+        .app-topbar.has-project-switcher
+        .page-heading h6,
+        .app-topbar.has-project-switcher
+        .page-subtitle {
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .app-topbar.has-project-switcher
+        .topbar-project-switcher {
+            position: relative;
+            left: auto;
+            width: 100%;
+            min-width: 0;
+            max-width: 520px;
+            margin: 0;
+            transform: none;
+            justify-self: center;
+        }
+
+        .app-topbar.has-project-switcher
+        .topbar-project-trigger {
+            min-width: 0;
+        }
+
+        .app-topbar.has-project-switcher
+        .topbar-project-trigger-copy,
+        .app-topbar.has-project-switcher
+        .topbar-project-trigger-copy strong {
+            min-width: 0;
+            max-width: 100%;
+        }
+
+        .app-topbar.has-project-switcher
+        .topbar-actions {
+            min-width: 0;
+            flex: 0 0 auto;
+            justify-self: end;
+        }
+
+        @@media (max-width: 1500px) {
+            .app-topbar.has-project-switcher {
+                grid-template-columns:
+                    minmax(150px, .78fr)
+                    minmax(250px, 420px)
+                    auto;
+                gap: 10px;
+            }
+
+            .app-topbar.has-project-switcher
+            .topbar-project-switcher {
+                max-width: 420px;
+            }
+
+            .app-topbar.has-project-switcher
+            .dashboard-top-heading h6 {
+                font-size: 1rem;
+            }
+        }
+
+        @@media (max-width: 1280px) {
+            .app-topbar.has-project-switcher {
+                grid-template-columns:
+                    minmax(110px, .55fr)
+                    minmax(225px, 340px)
+                    auto;
+                gap: 8px;
+            }
+
+            .app-topbar.has-project-switcher
+            .topbar-project-switcher {
+                width: 100%;
+                max-width: 340px;
+                margin-left: 0;
+            }
+
+            .app-topbar.has-project-switcher
+            .topbar-project-trigger {
+                grid-template-columns:
+                    34px minmax(0, 1fr) 16px;
+                gap: 8px;
+                min-height: 48px;
+                padding-right: 10px;
+            }
+
+            .app-topbar.has-project-switcher
+            .topbar-project-trigger-icon {
+                width: 34px;
+                height: 34px;
+            }
+
+            .app-topbar.has-project-switcher
+            .topbar-project-count {
+                display: none;
+            }
+        }
+
+        @@media (max-width: 1080px) {
+            .app-topbar.has-project-switcher {
+                display: flex !important;
+                align-items: center;
+                gap: 10px;
+            }
+
+            .app-topbar.has-project-switcher
+            > .d-flex:first-child {
+                flex: 1 1 auto;
+            }
+
+            .app-topbar.has-project-switcher
+            .topbar-project-switcher {
+                flex: 0 1 300px;
+                width: min(300px, 34vw);
+                max-width: 300px;
+                margin-left: auto;
+            }
+        }
+
+        @@media (max-width: 899.98px) {
+            .app-topbar.has-project-switcher
+            .topbar-project-switcher {
+                flex-basis: 220px;
+                width: 220px;
+                max-width: 220px;
+            }
+        }
+
+        @@media (max-width: 639.98px) {
+            .app-topbar.has-project-switcher
+            .topbar-project-switcher {
+                display: none;
+            }
+        }
+
     </style>
 
     @RenderSection("Head", required: false)
@@ -776,7 +940,11 @@
 
             <div class="app-main flex-grow-1 d-flex flex-column min-w-0">
 
-                <header class="app-topbar">
+                <header class="app-topbar
+                    @(role == "student" &&
+                      studentProjectSwitcherItems.Count > 0
+                        ? "has-project-switcher"
+                        : "")">
                     <div class="d-flex align-items-center gap-3 min-w-0">
 
                         <button class="btn mobile-menu-btn d-lg-none"

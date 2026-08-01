@@ -587,6 +587,24 @@ public class IdeaReviewModel(
         var supervisorId =
             SupervisorId();
 
+        /*
+         * SupervisorAssignment.ProjectId is authoritative.
+         */
+        var assignedProjectIds =
+            await db.SupervisorAssignments
+                .AsNoTracking()
+                .Where(assignment =>
+                    assignment.SupervisorId ==
+                        supervisorId &&
+                    assignment.Status ==
+                        "active" &&
+                    assignment.ProjectId.HasValue)
+                .Select(assignment =>
+                    assignment.ProjectId!.Value)
+                .Distinct()
+                .ToListAsync(
+                    cancellationToken);
+
         var projects =
             await db.Projects
                 .AsNoTracking()
@@ -602,11 +620,8 @@ public class IdeaReviewModel(
                 .ThenInclude(member =>
                     member.User)
                 .Where(project =>
-                    project.SupervisorId ==
-                        supervisorId &&
-                    project.SupervisorAssignmentStatus ==
-                        "active" &&
-                    project.ProjectIdeaId.HasValue)
+                    assignedProjectIds.Contains(
+                        project.Id))
                 .OrderByDescending(project =>
                     project.UpdatedAt)
                 .AsSplitQuery()
@@ -686,15 +701,19 @@ public class IdeaReviewModel(
 
         PendingReviews =
             projects.Count(project =>
-                !evaluationByProject.TryGetValue(
-                    project.Id,
-                    out var evaluation) ||
-                NormalizeStatus(
-                    evaluation.Status) ==
-                    "pending");
+                project.ProjectIdea != null &&
+                (
+                    !evaluationByProject.TryGetValue(
+                        project.Id,
+                        out var evaluation) ||
+                    NormalizeStatus(
+                        evaluation.Status) ==
+                        "pending"
+                ));
 
         ReviewedIdeas =
             projects.Count(project =>
+                project.ProjectIdea != null &&
                 evaluationByProject.TryGetValue(
                     project.Id,
                     out var evaluation) &&
@@ -704,6 +723,7 @@ public class IdeaReviewModel(
 
         NeedsRevisionIdeas =
             projects.Count(project =>
+                project.ProjectIdea != null &&
                 evaluationByProject.TryGetValue(
                     project.Id,
                     out var evaluation) &&
@@ -722,14 +742,15 @@ public class IdeaReviewModel(
 
         AllIdeas =
             projects
-                .Where(project =>
-                    project.ProjectIdea != null)
                 .Select(project =>
                 {
                     var members =
                         BuildProjectMembers(
                             project,
                             userMap);
+
+                    var idea =
+                        project.ProjectIdea;
 
                     evaluationByProject.TryGetValue(
                         project.Id,
@@ -738,7 +759,7 @@ public class IdeaReviewModel(
                     return new IdeaListItem
                     {
                         Id =
-                            project.ProjectIdea!.Id,
+                            idea?.Id ?? 0,
 
                         ProjectId =
                             project.Id,
@@ -748,7 +769,8 @@ public class IdeaReviewModel(
                                 project.Title),
 
                         Title =
-                            project.ProjectIdea.Title,
+                            idea?.Title
+                            ?? "No official idea selected yet",
 
                         StudentName =
                             JoinMemberNames(
@@ -762,22 +784,24 @@ public class IdeaReviewModel(
                             members.Count,
 
                         Domain =
-                            project.ProjectIdea.Domain,
+                            idea?.Domain,
 
                         DifficultyLevel =
-                            project.ProjectIdea
-                                .DifficultyLevel,
+                            idea?.DifficultyLevel,
 
                         CreatedAt =
-                            project.ProjectIdea.CreatedAt,
+                            idea?.CreatedAt
+                            ?? project.CreatedAt,
 
                         FeasibilityScore =
-                            project.ProjectIdea
-                                .FeasibilityScore,
+                            idea?.FeasibilityScore
+                            ?? 0,
 
                         Status =
-                            evaluation?.Status
-                            ?? "pending",
+                            idea == null
+                                ? "awaiting_idea"
+                                : evaluation?.Status
+                                  ?? "pending",
 
                         IsSelected =
                             selectedProjectId.HasValue &&
@@ -787,7 +811,7 @@ public class IdeaReviewModel(
                 })
                 .ToList();
 
-        if (selectedProject?.ProjectIdea == null)
+        if (selectedProject == null)
         {
             SelectedProject =
                 null;
@@ -816,13 +840,41 @@ public class IdeaReviewModel(
         SelectedProject =
             selectedProject;
 
-        SelectedIdea =
-            selectedProject.ProjectIdea;
-
         SelectedProjectMembers =
             BuildProjectMembers(
                 selectedProject,
                 userMap);
+
+        if (selectedProject.ProjectIdea == null)
+        {
+            SelectedIdea =
+                null;
+
+            Evaluation =
+                null;
+
+            Messages =
+                [];
+
+            EvaluationInput =
+                new EvaluationInputModel
+                {
+                    ProjectId =
+                        selectedProject.Id
+                };
+
+            MessageInput =
+                new MessageInputModel
+                {
+                    ProjectId =
+                        selectedProject.Id
+                };
+
+            return;
+        }
+
+        SelectedIdea =
+            selectedProject.ProjectIdea;
 
         evaluationByProject.TryGetValue(
             selectedProject.Id,
@@ -1022,12 +1074,21 @@ public class IdeaReviewModel(
                 query.AsNoTracking();
         }
 
+        var assignedProjectIds =
+            db.SupervisorAssignments
+                .Where(assignment =>
+                    assignment.SupervisorId ==
+                        supervisorId &&
+                    assignment.Status ==
+                        "active" &&
+                    assignment.ProjectId.HasValue)
+                .Select(assignment =>
+                    assignment.ProjectId!.Value);
+
         query =
             query.Where(project =>
-                project.SupervisorId ==
-                    supervisorId &&
-                project.SupervisorAssignmentStatus ==
-                    "active" &&
+                assignedProjectIds.Contains(
+                    project.Id) &&
                 project.ProjectIdeaId.HasValue);
 
         if (projectId > 0)

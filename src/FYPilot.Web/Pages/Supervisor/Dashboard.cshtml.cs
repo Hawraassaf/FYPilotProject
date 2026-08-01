@@ -19,6 +19,22 @@ public class DashboardModel(
     {
         var supervisorId = SupervisorId();
 
+        /*
+         * SupervisorAssignment.ProjectId is the authoritative
+         * source for active supervisor access.
+         */
+        var assignedProjectIds =
+            await db.SupervisorAssignments
+                .AsNoTracking()
+                .Where(assignment =>
+                    assignment.SupervisorId == supervisorId &&
+                    assignment.Status == "active" &&
+                    assignment.ProjectId.HasValue)
+                .Select(assignment =>
+                    assignment.ProjectId!.Value)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
         var projects = await db.Projects
             .AsNoTracking()
             .Include(project => project.Student)
@@ -27,10 +43,7 @@ public class DashboardModel(
                 .Where(member => member.Status == "active"))
                 .ThenInclude(member => member.User)
             .Where(project =>
-                project.SupervisorId == supervisorId &&
-                project.SupervisorAssignmentStatus == "active" &&
-                project.ProjectIdeaId.HasValue &&
-                project.ProjectIdea != null)
+                assignedProjectIds.Contains(project.Id))
             .OrderByDescending(project => project.UpdatedAt)
             .AsSplitQuery()
             .ToListAsync(cancellationToken);
@@ -63,7 +76,7 @@ public class DashboardModel(
         AllProjects = projects
             .Select(project =>
             {
-                var idea = project.ProjectIdea!;
+                var idea = project.ProjectIdea;
 
                 latestEvaluationByProject.TryGetValue(
                     project.Id,
@@ -101,32 +114,40 @@ public class DashboardModel(
                 var lastActivityAt = new[]
                 {
                     project.UpdatedAt,
-                    idea.CreatedAt,
+                    idea?.CreatedAt ?? DateTime.MinValue,
                     evaluationUpdatedAt
                 }.Max();
 
                 return new ProjectDashboardItem
                 {
                     ProjectId = project.Id,
-                    IdeaId = idea.Id,
+                    IdeaId = idea?.Id ?? 0,
+                    HasOfficialIdea = idea != null,
                     ProjectTitle = SafeProjectTitle(project.Title),
-                    IdeaTitle = idea.Title,
+                    IdeaTitle = idea?.Title
+                        ?? "No official idea selected yet",
                     MemberNames = string.Join(
                         ", ",
                         distinctMembers.Select(member => member.FullName)),
                     MemberCount = distinctMembers.Count,
-                    Domain = string.IsNullOrWhiteSpace(idea.Domain)
-                        ? "Uncategorized"
-                        : idea.Domain,
+                    Domain = idea == null
+                        ? "Awaiting official idea"
+                        : string.IsNullOrWhiteSpace(idea.Domain)
+                            ? "Uncategorized"
+                            : idea.Domain,
                     DifficultyLevel =
-                        string.IsNullOrWhiteSpace(idea.DifficultyLevel)
-                            ? "Not specified"
-                            : idea.DifficultyLevel,
-                    CreatedAt = idea.CreatedAt,
+                        idea == null
+                            ? "Not available"
+                            : string.IsNullOrWhiteSpace(idea.DifficultyLevel)
+                                ? "Not specified"
+                                : idea.DifficultyLevel,
+                    CreatedAt = idea?.CreatedAt ?? project.CreatedAt,
                     LastActivityAt = lastActivityAt,
-                    FeasibilityScore = idea.FeasibilityScore,
-                    InnovationScore = idea.InnovationScore,
-                    Status = NormalizeStatus(evaluation?.Status)
+                    FeasibilityScore = idea?.FeasibilityScore ?? 0,
+                    InnovationScore = idea?.InnovationScore ?? 0,
+                    Status = idea == null
+                        ? "awaiting_idea"
+                        : NormalizeStatus(evaluation?.Status)
                 };
             })
             .OrderByDescending(project => project.LastActivityAt)
@@ -206,6 +227,7 @@ public class DashboardModel(
             "approved" => "approved",
             "needs_revision" => "needs_revision",
             "rejected" => "rejected",
+            "awaiting_idea" => "awaiting_idea",
             _ => "pending"
         };
     }
@@ -226,6 +248,8 @@ public class DashboardModel(
         public int ProjectId { get; set; }
 
         public int IdeaId { get; set; }
+
+        public bool HasOfficialIdea { get; set; }
 
         public string ProjectTitle { get; set; } = "";
 

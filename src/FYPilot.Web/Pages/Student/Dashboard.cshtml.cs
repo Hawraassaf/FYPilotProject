@@ -49,11 +49,16 @@ public class DashboardModel(
     public int ActiveMembersCount =>
         Members.Count;
 
+    /*
+     * Project.MaximumMembers is the shared source of truth.
+     *
+     * Do not clamp it to 3 here because Team Management may
+     * configure a larger project capacity, such as 4.
+     */
     public int MaximumMembers =>
-    Math.Clamp(
-        CurrentProject?.MaximumMembers ?? 1,
-        1,
-        3);
+        Math.Max(
+            CurrentProject?.MaximumMembers ?? 1,
+            ActiveMembersCount);
 
     public string ProjectTitle =>
         string.IsNullOrWhiteSpace(CurrentProject?.Title)

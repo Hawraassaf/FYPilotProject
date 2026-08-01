@@ -118,9 +118,26 @@
                 @if (Model.SelectedIdea == null)
                 {
                     <section class="sfr-empty-page compact">
-                        <i class="bi bi-card-checklist"></i>
-                        <h2>Select a project to review</h2>
-                        <p>Choose an assigned project to view its official idea and save a new evaluation round.</p>
+                        @if (Model.SelectedProject != null)
+                        {
+                            <i class="bi bi-lightbulb"></i>
+                            <h2>Awaiting an official project idea</h2>
+                            <p>
+                                This project is assigned to you, but its team
+                                has not selected an official idea yet. It will
+                                become reviewable immediately after an idea is
+                                selected.
+                            </p>
+                        }
+                        else
+                        {
+                            <i class="bi bi-card-checklist"></i>
+                            <h2>Select a project to review</h2>
+                            <p>
+                                Choose an assigned project to view its official
+                                idea and save a new evaluation round.
+                            </p>
+                        }
                     </section>
                 }
                 else
@@ -647,6 +664,11 @@
             .sfr-status.pending {
                 background: #FFF7ED;
                 color: #9A3412;
+            }
+
+            .sfr-status.awaiting {
+                background: #EEF2F6;
+                color: var(--sfr-blue);
             }
 
             .sfr-status.approved {
@@ -1281,6 +1303,9 @@
             "approved" => ("Approved", "sfr-status approved"),
             "needs_revision" => ("Needs Revision", "sfr-status revision"),
             "rejected" => ("Rejected", "sfr-status rejected"),
+            "awaiting_idea" => (
+                "Awaiting Idea",
+                "sfr-status awaiting"),
             _ => ("Pending", "sfr-status pending")
         };
     }
