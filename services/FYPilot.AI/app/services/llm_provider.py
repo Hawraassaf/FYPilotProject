@@ -38,6 +38,7 @@ This file lets agents switch providers without rewriting every agent.
 import json
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
@@ -381,7 +382,12 @@ class DeepInfraProvider(BaseProvider):
 
     name = "deepinfra"
 
-    def __init__(self, model: str | None = None):
+    def __init__(
+        self,
+        model: str | None = None,
+        max_retries: int | None = None,
+        timeout_seconds: float | None = None,
+    ):
         self.api_key = os.getenv("DEEPINFRA_API_KEY")
 
         self.model = model or os.getenv(
@@ -391,18 +397,34 @@ class DeepInfraProvider(BaseProvider):
 
         # Mirrors GroqProvider's SEC-3 per-call timeout rationale: a hung
         # request must not block a review-pipeline attempt indefinitely.
-        self.timeout_seconds = float(os.getenv("DEEPINFRA_TIMEOUT_SECONDS", "60"))
+        self.timeout_seconds = timeout_seconds or float(
+            os.getenv("DEEPINFRA_TIMEOUT_SECONDS", "60"),
+        )
+
+        # The openai SDK's own default (max_retries=2) means a single call
+        # can silently take up to ~3x timeout_seconds before this provider
+        # gives up and ProviderChain moves to Groq -- fine for most agents,
+        # but too slow for a large-batch, latency-sensitive caller (e.g.
+        # Idea Comparison's 12-idea prompt during a live demo). Callers with
+        # that need can pass max_retries explicitly; every other agent
+        # keeps today's default (None -> SDK default) unchanged.
+        self.max_retries = max_retries
 
         self.enabled = bool(self.api_key)
 
     def _client(self):
         from openai import OpenAI
 
-        return OpenAI(
-            api_key=self.api_key,
-            base_url="https://api.deepinfra.com/v1/openai",
-            timeout=self.timeout_seconds,
-        )
+        client_kwargs = {
+            "api_key": self.api_key,
+            "base_url": "https://api.deepinfra.com/v1/openai",
+            "timeout": self.timeout_seconds,
+        }
+
+        if self.max_retries is not None:
+            client_kwargs["max_retries"] = self.max_retries
+
+        return OpenAI(**client_kwargs)
 
     def generate_json(
         self,
@@ -778,7 +800,11 @@ class GroqProvider(BaseProvider):
 
     name = "groq"
 
-    def __init__(self):
+    def __init__(
+        self,
+        max_retries: int | None = None,
+        timeout_seconds: float | None = None,
+    ):
         self.api_key = os.getenv("GROQ_API_KEY")
 
         self.model = os.getenv(
@@ -796,10 +822,35 @@ class GroqProvider(BaseProvider):
         # this is a prerequisite for (and separate from) the pipeline's own
         # aggregate wall-clock budget, which only checks time BETWEEN
         # iterations and cannot interrupt a single in-flight call.
-        self.timeout_seconds = float(os.getenv("GROQ_TIMEOUT_SECONDS", "60"))
+        self.timeout_seconds = timeout_seconds or float(
+            os.getenv("GROQ_TIMEOUT_SECONDS", "60"),
+        )
+
+        # Same rationale as DeepInfraProvider.max_retries: the groq SDK's own
+        # default (max_retries=2) means a single fallback attempt can
+        # silently take up to ~3x timeout_seconds before this provider gives
+        # up -- fine for most agents, but a latency-sensitive caller (e.g.
+        # Idea Comparison, which fell back to Groq and then sat through a
+        # 429-triggered retry loop well past its 45s end-to-end deadline)
+        # needs a single fast attempt instead. None preserves every other
+        # agent's existing behavior unchanged (SDK default).
+        self.max_retries = max_retries
 
         self.enabled = bool(self.api_key)
         self.endpoint = "https://api.groq.com/openai/v1/chat/completions"
+
+    def _client(self):
+        from groq import Groq
+
+        client_kwargs: dict[str, Any] = {
+            "api_key": self.api_key,
+            "timeout": self.timeout_seconds,
+        }
+
+        if self.max_retries is not None:
+            client_kwargs["max_retries"] = self.max_retries
+
+        return Groq(**client_kwargs)
 
     def _request(
         self,
@@ -810,9 +861,7 @@ class GroqProvider(BaseProvider):
         messages: list[dict[str, str]],
     ) -> tuple[str, list[dict[str, Any]], list[dict[str, str]]]:
         """Normal Groq chat request used for structured generation."""
-        from groq import Groq
-
-        client = Groq(api_key=self.api_key, timeout=self.timeout_seconds)
+        client = self._client()
 
         response = client.chat.completions.create(
             model=model,
@@ -851,9 +900,7 @@ class GroqProvider(BaseProvider):
             )
 
         try:
-            from groq import Groq
-
-            client = Groq(api_key=self.api_key, timeout=self.timeout_seconds)
+            client = self._client()
 
             response = client.chat.completions.create(
                 model=self.search_model,
@@ -1191,7 +1238,7 @@ class OllamaProvider(BaseProvider):
 
     name = "ollama"
 
-    def __init__(self):
+    def __init__(self, timeout_seconds: float | None = None):
         self.base_url = os.getenv(
             "OLLAMA_BASE_URL",
             "http://localhost:11434",
@@ -1206,6 +1253,17 @@ class OllamaProvider(BaseProvider):
             os.getenv("OLLAMA_FALLBACK_ENABLED", "true").lower()
             == "true"
         )
+
+        # Same rationale as DeepInfraProvider/GroqProvider's per-tier timing
+        # overrides: the previous hardcoded (5, 90) request timeout let a
+        # slow local model generation hang for up to 90s on its own --
+        # observed live consuming almost this provider's entire read timeout
+        # as the LAST fallback attempt on a request that had already spent
+        # most of its 45s end-to-end deadline on DeepInfra+Groq, overshooting
+        # the deadline by nearly 90s even with those two providers already
+        # tightly bounded. None preserves the previous (5, 90) behavior for
+        # every agent that doesn't request a tighter tier.
+        self.timeout_seconds = timeout_seconds
 
     def generate_json(
         self,
@@ -1247,7 +1305,7 @@ class OllamaProvider(BaseProvider):
                     "format": "json",
                     "options": options,
                 },
-                timeout=(5, 90),
+                timeout=(5, self.timeout_seconds or 90),
             )
 
             response.raise_for_status()
@@ -1309,7 +1367,7 @@ class OllamaProvider(BaseProvider):
                         "num_ctx": 4096,
                     },
                 },
-                timeout=(5, 90),
+                timeout=(5, self.timeout_seconds or 90),
             )
 
             response.raise_for_status()
@@ -1355,8 +1413,7 @@ _DEEPINFRA_TIER_DEFAULTS: dict[str, str] = {
     # 404s as model_not_found. Verified live against the real API.
     "high": "anthropic/claude-opus-4-8",
     # Default tier: most agents (market needs, project DNA, market
-    # footprint, idea comparison) -- confirmed working, cheap, good
-    # instruction-following.
+    # footprint) -- confirmed working, cheap, good instruction-following.
     "standard": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
     # Lightweight tier: short, simple prompts (Defense Simulator).
     "light": "google/gemma-3-12b-it",
@@ -1368,11 +1425,78 @@ _DEEPINFRA_TIER_DEFAULTS: dict[str, str] = {
     "mentor": "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",
 }
 
+# Idea Comparison deliberately reuses the "light" tier's model rather than a
+# new hardcoded one -- measured live against the "standard" 70B model on the
+# same 4-idea comparison prompt: the 70B model timed out at 40s, while
+# gemma-3-12b-it finished in ~22.5s with equally idea-specific, comparative,
+# non-repetitive output. A ranking/explanation task over a handful of
+# already-generated ideas doesn't need the highest-accuracy tier.
+_DEEPINFRA_TIER_DEFAULTS["comparison"] = _DEEPINFRA_TIER_DEFAULTS["light"]
+
+# Per-tier timing overrides for the DeepInfra leg of the chain. Absent here
+# (every tier except "comparison") means "use DeepInfraProvider's own
+# defaults" (DEEPINFRA_TIMEOUT_SECONDS env var, openai SDK's default retry
+# count) -- unchanged for every other agent. This is what lets a
+# latency-sensitive caller (e.g. Idea Comparison, budgeted for a live-defense-
+# facing 2-5 idea batch) ask ProviderChain(tier=...) for a faster, single-
+# attempt DeepInfra call WITHOUT constructing its own DeepInfraProvider --
+# the shared ProviderChain still owns order/fallback/timing/retries.
+_DEEPINFRA_TIER_TIMING: dict[str, dict[str, float | int]] = {
+    # Sized for the writer call, the primary deliverable (the actual
+    # idea-specific comparison) -- measured live at ~14s/20s/31s for
+    # 2/3/4 ideas (a direct 4-idea benchmark against real DeepInfra
+    # measured 31.3s -- right at a 30.0s timeout's edge, and observed
+    # timing out intermittently at exactly that setting live through the
+    # router). 34s gives that common 4-idea case a real margin to
+    # complete instead of a coin-flip timeout, while still leaving room
+    # in the 45s end-to-end deadline for the Groq/Ollama fallback legs
+    # below (each now tightly bounded) if DeepInfra genuinely fails.
+    "comparison": {"timeout_seconds": 34.0, "max_retries": 0},
+}
+
+# Same rationale as _DEEPINFRA_TIER_TIMING, for the Groq fallback leg.
+# GroqProvider's own default (60s timeout, groq SDK's default max_retries=2)
+# meant that once DeepInfra failed/timed out (already consuming most of a
+# 45s end-to-end deadline), a SINGLE Groq fallback attempt could itself take
+# up to ~180s -- observed live as a 429 rate-limit response followed by the
+# SDK's own retry/backoff, blowing the request well past .NET's hard cutoff
+# even though the writer's own compare() call never saw a chance to return.
+# Absent here (every tier except "comparison") means "use GroqProvider's own
+# defaults" -- unchanged for every other agent.
+_GROQ_TIER_TIMING: dict[str, dict[str, float | int]] = {
+    "comparison": {"timeout_seconds": 6.0, "max_retries": 0},
+}
+
+# Same rationale again, for the final local-Ollama fallback leg. Its
+# previous hardcoded (5, 90) request timeout meant that even after DeepInfra
+# and Groq were both tightly bounded for the "comparison" tier, a THIRD
+# fallback attempt (Ollama, when a local server happens to be running) could
+# still hang for up to 90s of local CPU inference -- observed live consuming
+# almost the full 90s as the last leg of a request that had already spent
+# most of its 45s end-to-end deadline, overshooting the deadline by nearly
+# 90s. Absent here (every tier except "comparison") means "use the previous
+# (5, 90) timeout" -- unchanged for every other agent.
+_OLLAMA_TIER_TIMING: dict[str, dict[str, float]] = {
+    "comparison": {"timeout_seconds": 3.0},
+}
+
 
 def _deepinfra_model_for_tier(tier: str) -> str:
     resolved_tier = tier if tier in _DEEPINFRA_TIER_DEFAULTS else "standard"
     env_key = f"DEEPINFRA_MODEL_{resolved_tier.upper()}"
     return os.getenv(env_key, _DEEPINFRA_TIER_DEFAULTS[resolved_tier])
+
+
+def _deepinfra_timing_for_tier(tier: str) -> dict[str, float | int]:
+    return _DEEPINFRA_TIER_TIMING.get(tier, {})
+
+
+def _groq_timing_for_tier(tier: str) -> dict[str, float | int]:
+    return _GROQ_TIER_TIMING.get(tier, {})
+
+
+def _ollama_timing_for_tier(tier: str) -> dict[str, float]:
+    return _OLLAMA_TIER_TIMING.get(tier, {})
 
 
 class ProviderChain:
@@ -1411,10 +1535,21 @@ class ProviderChain:
         tier: str = "standard",
         search_providers: list[BaseProvider] | None = None,
     ):
+        deepinfra_timing = _deepinfra_timing_for_tier(tier)
+        groq_timing = _groq_timing_for_tier(tier)
+        ollama_timing = _ollama_timing_for_tier(tier)
+
         self.providers = providers or [
-            DeepInfraProvider(model=_deepinfra_model_for_tier(tier)),
-            GroqProvider(),
-            OllamaProvider(),
+            DeepInfraProvider(
+                model=_deepinfra_model_for_tier(tier),
+                max_retries=deepinfra_timing.get("max_retries"),
+                timeout_seconds=deepinfra_timing.get("timeout_seconds"),
+            ),
+            GroqProvider(
+                max_retries=groq_timing.get("max_retries"),
+                timeout_seconds=groq_timing.get("timeout_seconds"),
+            ),
+            OllamaProvider(timeout_seconds=ollama_timing.get("timeout_seconds")),
         ]
 
         self.search_providers = search_providers or [
@@ -1455,16 +1590,33 @@ class ProviderChain:
             search_failed=True,
         )
 
+    # Below this many remaining deadline seconds, starting one more provider
+    # attempt (even a fast local Ollama call) has too little of a chance to
+    # complete before the caller's own end-to-end deadline -- skip it and
+    # let the cascade end (fall through to the next provider's own check, or
+    # to the final "all providers failed" result) instead of starting a call
+    # a caller with a `deadline` has no time left to wait for. Ignored
+    # entirely when `deadline` is None (every caller that doesn't pass one
+    # keeps today's unconditional cascade, unchanged).
+    _MIN_SECONDS_PER_PROVIDER_ATTEMPT = 4.0
+
     def generate_json(
         self,
         prompt: str,
         *,
         use_search: bool = False,
         max_tokens: int | None = None,
+        deadline: float | None = None,
     ) -> LLMResult:
         errors: list[str] = []
 
         for provider in self.providers:
+            if deadline is not None and (
+                deadline - time.monotonic() < self._MIN_SECONDS_PER_PROVIDER_ATTEMPT
+            ):
+                errors.append(f"{provider.name} -> skipped, insufficient deadline time remaining")
+                break
+
             result = provider.generate_json(
                 prompt,
                 use_search=use_search,
@@ -1500,10 +1652,17 @@ class ProviderChain:
         prompt: str,
         *,
         use_search: bool = False,
+        deadline: float | None = None,
     ) -> LLMResult:
         errors: list[str] = []
 
         for provider in self.providers:
+            if deadline is not None and (
+                deadline - time.monotonic() < self._MIN_SECONDS_PER_PROVIDER_ATTEMPT
+            ):
+                errors.append(f"{provider.name} -> skipped, insufficient deadline time remaining")
+                break
+
             result = provider.generate_text(
                 prompt,
                 use_search=use_search,

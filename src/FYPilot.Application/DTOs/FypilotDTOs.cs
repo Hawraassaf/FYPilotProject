@@ -195,7 +195,16 @@ public record GeneratedIdeaDto(
     string FinalDeliverables,
     string Domain,
     string LebaneseSector
-);
+)
+{
+    // Score explanations from Idea Generation (see ProjectIdeaAgent's
+    // _innovation_reason/_feasibility_reason/_market_reason). Init-only body
+    // properties so a Python response that omits them (older AI service
+    // build) still deserializes fine and mapping code can fall back safely.
+    public string? InnovationScoreReason { get; init; }
+    public string? FeasibilityScoreReason { get; init; }
+    public string? MarketDemandScoreReason { get; init; }
+}
 
 public record ProjectIdeaResponse(
     int Id,
@@ -219,7 +228,12 @@ public record ProjectIdeaResponse(
     string LebanesesSector,
     bool IsSelected,
     DateTime CreatedAt
-);
+)
+{
+    public string? InnovationScoreReason { get; init; }
+    public string? FeasibilityScoreReason { get; init; }
+    public string? MarketDemandScoreReason { get; init; }
+}
 
 // ── Feasibility ───────────────────────────────────────────────────────────────
 public record FeasibilityReportResponse(
@@ -686,10 +700,18 @@ public record IdeaComparisonRequest(
     List<IdeaComparisonInputDto> Ideas
 );
 
+// Official scores (InnovationScore/FeasibilityScore/MarketDemandScore) are
+// sent as READ-ONLY EVIDENCE only -- ProjectIdea is the single source of
+// truth for these numbers (see IdeaComparisonModel.BuildComparisonRequest).
+// 0 means "not evaluated for this idea", matching ScoreHelper.IsEvaluated's
+// convention -- never a fabricated default. The comparison agent must not
+// return replacement/alternative numeric scores; it only ranks and explains.
 public record IdeaComparisonInputDto(
     int Id,
     string Title,
     string ProblemStatement,
+    string WhyUseful,
+    string TargetUsers,
     string RequiredTechnologies,
     string RequiredSkills,
     string MissingSkills,
@@ -699,8 +721,11 @@ public record IdeaComparisonInputDto(
     string Domain,
     string LebaneseMarketRelevance,
     double InnovationScore,
+    string? InnovationScoreReason,
     double FeasibilityScore,
+    string? FeasibilityScoreReason,
     double MarketDemandScore,
+    string? MarketDemandScoreReason,
     string CreatedAt
 );
 
@@ -725,22 +750,26 @@ public record IdeaComparisonDto(
     string BestIdeaTitle,
     string Summary,
     List<ComparedIdeaDto> Ideas,
-    string FinalRecommendation
+    string FinalRecommendation,
+    bool Available = true
 );
 
+// Qualitative ranking only -- no numeric scores. ProjectIdea's saved
+// Innovation/Feasibility/MarketDemand scores (plus the .NET-computed
+// Overall via ScoreHelper) remain the only percentages ever shown; this
+// DTO exists purely to carry the AI's reasoning about that fixed data.
 public record ComparedIdeaDto(
     int IdeaId,
     int Rank,
     string Title,
-    int OverallScore,
-    int SkillFitScore,
-    int FeasibilityScore,
-    int InnovationScore,
-    int MarketRelevanceScore,
-    string RiskLevel,
+    string ContextSummary,
+    string WhyThisRank,
+    string MainStrength,
+    string MainRisk,
     string BestFor,
-    List<string> Strengths,
-    List<string> Weaknesses,
+    string ComparisonAdvantage,
+    string RequiredValidation,
+    string RiskLevel,
     string Recommendation
 );
 public record FypMentorRequest(

@@ -20,6 +20,17 @@ public class ProjectIdea
     [Key] [Column("id")] public int Id { get; set; }
     [Column("user_id")] public int UserId { get; set; }
     [Column("generated_for_project_id")] public int? GeneratedForProjectId { get; set; }
+
+    /// <summary>
+    /// Shared by every idea saved from the same "Generate"/"Regenerate"
+    /// click (see IdeaGeneratorModel.SaveGeneratedIdeasAsync) -- the
+    /// smallest safe way to identify "the latest batch" for Idea
+    /// Comparison's default selection without touching any existing
+    /// column. Null for ideas saved before this field existed; those are
+    /// treated as one legacy idea per implicit batch, never grouped.
+    /// </summary>
+    [Column("generation_batch_id")] public Guid? GenerationBatchId { get; set; }
+
     [Column("title")] public string Title { get; set; } = "";
     [Column("problem_statement")] public string ProblemStatement { get; set; } = "";
     [Column("target_users")] public string TargetUsers { get; set; } = "";
@@ -30,8 +41,23 @@ public class ProjectIdea
     [Column("missing_skills")] public string MissingSkills { get; set; } = "";
     [Column("difficulty_level")] public string DifficultyLevel { get; set; } = "intermediate";
     [Column("innovation_score")] public int InnovationScore { get; set; } = 70;
+    [Column("innovation_score_reason")] public string? InnovationScoreReason { get; set; }
     [Column("feasibility_score")] public int FeasibilityScore { get; set; } = 70;
+    [Column("feasibility_score_reason")] public string? FeasibilityScoreReason { get; set; }
     [Column("market_demand_score")] public int MarketDemandScore { get; set; } = 70;
+    [Column("market_demand_score_reason")] public string? MarketDemandScoreReason { get; set; }
+
+    /// <summary>
+    /// "v2" for ideas scored by the current per-idea-sensitive formula
+    /// (see ProjectIdeaAgent._complete_and_score); "legacy" for ideas
+    /// scored before that change. Never recalculated after the fact --
+    /// Idea Comparison only uses this to label old scores, never to hide
+    /// or replace them. No equivalent per-idea version field existed
+    /// before this (AiOutputReview.GeneratorModel/Provider are review-log
+    /// rows, not reliably 1:1 with a given ProjectIdea).
+    /// </summary>
+    [Column("score_version")] public string? ScoreVersion { get; set; }
+
     [Column("expected_duration_weeks")] public int ExpectedDurationWeeks { get; set; } = 16;
     [Column("supervisor_category")] public string SupervisorCategory { get; set; } = "";
     [Column("dataset_needed")] public string DatasetNeeded { get; set; } = "";

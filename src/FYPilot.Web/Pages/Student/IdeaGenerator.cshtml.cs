@@ -1420,6 +1420,27 @@ public class IdeaGeneratorModel(
             .FirstOrDefaultAsync();
     }
 
+    /// <summary>
+    /// Score values from the AI response are only ever clamped into 0-100
+    /// here, never replaced with a fixed fallback (e.g. 88) when missing or
+    /// out of range -- an unavailable score becomes 0, which the UI shows
+    /// as "Not evaluated" rather than a fabricated number.
+    /// </summary>
+    private static int ClampScore(double rawScore)
+    {
+        if (double.IsNaN(rawScore) || double.IsInfinity(rawScore))
+        {
+            return 0;
+        }
+
+        return Math.Clamp((int)Math.Round(rawScore), 0, 100);
+    }
+
+    private static string? SafeReason(string? reason) =>
+        string.IsNullOrWhiteSpace(reason)
+            ? null
+            : (reason.Trim().Length <= 1000 ? reason.Trim() : reason.Trim()[..1000]);
+
     private async Task<List<ProjectIdea>>
      SaveGeneratedIdeasAsync(
          int userId,
@@ -1427,9 +1448,30 @@ public class IdeaGeneratorModel(
     {
         var entities = new List<ProjectIdea>();
 
+        // One batch id per Generate/Regenerate click -- lets Idea
+        // Comparison default to "the latest batch" without guessing from
+        // CreatedAt proximity.
+        var generationBatchId = Guid.NewGuid();
+
         foreach (var idea in ideas.Take(
                      IdeasPerGeneration))
         {
+            var innovationScore = ClampScore(idea.InnovationScore);
+            var feasibilityScore = ClampScore(idea.FeasibilityScore);
+            var marketDemandScore = ClampScore(idea.MarketDemandScore);
+
+            logger.LogInformation(
+                "Idea generated: {Title} | AI scores: innovation={AiInnovation}, " +
+                "feasibility={AiFeasibility}, market={AiMarket} | Mapped scores: " +
+                "innovation={MappedInnovation}, feasibility={MappedFeasibility}, market={MappedMarket}",
+                idea.Title,
+                idea.InnovationScore,
+                idea.FeasibilityScore,
+                idea.MarketDemandScore,
+                innovationScore,
+                feasibilityScore,
+                marketDemandScore);
+
             var entity = new ProjectIdea
             {
                 /*
@@ -1443,6 +1485,7 @@ public class IdeaGeneratorModel(
                  * project workspace containing the candidate.
                  */
                 GeneratedForProjectId = ProjectId,
+                GenerationBatchId = generationBatchId,
 
                 Title = idea.Title,
                 ProblemStatement = idea.ProblemStatement,
@@ -1461,17 +1504,23 @@ public class IdeaGeneratorModel(
                 DifficultyLevel =
                     idea.DifficultyLevel.ToString(),
 
-                InnovationScore =
-                    (int)Math.Round(
-                        idea.InnovationScore),
+                InnovationScore = innovationScore,
+                InnovationScoreReason = SafeReason(idea.InnovationScoreReason),
 
-                FeasibilityScore =
-                    (int)Math.Round(
-                        idea.FeasibilityScore),
+                FeasibilityScore = feasibilityScore,
+                FeasibilityScoreReason = SafeReason(idea.FeasibilityScoreReason),
 
-                MarketDemandScore =
-                    (int)Math.Round(
-                        idea.MarketDemandScore),
+                MarketDemandScore = marketDemandScore,
+                MarketDemandScoreReason = SafeReason(idea.MarketDemandScoreReason),
+
+                /*
+                 * Every idea saved from this point on uses the current
+                 * per-idea-sensitive scoring formula -- see ProjectIdea.
+                 * ScoreVersion. Ideas saved before this existed are "legacy"
+                 * (set by the AddIdeaScoreVersion migration), never
+                 * silently relabeled or recalculated.
+                 */
+                ScoreVersion = "v2",
 
                 ExpectedDurationWeeks =
                     idea.ExpectedDurationWeeks,
@@ -1495,6 +1544,14 @@ public class IdeaGeneratorModel(
         }
 
         await db.SaveChangesAsync();
+
+        foreach (var entity in entities)
+        {
+            logger.LogInformation(
+                "Idea saved: {Title} | Saved idea ID: {IdeaId}",
+                entity.Title,
+                entity.Id);
+        }
 
         return entities;
     }

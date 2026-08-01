@@ -51,8 +51,18 @@ public interface IAiServiceClient
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>POST /compare-generated-ideas — Compare and rank generated ideas.</summary>
-    Task<IdeaComparisonServiceResponse?> CompareGeneratedIdeasAsync(IdeaComparisonRequest request);
+    /// <summary>
+    /// POST /compare-generated-ideas — Compare and rank generated ideas.
+    /// <paramref name="deadline"/> bounds the whole round trip end to end:
+    /// it is sent to the AI service as X-Request-Deadline-Ms (so Python
+    /// stops starting new provider/rewrite/reviewer calls once it's spent)
+    /// AND enforced locally, so the .NET caller never waits past it even if
+    /// the AI service itself does not respect it.
+    /// </summary>
+    Task<IdeaComparisonServiceResponse?> CompareGeneratedIdeasAsync(
+        IdeaComparisonRequest request,
+        TimeSpan deadline,
+        CancellationToken cancellationToken = default);
 
     /// <summary>POST /fyp-chat — Ask the FYP mentor a question.</summary>
     Task<FypMentorServiceResponse?> AskFypMentorAsync(FypMentorRequest request);
