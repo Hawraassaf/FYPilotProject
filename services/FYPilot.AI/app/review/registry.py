@@ -8,6 +8,7 @@ to call ReviewPipeline. Until that happens, an agent NOT listed here (or not
 actually wired) gets none of this pipeline's protection.
 """
 
+import re
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel, model_validator
@@ -829,14 +830,34 @@ class ProjectDNACandidateSchema(ProjectDNAResponse):
 
 _IDEA_COMPARISON_EXTRA_RUBRIC = """
 IDEA COMPARISON-SPECIFIC REVIEW CRITERIA (in addition to the standard criteria above):
-- skillFitScore must not contradict the student's actual skillRatings in the
-  trusted project context -- a skill rated 3/5 or higher must never be
-  treated as a weakness or a reason for a low score. Flag as category
-  "contradiction".
+- Fabricated scores: this agent must never state or imply a numeric
+  percentage/score anywhere in free text (contextSummary, whyThisRank,
+  mainStrength, mainRisk, bestFor, comparisonAdvantage, requiredValidation,
+  recommendation, summary, finalRecommendation) -- Innovation, Feasibility,
+  Market Demand and Overall are fixed values already saved on the idea and
+  must never be restated, replaced, or reinterpreted as a different number.
+  Flag any numeric score/percentage found in free text as category
+  "fabricated_score" (critical).
+- Repetitive or generic comparison: flag as category
+  "repetitive_or_generic_comparison" (critical) if two or more ideas share
+  a copied sentence structure, a title-swapped template, an identical
+  comparisonAdvantage, or an identical recommendation, or if any field
+  contains no concrete detail specific to that idea (a named technology,
+  dataset need, target-user group, domain workflow, missing skill, or
+  duration) and could be pasted onto an unrelated idea unchanged. Do NOT
+  flag ideas merely for sharing domain terminology or the same technology
+  stack (e.g. "ASP.NET Core Razor Pages, Python FastAPI, PostgreSQL") --
+  that is expected and not generic. When two ideas are similar (same
+  domain/concept), whyThisRank or comparisonAdvantage must name the exact
+  feature or scope difference between them; if neither does, flag it.
+- Comparative reasoning: flag (category "contradiction") if whyThisRank
+  evaluates an idea in isolation instead of explaining its rank relative to
+  the other ideas in the batch (e.g. "ranks second because it is useful and
+  feasible" is not comparative).
 - Technology alignment: flag (category "project_alignment") any mention of
   React, Node.js, Vue, Angular, Flutter, Dart, Kafka, Azure, AWS, GCP,
-  Kubernetes, blockchain, Web3, or Solidity anywhere in bestFor, strengths,
-  weaknesses, recommendation, or finalRecommendation.
+  Kubernetes, blockchain, Web3, or Solidity anywhere in bestFor,
+  comparisonAdvantage, recommendation, or finalRecommendation.
 - Ranking consistency: flag (category "contradiction") if finalRecommendation
   does not clearly point to the idea identified as bestIdeaId/bestIdeaTitle.
 - Unsupported claims: flag (category "unsupported_claim") any invented
@@ -844,21 +865,52 @@ IDEA COMPARISON-SPECIFIC REVIEW CRITERIA (in addition to the standard criteria a
   idea data.
 """
 
+# Word-count ceilings for each qualitative field -- mirrors
+# app.agents.project_idea_comparison.FIELD_WORD_LIMITS so a response that
+# blows past them fails schema validation and goes through the pipeline's
+# existing structural-repair path, the same mechanism that already handles
+# rank/id invariants below (no separate length-enforcement code path).
+_IDEA_COMPARISON_FIELD_WORD_LIMITS: dict[str, int] = {
+    "contextSummary": 18,
+    "whyThisRank": 32,
+    "mainStrength": 18,
+    "mainRisk": 18,
+    "bestFor": 18,
+    "comparisonAdvantage": 24,
+    "requiredValidation": 20,
+    "recommendation": 24,
+}
+
+
+def _word_count(text: str) -> int:
+    return len(text.split())
+
+
+def _sentence_count(text: str) -> int:
+    stripped = text.strip()
+    return len([part for part in re.split(r"[.!?]+", stripped) if part.strip()]) if stripped else 0
+
 
 class IdeaComparisonCandidateSchema(IdeaComparisonResponse):
     """
     Wraps the agent's own IdeaComparisonResponse with the structural
     invariants that must survive a Rewrite untouched -- the ideas list count
     must match totalIdeasCompared, ranks must be an exact 1..N permutation
-    (no gaps or duplicates), and bestIdeaId/bestIdeaTitle must actually be
-    the idea ranked #1. A violation here is a schema failure
+    (no gaps or duplicates), bestIdeaId/bestIdeaTitle must actually be the
+    idea ranked #1, and every qualitative field must stay within its word
+    limit (see _IDEA_COMPARISON_FIELD_WORD_LIMITS) so the default UI never
+    needs to show a long paragraph. A violation here is a schema failure
     (schema_ok=False), handled entirely by the pipeline's existing
     structural-repair path -- no changes to pipeline.py's decision logic
-    were needed for this.
+    were needed for this. Only checked when available=True -- the safe
+    "could not be generated" response intentionally has an empty ideas list.
     """
 
     @model_validator(mode="after")
     def _check_structural_invariants(self) -> "IdeaComparisonCandidateSchema":
+        if not self.available:
+            return self
+
         if len(self.ideas) != self.totalIdeasCompared:
             raise ValueError(
                 f"ideas count ({len(self.ideas)}) does not match "
@@ -880,6 +932,22 @@ class IdeaComparisonCandidateSchema(IdeaComparisonResponse):
                     f"top_ranked=({top_ranked.ideaId}, '{top_ranked.title}'), "
                     f"declared=({self.bestIdeaId}, '{self.bestIdeaTitle}')"
                 )
+
+        if _sentence_count(self.summary) > 2:
+            raise ValueError("summary exceeds the 2-sentence limit")
+
+        if _sentence_count(self.finalRecommendation) > 2:
+            raise ValueError("finalRecommendation exceeds the 2-sentence limit")
+
+        for idea in self.ideas:
+            for field_name, limit in _IDEA_COMPARISON_FIELD_WORD_LIMITS.items():
+                value = getattr(idea, field_name, "") or ""
+
+                if _word_count(value) > limit:
+                    raise ValueError(
+                        f"idea {idea.ideaId} field '{field_name}' exceeds the "
+                        f"{limit}-word limit ({_word_count(value)} words)"
+                    )
 
         return self
 
@@ -1206,10 +1274,27 @@ AGENT_REGISTRY: dict[str, AgentReviewConfig] = {
         schema=IdeaComparisonCandidateSchema,
         max_rewrites=1,
         url_mode="no_urls_allowed",
-        allow_unreviewed_output=False,
+        # Unlike DNA/security-relevant content, a structurally-valid
+        # comparison of the student's OWN saved ideas is low-risk to show
+        # even when the Reviewer stage itself times out/fails on a large
+        # 12-idea batch: without this, a single reviewer hiccup discarded a
+        # perfectly good, idea-specific LLM ranking and forced the generic
+        # safe-fallback message instead -- see the trace in the Idea
+        # Comparison redesign notes. The percentages a student could act on
+        # are never at risk either way, since this agent has no score
+        # fields at all.
+        allow_unreviewed_output=True,
         known_risky_claims=_DNA_KNOWN_RISKY_CLAIMS,
         mandatory_fields=["summary", "finalRecommendation"],
-        max_total_seconds=90.0,
+        # Static fallback only -- the router (routers/idea_comparison.py)
+        # overrides this per-request from the caller's actual end-to-end
+        # deadline (X-Request-Deadline-Ms, default 45s). 45 here matches
+        # that default for any code path that constructs ReviewPipeline
+        # without the override (e.g. direct calls, tests). A normal batch
+        # is now 2-5 ideas on the "comparison" tier's fast model (~20-30s
+        # for the writer alone), so this comfortably covers one writer
+        # attempt plus a Reviewer pass and, if needed, one rewrite.
+        max_total_seconds=45.0,
         extra_rubric=_IDEA_COMPARISON_EXTRA_RUBRIC,
     ),
     "MarketFootprintAgent": AgentReviewConfig(

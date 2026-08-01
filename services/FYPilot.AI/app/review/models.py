@@ -59,6 +59,17 @@ PipelineStatus = Literal[
     "review_unavailable",
     "provider_unavailable",
     "schema_invalid",
+    # Statuses below are specific to IdeaComparisonAgent's decoupled router
+    # flow (see routers/idea_comparison.py) rather than ReviewPipeline.run()
+    # -- that flow calls IdeaComparisonAgent.compare() directly (one writer
+    # call, deterministic validation) and only conditionally runs the
+    # semantic Reviewer, so it needs a status vocabulary that distinguishes
+    # "never attempted because review was decoupled from rendering" from
+    # ReviewPipeline's own "attempted but timed out" (review_unavailable).
+    "automated_checks_passed",  # deterministic checks passed; review skipped (insufficient deadline time to attempt it)
+    "review_pending",  # reserved for a future async-after-response Reviewer call; not yet emitted (see idea_comparison.py)
+    "reviewed",  # Reviewer ran synchronously and found no blocking issue
+    "review_rejected",  # Reviewer ran synchronously and found a blocking issue
 ]
 
 

@@ -457,6 +457,21 @@ class ReviewPipeline:
                 review_run_id=review_run_id, history=history, attempts=attempt,
             )
 
+        # Same fallback _review_unavailable_result already uses when the
+        # Reviewer call itself fails/errors -- applied here too for
+        # consistency, so a request that ran out of wall-clock budget
+        # (e.g. a slow Reviewer call on a tight end-to-end deadline) isn't
+        # treated differently from one where the Reviewer call errored
+        # outright. allow_unreviewed_output defaults to False, so this is a
+        # no-op for every agent that hasn't explicitly opted in.
+        if self.config.allow_unreviewed_output and state.last_structurally_valid_candidate:
+            return self._result(
+                "review_unavailable", usable=True, output=state.last_structurally_valid_candidate,
+                warning="This answer passed structural checks but semantic review could not be "
+                        "completed before the request's time budget ran out.",
+                review_run_id=review_run_id, history=history, attempts=attempt, review_unavailable=True,
+            )
+
         return self._result(
             "review_unavailable", usable=False, output={},
             warning="The review process exceeded its time budget before completing a single review.",

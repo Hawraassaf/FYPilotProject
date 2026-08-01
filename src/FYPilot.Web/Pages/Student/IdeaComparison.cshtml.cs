@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Security.Claims;
 using System.Text.Json;
+using FYPilot.Application.Common;
 using FYPilot.Application.DTOs;
 using FYPilot.Application.Interfaces;
 using FYPilot.Domain.Entities;
@@ -16,7 +18,8 @@ public class IdeaComparisonModel(
     ApplicationDbContext db,
     IAiServiceClient aiService,
     IProjectAccessService projectAccessService,
-    IActiveProjectService activeProjectService
+    IActiveProjectService activeProjectService,
+    ILogger<IdeaComparisonModel> logger
 ) : PageModel
 {
     private const int MaximumProjectMembers = 21;
@@ -29,6 +32,97 @@ public class IdeaComparisonModel(
     public ProjectAccessResult? ProjectAccess { get; private set; }
 
     public List<ProjectIdea> Ideas { get; private set; } = [];
+
+    /// <summary>
+    /// The most recent Generate/Regenerate batch (see
+    /// IdeaGeneratorModel.SaveGeneratedIdeasAsync's GenerationBatchId) --
+    /// what the AI comparison selection defaults to. Ideas saved before
+    /// GenerationBatchId existed have no batch to group by, so the default
+    /// falls back to the single most recent idea by CreatedAt for those.
+    /// </summary>
+    public HashSet<int> LatestBatchIdeaIds { get; private set; } = [];
+
+    public const int MinimumIdeasToCompare = 2;
+    public const int RecommendedMaximumIdeasToCompare = 4;
+    public const int HardMaximumIdeasToCompare = 5;
+
+    /// <summary>
+    /// End-to-end budget for the whole "Generate Recommendation" round
+    /// trip -- sent to the AI service as X-Request-Deadline-Ms so it stops
+    /// starting new provider/rewrite/reviewer work once spent, and
+    /// enforced here too (see CompareGeneratedIdeasAsync) so the browser
+    /// never waits past it even if the AI service does not respect it.
+    /// </summary>
+    private static readonly TimeSpan ComparisonDeadline = TimeSpan.FromSeconds(45);
+
+    /// <summary>
+    /// Ideas the student picked to send to the AI comparison -- bound from
+    /// the checkboxes on the Compare form. A normal comparison is the
+    /// latest batch (~3-4 ideas); this lets the student swap in older
+    /// ideas instead, but never send the AI service everything the project
+    /// has ever generated (see OnPostCompareAsync's count enforcement).
+    /// </summary>
+    [BindProperty]
+    public List<int> SelectedIdeaIds { get; set; } = [];
+
+    /// <summary>
+    /// Stored generated-score data used by the original comparison table.
+    /// The table reads Innovation, Feasibility and Market Demand directly
+    /// from ProjectIdea, plus a C# overall average. Hover/tap explanations
+    /// are rendered from the saved reason columns. No AI call is made to
+    /// populate these score cells.
+    /// </summary>
+    public List<IdeaScorecardView> Scorecards { get; private set; } = [];
+
+    public sealed record ScoreCardView(
+        string Key,
+        string Name,
+        string Icon,
+        int? Score,
+        string Label,
+        string Reason);
+
+    /// <summary>
+    /// Single view model per idea, reused by the winner spotlight, the
+    /// compact ranking cards, the expandable details, and the existing
+    /// saved-score comparison table -- so the same idea never shows a
+    /// different value in two places (see BuildScorecards for the saved
+    /// scores and ApplyAiComparison for the Ai* fields).
+    /// </summary>
+    public sealed record IdeaScorecardView(
+        int IdeaId,
+        string Title,
+        List<ScoreCardView> Cards,
+        int? OverallScore,
+        string OverallLabel,
+        int EvaluatedCount,
+        bool IsLegacyScoring)
+    {
+        /// <summary>
+        /// Set only when OverallScore was computed from fewer than all 3
+        /// metrics, so the UI never implies a full evaluation happened.
+        /// </summary>
+        public string? OverallPartialNote =>
+            OverallScore.HasValue && EvaluatedCount < 3
+                ? $"Based on {EvaluatedCount} of 3 evaluated metrics."
+                : null;
+
+        // AI qualitative ranking (see ApplyAiComparison) -- null for every
+        // idea until "Generate Recommendation" succeeds, and null for any
+        // idea the AI response did not rank or that failed the IdeaId
+        // authorization check. Never a numeric score -- the AI comparison
+        // has no score fields at all.
+        public int? AiRank { get; init; }
+        public string? AiContextSummary { get; init; }
+        public string? AiWhyThisRank { get; init; }
+        public string? AiMainStrength { get; init; }
+        public string? AiMainRisk { get; init; }
+        public string? AiBestFor { get; init; }
+        public string? AiComparisonAdvantage { get; init; }
+        public string? AiRequiredValidation { get; init; }
+        public string? AiRiskLevel { get; init; }
+        public string? AiRecommendation { get; init; }
+    }
 
     public StudentProfile? Profile { get; private set; }
 
@@ -54,10 +148,19 @@ public class IdeaComparisonModel(
     {
         "approved" => ("bg-success", "Reviewed"),
         "approved_with_minor_warnings" => ("bg-success", "Reviewed · minor notes"),
+        "reviewed" => ("bg-success", "Reviewed"),
         "unresolved" => ("bg-warning text-dark", "Unresolved · shown as-is"),
         "rejected" => ("bg-danger", "Rejected · showing safe comparison"),
+        "review_rejected" => ("bg-danger", "Rejected · showing safe comparison"),
         "firewall_blocked" => ("bg-danger", "Blocked by content firewall"),
-        "review_unavailable" => ("bg-secondary", "Not semantically reviewed"),
+        "review_unavailable" => ("bg-secondary", "Semantic review unavailable"),
+        // Deterministic checks (firewall + structural) passed and the
+        // ranking below is this batch's real AI output -- semantic review
+        // was skipped because too little of the request's time budget
+        // remained, not because anything failed. See
+        // routers/idea_comparison.py's _MIN_SECONDS_FOR_SYNC_REVIEW.
+        "automated_checks_passed" => ("bg-info text-dark", "Automated checks passed"),
+        "review_pending" => ("bg-info text-dark", "Semantic review pending"),
         "provider_unavailable" => ("bg-secondary", "AI service unavailable"),
         "schema_invalid" => ("bg-secondary", "Formatting issue"),
         _ => ("bg-secondary", review.Status),
@@ -111,15 +214,99 @@ public class IdeaComparisonModel(
 
         await LoadLatestReviewAsync();
 
-        if (Ideas.Count < 2)
+        if (Ideas.Count < MinimumIdeasToCompare)
         {
             ErrorMessage = "You need at least two generated ideas before comparing.";
             return Page();
         }
 
-        var request = BuildComparisonRequest();
+        // Never trust the posted IDs blindly -- only ideas already loaded
+        // for this project/user are eligible. Falls back to the latest
+        // batch if the form somehow posted no selection at all.
+        var authorizedIdeaIds = Ideas.Select(idea => idea.Id).ToHashSet();
 
-        ComparisonResponse = await aiService.CompareGeneratedIdeasAsync(request);
+        var requestedIds = SelectedIdeaIds.Count > 0
+            ? SelectedIdeaIds
+            : LatestBatchIdeaIds.ToList();
+
+        var selectedIdeas = Ideas
+            .Where(idea => requestedIds.Contains(idea.Id) && authorizedIdeaIds.Contains(idea.Id))
+            .ToList();
+
+        if (selectedIdeas.Count < MinimumIdeasToCompare)
+        {
+            ErrorMessage = $"Select at least {MinimumIdeasToCompare} ideas to compare.";
+            return Page();
+        }
+
+        if (selectedIdeas.Count > HardMaximumIdeasToCompare)
+        {
+            ErrorMessage = $"Select at most {HardMaximumIdeasToCompare} ideas to compare -- " +
+                $"{RecommendedMaximumIdeasToCompare} or fewer is recommended for the fastest result.";
+            return Page();
+        }
+
+        var request = BuildComparisonRequest(selectedIdeas);
+        var stopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            ComparisonResponse = await aiService.CompareGeneratedIdeasAsync(
+                request,
+                ComparisonDeadline,
+                cancellationToken);
+        }
+        catch (HttpRequestException exception)
+        {
+            logger.LogWarning(
+                exception,
+                "The idea-comparison AI service could not be reached for project {ProjectId}, user {UserId}.",
+                ProjectId,
+                userId);
+
+            ErrorMessage =
+                "The AI recommendation is temporarily unavailable. "
+                + "Use the saved score comparison below to evaluate your ideas.";
+
+            return Page();
+        }
+        catch (TaskCanceledException exception)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                exception,
+                "The idea-comparison AI request timed out for project {ProjectId}, user {UserId}.",
+                ProjectId,
+                userId);
+
+            ErrorMessage =
+                "The AI recommendation took too long to respond. "
+                + "Use the saved score comparison below to evaluate your ideas.";
+
+            return Page();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return new EmptyResult();
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                exception,
+                "Unexpected idea-comparison failure for project {ProjectId}, user {UserId}.",
+                ProjectId,
+                userId);
+
+            ErrorMessage =
+                "An unexpected error occurred while generating the AI recommendation. "
+                + "Use the saved score comparison below to evaluate your ideas.";
+
+            return Page();
+        }
+        finally
+        {
+            stopwatch.Stop();
+        }
 
         if (ComparisonResponse == null)
         {
@@ -127,9 +314,73 @@ public class IdeaComparisonModel(
             return Page();
         }
 
+        logger.LogInformation(
+            "Idea comparison generated: project={ProjectId}, ideas={IdeaCount}, provider={Provider}, " +
+            "model={Model}, llmUsed={LlmUsed}, available={Available}, requestMs={ElapsedMs}",
+            ProjectId,
+            selectedIdeas.Count,
+            ComparisonResponse.Provider,
+            ComparisonResponse.ModelUsed,
+            ComparisonResponse.LlmUsed,
+            ComparisonResponse.Comparison.Available,
+            stopwatch.ElapsedMilliseconds);
+
+        ApplyAiComparison(ComparisonResponse.Comparison);
+
         await PersistReviewAsync(ComparisonResponse);
 
         return Page();
+    }
+
+    /// <summary>
+    /// Trust boundary (see requirement to never trust AI-returned IdeaIds):
+    /// only merges AI ranking fields for ideas that are both present in the
+    /// AI response AND already in the authorized Ideas list loaded for this
+    /// project/user. An idea ID the AI invents or a stale ID from another
+    /// project is silently ignored, never rendered.
+    /// </summary>
+    private void ApplyAiComparison(IdeaComparisonDto comparison)
+    {
+        if (!comparison.Available || comparison.Ideas.Count == 0)
+        {
+            return;
+        }
+
+        var authorizedIds = Ideas.Select(idea => idea.Id).ToHashSet();
+
+        var authorizedRankedIdeas = comparison.Ideas
+            .Where(idea => authorizedIds.Contains(idea.IdeaId))
+            .OrderBy(idea => idea.Rank)
+            .ToList();
+
+        if (authorizedRankedIdeas.Count == 0 || !authorizedIds.Contains(comparison.BestIdeaId))
+        {
+            logger.LogWarning(
+                "Idea comparison response referenced no ideas from the authorized set for project {ProjectId}; discarding AI ranking.",
+                ProjectId);
+
+            return;
+        }
+
+        var byId = comparison.Ideas.ToDictionary(idea => idea.IdeaId);
+
+        Scorecards = Scorecards
+            .Select(card => byId.TryGetValue(card.IdeaId, out var ranked) && authorizedIds.Contains(ranked.IdeaId)
+                ? card with
+                {
+                    AiRank = ranked.Rank,
+                    AiContextSummary = ranked.ContextSummary,
+                    AiWhyThisRank = ranked.WhyThisRank,
+                    AiMainStrength = ranked.MainStrength,
+                    AiMainRisk = ranked.MainRisk,
+                    AiBestFor = ranked.BestFor,
+                    AiComparisonAdvantage = ranked.ComparisonAdvantage,
+                    AiRequiredValidation = ranked.RequiredValidation,
+                    AiRiskLevel = ranked.RiskLevel,
+                    AiRecommendation = ranked.Recommendation,
+                }
+                : card)
+            .ToList();
     }
 
     private async Task PersistReviewAsync(IdeaComparisonServiceResponse response)
@@ -523,9 +774,91 @@ public class IdeaComparisonModel(
             .ThenByDescending(item => item.CreatedAt)
             .Take(12)
             .ToListAsync(cancellationToken);
+
+        Scorecards = BuildScorecards(Ideas);
+        LatestBatchIdeaIds = ComputeLatestBatchIdeaIds(Ideas);
     }
 
-    private IdeaComparisonRequest BuildComparisonRequest()
+    /// <summary>
+    /// The default comparison selection: every idea saved in the same
+    /// Generate/Regenerate click as the most recently created idea. Falls
+    /// back to just that single most recent idea when it predates
+    /// GenerationBatchId (legacy rows), rather than grouping unrelated
+    /// ideas together by guessing from timestamps.
+    /// </summary>
+    private static HashSet<int> ComputeLatestBatchIdeaIds(List<ProjectIdea> ideas)
+    {
+        var mostRecent = ideas.OrderByDescending(idea => idea.CreatedAt).FirstOrDefault();
+
+        if (mostRecent == null)
+        {
+            return [];
+        }
+
+        if (mostRecent.GenerationBatchId is not { } batchId)
+        {
+            return [mostRecent.Id];
+        }
+
+        return ideas
+            .Where(idea => idea.GenerationBatchId == batchId)
+            .Take(HardMaximumIdeasToCompare)
+            .Select(idea => idea.Id)
+            .ToHashSet();
+    }
+
+    /// <summary>
+    /// Single source of truth for the score-card grid: reads only the
+    /// saved InnovationScore/FeasibilityScore/MarketDemandScore (and their
+    /// Reason columns) already on ProjectIdea. A score of 0 means the AI
+    /// service never returned a value for it -- shown as "Not evaluated",
+    /// never substituted with a placeholder number.
+    /// </summary>
+    private static List<IdeaScorecardView> BuildScorecards(List<ProjectIdea> ideas) =>
+        ideas.Select(idea =>
+        {
+            var cards = new List<ScoreCardView>
+            {
+                BuildScoreCard("innovation", "Innovation", "bi-lightbulb", idea.InnovationScore, idea.InnovationScoreReason),
+                BuildScoreCard("feasibility", "Feasibility", "bi-bar-chart-line", idea.FeasibilityScore, idea.FeasibilityScoreReason),
+                BuildScoreCard("market", "Market Demand", "bi-shop", idea.MarketDemandScore, idea.MarketDemandScoreReason),
+            };
+
+            var evaluatedCount = new[] { idea.InnovationScore, idea.FeasibilityScore, idea.MarketDemandScore }
+                .Count(ScoreHelper.IsEvaluated);
+
+            var overall = ScoreHelper.Overall(idea.InnovationScore, idea.FeasibilityScore, idea.MarketDemandScore);
+            var overallLabel = overall.HasValue ? ScoreHelper.Label(overall.Value) : "Not evaluated";
+
+            // "v2" is the only value new saves ever write (IdeaGenerator's
+            // SaveGeneratedIdeasAsync); anything else -- including the
+            // pre-migration NULL rows the AddIdeaScoreVersion migration
+            // backfilled to "legacy" -- is scored by the old formula.
+            var isLegacyScoring = idea.ScoreVersion != "v2";
+
+            return new IdeaScorecardView(idea.Id, idea.Title, cards, overall, overallLabel, evaluatedCount, isLegacyScoring);
+        }).ToList();
+
+    private static ScoreCardView BuildScoreCard(string key, string name, string icon, int rawScore, string? reason)
+    {
+        var evaluated = ScoreHelper.IsEvaluated(rawScore);
+
+        var reasonText = evaluated
+            ? (string.IsNullOrWhiteSpace(reason)
+                ? "Explanation was not saved when this idea was generated."
+                : reason)
+            : "This score was not evaluated for this idea.";
+
+        return new ScoreCardView(
+            key,
+            name,
+            icon,
+            evaluated ? rawScore : null,
+            evaluated ? ScoreHelper.Label(rawScore) : "Not evaluated",
+            reasonText);
+    }
+
+    private IdeaComparisonRequest BuildComparisonRequest(List<ProjectIdea> selectedIdeas)
     {
         var studentSkills = Skills
             .Select(s => GetString(s, "SkillName", "Name", "Title"))
@@ -548,11 +881,18 @@ public class IdeaComparisonModel(
             skillRatings[skillName] = rating;
         }
 
-        var ideaDtos = Ideas
+        // Scores/reasons are sent as read-only evidence only (see the
+        // prompt built in IdeaComparisonAgent._build_prompt) -- 0 already
+        // means "not evaluated" throughout this page (ScoreHelper), so no
+        // separate "missing" sentinel is needed here; the AI is explicitly
+        // told a 0 is unknown, not a real low score.
+        var ideaDtos = selectedIdeas
             .Select(i => new IdeaComparisonInputDto(
                 Id: i.Id,
                 Title: GetString(i, "Title", "IdeaTitle", "Name"),
                 ProblemStatement: GetString(i, "ProblemStatement", "Problem", "Description"),
+                WhyUseful: GetString(i, "WhyUseful"),
+                TargetUsers: GetString(i, "TargetUsers"),
                 RequiredTechnologies: GetString(i, "RequiredTechnologies", "Technologies", "TechStack"),
                 RequiredSkills: GetString(i, "RequiredSkills"),
                 MissingSkills: GetString(i, "MissingSkills"),
@@ -561,9 +901,12 @@ public class IdeaComparisonModel(
                 DatasetNeeded: GetString(i, "DatasetNeeded", "DatasetRequirement", "Dataset"),
                 Domain: GetString(i, "Domain", "ProjectDomain"),
                 LebaneseMarketRelevance: GetString(i, "LebaneseMarketRelevance", "LebanesesMarketRelevance", "LocalMarketRelevance"),
-                InnovationScore: GetDouble(i, 70, "InnovationScore"),
-                FeasibilityScore: GetDouble(i, 70, "FeasibilityScore"),
-                MarketDemandScore: GetDouble(i, 70, "MarketDemandScore", "MarketRelevanceScore"),
+                InnovationScore: GetDouble(i, 0, "InnovationScore"),
+                InnovationScoreReason: GetNullableString(i, "InnovationScoreReason"),
+                FeasibilityScore: GetDouble(i, 0, "FeasibilityScore"),
+                FeasibilityScoreReason: GetNullableString(i, "FeasibilityScoreReason"),
+                MarketDemandScore: GetDouble(i, 0, "MarketDemandScore", "MarketRelevanceScore"),
+                MarketDemandScoreReason: GetNullableString(i, "MarketDemandScoreReason"),
                 CreatedAt: GetDateString(i, "CreatedAt")
             ))
             .ToList();
@@ -612,6 +955,12 @@ public class IdeaComparisonModel(
         }
 
         return "";
+    }
+
+    private static string? GetNullableString(object? obj, params string[] propertyNames)
+    {
+        var value = GetString(obj, propertyNames);
+        return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
     private static int GetInt(object? obj, int defaultValue, params string[] propertyNames)

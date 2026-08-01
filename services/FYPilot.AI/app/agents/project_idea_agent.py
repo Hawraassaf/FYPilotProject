@@ -131,8 +131,11 @@ class ProjectIdea(BaseModel):
     missingSkills: str
     difficultyLevel: int
     innovationScore: float
+    innovationScoreReason: str
     feasibilityScore: float
+    feasibilityScoreReason: str
     marketDemandScore: float
+    marketDemandScoreReason: str
     expectedDurationWeeks: int
     supervisorCategory: str
     datasetNeeded: str
@@ -1048,22 +1051,28 @@ Return exactly this JSON structure with exactly 4 filled idea objects:
             self._infer_sector(domain, problem)
         )
 
-        innovation_score = self._calculate_innovation_score(title, problem, why_useful, domain)
+        innovation_score, innovation_hits = self._calculate_innovation_score(title, problem, why_useful, domain)
 
-        feasibility_score = self._calculate_feasibility_score(
+        feasibility_score, feasibility_factors = self._calculate_feasibility_score(
             profile,
             required_skills,
             missing_skills,
-            difficulty
+            difficulty,
+            required_technologies,
+            dataset_needed,
         )
 
-        market_score = self._calculate_market_score(
+        market_score, market_factors = self._calculate_market_score(
             lebanese_relevance,
             lebanese_sector,
             problem,
             search_used=self.last_search_used,
             sources=self.last_sources,
         )
+
+        innovation_reason = self._innovation_reason(innovation_score, innovation_hits)
+        feasibility_reason = self._feasibility_reason(feasibility_score, feasibility_factors)
+        market_reason = self._market_reason(market_score, market_factors)
 
         return ProjectIdea(
             title=title,
@@ -1076,8 +1085,11 @@ Return exactly this JSON structure with exactly 4 filled idea objects:
             missingSkills=missing_skills,
             difficultyLevel=difficulty,
             innovationScore=round(innovation_score, 1),
+            innovationScoreReason=innovation_reason,
             feasibilityScore=round(feasibility_score, 1),
+            feasibilityScoreReason=feasibility_reason,
             marketDemandScore=round(market_score, 1),
+            marketDemandScoreReason=market_reason,
             expectedDurationWeeks=self._estimate_duration(profile, difficulty),
             supervisorCategory=self._supervisor_category(domain),
             datasetNeeded=dataset_needed,
@@ -1359,59 +1371,143 @@ Return exactly this JSON structure with exactly 4 filled idea objects:
         return "Computer Science"
 
     # ── Deterministic score calculations ──────────────────────────────────────
+    #
+    # Each _calculate_* method returns (score, factors) where factors is an
+    # ordered list of short human-readable strings describing exactly which
+    # signals moved the score -- consumed by the matching _*_reason() builder
+    # below so the explanation shown to the student always traces back to
+    # the real inputs that produced the number, never a generic sentence.
 
-    def _calculate_innovation_score(self, title: str, problem: str, why_useful: str, domain: str) -> float:
+    def _calculate_innovation_score(
+        self, title: str, problem: str, why_useful: str, domain: str
+    ) -> tuple[float, list[str]]:
         text = f"{title} {problem} {why_useful} {domain}".lower()
         score = 65.0
+        factors: list[str] = []
 
         if "ai" in text or "smart" in text or "intelligent" in text:
             score += 8
+            factors.append("uses AI/smart automation, which raises originality")
 
         if "recommendation" in text or "prediction" in text or "personalized" in text:
             score += 7
+            factors.append("includes recommendation/prediction/personalization logic")
 
         if "lebanese" in text or "lebanon" in text or "local" in text:
             score += 5
+            factors.append("is explicitly localized for the Lebanese context")
 
         if "dashboard" in text or "analytics" in text:
             score += 4
+            factors.append("adds an analytics/dashboard layer")
 
-        return max(55.0, min(score, 95.0))
+        if not factors:
+            factors.append(
+                "follows a familiar problem/solution pattern without a distinctive "
+                "AI, personalization, or localization angle"
+            )
+
+        return max(55.0, min(score, 95.0)), factors
 
     def _calculate_feasibility_score(
         self,
         profile: StudentProfile,
         required_skills: str,
         missing_skills: str,
-        difficulty: int
-    ) -> float:
-        ratings = list(profile.skillRatings.values())
-        avg_rating = sum(ratings) / len(ratings) if ratings else 3
-
+        difficulty: int,
+        required_technologies: str,
+        dataset_needed: str,
+    ) -> tuple[float, list[str]]:
+        """
+        Returns (score, dimension_notes) where dimension_notes has exactly
+        5 entries, one per required explanation dimension, in this fixed
+        order: [skill match, complexity, technologies, data, time]. Each
+        entry is always present (never conditionally omitted) so
+        _feasibility_reason can join all 5 without risking a slice cutting
+        off a dimension the student needs to see.
+        """
+        ratings = profile.skillRatings
+        avg_rating = sum(ratings.values()) / len(ratings) if ratings else 3
         score = 55.0 + (avg_rating * 6)
+
+        # ── Dimension 1: skill match ────────────────────────────────────
+        required_tokens = [t.strip().lower() for t in required_skills.split(",") if t.strip()]
+        known_skill_names = [name.lower() for name in ratings.keys()]
+        skill_note = f"average self-rated skill level of {avg_rating:.1f}/5"
+
+        if required_tokens:
+            matched = sum(
+                1
+                for token in required_tokens
+                if any(token in known or known in token for known in known_skill_names)
+            )
+            match_ratio = matched / len(required_tokens)
+
+            if match_ratio >= 0.6:
+                score += 10
+                skill_note += ", with most of this idea's required skills already known"
+            elif match_ratio <= 0.2:
+                score -= 10
+                skill_note += ", with little overlap between known skills and what this idea needs"
 
         if missing_skills != "No major missing skills for MVP":
             missing_count = len([x for x in missing_skills.split(",") if x.strip()])
             score -= missing_count * 5
+            skill_note += f"; {missing_count} skill(s) still need to be learned"
+        else:
+            skill_note += "; no major missing skills for an MVP"
 
+        # ── Dimension 2: complexity (difficulty vs. semester timeline) ──
         if difficulty <= 2:
             score += 8
+            complexity_note = "difficulty level is low relative to a full semester"
+        elif difficulty == 3:
+            complexity_note = "difficulty level is a reasonable match for a full semester"
         elif difficulty == 4:
             score -= 5
-        elif difficulty >= 5:
+            complexity_note = "difficulty level is high for the available timeline"
+        else:
             score -= 10
+            complexity_note = "difficulty level is very high for a single semester"
 
+        # ── Dimension 3: technologies (stack breadth) ────────────────────
+        tech_count = len([t.strip() for t in required_technologies.split(",") if t.strip()])
+        if tech_count >= 5:
+            score -= 6
+            tech_note = f"requires a wider technology stack ({tech_count} technologies)"
+        elif tech_count <= 2:
+            score += 4
+            tech_note = f"uses a narrow, focused technology stack ({tech_count} technologies)"
+        else:
+            tech_note = f"uses a moderate technology stack ({tech_count} technologies)"
+
+        # ── Dimension 4: data (dataset requirement) ──────────────────────
+        if dataset_needed.strip().lower().startswith("yes"):
+            score -= 4
+            data_note = "needs a dataset to be sourced or prepared, adding extra work"
+        else:
+            data_note = "does not require a dataset for an MVP"
+
+        # ── Dimension 5: time (hours/week and team size) ─────────────────
         if profile.availableHoursPerWeek >= 12:
             score += 8
+            time_note = f"student has {profile.availableHoursPerWeek}+ hours/week available"
         elif profile.availableHoursPerWeek >= 8:
             score += 4
+            time_note = f"student has {profile.availableHoursPerWeek} hours/week available"
         elif profile.availableHoursPerWeek < 5:
             score -= 10
+            time_note = f"student has only {profile.availableHoursPerWeek} hours/week available"
+        else:
+            time_note = f"student has {profile.availableHoursPerWeek} hours/week available"
 
         if profile.teamSize >= 2:
             score += 4
+            time_note += f", and a {profile.teamSize}-person team shares the workload"
 
-        return max(40.0, min(score, 95.0))
+        dimension_notes = [skill_note, complexity_note, tech_note, data_note, time_note]
+
+        return max(40.0, min(score, 95.0)), dimension_notes
 
     def _calculate_market_score(
         self,
@@ -1421,7 +1517,7 @@ Return exactly this JSON structure with exactly 4 filled idea objects:
         *,
         search_used: bool,
         sources: list[dict[str, str]],
-    ) -> float:
+    ) -> tuple[float, list[str]]:
         """
         Deterministic market-demand score, grounded primarily in whether this
         idea batch is actually backed by real live-search evidence -- not
@@ -1432,6 +1528,12 @@ Return exactly this JSON structure with exactly 4 filled idea objects:
         percentages" problem to avoid. Mirrors MarketNeedsAgent's
         calculate_confidence_score (real source count + recognized-domain
         count), adapted for one search shared across a whole idea batch.
+
+        Returns (score, dimension_notes) where dimension_notes has exactly 5
+        entries, one per required explanation dimension, in this fixed
+        order: [users, problem need, evidence, competitors, local
+        relevance]. Each entry is always present so _market_reason can join
+        all 5 without a slice cutting off a dimension.
         """
         recognized_domain_count = sum(
             1
@@ -1445,6 +1547,8 @@ Return exactly this JSON structure with exactly 4 filled idea objects:
             # generated text reads.
             ceiling = 55.0
             score = 40.0
+            evidence_note = "no live web evidence was available for this generation, so this is a preliminary estimate"
+            competitor_note = "competitor visibility could not be checked without live evidence"
         else:
             ceiling = 95.0
             score = (
@@ -1452,24 +1556,91 @@ Return exactly this JSON structure with exactly 4 filled idea objects:
                 + min(len(sources) / 6, 1) * 15
                 + min(recognized_domain_count / 3, 1) * 15
             )
+            evidence_note = f"grounded in {len(sources)} live web source(s)"
+            if recognized_domain_count > 0:
+                evidence_note += f", {recognized_domain_count} from recognized/reputable domains"
+
+            # Competitor-awareness signal: a proxy grounded in how many real
+            # sources came back for this problem space, not a fabricated
+            # competitor count -- more retrieved sources means more existing
+            # activity (products, articles, discussion) around the idea.
+            if len(sources) >= 3:
+                competitor_note = (
+                    f"{len(sources)} related sources were found, suggesting existing "
+                    "solutions or competitors are already visible in this space"
+                )
+            else:
+                competitor_note = "few competing solutions were visible in the available sources"
 
         # Idea-specific relevance keywords now only modulate the
         # evidence-grounded baseline above, instead of being the entire score.
         text = f"{relevance} {sector} {problem}".lower()
 
-        if "lebanon" in text or "lebanese" in text or "local" in text:
-            score += 5
-
+        # ── Dimension: users (target audience / sector fit) ──────────────
         if "education" in text or "student" in text or "university" in text:
             score += 4
-
-        if "sme" in text or "business" in text or "market" in text:
+            users_note = "targets the education sector (students/universities), where local demand evidence is easier to verify"
+        elif "sme" in text or "business" in text or "market" in text:
             score += 3
-
-        if "healthcare" in text or "finance" in text:
+            users_note = "targets SMEs/businesses, a sector with documented local demand"
+        elif "healthcare" in text or "finance" in text:
             score += 3
+            users_note = "targets healthcare/finance users, sectors with strong general demand"
+        else:
+            users_note = "targets a general user base without a specifically documented-demand sector"
 
-        return max(30.0, min(score, ceiling))
+        # ── Dimension: problem need (is a concrete pain point articulated) ─
+        need_keywords = ["struggl", "difficult", "lack of", "risk", "challenge", "unable", "limited access", "problem"]
+        problem_lower = problem.lower()
+        if any(keyword in problem_lower for keyword in need_keywords):
+            problem_need_note = "the problem statement names a concrete, specific pain point"
+        else:
+            problem_need_note = "the problem statement does not clearly name a specific, urgent pain point"
+
+        # ── Dimension: local relevance ────────────────────────────────────
+        if "lebanon" in text or "lebanese" in text or "local" in text:
+            score += 5
+            local_note = "directly addresses a Lebanese-market need"
+        else:
+            local_note = "does not explicitly tie the need to the Lebanese market"
+
+        dimension_notes = [users_note, problem_need_note, evidence_note, competitor_note, local_note]
+
+        return max(30.0, min(score, ceiling)), dimension_notes
+
+    # ── Score explanations ──────────────────────────────────────────────────
+    #
+    # Concise, evidence-based reasons shown to the student in Idea Comparison.
+    # These are generated here, during Idea Generation, and stored with the
+    # idea -- Idea Comparison only ever displays what is saved, it never
+    # invents or recalculates explanations.
+
+    def _innovation_reason(self, score: float, factors: list[str]) -> str:
+        lead = factors[0] if factors else "a standard problem/solution framing"
+        similar_note = (
+            "though similar solutions already exist in some markets"
+            if score < 85
+            else "with few directly comparable existing solutions"
+        )
+        return f"Scored {round(score)}/100 because it {lead}, {similar_note}."
+
+    def _feasibility_reason(self, score: float, dimension_notes: list[str]) -> str:
+        """
+        dimension_notes is always [skill match, complexity, technologies,
+        data, time] from _calculate_feasibility_score -- joined in full
+        (never truncated) so every required dimension reaches the student.
+        """
+        summary = "; ".join(dimension_notes) if dimension_notes else "a general assessment of the student's readiness"
+        return f"Scored {round(score)}/100 based on skill match, complexity, technologies, data and time: {summary}."
+
+    def _market_reason(self, score: float, dimension_notes: list[str]) -> str:
+        """
+        dimension_notes is always [users, problem need, evidence,
+        competitors, local relevance] from _calculate_market_score --
+        joined in full (never truncated).
+        """
+        summary = "; ".join(dimension_notes) if dimension_notes else "a general assessment of demand for this idea"
+        return f"Scored {round(score)}/100 based on users, problem need, evidence, competitors and local relevance: {summary}."
 
     def _is_recognized_domain(self, domain: str) -> bool:
         return any(

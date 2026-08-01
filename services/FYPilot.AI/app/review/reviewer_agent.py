@@ -121,6 +121,7 @@ Return exactly this JSON structure:
         known_risky_claims: list[str] | None = None,
         mandatory_fields: list[str] | None = None,
         extra_rubric: str = "",
+        deadline: float | None = None,
     ) -> LLMResult:
         prompt = self.build_prompt(
             candidate,
@@ -129,4 +130,4 @@ Return exactly this JSON structure:
             mandatory_fields=mandatory_fields or [],
             extra_rubric=extra_rubric,
         )
-        return self.provider_chain.generate_json(prompt, use_search=False)
+        return self.provider_chain.generate_json(prompt, use_search=False, deadline=deadline)

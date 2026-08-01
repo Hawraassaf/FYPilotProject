@@ -1511,8 +1511,11 @@ def _idea(title="Idea Title", **overrides):
         "missingSkills": "No major missing skills for MVP",
         "difficultyLevel": 3,
         "innovationScore": 70.0,
+        "innovationScoreReason": "Combines familiar techniques in a locally-relevant way.",
         "feasibilityScore": 75.0,
+        "feasibilityScoreReason": "Matches the student's rated skills and available time.",
         "marketDemandScore": 68.0,
+        "marketDemandScoreReason": "Addresses a documented need for Lebanese university students.",
         "expectedDurationWeeks": 12,
         "supervisorCategory": "Software Engineering",
         "datasetNeeded": "No for MVP",
@@ -1729,15 +1732,14 @@ def _compared_idea(idea_id=1, rank=1, title="Idea"):
         "ideaId": idea_id,
         "rank": rank,
         "title": title,
-        "overallScore": 80,
-        "skillFitScore": 80,
-        "feasibilityScore": 80,
-        "innovationScore": 75,
-        "marketRelevanceScore": 78,
-        "riskLevel": "Low",
+        "contextSummary": "short context summary",
+        "whyThisRank": "ranks here because of a comparative reason",
+        "mainStrength": "a concrete strength",
+        "mainRisk": "a concrete risk",
         "bestFor": "best for text",
-        "strengths": ["s1", "s2"],
-        "weaknesses": ["w1", "w2"],
+        "comparisonAdvantage": "advantage over other ideas",
+        "requiredValidation": "validate this before starting",
+        "riskLevel": "Low",
         "recommendation": "recommendation text",
     }
 
@@ -1771,7 +1773,7 @@ class IdeaComparisonRegistryTests(unittest.TestCase):
         config = get_agent_config("IdeaComparisonAgent")
         self.assertEqual(config.max_rewrites, 1)
         self.assertEqual(config.url_mode, "no_urls_allowed")
-        self.assertFalse(config.allow_unreviewed_output)
+        self.assertTrue(config.allow_unreviewed_output)
         self.assertIn("summary", config.mandatory_fields)
         self.assertIn("finalRecommendation", config.mandatory_fields)
         self.assertTrue(config.extra_rubric.strip())
@@ -1800,6 +1802,43 @@ class IdeaComparisonRegistryTests(unittest.TestCase):
         candidate["bestIdeaId"] = 999
         with self.assertRaises(Exception):
             IdeaComparisonCandidateSchema.model_validate(candidate)
+
+    def test_field_word_limit_exceeded_rejected(self):
+        ideas = [
+            _compared_idea(idea_id=1, rank=1, title="Idea One"),
+            _compared_idea(idea_id=2, rank=2, title="Idea Two"),
+        ]
+        ideas[0]["whyThisRank"] = " ".join(["word"] * 40)
+        candidate = _comparison_candidate(ideas=ideas)
+        with self.assertRaises(Exception):
+            IdeaComparisonCandidateSchema.model_validate(candidate)
+
+    def test_no_score_fields_in_schema(self):
+        """Structural guarantee: the qualitative schema cannot carry a
+        replacement numeric score -- there is no field for one."""
+        candidate = _comparison_candidate()
+        validated = IdeaComparisonCandidateSchema.model_validate(candidate)
+        idea_fields = set(type(validated.ideas[0]).model_fields.keys())
+        self.assertNotIn("overallScore", idea_fields)
+        self.assertNotIn("skillFitScore", idea_fields)
+        self.assertNotIn("feasibilityScore", idea_fields)
+        self.assertNotIn("innovationScore", idea_fields)
+        self.assertNotIn("marketRelevanceScore", idea_fields)
+
+    def test_available_false_skips_structural_checks(self):
+        """The safe 'unavailable' response has an empty ideas list and must
+        not be rejected by the rank/id invariants meant for real output."""
+        candidate = {
+            "comparisonTitle": "Idea Comparison Unavailable",
+            "totalIdeasCompared": 0,
+            "bestIdeaId": 0,
+            "bestIdeaTitle": "",
+            "summary": "unavailable",
+            "ideas": [],
+            "finalRecommendation": "unavailable",
+            "available": False,
+        }
+        IdeaComparisonCandidateSchema.model_validate(candidate)
 
 
 class IdeaComparisonPipelineTests(unittest.TestCase):

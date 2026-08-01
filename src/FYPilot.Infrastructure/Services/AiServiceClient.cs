@@ -88,11 +88,19 @@ public class AiServiceClient : IAiServiceClient
 
     // ── Helper ────────────────────────────────────────────────────────────────
 
-    private async Task<T?> PostAsync<T>(
+    private Task<T?> PostAsync<T>(
         string path,
         object request,
         JsonSerializerOptions? requestOptions = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        PostAsync<T>(path, request, requestOptions, cancellationToken, extraHeaders: null);
+
+    private async Task<T?> PostAsync<T>(
+        string path,
+        object request,
+        JsonSerializerOptions? requestOptions,
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? extraHeaders)
     {
         var fullUrl =
             $"{_baseUrl.TrimEnd('/')}/{path.TrimStart('/')}";
@@ -103,14 +111,24 @@ public class AiServiceClient : IAiServiceClient
                 request,
                 requestOptions ?? JsonOpts);
 
-            using var body = new StringContent(
-                requestJson,
-                Encoding.UTF8,
-                "application/json");
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, fullUrl)
+            {
+                Content = new StringContent(
+                    requestJson,
+                    Encoding.UTF8,
+                    "application/json"),
+            };
 
-            using var response = await _http.PostAsync(
-                fullUrl,
-                body,
+            if (extraHeaders != null)
+            {
+                foreach (var (headerName, headerValue) in extraHeaders)
+                {
+                    httpRequest.Headers.TryAddWithoutValidation(headerName, headerValue);
+                }
+            }
+
+            using var response = await _http.SendAsync(
+                httpRequest,
                 cancellationToken);
 
             var responseJson =
@@ -241,11 +259,31 @@ public class AiServiceClient : IAiServiceClient
 
     // ── Idea Comparison ────────────────────────────────────────────────────────
 
-    public Task<IdeaComparisonServiceResponse?> CompareGeneratedIdeasAsync(IdeaComparisonRequest request) =>
-        PostAsync<IdeaComparisonServiceResponse>(
+    public async Task<IdeaComparisonServiceResponse?> CompareGeneratedIdeasAsync(
+        IdeaComparisonRequest request,
+        TimeSpan deadline,
+        CancellationToken cancellationToken = default)
+    {
+        // Enforced on both ends: the header lets the AI service stop
+        // starting new provider/rewrite/reviewer work once it's spent its
+        // share of the budget, and CancelAfter bounds the .NET-side wait
+        // to the same deadline even if the AI service doesn't respect it
+        // (e.g. it's stuck mid-way through a single provider call).
+        using var deadlineCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadlineCts.CancelAfter(deadline);
+
+        var headers = new Dictionary<string, string>
+        {
+            ["X-Request-Deadline-Ms"] = ((int)deadline.TotalMilliseconds).ToString(),
+        };
+
+        return await PostAsync<IdeaComparisonServiceResponse>(
             "/compare-generated-ideas",
             request,
-            CamelCaseJsonOpts);
+            CamelCaseJsonOpts,
+            deadlineCts.Token,
+            headers);
+    }
 
     // ── Defense Simulator ─────────────────────────────────────────────────────
 

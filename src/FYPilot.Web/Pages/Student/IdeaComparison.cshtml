@@ -1,505 +1,3014 @@
 @page
 @model FYPilot.Web.Pages.Student.IdeaComparisonModel
+@using FYPilot.Application.Common
 @using FYPilot.Domain.Entities
 @{
-
     ViewData["Title"] = "Idea Comparison";
     ViewData["Subtitle"] = "Compare ideas clearly and choose the one that fits you best";
 
     var ideas = Model.Ideas;
+    var selectedIdeaId = Model.CurrentProject?.ProjectIdeaId;
+    var selectedIdea = ideas.FirstOrDefault(idea => idea.Id == selectedIdeaId);
 
-    /*
-     * The project's official idea foreign key is the source
-     * of truth. ProjectIdea.IsSelected is only a compatibility
-     * flag and may contain stale data from older selections.
-     */
-    var selectedIdeaId =
-        Model.CurrentProject?.ProjectIdeaId;
+    var latestIdeas = ideas
+        .Where(idea => Model.LatestBatchIdeaIds.Contains(idea.Id))
+        .ToList();
+
+    var olderIdeas = ideas
+        .Where(idea => !Model.LatestBatchIdeaIds.Contains(idea.Id))
+        .ToList();
 
     var metricDefinitions = new[]
     {
-        new { Key = "feasibility", Label = "Feasibility", Icon = "bar-chart-line", Description = "Achievable with your time and resources." },
-        new { Key = "innovation", Label = "Innovation", Icon = "lightbulb", Description = "Originality and creativity of the idea." },
-        new { Key = "market", Label = "Market Value", Icon = "shop", Description = "Usefulness for real users or the Lebanese market." },
-        new { Key = "time", Label = "Time Fit", Icon = "clock", Description = "Realistic duration for a semester project." },
-        new { Key = "difficulty", Label = "Difficulty Fit", Icon = "speedometer2", Description = "Suitable challenge level for an FYP." }
+        new
+        {
+            Key = "feasibility",
+            Label = "Feasibility",
+            Icon = "bar-chart-line",
+            Description = "How achievable the idea is for your skills, resources and project context."
+        },
+        new
+        {
+            Key = "innovation",
+            Label = "Innovation",
+            Icon = "lightbulb",
+            Description = "How original and differentiated the idea is."
+        },
+        new
+        {
+            Key = "market",
+            Label = "Market Demand",
+            Icon = "shop",
+            Description = "How useful and relevant the idea is for real users and the market."
+        },
+        new
+        {
+            Key = "overall",
+            Label = "Overall",
+            Icon = "award",
+            Description = "The rounded average of the evaluated generated scores."
+        }
     };
 
-    var comparisonData = ideas.Select(idea => new
+    var scorecardsByIdea = Model.Scorecards.ToDictionary(card => card.IdeaId);
+
+    var comparisonData = ideas.Select(idea =>
     {
-        id = idea.Id,
-        title = idea.Title,
-        domain = idea.Domain,
-        difficulty = idea.DifficultyLevel,
-        selected = selectedIdeaId == idea.Id,
-        scores = new Dictionary<string, int>
+        scorecardsByIdea.TryGetValue(idea.Id, out var scorecard);
+
+        var feasibility = scorecard?.Cards
+            .FirstOrDefault(card => card.Key == "feasibility")?.Score;
+
+        var innovation = scorecard?.Cards
+            .FirstOrDefault(card => card.Key == "innovation")?.Score;
+
+        var market = scorecard?.Cards
+            .FirstOrDefault(card => card.Key == "market")?.Score;
+
+        return new
         {
-            ["feasibility"] = ClampScore(idea.FeasibilityScore),
-            ["innovation"] = ClampScore(idea.InnovationScore),
-            ["market"] = ClampScore(idea.MarketDemandScore),
-            ["time"] = TimeFitScore(idea.ExpectedDurationWeeks),
-            ["difficulty"] = DifficultyFitScore(idea.DifficultyLevel)
-        }
+            id = idea.Id,
+            title = idea.Title,
+            domain = idea.Domain,
+            difficulty = idea.DifficultyLevel,
+            selected = selectedIdeaId == idea.Id,
+            scores = new Dictionary<string, int?>
+            {
+                ["feasibility"] = feasibility,
+                ["innovation"] = innovation,
+                ["market"] = market,
+                ["overall"] = scorecard?.OverallScore
+            }
+        };
     }).ToList();
 }
 
 @if (!ideas.Any())
 {
-    <div class="empty-dna-layout">
-        <div class="empty-dna-card">
-            <div class="empty-dna-content">
-                <div class="empty-dna-icon">
-                    <i class="bi bi-grid"></i>
-                </div>
-
-                <h1>No ideas to compare yet</h1>
-
-                <p>
-                    Generate at least two project ideas first, then come back here to
-                    compare them clearly.
-                </p>
-
-                <div class="empty-dna-actions">
-                    <a class="btn btn-primary" asp-page="/Student/IdeaGenerator" asp-route-projectId="@Model.ProjectId">
-                        <i class="bi bi-stars me-2"></i>
-                        Generate Ideas
-                    </a>
-                </div>
+    <main class="idea-empty-shell">
+        <section class="idea-empty-card">
+            <div class="idea-empty-orb">
+                <i class="bi bi-intersect"></i>
             </div>
-        </div>
-    </div>
+
+            <span class="ui-eyebrow">Idea Comparison</span>
+            <h1>Your comparison workspace is waiting</h1>
+            <p>
+                Generate at least two project ideas first. FYPilot will then help you
+                compare their strengths, risks and saved evaluation scores.
+            </p>
+
+            <a class="ui-btn ui-btn-primary"
+               asp-page="/Student/IdeaGenerator"
+               asp-route-projectId="@Model.ProjectId">
+                <i class="bi bi-stars"></i>
+                Generate project ideas
+            </a>
+        </section>
+    </main>
 }
 else
 {
-    <section class="ic3-page">
+    <main class="idea-page-shell">
+        <header class="idea-hero">
+            <div class="idea-hero-copy">
+                <div class="idea-breadcrumb">
+                    <span>Project planning</span>
+                    <i class="bi bi-chevron-right"></i>
+                    <strong>Idea comparison</strong>
+                </div>
 
-        <div class="ic3-hero">
-            <div>
-                <div class="ic3-kicker">Idea Comparison</div>
-                <h1>Compare all ideas in one clear view</h1>
+                <h1>Choose the idea worth building.</h1>
                 <p>
-                    Select the metrics that matter to you. FYPilot will show the matching score under each selected metric.
+                    Compare official saved scores, ask AI for a qualitative ranking,
+                    and make the final project decision from one focused workspace.
                 </p>
+
+                <div class="idea-hero-meta">
+                    <span>
+                        <i class="bi bi-collection"></i>
+                        <strong>@ideas.Count</strong> saved ideas
+                    </span>
+
+                    <span>
+                        <i class="bi bi-clock-history"></i>
+                        <strong>@latestIdeas.Count</strong> in latest batch
+                    </span>
+
+                    <span class="@(selectedIdea == null ? "is-muted" : "is-selected")">
+                        <i class="bi @(selectedIdea == null ? "bi-circle" : "bi-check-circle-fill")"></i>
+                        @(selectedIdea == null ? "No official idea selected" : $"Selected: {selectedIdea.Title}")
+                    </span>
+                </div>
             </div>
 
-            <div class="ic3-hero-actions">
-                <form method="post" asp-page-handler="Compare" class="m-0">
-                    @Html.AntiForgeryToken()
-                    <input type="hidden"
-                           name="projectId"
-                           value="@Model.ProjectId" />
-
-                    <button type="submit" class="btn ic3-soft-btn">
-                        <i class="bi bi-columns-gap me-1"></i>
-                        Compare My Ideas
-                    </button>
-                </form>
-
-                <a href="/Student/IdeaGenerator?projectId=@Model.ProjectId" class="btn ic3-outline-btn">
-                    <i class="bi bi-plus-circle me-1"></i>
-                    Add Ideas
+            <div class="idea-hero-actions">
+                <a class="ui-btn ui-btn-secondary"
+                   asp-page="/Student/IdeaGenerator"
+                   asp-route-projectId="@Model.ProjectId">
+                    <i class="bi bi-plus-lg"></i>
+                    Generate more ideas
                 </a>
             </div>
-        </div>
+        </header>
+
+        <section class="ui-panel selection-panel">
+            <div class="ui-panel-heading">
+                <div class="step-heading">
+                    <span class="step-number">1</span>
+                    <div>
+                        <span class="ui-eyebrow">Select ideas</span>
+                        <h2>What should the AI compare?</h2>
+                        <p>
+                            Your latest generation batch is selected automatically.
+                            Choose between
+                            @FYPilot.Web.Pages.Student.IdeaComparisonModel.MinimumIdeasToCompare
+                            and
+                            @FYPilot.Web.Pages.Student.IdeaComparisonModel.HardMaximumIdeasToCompare
+                            ideas.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="selection-status">
+                    <span class="selection-count" id="ic3SelectCount"></span>
+                    <span class="selection-speed">
+                        <i class="bi bi-lightning-charge-fill"></i>
+                        4 or fewer is fastest
+                    </span>
+                </div>
+            </div>
+
+            <form method="post"
+                  asp-page-handler="Compare"
+                  id="ic3CompareForm">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="projectId" value="@Model.ProjectId" />
+
+                <div class="selection-group">
+                    <div class="selection-group-title">
+                        <div>
+                            <strong>Latest batch</strong>
+                            <span>Recommended starting point</span>
+                        </div>
+                        <span class="selection-group-count">@latestIdeas.Count ideas</span>
+                    </div>
+
+                    <div class="idea-choice-grid">
+                        @foreach (var idea in latestIdeas)
+                        {
+                            var checkboxId = $"ideaChoice{idea.Id}";
+                            scorecardsByIdea.TryGetValue(idea.Id, out var scorecard);
+
+                            <div class="idea-choice-card">
+                                <input type="checkbox"
+                                       name="SelectedIdeaIds"
+                                       value="@idea.Id"
+                                       id="@checkboxId"
+                                       checked="checked" />
+
+                                <label for="@checkboxId">
+                                    <div class="choice-check">
+                                        <i class="bi bi-check-lg"></i>
+                                    </div>
+
+                                    <div class="choice-content">
+                                        <div class="choice-badges">
+                                            <span class="choice-badge choice-badge-latest">Latest</span>
+
+                                            @if (!string.IsNullOrWhiteSpace(idea.DifficultyLevel))
+                                            {
+                                                <span class="choice-badge">@idea.DifficultyLevel</span>
+                                            }
+                                        </div>
+
+                                        <h3>@idea.Title</h3>
+                                        <p>@(string.IsNullOrWhiteSpace(idea.Domain) ? "General project" : idea.Domain)</p>
+
+                                        <div class="choice-score">
+                                            <span>Saved overall</span>
+                                            <strong>
+                                                @(scorecard?.OverallScore.HasValue == true
+                                                    ? $"{scorecard.OverallScore}%"
+                                                    : "Not evaluated")
+                                            </strong>
+                                        </div>
+                                    </div>
+                                </label>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                @if (olderIdeas.Any())
+                {
+                    <details class="older-ideas">
+                        <summary>
+                            <span>
+                                <i class="bi bi-archive"></i>
+                                Browse older ideas
+                            </span>
+                            <small>@olderIdeas.Count available</small>
+                        </summary>
+
+                        <div class="idea-choice-grid older-choice-grid">
+                            @foreach (var idea in olderIdeas)
+                            {
+                                var checkboxId = $"ideaChoice{idea.Id}";
+                                scorecardsByIdea.TryGetValue(idea.Id, out var scorecard);
+
+                                <div class="idea-choice-card">
+                                    <input type="checkbox"
+                                           name="SelectedIdeaIds"
+                                           value="@idea.Id"
+                                           id="@checkboxId" />
+
+                                    <label for="@checkboxId">
+                                        <div class="choice-check">
+                                            <i class="bi bi-check-lg"></i>
+                                        </div>
+
+                                        <div class="choice-content">
+                                            <div class="choice-badges">
+                                                <span class="choice-badge">Previous batch</span>
+
+                                                @if (!string.IsNullOrWhiteSpace(idea.DifficultyLevel))
+                                                {
+                                                    <span class="choice-badge">@idea.DifficultyLevel</span>
+                                                }
+                                            </div>
+
+                                            <h3>@idea.Title</h3>
+                                            <p>@(string.IsNullOrWhiteSpace(idea.Domain) ? "General project" : idea.Domain)</p>
+
+                                            <div class="choice-score">
+                                                <span>Saved overall</span>
+                                                <strong>
+                                                    @(scorecard?.OverallScore.HasValue == true
+                                                        ? $"{scorecard.OverallScore}%"
+                                                        : "Not evaluated")
+                                                </strong>
+                                            </div>
+                                        </div>
+                                    </label>
+                                </div>
+                            }
+                        </div>
+                    </details>
+                }
+
+                <div class="selection-footer">
+                    <div class="selection-hint" id="ic3SelectHint">
+                        Select the ideas you want to compare.
+                    </div>
+
+                    <button type="submit"
+                            class="ui-btn ui-btn-primary compare-submit"
+                            id="ic3CompareBtn">
+                        <span class="button-icon">
+                            <i class="bi bi-stars"></i>
+                        </span>
+                        <span>
+                            <strong>Generate recommendation</strong>
+                            <small>AI ranking using your saved scores</small>
+                        </span>
+                        <i class="bi bi-arrow-right"></i>
+                    </button>
+                </div>
+            </form>
+        </section>
 
         @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
         {
-            <div class="alert alert-warning">
-                <i class="bi bi-exclamation-triangle me-2"></i>
-                @Model.ErrorMessage
+            <div class="ui-alert ui-alert-warning">
+                <div class="ui-alert-icon">
+                    <i class="bi bi-exclamation-triangle"></i>
+                </div>
+                <div>
+                    <strong>Recommendation unavailable</strong>
+                    <p>@Model.ErrorMessage</p>
+                </div>
             </div>
         }
 
         @if (Model.Comparison != null)
         {
             var comparison = Model.Comparison;
-            var rankedIdeas = comparison.Ideas.OrderBy(i => i.Rank).ToList();
+            var winner = Model.Scorecards.FirstOrDefault(s => s.AiRank == 1);
+            var others = Model.Scorecards
+                .Where(s => s.AiRank.HasValue && s.AiRank != 1)
+                .OrderBy(s => s.AiRank)
+                .ToList();
 
-            <section class="card mb-4 p-3">
-                <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
-                    <div>
-                        <div class="text-uppercase text-muted small fw-bold">AI-Reviewed Comparison</div>
-                        <h2 class="h4 mb-1">@comparison.ComparisonTitle</h2>
-                        <p class="text-muted small mb-0">
-                            This is the AI agent's own reasoning-based ranking and recommendation,
-                            reviewed by FYPilot's semantic Reviewer before being shown here --
-                            separate from the deterministic score table below.
-                        </p>
+            var winnerIdea = winner == null
+                ? null
+                : Model.Ideas.FirstOrDefault(i => i.Id == winner.IdeaId);
+
+            <section class="ui-panel ai-result-panel" id="aiRecommendationResult">
+                <div class="ui-panel-heading ai-result-heading">
+                    <div class="step-heading">
+                        <span class="step-number step-number-ai">
+                            <i class="bi bi-stars"></i>
+                        </span>
+                        <div>
+                            <span class="ui-eyebrow">AI recommendation</span>
+                            <h2>Your ranked shortlist</h2>
+                            <p>
+                                The AI explains the ranking but never replaces the percentages
+                                saved by Idea Generator.
+                            </p>
+                        </div>
                     </div>
 
                     @if (Model.LatestReview != null)
                     {
                         var (badgeClass, badgeLabel) = Model.DescribeReview(Model.LatestReview);
-                        <span class="badge @badgeClass" title="@Model.LatestReview.DecisionReason">
-                            <i class="bi bi-shield-check"></i> @badgeLabel
+
+                        var reviewTitle = Model.LatestReview.Status switch
+                        {
+                            "automated_checks_passed" =>
+                                "The response passed structural, authorization, score-consistency and firewall checks.",
+                            "review_unavailable" =>
+                                "The recommendation was generated, but semantic review was unavailable.",
+                            "reviewed" or "approved" or "approved_with_minor_warnings" =>
+                                Model.LatestReview.DecisionReason,
+                            _ => Model.LatestReview.DecisionReason
+                        };
+
+                        <span class="quality-badge @badgeClass"
+                              title="@reviewTitle">
+                            <i class="bi bi-shield-check"></i>
+                            @badgeLabel
                         </span>
                     }
                 </div>
 
-                <p>@comparison.Summary</p>
+                @if (!comparison.Available || winner == null || winnerIdea == null)
+                {
+                    <div class="ui-alert ui-alert-warning airec-unavailable">
+                        <div class="ui-alert-icon">
+                            <i class="bi bi-info-circle"></i>
+                        </div>
+                        <div>
+                            <strong>Use the saved comparison below</strong>
+                            <p>@comparison.Summary</p>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <article class="winner-card">
+                        <div class="winner-main">
+                            <div class="winner-topline">
+                                <span class="winner-rank">
+                                    <i class="bi bi-trophy-fill"></i>
+                                    Best fit · Rank #1
+                                </span>
 
-                <div class="alert alert-success py-2">
-                    <i class="bi bi-trophy me-1"></i>
-                    <strong>Best idea:</strong> @comparison.BestIdeaTitle
-                </div>
-
-                <div class="d-flex flex-column gap-3">
-                    @foreach (var idea in rankedIdeas)
-                    {
-                        <div class="border rounded-3 p-3 @(idea.IdeaId == comparison.BestIdeaId ? "border-success" : "")">
-                            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                                <h3 class="h6 mb-0">#@idea.Rank &mdash; @idea.Title</h3>
-                                <span class="badge @(idea.RiskLevel == "Low" ? "bg-success" : idea.RiskLevel == "Medium" ? "bg-warning text-dark" : "bg-danger")">
-                                    @idea.RiskLevel risk
+                                <span class="winner-domain">
+                                    @(string.IsNullOrWhiteSpace(winnerIdea.Domain)
+                                        ? "General project"
+                                        : winnerIdea.Domain)
                                 </span>
                             </div>
 
-                            <div class="small text-muted my-2">
-                                Overall @idea.OverallScore &middot;
-                                Skill Fit @idea.SkillFitScore &middot;
-                                Feasibility @idea.FeasibilityScore &middot;
-                                Innovation @idea.InnovationScore &middot;
-                                Market @idea.MarketRelevanceScore
+                            <h2 class="winner-title">@winner.Title</h2>
+
+                            <div class="winner-reason">
+                                <span>Why it wins</span>
+                                <p>@winner.AiWhyThisRank</p>
                             </div>
 
-                            <p class="mb-2"><strong>Best for:</strong> @idea.BestFor</p>
-
-                            <div class="row g-3">
-                                <div class="col-md-6">
-                                    <strong class="small">Strengths</strong>
-                                    <ul class="small mb-0">
-                                        @foreach (var s in idea.Strengths)
-                                        {
-                                            <li>@s</li>
-                                        }
-                                    </ul>
+                            <div class="winner-insight-grid">
+                                <div class="winner-insight">
+                                    <span class="insight-icon insight-icon-good">
+                                        <i class="bi bi-graph-up-arrow"></i>
+                                    </span>
+                                    <div>
+                                        <small>Main strength</small>
+                                        <p>@winner.AiMainStrength</p>
+                                    </div>
                                 </div>
-                                <div class="col-md-6">
-                                    <strong class="small">Weaknesses</strong>
-                                    <ul class="small mb-0">
-                                        @foreach (var w in idea.Weaknesses)
-                                        {
-                                            <li>@w</li>
-                                        }
-                                    </ul>
+
+                                <div class="winner-insight">
+                                    <span class="insight-icon insight-icon-risk">
+                                        <i class="bi bi-exclamation-diamond"></i>
+                                    </span>
+                                    <div>
+                                        <small>Main risk</small>
+                                        <p>@winner.AiMainRisk</p>
+                                    </div>
+                                </div>
+
+                                <div class="winner-insight">
+                                    <span class="insight-icon insight-icon-check">
+                                        <i class="bi bi-clipboard2-check"></i>
+                                    </span>
+                                    <div>
+                                        <small>Validate first</small>
+                                        <p>@winner.AiRequiredValidation</p>
+                                    </div>
                                 </div>
                             </div>
 
-                            <p class="mb-0 mt-2"><em>@idea.Recommendation</em></p>
+                            <div class="winner-actions">
+                                @{
+                                    var winnerSelected = Model.CurrentProject?.ProjectIdeaId == winner.IdeaId;
+                                }
+
+                                <form method="post"
+                                      asp-page-handler="Select"
+                                      class="m-0">
+                                    @Html.AntiForgeryToken()
+                                    <input type="hidden" name="projectId" value="@Model.ProjectId" />
+                                    <input type="hidden" name="ideaId" value="@winner.IdeaId" />
+
+                                    <button type="submit"
+                                            class="ui-btn ui-btn-primary"
+                                            disabled="@(winnerSelected ? "disabled" : null)">
+                                        @if (winnerSelected)
+                                        {
+                                            <i class="bi bi-check-circle-fill"></i>
+                                            <span>Official idea selected</span>
+                                        }
+                                        else
+                                        {
+                                            <i class="bi bi-check2-circle"></i>
+                                            <span>Select this idea</span>
+                                        }
+                                    </button>
+                                </form>
+
+                                <button type="button"
+                                        class="ui-btn ui-btn-ghost"
+                                        data-details-toggle
+                                        aria-expanded="false"
+                                        aria-controls="winnerDetails">
+                                    <i class="bi bi-layout-text-sidebar-reverse"></i>
+                                    Full analysis
+                                </button>
+                            </div>
+
+                            <div class="analysis-drawer"
+                                 id="winnerDetails"
+                                 hidden>
+                                <div>
+                                    <small>Best for</small>
+                                    <p>@winner.AiBestFor</p>
+                                </div>
+
+                                <div>
+                                    <small>Comparison advantage</small>
+                                    <p>@winner.AiComparisonAdvantage</p>
+                                </div>
+
+                                <div>
+                                    <small>Recommendation</small>
+                                    <p>@winner.AiRecommendation</p>
+                                </div>
+
+                                @foreach (var card in winner.Cards)
+                                {
+                                    <div>
+                                        <small>Saved @card.Name reason</small>
+                                        <p>@card.Reason</p>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        <aside class="winner-scoreboard">
+                            <div class="overall-ring"
+                                 style="--score:@(winner.OverallScore ?? 0)">
+                                <div>
+                                    <strong>
+                                        @(winner.OverallScore.HasValue
+                                            ? $"{winner.OverallScore}%"
+                                            : "—")
+                                    </strong>
+                                    <span>Overall</span>
+                                </div>
+                            </div>
+
+                            <div class="winner-metrics">
+                                @foreach (var card in winner.Cards)
+                                {
+                                    <div class="winner-metric">
+                                        <div>
+                                            <span>
+                                                <i class="bi @card.Icon"></i>
+                                                @card.Name
+                                            </span>
+                                            <strong>
+                                                @(card.Score.HasValue ? $"{card.Score}%" : "N/E")
+                                            </strong>
+                                        </div>
+
+                                        <div class="metric-track">
+                                            <span style="width:@(card.Score ?? 0)%"></span>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+
+                            @if (!string.IsNullOrWhiteSpace(winner.OverallPartialNote))
+                            {
+                                <p class="partial-note">
+                                    <i class="bi bi-info-circle"></i>
+                                    @winner.OverallPartialNote
+                                </p>
+                            }
+                        </aside>
+                    </article>
+
+                    @if (others.Any())
+                    {
+                        <div class="ranking-heading">
+                            <div>
+                                <span class="ui-eyebrow">Remaining ideas</span>
+                                <h3>Why they ranked lower</h3>
+                            </div>
+                            <span>@others.Count alternatives</span>
+                        </div>
+
+                        <div class="ranking-list">
+                            @foreach (var card in others)
+                            {
+                                var rankedIdea = Model.Ideas.FirstOrDefault(i => i.Id == card.IdeaId);
+                                var riskClass = (card.AiRiskLevel ?? "medium").ToLowerInvariant();
+
+                                <article class="ranking-row">
+                                    <div class="ranking-position">#@card.AiRank</div>
+
+                                    <div class="ranking-copy">
+                                        <div class="ranking-title-line">
+                                            <div>
+                                                <h4>@card.Title</h4>
+                                                <span>
+                                                    @(string.IsNullOrWhiteSpace(rankedIdea?.Domain)
+                                                        ? "General project"
+                                                        : rankedIdea.Domain)
+                                                </span>
+                                            </div>
+
+                                            <span class="risk-pill risk-@riskClass">
+                                                @card.AiRiskLevel risk
+                                            </span>
+                                        </div>
+
+                                        <p class="ranking-summary">@card.AiContextSummary</p>
+
+                                        <div class="ranking-signals">
+                                            <span>
+                                                <i class="bi bi-plus-circle"></i>
+                                                <strong>Strength:</strong> @card.AiMainStrength
+                                            </span>
+                                            <span>
+                                                <i class="bi bi-exclamation-circle"></i>
+                                                <strong>Risk:</strong> @card.AiMainRisk
+                                            </span>
+                                        </div>
+
+                                        <div class="ranking-actions">
+                                            <button type="button"
+                                                    class="text-action"
+                                                    data-details-toggle
+                                                    aria-expanded="false"
+                                                    aria-controls="rankDetails-@card.IdeaId">
+                                                View detailed reasoning
+                                                <i class="bi bi-chevron-down"></i>
+                                            </button>
+                                        </div>
+
+                                        <div class="analysis-drawer compact-drawer"
+                                             id="rankDetails-@card.IdeaId"
+                                             hidden>
+                                            <div>
+                                                <small>Why this rank</small>
+                                                <p>@card.AiWhyThisRank</p>
+                                            </div>
+                                            <div>
+                                                <small>Best for</small>
+                                                <p>@card.AiBestFor</p>
+                                            </div>
+                                            <div>
+                                                <small>Comparison advantage</small>
+                                                <p>@card.AiComparisonAdvantage</p>
+                                            </div>
+                                            <div>
+                                                <small>Required validation</small>
+                                                <p>@card.AiRequiredValidation</p>
+                                            </div>
+                                            <div>
+                                                <small>Recommendation</small>
+                                                <p>@card.AiRecommendation</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="ranking-score">
+                                        <strong>
+                                            @(card.OverallScore.HasValue
+                                                ? $"{card.OverallScore}%"
+                                                : "—")
+                                        </strong>
+                                        <span>Overall</span>
+                                    </div>
+                                </article>
+                            }
                         </div>
                     }
-                </div>
 
-                <div class="alert alert-info mt-3 mb-0">
-                    <i class="bi bi-lightbulb me-1"></i>
-                    <strong>Final recommendation:</strong> @comparison.FinalRecommendation
-                </div>
+                    <div class="final-recommendation">
+                        <span>
+                            <i class="bi bi-lightbulb-fill"></i>
+                        </span>
+                        <div>
+                            <small>Final recommendation</small>
+                            <p>@comparison.FinalRecommendation</p>
+                        </div>
+                    </div>
 
-                @if (Model.ComparisonResponse?.LlmUsed == true)
-                {
-                    <p class="text-muted small mt-2 mb-0">
-                        Generated using @(Model.ComparisonResponse.Provider ?? "AI")@(string.IsNullOrWhiteSpace(Model.ComparisonResponse.ModelUsed) ? "" : $" ({Model.ComparisonResponse.ModelUsed})").
-                    </p>
+                    @if (Model.ComparisonResponse?.LlmUsed == true)
+                    {
+                        <p class="provider-note">
+                            <i class="bi bi-cpu"></i>
+                            Generated using
+                            @(Model.ComparisonResponse.Provider ?? "AI")
+                            @(string.IsNullOrWhiteSpace(Model.ComparisonResponse.ModelUsed)
+                                ? ""
+                                : $" · {Model.ComparisonResponse.ModelUsed}")
+                        </p>
+                    }
                 }
             </section>
         }
 
-        <div class="ic3-card">
-
-            <div class="ic3-metric-header">
-                <div>
-                    <div class="ic3-kicker">Compare By</div>
-                    <h2>Choose one or more priorities</h2>
-                    <p class="text-muted small mb-0">
-                        Deterministic scores stored on each idea -- not the AI-reviewed
-                        comparison above.
-                    </p>
+        <section class="ui-panel matrix-panel">
+            <div class="ui-panel-heading matrix-heading">
+                <div class="step-heading">
+                    <span class="step-number">2</span>
+                    <div>
+                        <span class="ui-eyebrow">Compare saved evidence</span>
+                        <h2>Choose what matters most</h2>
+                        <p>
+                            Turn metrics on or off. The recommendation below updates instantly
+                            using only saved Idea Generator percentages.
+                        </p>
+                    </div>
                 </div>
 
-                <button type="button" class="btn ic3-clear-btn" id="ic3ResetMetrics">
-                    Reset
+                <button type="button"
+                        class="text-action reset-action"
+                        id="ic3ResetMetrics">
+                    <i class="bi bi-arrow-counterclockwise"></i>
+                    Reset metrics
                 </button>
             </div>
 
-            <div class="ic3-metric-tabs" id="ic3MetricTabs">
-                @foreach (var metric in metricDefinitions)
-                {
-                    var active = metric.Key is "feasibility" or "time";
-
-                    <button type="button"
-                            class="ic3-metric-tab @(active ? "active" : "")"
-                            data-metric="@metric.Key"
-                            title="@metric.Description">
-                        <i class="bi bi-@metric.Icon"></i>
-                        <span>@metric.Label</span>
-                        <b><i class="bi bi-check"></i></b>
-                    </button>
-                }
-            </div>
-
-            <div class="ic3-selected-line" id="ic3SelectedSummary">
-                Showing: <strong>Feasibility</strong> and <strong>Time Fit</strong>
-            </div>
-
-            <div class="ic3-table-card">
-                <div class="ic3-table-head">
-                    <div class="ic3-col-idea">Idea</div>
-
+            <div class="metric-toolbar">
+                <div class="metric-tabs" id="ic3MetricTabs">
                     @foreach (var metric in metricDefinitions)
                     {
-                        var visible = metric.Key is "feasibility" or "time";
+                        var active = metric.Key is "feasibility" or "innovation";
 
-                        <div class="ic3-col-metric @(visible ? "" : "d-none")"
-                             data-metric-column="@metric.Key">
-                            <i class="bi bi-@metric.Icon"></i>
-                            <span>@metric.Label</span>
-                        </div>
+                        <button type="button"
+                                class="metric-tab @(active ? "active" : "")"
+                                data-metric="@metric.Key"
+                                title="@metric.Description">
+                            <span>
+                                <i class="bi bi-@metric.Icon"></i>
+                            </span>
+                            <strong>@metric.Label</strong>
+                            <i class="bi bi-check-circle-fill metric-check"></i>
+                        </button>
                     }
-
-                    <div class="ic3-col-action">Choose</div>
                 </div>
 
-                <div class="ic3-table-body">
-                    @for (var i = 0; i < ideas.Count; i++)
-                    {
-                        var idea = ideas[i];
+                <div class="selected-metrics" id="ic3SelectedSummary">
+                    Showing: <strong>Feasibility</strong> and <strong>Innovation</strong>
+                </div>
+            </div>
 
-                        var isSelected =
-                            selectedIdeaId == idea.Id;
-
-                        <div class="ic3-idea-row @(isSelected ? "selected" : "")"
-                             data-idea-row="@idea.Id">
-
-                            <div class="ic3-idea-main">
-                                <div class="ic3-idea-number">
-                                    @(i + 1)
-                                </div>
-
-                                <div class="ic3-idea-text">
-                                    <h3>@idea.Title</h3>
-
-                                    <div>
-                                        <span>@idea.Domain</span>
-                                        <span class="text-capitalize">@idea.DifficultyLevel</span>
-                                    </div>
-                                </div>
-                            </div>
+            <div class="score-matrix-shell">
+                <table class="score-matrix">
+                    <thead>
+                        <tr>
+                            <th class="idea-column">Idea</th>
 
                             @foreach (var metric in metricDefinitions)
                             {
-                                var visible = metric.Key is "feasibility" or "time";
-                                var score = ScoreForMetric(idea, metric.Key);
+                                var visible = metric.Key is "feasibility" or "innovation";
 
-                                <div class="ic3-score-cell @(visible ? "" : "d-none")"
-                                     data-metric-cell="@metric.Key"
-                                     data-score="@score">
-
-                                    <div class="ic3-score-top">
-                                        <strong>@score%</strong>
-                                        <span>@ScoreLabel(score)</span>
-                                    </div>
-
-                                    <div class="ic3-score-track">
-                                        <div style="width:@score%"></div>
-                                    </div>
-                                </div>
+                                <th class="metric-column @(visible ? "" : "d-none")"
+                                    data-metric-column="@metric.Key">
+                                    <i class="bi bi-@metric.Icon"></i>
+                                    @metric.Label
+                                </th>
                             }
 
-                            <div class="ic3-select-cell">
-                                <form method="post" asp-page-handler="Select">
-                                    @Html.AntiForgeryToken()
-                                    <input type="hidden"
-                                           name="projectId"
-                                           value="@Model.ProjectId" />
-                                    <input type="hidden" name="ideaId" value="@idea.Id" />
+                            <th class="action-column">Decision</th>
+                        </tr>
+                    </thead>
 
-                                    <button type="submit"
-                                            class="ic3-pick-btn @(isSelected ? "picked" : "")"
-                                            title="@(isSelected
-                                                                                            ? "This is the official project idea"
-                                                                                            : "Select this idea")"
-                        disabled="@(
-                        isSelected
-                            ? "disabled"
-                            : null)">
-                    @if (isSelected)
-                    {
-                        <i class="bi bi-check-circle-fill"></i>
-                        <span>Selected</span>
-                    }
-                    else
-                    {
-                        <i class="bi bi-circle"></i>
-                        <span>Select</span>
-                    }
-                </button>
-            </form>
-        </div>
-    </div>
+                    <tbody>
+                        @for (var i = 0; i < ideas.Count; i++)
+                        {
+                            var idea = ideas[i];
+                            var isSelected = selectedIdeaId == idea.Id;
+
+                            scorecardsByIdea.TryGetValue(idea.Id, out var ideaScorecard);
+
+                            <tr class="idea-matrix-row @(isSelected ? "selected" : "")"
+                                data-idea-row="@idea.Id">
+
+                                <td class="idea-cell">
+                                    <div class="idea-index">@(i + 1)</div>
+
+                                    <div>
+                                        <div class="idea-cell-title">
+                                            <h3>@idea.Title</h3>
+
+                                            @if (isSelected)
+                                            {
+                                                <span class="official-pill">
+                                                    <i class="bi bi-check-circle-fill"></i>
+                                                    Official
+                                                </span>
+                                            }
+                                        </div>
+
+                                        <div class="idea-cell-meta">
+                                            <span>
+                                                <i class="bi bi-grid"></i>
+                                                @(string.IsNullOrWhiteSpace(idea.Domain)
+                                                    ? "General"
+                                                    : idea.Domain)
+                                            </span>
+                                            <span>
+                                                <i class="bi bi-speedometer2"></i>
+                                                @idea.DifficultyLevel
+                                            </span>
+
+                                            @if (ideaScorecard?.IsLegacyScoring == true)
+                                            {
+                                                <span class="legacy-pill"
+                                                      title="This idea was generated using the previous scoring method.">
+                                                    Previous score version
+                                                </span>
+                                            }
+                                        </div>
+                                    </div>
+                                </td>
+
+                                @foreach (var metric in metricDefinitions)
+                                {
+                                    var visible = metric.Key is "feasibility" or "innovation";
+
+                                    int? score;
+                                    string label;
+                                    string reason;
+                                    string source;
+
+                                    if (metric.Key == "overall")
+                                    {
+                                        score = ideaScorecard?.OverallScore;
+                                        label = ideaScorecard?.OverallLabel ?? "Not evaluated";
+                                        source = "FYPilot saved-score average";
+
+                                        reason = score.HasValue
+                                            ? ideaScorecard?.OverallPartialNote
+                                                ?? "Rounded average of the saved Innovation, Feasibility and Market Demand scores."
+                                            : "Not enough evaluated scores are saved for this idea.";
+                                    }
+                                    else
+                                    {
+                                        var storedScore = ideaScorecard?.Cards
+                                            .FirstOrDefault(card => card.Key == metric.Key);
+
+                                        score = storedScore?.Score;
+                                        label = storedScore?.Label ?? "Not evaluated";
+                                        reason = storedScore?.Reason
+                                            ?? "This score was not evaluated for this idea.";
+                                        source = "Idea Generator";
+                                    }
+
+                                    <td class="score-cell @(visible ? "" : "d-none")"
+                                        data-metric-cell="@metric.Key"
+                                        data-score="@(score?.ToString() ?? "")">
+
+                                        <div class="score-cell-card">
+                                            <div class="score-cell-top">
+                                                <strong>
+                                                    @(score.HasValue ? $"{score}%" : "—")
+                                                </strong>
+                                                <span>@label</span>
+                                            </div>
+
+                                            <div class="metric-track metric-track-light">
+                                                <span style="width:@(score ?? 0)%"></span>
+                                            </div>
+
+                                            <details class="score-explainer">
+                                                <summary>
+                                                    Why this score?
+                                                    <i class="bi bi-chevron-down"></i>
+                                                </summary>
+                                                <div>
+                                                    <small>Source</small>
+                                                    <strong>@source</strong>
+                                                    <p>@reason</p>
+                                                </div>
+                                            </details>
+                                        </div>
+                                    </td>
+                                }
+
+                                <td class="decision-cell">
+                                    <form method="post" asp-page-handler="Select">
+                                        @Html.AntiForgeryToken()
+                                        <input type="hidden" name="projectId" value="@Model.ProjectId" />
+                                        <input type="hidden" name="ideaId" value="@idea.Id" />
+
+                                        <button type="submit"
+                                                class="decision-btn @(isSelected ? "selected" : "")"
+                                                disabled="@(isSelected ? "disabled" : null)">
+                                            @if (isSelected)
+                                            {
+                                                <i class="bi bi-check-circle-fill"></i>
+                                                <span>Selected</span>
+                                            }
+                                            else
+                                            {
+                                                <i class="bi bi-circle"></i>
+                                                <span>Select</span>
+                                            }
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="metric-recommendation">
+                <div class="metric-recommendation-icon">
+                    <i class="bi bi-sliders2"></i>
+                </div>
+
+                <div class="metric-recommendation-copy">
+                    <span class="ui-eyebrow">Best match for selected metrics</span>
+                    <h3 id="ic3RecommendedTitle">Calculating best match…</h3>
+                    <p id="ic3RecommendedText">
+                        The result updates as you change the active metrics.
+                    </p>
+                </div>
+
+                <form method="post"
+                      asp-page-handler="Select"
+                      class="metric-recommendation-action">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="projectId" value="@Model.ProjectId" />
+                    <input type="hidden"
+                           name="ideaId"
+                           id="ic3RecommendedIdeaId"
+                           value="@ideas.First().Id" />
+
+                    <button type="submit"
+                            class="ui-btn ui-btn-primary">
+                        <i class="bi bi-check2-circle"></i>
+                        Select recommended
+                    </button>
+                </form>
+            </div>
+        </section>
+    </main>
 }
-</div>
-</div>
 
-<div class="ic3-recommendation-card">
-    <div class="ic3-recommendation-icon">
-        <i class="bi bi-award"></i>
-    </div>
-
-    <div>
-        <div class="ic3-kicker">Recommended Based On Selected Metrics</div>
-        <h3 id="ic3RecommendedTitle">Best matching idea</h3>
-        <p id="ic3RecommendedText">
-            The recommendation updates when you choose comparison metrics.
-        </p>
-    </div>
-
-    <form method="post" asp-page-handler="Select" class="ic3-recommendation-action">
-        @Html.AntiForgeryToken()
-        <input type="hidden"
-               name="projectId"
-               value="@Model.ProjectId" />
-        <input type="hidden" name="ideaId" id="ic3RecommendedIdeaId" value="@ideas.First().Id" />
-
-        <button type="submit" class="btn ic3-primary-btn">
-            <i class="bi bi-check2-circle me-1"></i>
-            Select Recommended
-        </button>
-    </form>
-</div>
-</div>
-</section>
-}
 @section Head {
     <style>
-        .empty-dna-layout {
-            min-height: calc(100vh - 170px);
-            display: grid;
-            place-items: center;
-            padding: 1.5rem;
+        :root {
+            /* FYPilot project theme */
+            --idea-navy: #28385E;
+            --idea-navy-2: #304163;
+            --idea-blue: #516C8D;
+            --idea-blue-soft: #EEF2F6;
+            --idea-gold: #B9954F;
+            --idea-gold-soft: #F7F1E4;
+            --idea-green: #39725A;
+            --idea-green-soft: #EDF5F1;
+            --idea-red: #A84A4A;
+            --idea-red-soft: #F8ECEC;
+            --idea-amber: #8A6418;
+            --idea-amber-soft: #FFF7DF;
+            --idea-ink: #111827;
+            --idea-muted: #64748B;
+            --idea-border: #E8ECF2;
+            --idea-surface: #FFFFFF;
+            --idea-surface-soft: #F8FAFC;
+            --idea-shadow: 0 16px 38px rgba(40, 56, 94, .08);
+            --idea-radius-xl: 24px;
+            --idea-radius-lg: 18px;
+            --idea-radius-md: 14px;
         }
 
-        .empty-dna-card {
-            width: min(760px, 100%);
-            min-height: 670px;
-            display: grid;
-            place-items: center;
-            text-align: center;
-            background: #ffffff;
-            border: 1px solid #E8ECF2;
-            border-radius: 28px;
-            box-shadow: 0 24px 55px rgba(15, 23, 42, .08);
-            padding: 2.5rem;
-        }
-
-        .empty-dna-content {
-            max-width: 560px;
+        .idea-page-shell,
+        .idea-empty-shell {
+            width: min(1480px, calc(100% - 2rem));
             margin: 0 auto;
+            padding: 1.4rem 0 3rem;
+            color: var(--idea-ink);
         }
 
-        .empty-dna-icon {
-            width: 78px;
-            height: 78px;
+        .idea-empty-shell {
+            min-height: calc(100vh - 160px);
             display: grid;
             place-items: center;
-            margin: 0 auto 1.35rem;
-            border-radius: 26px;
-            color: #516C8D;
-            background: #EEF2F6;
+        }
+
+        .idea-empty-card {
+            width: min(720px, 100%);
+            padding: clamp(2rem, 6vw, 4.5rem);
+            text-align: center;
+            border: 1px solid var(--idea-border);
+            border-radius: 30px;
+            background:
+                radial-gradient(circle at top, rgba(88, 120, 159, .12), transparent 42%),
+                var(--idea-surface);
+            box-shadow: var(--idea-shadow);
+        }
+
+        .idea-empty-orb {
+            width: 82px;
+            height: 82px;
+            display: grid;
+            place-items: center;
+            margin: 0 auto 1.25rem;
+            color: var(--idea-navy);
             font-size: 2rem;
+            border: 1px solid #d8e1ec;
+            border-radius: 24px;
+            background: var(--idea-blue-soft);
         }
 
-        .empty-dna-content h1,
-        .empty-dna-content h2 {
+        .idea-empty-card h1 {
+            max-width: 560px;
+            margin: .45rem auto .8rem;
+            color: var(--idea-ink);
+            font-size: clamp(2rem, 4vw, 3rem);
+            line-height: 1.05;
+            letter-spacing: -.05em;
+            font-weight: 850;
+        }
+
+        .idea-empty-card p {
+            max-width: 590px;
+            margin: 0 auto 1.5rem;
+            color: var(--idea-muted);
+            line-height: 1.7;
+        }
+
+        .idea-hero {
+            position: relative;
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 1.5rem;
+            margin-bottom: 1.25rem;
+            padding: clamp(1.5rem, 3vw, 2.25rem);
+            overflow: hidden;
+            border: 1px solid #dce5ef;
+            border-radius: var(--idea-radius-xl);
+            background:
+                radial-gradient(circle at 85% 10%, rgba(197, 154, 69, .16), transparent 28%),
+                linear-gradient(135deg, #f8fbff 0%, #eef4fa 100%);
+        }
+
+        .idea-hero::after {
+            content: "";
+            position: absolute;
+            right: -70px;
+            bottom: -105px;
+            width: 260px;
+            height: 260px;
+            border: 45px solid rgba(88, 120, 159, .08);
+            border-radius: 50%;
+            pointer-events: none;
+        }
+
+        .idea-hero-copy {
+            position: relative;
+            z-index: 1;
+            max-width: 900px;
+        }
+
+        .idea-breadcrumb {
+            display: inline-flex;
+            align-items: center;
+            gap: .45rem;
+            margin-bottom: .65rem;
+            color: #75849a;
+            font-size: .75rem;
+            font-weight: 700;
+        }
+
+        .idea-breadcrumb strong {
+            color: var(--idea-navy);
+        }
+
+        .idea-hero h1 {
+            max-width: 760px;
             margin: 0;
-            color: #111827;
-            font-size: clamp(1.9rem, 3vw, 2.55rem);
-            line-height: 1.12;
-            font-weight: 800;
-            letter-spacing: -0.05em;
+            color: var(--idea-ink);
+            font-size: clamp(2rem, 4vw, 3.6rem);
+            line-height: 1;
+            letter-spacing: -.055em;
+            font-weight: 850;
         }
 
-        .empty-dna-content p {
-            max-width: 540px;
-            margin: 0.9rem auto 0;
-            color: #64748B;
+        .idea-hero p {
+            max-width: 800px;
+            margin: .9rem 0 0;
+            color: var(--idea-muted);
             font-size: 1rem;
             line-height: 1.65;
         }
 
-        .empty-dna-actions {
+        .idea-hero-meta {
             display: flex;
-            justify-content: center;
+            align-items: center;
             flex-wrap: wrap;
-            gap: .65rem;
-            margin-top: 1.35rem;
+            gap: .55rem;
+            margin-top: 1.2rem;
         }
 
-            .empty-dna-actions .btn,
-            .empty-dna-actions a {
-                border-radius: 14px;
-                padding: .72rem 1rem;
-                font-size: .82rem;
-                font-weight: 700;
-            }
+        .idea-hero-meta > span {
+            display: inline-flex;
+            align-items: center;
+            gap: .4rem;
+            min-height: 34px;
+            padding: .4rem .7rem;
+            color: #56667c;
+            font-size: .72rem;
+            font-weight: 650;
+            border: 1px solid rgba(88, 120, 159, .16);
+            border-radius: 999px;
+            background: rgba(255, 255, 255, .72);
+        }
 
-                .empty-dna-actions .btn-primary,
-                .empty-dna-actions a.btn-primary {
-                    color: #ffffff !important;
-                    background: #28385E !important;
-                    border-color: #28385E !important;
-                    box-shadow: none !important;
-                }
+        .idea-hero-meta > span.is-selected {
+            color: #25694c;
+            border-color: #cfe8db;
+            background: #f0faf5;
+        }
 
-                    .empty-dna-actions .btn-primary:hover,
-                    .empty-dna-actions a.btn-primary:hover {
-                        color: #ffffff !important;
-                        background: #304163 !important;
-                        border-color: #304163 !important;
-                    }
+        .idea-hero-meta > span.is-muted {
+            color: #7c899a;
+        }
 
-                .empty-dna-actions .btn-outline-secondary,
-                .empty-dna-actions a.btn-outline-secondary {
-                    color: #28385E !important;
-                    background: #ffffff !important;
-                    border: 1px solid #E8ECF2 !important;
-                    box-shadow: none !important;
-                }
+        .idea-hero-actions {
+            position: relative;
+            z-index: 1;
+            flex: 0 0 auto;
+        }
 
-                    .empty-dna-actions .btn-outline-secondary:hover,
-                    .empty-dna-actions a.btn-outline-secondary:hover {
-                        color: #28385E !important;
-                        background: #EEF2F6 !important;
-                        border-color: #D8DEE9 !important;
-                    }
+        .ui-panel {
+            margin-bottom: 1.25rem;
+            padding: clamp(1.1rem, 2.4vw, 1.6rem);
+            border: 1px solid var(--idea-border);
+            border-radius: var(--idea-radius-xl);
+            background: var(--idea-surface);
+            box-shadow: 0 10px 32px rgba(24, 42, 72, .045);
+        }
 
-        .ic3-pick-btn.picked:disabled {
+        .ui-panel-heading {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 1.15rem;
+        }
+
+        .step-heading {
+            display: flex;
+            align-items: flex-start;
+            gap: .85rem;
+        }
+
+        .step-number {
+            width: 38px;
+            height: 38px;
+            display: grid;
+            place-items: center;
+            flex: 0 0 auto;
+            color: #ffffff;
+            font-size: .82rem;
+            font-weight: 800;
+            border-radius: 12px;
+            background: var(--idea-navy);
+            box-shadow: 0 8px 18px rgba(31, 47, 79, .18);
+        }
+
+        .step-number-ai {
+            color: #7e5b16;
+            background: var(--idea-gold-soft);
+            box-shadow: none;
+        }
+
+        .ui-eyebrow {
+            display: block;
+            margin-bottom: .22rem;
+            color: var(--idea-blue);
+            font-size: .68rem;
+            font-weight: 800;
+            letter-spacing: .09em;
+            text-transform: uppercase;
+        }
+
+        .ui-panel-heading h2,
+        .ranking-heading h3 {
+            margin: 0;
+            color: var(--idea-ink);
+            font-size: clamp(1.25rem, 2vw, 1.65rem);
+            letter-spacing: -.025em;
+            font-weight: 800;
+        }
+
+        .ui-panel-heading p {
+            max-width: 760px;
+            margin: .35rem 0 0;
+            color: var(--idea-muted);
+            font-size: .82rem;
+            line-height: 1.55;
+        }
+
+        .ui-btn {
+            min-height: 42px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .5rem;
+            padding: .65rem .95rem;
+            font-size: .78rem;
+            font-weight: 750;
+            line-height: 1;
+            text-decoration: none;
+            border: 1px solid transparent;
+            border-radius: 12px;
+            transition: transform .16s ease, box-shadow .16s ease, background .16s ease;
+        }
+
+        .ui-btn:hover {
+            transform: translateY(-1px);
+        }
+
+        .ui-btn-primary {
+            color: #ffffff !important;
+            border-color: var(--idea-navy) !important;
+            background: var(--idea-navy) !important;
+            box-shadow: 0 8px 18px rgba(31, 47, 79, .15);
+        }
+
+        .ui-btn-primary:hover:not(:disabled) {
+            color: #ffffff !important;
+            background: var(--idea-navy-2) !important;
+        }
+
+        .ui-btn-primary:disabled {
+            opacity: .72;
+            cursor: default;
+            transform: none;
+        }
+
+        .ui-btn-secondary {
+            color: var(--idea-navy) !important;
+            border-color: #d4dfeb !important;
+            background: rgba(255, 255, 255, .88) !important;
+        }
+
+        .ui-btn-secondary:hover {
+            color: var(--idea-navy) !important;
+            background: #ffffff !important;
+            box-shadow: 0 8px 18px rgba(31, 47, 79, .08);
+        }
+
+        .ui-btn-ghost {
+            color: var(--idea-navy) !important;
+            border-color: #dce4ed !important;
+            background: #ffffff !important;
+        }
+
+        .selection-status {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: .45rem;
+            justify-content: flex-end;
+        }
+
+        .selection-count,
+        .selection-speed {
+            display: inline-flex;
+            align-items: center;
+            gap: .35rem;
+            min-height: 32px;
+            padding: .34rem .65rem;
+            font-size: .68rem;
+            font-weight: 750;
+            border-radius: 999px;
+        }
+
+        .selection-count {
+            color: var(--idea-navy);
+            border: 1px solid #d9e3ee;
+            background: var(--idea-blue-soft);
+        }
+
+        .selection-count.is-invalid {
+            color: var(--idea-red);
+            border-color: #efd3d3;
+            background: var(--idea-red-soft);
+        }
+
+        .selection-count.is-caution {
+            color: var(--idea-amber);
+            border-color: #f0dfb9;
+            background: var(--idea-amber-soft);
+        }
+
+        .selection-speed {
+            color: #875f17;
+            border: 1px solid #ead7aa;
+            background: var(--idea-gold-soft);
+        }
+
+        .selection-group {
+            padding: .9rem;
+            border: 1px solid #e5ebf2;
+            border-radius: var(--idea-radius-lg);
+            background: var(--idea-surface-soft);
+        }
+
+        .selection-group-title,
+        .older-ideas summary {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .75rem;
+        }
+
+        .selection-group-title {
+            margin-bottom: .75rem;
+        }
+
+        .selection-group-title > div {
+            display: flex;
+            flex-direction: column;
+            gap: .1rem;
+        }
+
+        .selection-group-title strong {
+            color: var(--idea-ink);
+            font-size: .82rem;
+        }
+
+        .selection-group-title span {
+            color: var(--idea-muted);
+            font-size: .68rem;
+        }
+
+        .selection-group-count {
+            padding: .24rem .55rem;
+            color: var(--idea-blue) !important;
+            font-weight: 750;
+            border-radius: 999px;
+            background: var(--idea-blue-soft);
+        }
+
+        .idea-choice-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(235px, 1fr));
+            gap: .7rem;
+        }
+
+        .idea-choice-card {
+            position: relative;
+            min-width: 0;
+        }
+
+        .idea-choice-card input {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .idea-choice-card label {
+            position: relative;
+            min-height: 174px;
+            display: block;
+            padding: .9rem;
+            overflow: hidden;
+            cursor: pointer;
+            border: 1px solid #dfe6ee;
+            border-radius: 15px;
+            background: #ffffff;
+            transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+        }
+
+        .idea-choice-card label:hover {
+            transform: translateY(-2px);
+            border-color: #becddd;
+            box-shadow: 0 10px 22px rgba(31, 47, 79, .07);
+        }
+
+        .idea-choice-card input:checked + label {
+            border-color: var(--idea-blue);
+            box-shadow: inset 0 0 0 1px var(--idea-blue), 0 10px 24px rgba(88, 120, 159, .12);
+            background:
+                linear-gradient(180deg, rgba(238, 244, 250, .8), #ffffff 75%);
+        }
+
+        .idea-choice-card input:focus-visible + label {
+            outline: 3px solid rgba(88, 120, 159, .25);
+            outline-offset: 2px;
+        }
+
+        .choice-check {
+            position: absolute;
+            top: .7rem;
+            right: .7rem;
+            width: 25px;
+            height: 25px;
+            display: grid;
+            place-items: center;
+            color: transparent;
+            font-size: .72rem;
+            border: 1px solid #cdd8e4;
+            border-radius: 8px;
+            background: #ffffff;
+            transition: all .16s ease;
+        }
+
+        .idea-choice-card input:checked + label .choice-check {
+            color: #ffffff;
+            border-color: var(--idea-navy);
+            background: var(--idea-navy);
+        }
+
+        .choice-content {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .choice-badges {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: .35rem;
+            padding-right: 2rem;
+        }
+
+        .choice-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: .2rem .42rem;
+            color: #75849a;
+            font-size: .56rem;
+            font-weight: 800;
+            letter-spacing: .035em;
+            text-transform: uppercase;
+            border: 1px solid #e0e6ed;
+            border-radius: 999px;
+            background: #f8fafc;
+        }
+
+        .choice-badge-latest {
+            color: var(--idea-blue);
+            border-color: #d4e2ef;
+            background: var(--idea-blue-soft);
+        }
+
+        .choice-content h3 {
+            margin: .65rem 0 .3rem;
+            color: var(--idea-ink);
+            font-size: .9rem;
+            line-height: 1.35;
+            font-weight: 780;
+        }
+
+        .choice-content p {
+            margin: 0;
+            color: var(--idea-muted);
+            font-size: .68rem;
+        }
+
+        .choice-score {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: .5rem;
+            margin-top: auto;
+            padding-top: .8rem;
+        }
+
+        .choice-score span {
+            color: #8794a5;
+            font-size: .62rem;
+            font-weight: 700;
+        }
+
+        .choice-score strong {
+            color: var(--idea-navy);
+            font-size: .92rem;
+        }
+
+        .older-ideas {
+            margin-top: .75rem;
+            border: 1px solid #e3e9f0;
+            border-radius: var(--idea-radius-lg);
+            background: #ffffff;
+        }
+
+        .older-ideas summary {
+            padding: .85rem 1rem;
+            color: var(--idea-navy);
+            font-size: .76rem;
+            font-weight: 750;
+            cursor: pointer;
+            list-style: none;
+        }
+
+        .older-ideas summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .older-ideas summary span {
+            display: inline-flex;
+            align-items: center;
+            gap: .45rem;
+        }
+
+        .older-ideas summary small {
+            color: var(--idea-muted);
+            font-size: .64rem;
+        }
+
+        .older-choice-grid {
+            padding: 0 .8rem .8rem;
+        }
+
+        .selection-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .selection-hint {
+            color: var(--idea-muted);
+            font-size: .75rem;
+        }
+
+        .compare-submit {
+            min-width: 250px;
+            justify-content: flex-start;
+            padding: .62rem .75rem;
+        }
+
+        .compare-submit .button-icon {
+            width: 32px;
+            height: 32px;
+            display: grid;
+            place-items: center;
+            flex: 0 0 auto;
+            border-radius: 9px;
+            background: rgba(255, 255, 255, .13);
+        }
+
+        .compare-submit > span:nth-child(2) {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: .12rem;
+            margin-right: auto;
+        }
+
+        .compare-submit strong {
+            font-size: .76rem;
+        }
+
+        .compare-submit small {
+            color: rgba(255, 255, 255, .68);
+            font-size: .57rem;
+            font-weight: 600;
+        }
+
+        .ui-alert {
+            display: flex;
+            align-items: flex-start;
+            gap: .75rem;
+            margin-bottom: 1.25rem;
+            padding: .9rem 1rem;
+            border: 1px solid;
+            border-radius: var(--idea-radius-lg);
+        }
+
+        .ui-alert-warning {
+            color: #6f5117;
+            border-color: #ecd9aa;
+            background: var(--idea-amber-soft);
+        }
+
+        .ui-alert-icon {
+            width: 34px;
+            height: 34px;
+            display: grid;
+            place-items: center;
+            flex: 0 0 auto;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, .65);
+        }
+
+        .ui-alert strong {
+            display: block;
+            margin-bottom: .12rem;
+            font-size: .78rem;
+        }
+
+        .ui-alert p {
+            margin: 0;
+            font-size: .72rem;
+            line-height: 1.45;
+        }
+
+        .ai-result-panel {
+            overflow: hidden;
+        }
+
+        .quality-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: .35rem;
+            min-height: 32px;
+            padding: .35rem .65rem;
+            color: #40516a !important;
+            font-size: .65rem;
+            font-weight: 800;
+            border: 1px solid #d5dee8;
+            border-radius: 999px;
+            background: #f3f6f9 !important;
+        }
+
+        .quality-badge.bg-success {
+            color: #25694c !important;
+            border-color: #cfe8db;
+            background: var(--idea-green-soft) !important;
+        }
+
+        .quality-badge.bg-danger {
+            color: #984242 !important;
+            border-color: #efd0d0;
+            background: var(--idea-red-soft) !important;
+        }
+
+        .quality-badge.bg-info {
+            color: #3d5d80 !important;
+            border-color: #d4e2ef;
+            background: var(--idea-blue-soft) !important;
+        }
+
+        .winner-card {
+            display: grid;
+            grid-template-columns: minmax(0, 1.55fr) minmax(260px, .7fr);
+            overflow: hidden;
+            border: 1px solid #dbe4ee;
+            border-radius: 22px;
+            background:
+                radial-gradient(circle at 8% 0%, rgba(197, 154, 69, .12), transparent 28%),
+                #ffffff;
+            box-shadow: 0 18px 38px rgba(31, 47, 79, .08);
+        }
+
+        .winner-main {
+            padding: clamp(1.1rem, 2.5vw, 1.7rem);
+        }
+
+        .winner-scoreboard {
+            padding: 1.35rem;
+            color: #ffffff;
+            background:
+                radial-gradient(circle at 80% 10%, rgba(197, 154, 69, .22), transparent 26%),
+                linear-gradient(160deg, var(--idea-navy) 0%, #2b4267 100%);
+        }
+
+        .winner-topline,
+        .ranking-title-line,
+        .score-cell-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .65rem;
+        }
+
+        .winner-rank {
+            display: inline-flex;
+            align-items: center;
+            gap: .4rem;
+            color: #8a651b;
+            font-size: .67rem;
+            font-weight: 850;
+            letter-spacing: .055em;
+            text-transform: uppercase;
+        }
+
+        .winner-domain {
+            padding: .26rem .55rem;
+            color: var(--idea-blue);
+            font-size: .61rem;
+            font-weight: 750;
+            border-radius: 999px;
+            background: var(--idea-blue-soft);
+        }
+
+        .winner-title {
+            max-width: 850px;
+            margin: .75rem 0 1rem;
+            color: var(--idea-ink);
+            font-size: clamp(1.5rem, 3vw, 2.25rem);
+            line-height: 1.12;
+            letter-spacing: -.04em;
+            font-weight: 850;
+        }
+
+        .winner-reason {
+            padding: .8rem .9rem;
+            border-left: 3px solid var(--idea-gold);
+            border-radius: 0 12px 12px 0;
+            background: var(--idea-gold-soft);
+        }
+
+        .winner-reason span,
+        .winner-insight small,
+        .analysis-drawer small,
+        .final-recommendation small {
+            color: #8b661f;
+            font-size: .61rem;
+            font-weight: 850;
+            letter-spacing: .055em;
+            text-transform: uppercase;
+        }
+
+        .winner-reason p {
+            margin: .25rem 0 0;
+            color: #4d4128;
+            font-size: .82rem;
+            line-height: 1.55;
+        }
+
+        .winner-insight-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: .7rem;
+            margin-top: .9rem;
+        }
+
+        .winner-insight {
+            display: flex;
+            align-items: flex-start;
+            gap: .6rem;
+            padding: .75rem;
+            border: 1px solid #e3e9ef;
+            border-radius: 14px;
+            background: #fbfcfe;
+        }
+
+        .insight-icon {
+            width: 32px;
+            height: 32px;
+            display: grid;
+            place-items: center;
+            flex: 0 0 auto;
+            font-size: .78rem;
+            border-radius: 10px;
+        }
+
+        .insight-icon-good {
+            color: #2b7d5a;
+            background: var(--idea-green-soft);
+        }
+
+        .insight-icon-risk {
+            color: #9a4444;
+            background: var(--idea-red-soft);
+        }
+
+        .insight-icon-check {
+            color: #4f6f96;
+            background: var(--idea-blue-soft);
+        }
+
+        .winner-insight small {
+            color: #748296;
+        }
+
+        .winner-insight p {
+            margin: .2rem 0 0;
+            color: #4d5b6e;
+            font-size: .69rem;
+            line-height: 1.45;
+        }
+
+        .winner-actions {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: .55rem;
+            margin-top: 1rem;
+        }
+
+        .analysis-drawer {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: .65rem;
+            margin-top: .9rem;
+            padding: .8rem;
+            border: 1px solid #dde5ee;
+            border-radius: 14px;
+            background: #f7f9fc;
+        }
+
+        .analysis-drawer[hidden] {
+            display: none !important;
+        }
+
+        .analysis-drawer > div {
+            padding: .65rem;
+            border-radius: 11px;
+            background: #ffffff;
+        }
+
+        .analysis-drawer small {
+            color: var(--idea-blue);
+        }
+
+        .analysis-drawer p {
+            margin: .2rem 0 0;
+            color: #526176;
+            font-size: .69rem;
+            line-height: 1.45;
+        }
+
+        .overall-ring {
+            --score: 0;
+            width: 140px;
+            height: 140px;
+            display: grid;
+            place-items: center;
+            margin: 0 auto 1.1rem;
+            border-radius: 50%;
+            background:
+                radial-gradient(circle, var(--idea-navy) 57%, transparent 58%),
+                conic-gradient(var(--idea-gold) calc(var(--score) * 1%), rgba(255, 255, 255, .15) 0);
+        }
+
+        .overall-ring > div {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: .08rem;
+        }
+
+        .overall-ring strong {
+            color: #ffffff;
+            font-size: 1.7rem;
+            line-height: 1;
+        }
+
+        .overall-ring span {
+            color: #afbdd0;
+            font-size: .64rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: .06em;
+        }
+
+        .winner-metrics {
+            display: flex;
+            flex-direction: column;
+            gap: .8rem;
+        }
+
+        .winner-metric > div:first-child {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .6rem;
+            margin-bottom: .35rem;
+        }
+
+        .winner-metric span {
+            display: inline-flex;
+            align-items: center;
+            gap: .4rem;
+            color: #c5d0df;
+            font-size: .68rem;
+            font-weight: 700;
+        }
+
+        .winner-metric strong {
+            color: #ffffff;
+            font-size: .75rem;
+        }
+
+        .metric-track {
+            height: 6px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, .13);
+        }
+
+        .metric-track span {
+            display: block;
+            height: 100%;
+            border-radius: inherit;
+            background: linear-gradient(90deg, #c59a45, #e3c984);
+        }
+
+        .partial-note {
+            display: flex;
+            align-items: flex-start;
+            gap: .35rem;
+            margin: 1rem 0 0;
+            color: #aebcd0;
+            font-size: .61rem;
+            line-height: 1.4;
+        }
+
+        .ranking-heading {
+            display: flex;
+            align-items: flex-end;
+            justify-content: space-between;
+            gap: 1rem;
+            margin: 1.35rem 0 .7rem;
+        }
+
+        .ranking-heading > span {
+            color: var(--idea-muted);
+            font-size: .68rem;
+            font-weight: 700;
+        }
+
+        .ranking-list {
+            overflow: hidden;
+            border: 1px solid var(--idea-border);
+            border-radius: var(--idea-radius-lg);
+        }
+
+        .ranking-row {
+            display: grid;
+            grid-template-columns: 58px minmax(0, 1fr) 90px;
+            gap: .85rem;
+            padding: 1rem;
+            border-bottom: 1px solid var(--idea-border);
+            background: #ffffff;
+        }
+
+        .ranking-row:last-child {
+            border-bottom: 0;
+        }
+
+        .ranking-row:hover {
+            background: #fbfcfe;
+        }
+
+        .ranking-position {
+            width: 44px;
+            height: 44px;
+            display: grid;
+            place-items: center;
+            color: var(--idea-navy);
+            font-size: .85rem;
+            font-weight: 850;
+            border-radius: 13px;
+            background: var(--idea-blue-soft);
+        }
+
+        .ranking-title-line {
+            align-items: flex-start;
+        }
+
+        .ranking-title-line h4 {
+            margin: 0;
+            color: var(--idea-ink);
+            font-size: .9rem;
+            font-weight: 790;
+        }
+
+        .ranking-title-line > div > span {
+            display: block;
+            margin-top: .15rem;
+            color: var(--idea-muted);
+            font-size: .63rem;
+        }
+
+        .risk-pill {
+            flex: 0 0 auto;
+            padding: .22rem .48rem;
+            font-size: .57rem;
+            font-weight: 850;
+            letter-spacing: .04em;
+            text-transform: uppercase;
+            border-radius: 999px;
+        }
+
+        .risk-low {
+            color: #277452;
+            background: var(--idea-green-soft);
+        }
+
+        .risk-medium {
+            color: #8a6018;
+            background: var(--idea-gold-soft);
+        }
+
+        .risk-high {
+            color: #9e4343;
+            background: var(--idea-red-soft);
+        }
+
+        .ranking-summary {
+            margin: .55rem 0;
+            color: #566579;
+            font-size: .73rem;
+            line-height: 1.5;
+        }
+
+        .ranking-signals {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: .5rem;
+        }
+
+        .ranking-signals span {
+            color: #657489;
+            font-size: .66rem;
+            line-height: 1.45;
+        }
+
+        .ranking-signals i {
+            margin-right: .2rem;
+            color: var(--idea-blue);
+        }
+
+        .ranking-actions {
+            margin-top: .6rem;
+        }
+
+        .text-action {
+            display: inline-flex;
+            align-items: center;
+            gap: .35rem;
+            padding: 0;
+            color: var(--idea-blue);
+            font-size: .66rem;
+            font-weight: 800;
+            border: 0;
+            background: transparent;
+        }
+
+        .text-action:hover {
+            color: var(--idea-navy);
+        }
+
+        .compact-drawer {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .ranking-score {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            justify-content: center;
+        }
+
+        .ranking-score strong {
+            color: var(--idea-navy);
+            font-size: 1.1rem;
+        }
+
+        .ranking-score span {
+            color: var(--idea-muted);
+            font-size: .58rem;
+            font-weight: 750;
+            text-transform: uppercase;
+        }
+
+        .final-recommendation {
+            display: flex;
+            align-items: flex-start;
+            gap: .75rem;
+            margin-top: .9rem;
+            padding: .9rem 1rem;
+            border: 1px solid #ead9b4;
+            border-radius: 15px;
+            background: var(--idea-gold-soft);
+        }
+
+        .final-recommendation > span {
+            width: 36px;
+            height: 36px;
+            display: grid;
+            place-items: center;
+            flex: 0 0 auto;
+            color: #8a6418;
+            border-radius: 11px;
+            background: rgba(255, 255, 255, .72);
+        }
+
+        .final-recommendation p {
+            margin: .2rem 0 0;
+            color: #5f4d29;
+            font-size: .76rem;
+            line-height: 1.5;
+        }
+
+        .provider-note {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: .35rem;
+            margin: .65rem 0 0;
+            color: #8a96a7;
+            font-size: .59rem;
+        }
+
+        .matrix-heading {
+            align-items: center;
+        }
+
+        .reset-action {
+            flex: 0 0 auto;
+        }
+
+        .metric-toolbar {
+            position: sticky;
+            top: 0;
+            z-index: 4;
+            margin: 0 -1px .85rem;
+            padding: .75rem;
+            border: 1px solid var(--idea-border);
+            border-radius: var(--idea-radius-lg);
+            background: rgba(255, 255, 255, .96);
+            backdrop-filter: blur(10px);
+        }
+
+        .metric-tabs {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: .55rem;
+        }
+
+        .metric-tab {
+            min-height: 48px;
+            display: flex;
+            align-items: center;
+            gap: .5rem;
+            padding: .55rem .65rem;
+            color: #68778b;
+            text-align: left;
+            border: 1px solid #dfe6ee;
+            border-radius: 12px;
+            background: #ffffff;
+            transition: border-color .15s ease, background .15s ease, color .15s ease;
+        }
+
+        .metric-tab > span {
+            width: 29px;
+            height: 29px;
+            display: grid;
+            place-items: center;
+            flex: 0 0 auto;
+            border-radius: 9px;
+            background: #f2f5f8;
+        }
+
+        .metric-tab strong {
+            margin-right: auto;
+            font-size: .7rem;
+        }
+
+        .metric-tab .metric-check {
+            color: transparent;
+        }
+
+        .metric-tab.active {
+            color: var(--idea-navy);
+            border-color: var(--idea-blue);
+            background: var(--idea-blue-soft);
+        }
+
+        .metric-tab.active > span {
+            color: #ffffff;
+            background: var(--idea-blue);
+        }
+
+        .metric-tab.active .metric-check {
+            color: var(--idea-blue);
+        }
+
+        .selected-metrics {
+            margin-top: .6rem;
+            color: var(--idea-muted);
+            font-size: .66rem;
+        }
+
+        .score-matrix-shell {
+            overflow-x: auto;
+            border: 1px solid var(--idea-border);
+            border-radius: var(--idea-radius-lg);
+        }
+
+        .score-matrix {
+            width: 100%;
+            min-width: 920px;
+            border-collapse: separate;
+            border-spacing: 0;
+            background: #ffffff;
+        }
+
+        .score-matrix th {
+            padding: .75rem;
+            color: #718096;
+            font-size: .61rem;
+            font-weight: 850;
+            letter-spacing: .045em;
+            text-align: left;
+            text-transform: uppercase;
+            border-bottom: 1px solid var(--idea-border);
+            background: #f7f9fc;
+        }
+
+        .score-matrix th i {
+            margin-right: .25rem;
+        }
+
+        .idea-column {
+            min-width: 330px;
+        }
+
+        .metric-column {
+            min-width: 165px;
+        }
+
+        .action-column {
+            width: 115px;
+            text-align: center !important;
+        }
+
+        .idea-matrix-row {
+            transition: background .15s ease;
+        }
+
+        .idea-matrix-row:hover {
+            background: #fbfcfe;
+        }
+
+        .idea-matrix-row.best-match {
+            background: #f2f7fc;
+        }
+
+        .idea-matrix-row.best-match .idea-cell {
+            box-shadow: inset 3px 0 0 var(--idea-blue);
+        }
+
+        .idea-matrix-row.selected {
+            background: #f3faf6;
+        }
+
+        .score-matrix td {
+            padding: .72rem;
+            vertical-align: top;
+            border-bottom: 1px solid #edf1f5;
+        }
+
+        .score-matrix tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .idea-cell {
+            display: flex;
+            align-items: flex-start;
+            gap: .65rem;
+            min-width: 330px;
+        }
+
+        .idea-index {
+            width: 30px;
+            height: 30px;
+            display: grid;
+            place-items: center;
+            flex: 0 0 auto;
+            color: var(--idea-navy);
+            font-size: .68rem;
+            font-weight: 850;
+            border-radius: 9px;
+            background: var(--idea-blue-soft);
+        }
+
+        .idea-cell-title {
+            display: flex;
+            align-items: flex-start;
+            gap: .45rem;
+        }
+
+        .idea-cell-title h3 {
+            margin: 0;
+            color: var(--idea-ink);
+            font-size: .78rem;
+            line-height: 1.35;
+            font-weight: 780;
+        }
+
+        .official-pill,
+        .legacy-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: .25rem;
+            flex: 0 0 auto;
+            padding: .17rem .4rem;
+            font-size: .52rem;
+            font-weight: 850;
+            border-radius: 999px;
+        }
+
+        .official-pill {
+            color: #287151;
+            background: var(--idea-green-soft);
+        }
+
+        .legacy-pill {
+            color: #86601d;
+            background: var(--idea-gold-soft);
+        }
+
+        .idea-cell-meta {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: .35rem .7rem;
+            margin-top: .4rem;
+            color: var(--idea-muted);
+            font-size: .59rem;
+        }
+
+        .idea-cell-meta span {
+            display: inline-flex;
+            align-items: center;
+            gap: .25rem;
+        }
+
+        .score-cell {
+            min-width: 165px;
+        }
+
+        .score-cell-card {
+            min-height: 106px;
+            padding: .65rem;
+            border: 1px solid #e3e9ef;
+            border-radius: 13px;
+            background: #ffffff;
+        }
+
+        .score-cell-top strong {
+            color: var(--idea-navy);
+            font-size: .95rem;
+        }
+
+        .score-cell-top span {
+            color: var(--idea-muted);
+            font-size: .58rem;
+            font-weight: 750;
+        }
+
+        .metric-track-light {
+            height: 5px;
+            margin: .45rem 0;
+            background: #edf1f5;
+        }
+
+        .metric-track-light span {
+            background: linear-gradient(90deg, var(--idea-blue), #89a5c4);
+        }
+
+        .score-explainer summary {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .4rem;
+            color: var(--idea-blue);
+            font-size: .58rem;
+            font-weight: 800;
+            cursor: pointer;
+            list-style: none;
+        }
+
+        .score-explainer summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .score-explainer[open] summary i {
+            transform: rotate(180deg);
+        }
+
+        .score-explainer > div {
+            margin-top: .55rem;
+            padding-top: .55rem;
+            border-top: 1px solid #edf1f5;
+        }
+
+        .score-explainer small {
+            display: block;
+            color: #8a97a7;
+            font-size: .5rem;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+        .score-explainer strong {
+            display: block;
+            margin-top: .1rem;
+            color: var(--idea-navy);
+            font-size: .56rem;
+        }
+
+        .score-explainer p {
+            margin: .35rem 0 0;
+            color: #607085;
+            font-size: .56rem;
+            line-height: 1.4;
+        }
+
+        .decision-cell {
+            text-align: center;
+        }
+
+        .decision-btn {
+            min-width: 88px;
+            min-height: 36px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .35rem;
+            color: var(--idea-navy);
+            font-size: .66rem;
+            font-weight: 800;
+            border: 1px solid #d5dfe9;
+            border-radius: 10px;
+            background: #ffffff;
+        }
+
+        .decision-btn:hover:not(:disabled) {
+            border-color: var(--idea-blue);
+            background: var(--idea-blue-soft);
+        }
+
+        .decision-btn.selected {
+            color: #287151;
+            border-color: #cce5d8;
+            background: var(--idea-green-soft);
+        }
+
+        .decision-btn:disabled {
             opacity: 1;
             cursor: default;
         }
 
-        @@media (max-width: 767px) {
-            .empty-dna-layout {
-                min-height: calc(100vh - 140px);
-                padding: 1rem;
+        .metric-recommendation {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: .8rem;
+            margin-top: .85rem;
+            padding: 1rem;
+            color: #ffffff;
+            border-radius: var(--idea-radius-lg);
+            background:
+                radial-gradient(circle at 90% 10%, rgba(197, 154, 69, .23), transparent 28%),
+                linear-gradient(135deg, var(--idea-navy) 0%, #314a70 100%);
+        }
+
+        .metric-recommendation-icon {
+            width: 42px;
+            height: 42px;
+            display: grid;
+            place-items: center;
+            color: #e6c97d;
+            border: 1px solid rgba(255, 255, 255, .12);
+            border-radius: 13px;
+            background: rgba(255, 255, 255, .08);
+        }
+
+        .metric-recommendation .ui-eyebrow {
+            color: #b8c6d9;
+        }
+
+        .metric-recommendation h3 {
+            margin: 0;
+            color: #ffffff;
+            font-size: 1rem;
+            font-weight: 800;
+        }
+
+        .metric-recommendation p {
+            margin: .2rem 0 0;
+            color: #c3cfdf;
+            font-size: .67rem;
+        }
+
+        .metric-recommendation .ui-btn-primary {
+            color: var(--idea-navy) !important;
+            border-color: #e3c576 !important;
+            background: #e3c576 !important;
+            box-shadow: none;
+        }
+
+        .metric-recommendation .ui-btn-primary:hover:not(:disabled) {
+            color: var(--idea-navy) !important;
+            background: #ecd58f !important;
+        }
+
+        .rotate-180 {
+            transform: rotate(180deg);
+        }
+
+        .d-none {
+            display: none !important;
+        }
+
+        @@media (max-width: 1100px) {
+            .winner-card {
+                grid-template-columns: 1fr;
             }
 
-            .empty-dna-card {
-                min-height: 540px;
-                padding: 1.5rem;
+            .winner-scoreboard {
+                display: grid;
+                grid-template-columns: 160px minmax(0, 1fr);
+                align-items: center;
+                gap: 1.2rem;
+            }
+
+            .overall-ring {
+                margin-bottom: 0;
+            }
+
+            .winner-insight-grid {
+                grid-template-columns: 1fr;
             }
         }
+
+        @@media (max-width: 900px) {
+            .idea-hero {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .idea-hero-actions {
+                width: 100%;
+            }
+
+            .idea-hero-actions .ui-btn {
+                width: 100%;
+            }
+
+            .metric-tabs {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .ranking-signals {
+                grid-template-columns: 1fr;
+            }
+
+            .metric-recommendation {
+                grid-template-columns: auto minmax(0, 1fr);
+            }
+
+            .metric-recommendation-action {
+                grid-column: 1 / -1;
+            }
+
+            .metric-recommendation-action .ui-btn {
+                width: 100%;
+            }
+        }
+
+        @@media (max-width: 720px) {
+            .idea-page-shell,
+            .idea-empty-shell {
+                width: min(100% - 1rem, 1480px);
+                padding-top: .6rem;
+            }
+
+            .idea-hero,
+            .ui-panel {
+                border-radius: 18px;
+            }
+
+            .ui-panel-heading,
+            .selection-footer,
+            .ranking-heading {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .selection-status {
+                justify-content: flex-start;
+            }
+
+            .compare-submit {
+                width: 100%;
+            }
+
+            .winner-scoreboard {
+                grid-template-columns: 1fr;
+            }
+
+            .overall-ring {
+                margin: 0 auto 1rem;
+            }
+
+            .analysis-drawer,
+            .compact-drawer {
+                grid-template-columns: 1fr;
+            }
+
+            .ranking-row {
+                grid-template-columns: 44px minmax(0, 1fr);
+            }
+
+            .ranking-score {
+                grid-column: 2;
+                align-items: flex-start;
+            }
+
+            .idea-choice-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .metric-tabs {
+                grid-template-columns: 1fr;
+            }
+
+            .metric-toolbar {
+                position: static;
+            }
+        }
+
+        /* =========================================================
+           FYPilot theme overrides
+           Navy #28385E · Slate #516C8D · Soft gray #EEF2F6
+           ========================================================= */
+
+        .idea-page-shell {
+            background: transparent;
+        }
+
+        .idea-hero {
+            border-color: #E0E6EE;
+            background:
+                radial-gradient(circle at 88% 8%, rgba(81, 108, 141, .13), transparent 30%),
+                linear-gradient(135deg, #FFFFFF 0%, #F3F6F9 100%);
+            box-shadow: 0 14px 34px rgba(40, 56, 94, .06);
+        }
+
+        .idea-hero::after {
+            border-color: rgba(40, 56, 94, .055);
+        }
+
+        .ui-panel {
+            border-color: #E4E9F0;
+            box-shadow: 0 12px 30px rgba(40, 56, 94, .055);
+        }
+
+        .step-number {
+            background: #28385E;
+            box-shadow: 0 8px 18px rgba(40, 56, 94, .18);
+        }
+
+        .step-number-ai {
+            color: #28385E;
+            border: 1px solid #D9E0E9;
+            background: #EEF2F6;
+        }
+
+        .ui-eyebrow {
+            color: #516C8D;
+        }
+
+        .selection-group {
+            border-color: #E2E8F0;
+            background: #F8FAFC;
+        }
+
+        .selection-group-count,
+        .choice-badge-latest {
+            color: #28385E !important;
+            border-color: #D8E0EA;
+            background: #EEF2F6;
+        }
+
+        .older-ideas {
+            border-color: #E2E8F0;
+            background: #FFFFFF;
+        }
+
+        .older-ideas summary {
+            color: #28385E;
+            background: #F8FAFC;
+            border-radius: 17px;
+        }
+
+        .older-ideas[open] summary {
+            border-bottom: 1px solid #E8ECF2;
+            border-radius: 17px 17px 0 0;
+            background: #EEF2F6;
+        }
+
+        .idea-choice-card label {
+            border-color: #DDE4EC;
+            background: #FFFFFF;
+            box-shadow: 0 4px 12px rgba(40, 56, 94, .025);
+        }
+
+        .idea-choice-card label:hover {
+            border-color: #AEBED1;
+            box-shadow: 0 10px 22px rgba(40, 56, 94, .08);
+        }
+
+        .idea-choice-card input:checked + label {
+            border-color: #28385E;
+            background:
+                linear-gradient(180deg, #EEF2F6 0%, #FFFFFF 82%);
+            box-shadow:
+                inset 0 0 0 1px #28385E,
+                0 10px 22px rgba(40, 56, 94, .10);
+        }
+
+        .choice-check {
+            border-color: #C8D3E0;
+            background: #FFFFFF;
+        }
+
+        .idea-choice-card input:checked + label .choice-check {
+            color: #FFFFFF;
+            border-color: #28385E;
+            background: #28385E;
+        }
+
+        .choice-badge {
+            color: #64748B;
+            border-color: #DDE4EC;
+            background: #F8FAFC;
+        }
+
+        .choice-content h3,
+        .choice-score strong {
+            color: #111827;
+        }
+
+        .selection-count {
+            color: #28385E;
+            border-color: #D5DEE9;
+            background: #EEF2F6;
+        }
+
+        .selection-speed {
+            color: #516C8D;
+            border-color: #D5DEE9;
+            background: #F8FAFC;
+        }
+
+        .ui-btn-primary {
+            color: #FFFFFF !important;
+            border-color: #28385E !important;
+            background: #28385E !important;
+            box-shadow: 0 8px 18px rgba(40, 56, 94, .16);
+        }
+
+        .ui-btn-primary:hover:not(:disabled) {
+            color: #FFFFFF !important;
+            border-color: #304163 !important;
+            background: #304163 !important;
+        }
+
+        .ui-btn-secondary,
+        .ui-btn-ghost {
+            color: #28385E !important;
+            border-color: #D8E0EA !important;
+            background: #FFFFFF !important;
+        }
+
+        .ui-btn-secondary:hover,
+        .ui-btn-ghost:hover {
+            color: #28385E !important;
+            border-color: #BECAD8 !important;
+            background: #EEF2F6 !important;
+        }
+
+        .quality-badge,
+        .quality-badge.bg-info {
+            color: #28385E !important;
+            border-color: #D5DEE9;
+            background: #EEF2F6 !important;
+        }
+
+        .winner-card {
+            border-color: #DDE4EC;
+            background:
+                radial-gradient(circle at 7% 0%, rgba(81, 108, 141, .10), transparent 30%),
+                #FFFFFF;
+            box-shadow: 0 16px 36px rgba(40, 56, 94, .08);
+        }
+
+        .winner-scoreboard {
+            background:
+                radial-gradient(circle at 82% 10%, rgba(255, 255, 255, .09), transparent 28%),
+                linear-gradient(160deg, #28385E 0%, #304163 100%);
+        }
+
+        .winner-rank {
+            color: #516C8D;
+        }
+
+        .winner-domain {
+            color: #28385E;
+            background: #EEF2F6;
+        }
+
+        .winner-reason {
+            border-left-color: #516C8D;
+            background: #F3F6F9;
+        }
+
+        .winner-reason span,
+        .winner-insight small,
+        .analysis-drawer small,
+        .final-recommendation small {
+            color: #516C8D;
+        }
+
+        .winner-reason p {
+            color: #39475B;
+        }
+
+        .overall-ring {
+            background:
+                radial-gradient(circle, #28385E 57%, transparent 58%),
+                conic-gradient(#D9E2EC calc(var(--score) * 1%), rgba(255, 255, 255, .13) 0);
+        }
+
+        .metric-track span {
+            background: linear-gradient(90deg, #8FA5BE, #D4DEE9);
+        }
+
+        .ranking-position {
+            color: #28385E;
+            background: #EEF2F6;
+        }
+
+        .ranking-row:hover {
+            background: #F8FAFC;
+        }
+
+        .final-recommendation {
+            border-color: #D9E1EA;
+            background: #EEF2F6;
+        }
+
+        .final-recommendation > span {
+            color: #28385E;
+            background: #FFFFFF;
+        }
+
+        .final-recommendation p {
+            color: #46556A;
+        }
+
+        .metric-toolbar {
+            border-color: #E1E7EF;
+            background: rgba(255, 255, 255, .98);
+        }
+
+        .metric-tab {
+            color: #64748B;
+            border-color: #DDE4EC;
+            background: #FFFFFF;
+        }
+
+        .metric-tab > span {
+            background: #F1F4F7;
+        }
+
+        .metric-tab.active {
+            color: #28385E;
+            border-color: #516C8D;
+            background: #EEF2F6;
+        }
+
+        .metric-tab.active > span {
+            color: #FFFFFF;
+            background: #516C8D;
+        }
+
+        .metric-tab.active .metric-check {
+            color: #28385E;
+        }
+
+        .score-matrix-shell {
+            border-color: #DEE5ED;
+            box-shadow: 0 8px 22px rgba(40, 56, 94, .045);
+        }
+
+        .score-matrix th {
+            color: #FFFFFF;
+            border-bottom-color: #28385E;
+            background: #28385E;
+        }
+
+        .score-matrix th i {
+            color: #C9D5E2;
+        }
+
+        .score-matrix td {
+            border-bottom-color: #E8ECF2;
+        }
+
+        .idea-matrix-row:hover {
+            background: #F8FAFC;
+        }
+
+        .idea-matrix-row.best-match {
+            background: #F1F4F8;
+        }
+
+        .idea-matrix-row.best-match .idea-cell {
+            box-shadow: inset 4px 0 0 #516C8D;
+        }
+
+        .idea-matrix-row.selected {
+            background: #EEF2F6;
+        }
+
+        .idea-matrix-row.selected .idea-cell {
+            box-shadow: inset 4px 0 0 #28385E;
+        }
+
+        .idea-index {
+            color: #28385E;
+            background: #EEF2F6;
+        }
+
+        .official-pill {
+            color: #28385E;
+            border: 1px solid #D4DEE8;
+            background: #EEF2F6;
+        }
+
+        .legacy-pill {
+            color: #6A5121;
+            background: #F7F1E4;
+        }
+
+        .score-cell-card {
+            border-color: #DEE5ED;
+            background: #FFFFFF;
+            box-shadow: 0 3px 10px rgba(40, 56, 94, .025);
+        }
+
+        .score-cell-top strong {
+            color: #28385E;
+        }
+
+        .metric-track-light {
+            background: #E9EEF3;
+        }
+
+        .metric-track-light span {
+            background: linear-gradient(90deg, #516C8D, #91A6BF);
+        }
+
+        .score-explainer summary,
+        .text-action {
+            color: #516C8D;
+        }
+
+        .score-explainer summary:hover,
+        .text-action:hover {
+            color: #28385E;
+        }
+
+        .decision-btn {
+            color: #28385E;
+            border-color: #CBD6E2;
+            background: #FFFFFF;
+        }
+
+        .decision-btn:hover:not(:disabled) {
+            border-color: #516C8D;
+            background: #EEF2F6;
+        }
+
+        .decision-btn.selected {
+            color: #FFFFFF;
+            border-color: #28385E;
+            background: #28385E;
+        }
+
+        .metric-recommendation {
+            background:
+                radial-gradient(circle at 90% 10%, rgba(255, 255, 255, .08), transparent 30%),
+                linear-gradient(135deg, #28385E 0%, #304163 100%);
+        }
+
+        .metric-recommendation-icon {
+            color: #FFFFFF;
+            border-color: rgba(255, 255, 255, .15);
+            background: rgba(255, 255, 255, .09);
+        }
+
+        .metric-recommendation .ui-eyebrow {
+            color: #BDCAD8;
+        }
+
+        .metric-recommendation .ui-btn-primary {
+            color: #28385E !important;
+            border-color: #FFFFFF !important;
+            background: #FFFFFF !important;
+        }
+
+        .metric-recommendation .ui-btn-primary:hover:not(:disabled) {
+            color: #28385E !important;
+            border-color: #EEF2F6 !important;
+            background: #EEF2F6 !important;
+        }
+
     </style>
 }
+
 @section Scripts {
     <script>
-        const comparisonIdeas = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(comparisonData));
+        const comparisonIdeas = @Html.Raw(
+            System.Text.Json.JsonSerializer.Serialize(comparisonData));
 
         const metricLabels = {
             feasibility: "Feasibility",
             innovation: "Innovation",
-            market: "Market Value",
-            time: "Time Fit",
-            difficulty: "Difficulty Fit"
+            market: "Market Demand",
+            overall: "Overall"
         };
 
         const metricTabs = document.querySelectorAll("[data-metric]");
@@ -509,6 +3018,8 @@ else
         const recommendedTitle = document.getElementById("ic3RecommendedTitle");
         const recommendedText = document.getElementById("ic3RecommendedText");
         const recommendedIdeaId = document.getElementById("ic3RecommendedIdeaId");
+        const recommendedButton =
+            document.querySelector(".metric-recommendation-action button");
         const resetButton = document.getElementById("ic3ResetMetrics");
 
         function getSelectedMetrics() {
@@ -518,24 +3029,38 @@ else
         }
 
         function scoreIdea(idea, selectedMetrics) {
-            if (selectedMetrics.length === 0) {
-                return 0;
+            const evaluatedValues = selectedMetrics
+                .map(metric => idea.scores[metric])
+                .filter(value => Number.isFinite(value) && value > 0);
+
+            if (evaluatedValues.length === 0) {
+                return {
+                    score: null,
+                    evaluatedCount: 0
+                };
             }
 
-            const total = selectedMetrics.reduce((sum, metric) => {
-                return sum + (idea.scores[metric] || 0);
-            }, 0);
+            const total = evaluatedValues.reduce(
+                (sum, value) => sum + value,
+                0);
 
-            return Math.round(total / selectedMetrics.length);
+            return {
+                score: Math.round(total / evaluatedValues.length),
+                evaluatedCount: evaluatedValues.length
+            };
         }
 
         function updateMetricVisibility(selectedMetrics) {
             metricColumns.forEach(column => {
-                column.classList.toggle("d-none", !selectedMetrics.includes(column.dataset.metricColumn));
+                column.classList.toggle(
+                    "d-none",
+                    !selectedMetrics.includes(column.dataset.metricColumn));
             });
 
             metricCells.forEach(cell => {
-                cell.classList.toggle("d-none", !selectedMetrics.includes(cell.dataset.metricCell));
+                cell.classList.toggle(
+                    "d-none",
+                    !selectedMetrics.includes(cell.dataset.metricCell));
             });
         }
 
@@ -545,42 +3070,74 @@ else
             });
 
             const ranked = comparisonIdeas
-                .map(idea => ({
-                    ...idea,
-                    finalScore: scoreIdea(idea, selectedMetrics)
-                }))
-                .sort((a, b) => b.finalScore - a.finalScore);
+                .map(idea => {
+                    const evaluation = scoreIdea(idea, selectedMetrics);
 
-            const best = ranked[0];
+                    return {
+                        ...idea,
+                        finalScore: evaluation.score,
+                        evaluatedCount: evaluation.evaluatedCount
+                    };
+                })
+                .sort((a, b) => (b.finalScore ?? -1) - (a.finalScore ?? -1));
+
+            const best = ranked.find(
+                idea => Number.isFinite(idea.finalScore));
 
             if (!best) {
+                recommendedTitle.textContent = "Not enough evaluated scores";
+                recommendedText.textContent =
+                    "Generate new ideas with evaluated scores before using the automatic recommendation.";
+
+                recommendedIdeaId.value = "";
+
+                if (recommendedButton) {
+                    recommendedButton.disabled = true;
+                }
+
                 return;
             }
 
-            document.querySelector(`[data-idea-row="${best.id}"]`)?.classList.add("best-match");
+            document
+                .querySelector(`[data-idea-row="${best.id}"]`)
+                ?.classList.add("best-match");
 
             recommendedTitle.textContent = best.title;
             recommendedText.textContent =
-                `${best.title} is currently the strongest match based on your selected priorities with an average fit of ${best.finalScore}%.`;
+                `${best.title} is the strongest match at ${best.finalScore}% ` +
+                `across ${best.evaluatedCount} evaluated ` +
+                `${best.evaluatedCount === 1 ? "metric" : "metrics"}.`;
 
             recommendedIdeaId.value = best.id;
+
+            if (recommendedButton) {
+                recommendedButton.disabled = false;
+            }
         }
 
         function updateComparison() {
             let selectedMetrics = getSelectedMetrics();
 
             if (selectedMetrics.length === 0) {
-                document.querySelector('[data-metric="feasibility"]')?.classList.add("active");
+                document
+                    .querySelector('[data-metric="feasibility"]')
+                    ?.classList.add("active");
+
                 selectedMetrics = ["feasibility"];
             }
 
             updateMetricVisibility(selectedMetrics);
 
-            const selectedLabels = selectedMetrics.map(metric => metricLabels[metric]);
+            const selectedLabels = selectedMetrics.map(
+                metric => metricLabels[metric]);
 
-            selectedSummary.innerHTML =
-                "Showing: " +
-                selectedLabels.map(label => `<strong>${label}</strong>`).join(", ");
+            if (selectedSummary) {
+                selectedSummary.innerHTML =
+                    "Showing: " +
+                    selectedLabels
+                        .map(label => `<strong>${label}</strong>`)
+                        .join(", ");
+            }
 
             updateTableHighlight(selectedMetrics);
         }
@@ -595,103 +3152,141 @@ else
         resetButton?.addEventListener("click", function () {
             metricTabs.forEach(tab => tab.classList.remove("active"));
 
-            document.querySelector('[data-metric="feasibility"]')?.classList.add("active");
-            document.querySelector('[data-metric="time"]')?.classList.add("active");
+            document
+                .querySelector('[data-metric="feasibility"]')
+                ?.classList.add("active");
+
+            document
+                .querySelector('[data-metric="innovation"]')
+                ?.classList.add("active");
 
             updateComparison();
         });
 
         updateComparison();
+
+        document.querySelectorAll("[data-details-toggle]").forEach(button => {
+            button.addEventListener("click", () => {
+                const panel = document.getElementById(
+                    button.getAttribute("aria-controls"));
+
+                if (!panel) {
+                    return;
+                }
+
+                const isOpen =
+                    button.getAttribute("aria-expanded") === "true";
+
+                button.setAttribute(
+                    "aria-expanded",
+                    String(!isOpen));
+
+                button
+                    .querySelector(".bi-chevron-down")
+                    ?.classList.toggle("rotate-180", !isOpen);
+
+                if (isOpen) {
+                    panel.setAttribute("hidden", "");
+                } else {
+                    panel.removeAttribute("hidden");
+                }
+            });
+        });
+
+        const compareForm = document.getElementById("ic3CompareForm");
+        const compareBtn = document.getElementById("ic3CompareBtn");
+
+        const MIN_IDEAS =
+            @FYPilot.Web.Pages.Student.IdeaComparisonModel.MinimumIdeasToCompare;
+
+        const RECOMMENDED_MAX_IDEAS =
+            @FYPilot.Web.Pages.Student.IdeaComparisonModel.RecommendedMaximumIdeasToCompare;
+
+        const HARD_MAX_IDEAS =
+            @FYPilot.Web.Pages.Student.IdeaComparisonModel.HardMaximumIdeasToCompare;
+
+        const selectCheckboxes =
+            document.querySelectorAll('input[name="SelectedIdeaIds"]');
+
+        const selectCount = document.getElementById("ic3SelectCount");
+        const selectHint = document.getElementById("ic3SelectHint");
+
+        function updateSelectionState(changedBox = null) {
+            let checked = Array.from(selectCheckboxes)
+                .filter(box => box.checked);
+
+            if (checked.length > HARD_MAX_IDEAS && changedBox) {
+                changedBox.checked = false;
+                checked = Array.from(selectCheckboxes)
+                    .filter(box => box.checked);
+            }
+
+            const count = checked.length;
+            const isValid =
+                count >= MIN_IDEAS &&
+                count <= HARD_MAX_IDEAS;
+
+            if (selectCount) {
+                selectCount.textContent = `${count} selected`;
+
+                selectCount.classList.toggle(
+                    "is-invalid",
+                    !isValid);
+
+                selectCount.classList.toggle(
+                    "is-caution",
+                    count > RECOMMENDED_MAX_IDEAS &&
+                    count <= HARD_MAX_IDEAS);
+            }
+
+            let hint;
+
+            if (count < MIN_IDEAS) {
+                hint =
+                    `Select at least ${MIN_IDEAS} ideas to continue.`;
+            } else if (count > RECOMMENDED_MAX_IDEAS) {
+                hint =
+                    `${count} ideas selected. ${RECOMMENDED_MAX_IDEAS} or fewer usually returns faster.`;
+            } else {
+                hint =
+                    `${count} ideas selected and ready to compare.`;
+            }
+
+            if (selectHint) {
+                selectHint.textContent = hint;
+            }
+
+            if (compareBtn && !compareBtn.dataset.submitting) {
+                compareBtn.disabled = !isValid;
+            }
+        }
+
+        selectCheckboxes.forEach(box => {
+            box.addEventListener("change", () => {
+                updateSelectionState(box);
+            });
+        });
+
+        updateSelectionState();
+
+        compareForm?.addEventListener("submit", () => {
+            if (!compareBtn) {
+                return;
+            }
+
+            compareBtn.dataset.submitting = "true";
+            compareBtn.disabled = true;
+
+            compareBtn.innerHTML =
+                '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>' +
+                '<span><strong>Analyzing your shortlist…</strong><small>This normally takes under 45 seconds</small></span>';
+        });
+
+        document
+            .getElementById("aiRecommendationResult")
+            ?.scrollIntoView({
+                behavior: "smooth",
+                block: "start"
+            });
     </script>
-}
-
-@functions {
-    private static int ClampScore(int value)
-    {
-        return Math.Clamp(value, 0, 100);
-    }
-
-    private static int AverageScore(ProjectIdea idea)
-    {
-        return (ClampScore(idea.InnovationScore) + ClampScore(idea.FeasibilityScore) + ClampScore(idea.MarketDemandScore)) / 3;
-    }
-
-    private static int TimeFitScore(int weeks)
-    {
-        if (weeks <= 0)
-        {
-            return 70;
-        }
-
-        if (weeks <= 10)
-        {
-            return 95;
-        }
-
-        if (weeks <= 14)
-        {
-            return 88;
-        }
-
-        if (weeks <= 18)
-        {
-            return 74;
-        }
-
-        if (weeks <= 24)
-        {
-            return 58;
-        }
-
-        return 42;
-    }
-
-    private static int DifficultyFitScore(string? difficulty)
-    {
-        var value = (difficulty ?? "").Trim().ToLowerInvariant();
-
-        return value switch
-        {
-            "beginner" => 82,
-            "easy" => 82,
-            "intermediate" => 92,
-            "medium" => 92,
-            "advanced" => 68,
-            "hard" => 58,
-            _ => 75
-        };
-    }
-
-    private static int ScoreForMetric(ProjectIdea idea, string metric)
-    {
-        return metric switch
-        {
-            "feasibility" => ClampScore(idea.FeasibilityScore),
-            "innovation" => ClampScore(idea.InnovationScore),
-            "market" => ClampScore(idea.MarketDemandScore),
-            "time" => TimeFitScore(idea.ExpectedDurationWeeks),
-            "difficulty" => DifficultyFitScore(idea.DifficultyLevel),
-            _ => AverageScore(idea)
-        };
-    }
-
-    private static string ScoreLabel(int score)
-    {
-        if (score >= 85)
-        {
-            return "High";
-        }
-
-        if (score >= 65)
-        {
-            return "Good";
-        }
-
-        if (score >= 45)
-        {
-            return "Medium";
-        }
-
-        return "Low";
-    }
 }
