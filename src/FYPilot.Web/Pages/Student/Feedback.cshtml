@@ -126,6 +126,21 @@
                 box-shadow: 0 8px 20px rgba(15,23,42,0.06);
             }
 
+        .sf-item-round {
+            display: inline-flex;
+            align-items: center;
+            gap: .28rem;
+            margin-bottom: .35rem;
+            padding: .24rem .42rem;
+            color: #405A7C;
+            background: #EEF2F6;
+            border-radius: 999px;
+            font-size: .58rem;
+            font-weight: 820;
+            letter-spacing: .03em;
+            text-transform: uppercase;
+        }
+
         .sf-item-title {
             color: #111827;
             font-size: 0.88rem;
@@ -191,67 +206,80 @@
             overflow: hidden;
         }
 
+        .sf-main-shell {
+            display: grid;
+            grid-template-columns: 340px minmax(0, 1fr);
+            gap: 1rem;
+            align-items: start;
+        }
+
         .sf-main-head {
-            padding: 1.1rem;
-            border-bottom: 1px solid #EEF2F7;
+            padding: 1rem 1.1rem;
+            border-bottom: 1px solid #223455;
             display: flex;
             justify-content: space-between;
             gap: 1rem;
             align-items: flex-start;
+            color: #ffffff;
+            background: linear-gradient(135deg, #1F2F4D 0%, #28385E 58%, #405A7C 120%);
         }
 
             .sf-main-head h2 {
                 margin: 0;
-                color: #111827;
-                font-size: 1.25rem;
+                color: #ffffff;
+                font-size: 1.16rem;
                 font-weight: 780;
-                letter-spacing: -0.035em;
+                letter-spacing: -0.03em;
             }
 
         .sf-main-sub {
-            color: #64748B;
-            font-size: 0.82rem;
-            margin-top: 0.3rem;
+            color: rgba(255,255,255,0.78);
+            font-size: 0.78rem;
+            margin-top: 0.28rem;
         }
 
+            .sf-main-sub strong {
+                color: #ffffff;
+            }
+
         .sf-main-body {
-            padding: 1.1rem;
+            padding: 1rem 1.1rem 1.1rem;
         }
 
         .sf-score-grid {
             display: grid;
             grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 0.8rem;
-            margin-bottom: 1rem;
+            gap: 0.7rem;
+            margin-bottom: 0.9rem;
         }
 
         .sf-score-card {
-            border-radius: 18px;
+            border-radius: 16px;
             background: #FAFBFD;
             border: 1px solid #EEF2F7;
-            padding: 0.95rem;
+            padding: 0.75rem 0.85rem;
         }
 
             .sf-score-card span {
                 display: block;
                 color: #64748B;
-                font-size: 0.75rem;
-                font-weight: 700;
-                margin-bottom: 0.35rem;
+                font-size: 0.72rem;
+                font-weight: 760;
+                margin-bottom: 0.22rem;
             }
 
             .sf-score-card strong {
                 color: #28385E;
-                font-size: 1.4rem;
+                font-size: 1.05rem;
                 font-weight: 820;
             }
 
         .sf-progress {
-            height: 8px;
+            height: 6px;
             background: #EEF2F6;
             border-radius: 999px;
             overflow: hidden;
-            margin-top: 0.6rem;
+            margin-top: 0.45rem;
         }
 
         .sf-progress-fill {
@@ -268,19 +296,19 @@
         }
 
         .sf-section-head {
-            padding: 0.85rem 1rem;
-            background: #FAFBFD;
-            border-bottom: 1px solid #EEF2F7;
+            padding: 0.8rem 1rem;
+            background: linear-gradient(135deg, #243552, #304163);
+            border-bottom: 1px solid #223455;
             display: flex;
             align-items: center;
             gap: 0.55rem;
-            color: #111827;
-            font-weight: 750;
-            font-size: 0.9rem;
+            color: #ffffff;
+            font-weight: 760;
+            font-size: 0.88rem;
         }
 
             .sf-section-head i {
-                color: #516C8D;
+                color: rgba(255,255,255,0.84);
             }
 
         .sf-section-body {
@@ -300,6 +328,13 @@
             display: flex;
             flex-wrap: wrap;
             gap: 0.45rem;
+            margin-bottom: 0.9rem;
+        }
+
+        .sf-insight-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 0.9rem;
             margin-bottom: 1rem;
         }
 
@@ -322,10 +357,23 @@
             background: #FAFBFD;
         }
 
+        .sf-chat-empty {
+            min-height: 240px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 1.5rem;
+            color: #64748B;
+            font-size: 0.86rem;
+            line-height: 1.6;
+        }
+
         .sf-chat-head {
             padding: 0.95rem 1rem;
-            background: #ffffff;
-            border-bottom: 1px solid #EEF2F7;
+            color: #ffffff;
+            background: linear-gradient( 135deg, #1F2F4D 0%, #28385E 58%, #405A7C 120%);
+            border-bottom: 1px solid #223455;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -334,15 +382,20 @@
 
             .sf-chat-head h3 {
                 margin: 0;
-                color: #111827;
+                color: #ffffff;
                 font-size: 1rem;
                 font-weight: 760;
             }
 
             .sf-chat-head p {
                 margin: 0.2rem 0 0;
-                color: #64748B;
+                color: rgba(255,255,255,0.74);
                 font-size: 0.78rem;
+            }
+
+            .sf-chat-head > i {
+                color: rgba(255,255,255,0.88) !important;
+                font-size: 1.05rem;
             }
 
         /* Chat container */
@@ -350,8 +403,9 @@
             padding: 1rem;
             display: flex;
             flex-direction: column;
-            gap: 0.75rem;
-            max-height: 420px;
+            gap: 0.85rem;
+            min-height: 340px;
+            max-height: 540px;
             overflow-y: auto;
         }
 
@@ -393,10 +447,10 @@
         }
 
         /*
-                                                   IMPORTANT:
-                                                   white-space: normal is what fixes the giant message cards.
-                                                   The old pre-wrap preserved Razor indentation/new lines and made bubbles huge.
-                                                */
+                                                                           IMPORTANT:
+                                                                           white-space: normal is what fixes the giant message cards.
+                                                                           The old pre-wrap preserved Razor indentation/new lines and made bubbles huge.
+                                                                        */
         .sf-bubble {
             display: inline-flex;
             flex-direction: column;
@@ -456,7 +510,7 @@
         }
 
             .sf-reply textarea {
-                min-height: 82px;
+                min-height: 110px;
                 border-radius: 16px;
                 border-color: #DDDDDD;
                 resize: vertical;
@@ -678,9 +732,9 @@
 
         .sf-project-context {
             display: grid;
-            grid-template-columns: minmax(230px, .72fr) minmax(0, 1.28fr);
-            gap: .85rem;
-            margin-bottom: 1rem;
+            grid-template-columns: 1fr;
+            gap: .7rem;
+            margin-bottom: .78rem;
         }
 
         .sf-project-picker,
@@ -747,10 +801,10 @@
         }
 
         .sf-project-summary {
-            padding: .95rem 1rem;
+            padding: .82rem .92rem;
             display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
-            gap: .9rem;
+            grid-template-columns: minmax(0, 1.35fr) minmax(430px, .9fr);
+            gap: .8rem;
             align-items: center;
         }
 
@@ -827,46 +881,100 @@
                 font-weight: 800;
             }
 
-        .sf-project-supervision {
-            min-width: 175px;
-            padding: .7rem .75rem;
+        .sf-project-facts {
+            min-width: 0;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: .55rem;
+        }
+
+        .sf-project-fact {
+            min-width: 0;
+            padding: .62rem .68rem;
             border: 1px solid #E3E8EF;
-            border-radius: 14px;
+            border-radius: 13px;
             background: #F8FAFC;
         }
 
-            .sf-project-supervision > span {
+            .sf-project-fact > span {
                 display: block;
                 color: #8490A3;
-                font-size: .58rem;
+                font-size: .52rem;
                 font-weight: 800;
                 letter-spacing: .04em;
                 text-transform: uppercase;
             }
 
-            .sf-project-supervision strong {
+            .sf-project-fact > strong {
                 display: block;
-                margin-top: .2rem;
+                margin-top: .18rem;
+                overflow: hidden;
                 color: #2C466A;
-                font-size: .72rem;
+                font-size: .67rem;
+                font-weight: 800;
+                line-height: 1.3;
+                text-overflow: ellipsis;
+                white-space: nowrap;
             }
 
-            .sf-project-supervision small {
+            .sf-project-fact > small {
                 display: inline-flex;
                 align-items: center;
-                gap: .28rem;
-                margin-top: .36rem;
-                padding: .24rem .42rem;
+                gap: .25rem;
+                margin-top: .3rem;
+                padding: .21rem .38rem;
                 border-radius: 999px;
                 color: #5F6E82;
                 background: #EEF2F6;
-                font-size: .55rem;
-                font-weight: 750;
+                font-size: .5rem;
+                font-weight: 760;
             }
 
-                .sf-project-supervision small i {
-                    font-size: .36rem;
+                .sf-project-fact > small i {
+                    font-size: .32rem;
                 }
+
+        .sf-project-domain-fact .sf-supervision-match-list {
+            margin-top: .32rem;
+        }
+
+        .sf-project-domain-fact .sf-no-direct-match {
+            margin-top: .28rem;
+            font-size: .48rem;
+            line-height: 1.3;
+        }
+
+        .sf-supervision-match-list,
+        .sf-requested-specializations {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .3rem;
+            margin-top: .42rem;
+        }
+
+            .sf-supervision-match-list span,
+            .sf-requested-box
+            .sf-requested-specializations span {
+                display: inline-flex;
+                align-items: center;
+                gap: .25rem;
+                padding: .25rem .4rem;
+                border: 1px solid #D7E4DD;
+                border-radius: 999px;
+                color: #315F4B;
+                background: #F1F8F4;
+                font-size: .52rem;
+                font-weight: 760;
+                line-height: 1.25;
+            }
+
+        .sf-no-direct-match {
+            display: block;
+            margin-top: .4rem;
+            color: #8A6470;
+            font-size: .55rem;
+            line-height: 1.4;
+        }
 
         .sf-readonly-note {
             margin-top: 1rem;
@@ -895,6 +1003,14 @@
             .sf-panel {
                 position: static;
             }
+
+            .sf-project-summary {
+                grid-template-columns: 1fr;
+            }
+
+            .sf-project-facts {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
         }
 
         @@media (max-width: 767px) {
@@ -906,15 +1022,20 @@
                 grid-template-columns: 1fr;
             }
 
-            .sf-project-supervision {
-                min-width: 0;
+            .sf-project-facts {
+                grid-template-columns: 1fr;
+            }
+
+            .sf-main-shell {
+                grid-template-columns: 1fr;
             }
 
             .sf-main-head {
                 flex-direction: column;
             }
 
-            .sf-score-grid {
+            .sf-score-grid,
+            .sf-insight-grid {
                 grid-template-columns: 1fr;
             }
 
@@ -1097,6 +1218,61 @@
             font-weight: 850;
         }
 
+        .sf-domain-banner {
+            width: fit-content;
+            max-width: 100%;
+            display: flex;
+            align-items: center;
+            gap: .42rem;
+            margin-top: .75rem;
+            padding: .48rem .68rem;
+            border: 1px solid #DCE4EF;
+            border-radius: 12px;
+            color: #405A7C;
+            background: #F6F8FB;
+            font-size: .72rem;
+            font-weight: 720;
+        }
+
+            .sf-domain-banner strong {
+                color: #28385E;
+                overflow-wrap: anywhere;
+            }
+
+        .sf-matching-expertise {
+            padding: .72rem;
+            border: 1px solid #DDE6E1;
+            border-radius: 15px;
+            background: #F8FCFA;
+        }
+
+        .sf-matching-label {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .6rem;
+            margin-bottom: .5rem;
+        }
+
+            .sf-matching-label strong {
+                display: inline-flex;
+                align-items: center;
+                gap: .32rem;
+                color: #315F4B;
+                font-size: .7rem;
+                font-weight: 820;
+            }
+
+            .sf-matching-label small {
+                max-width: 48%;
+                overflow: hidden;
+                color: #708477;
+                font-size: .58rem;
+                text-align: right;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
         .sf-supervisor-tags {
             display: flex;
             flex-wrap: wrap;
@@ -1112,6 +1288,29 @@
                 font-size: 0.72rem;
                 font-weight: 760;
             }
+
+            .sf-supervisor-tags.is-matching span {
+                color: #285941;
+                background: #FFFFFF;
+                border-color: #CFE0D6;
+            }
+
+        .sf-supervisor-logistics {
+            min-height: 30px;
+        }
+
+            .sf-supervisor-logistics span {
+                color: #56667D;
+                background: #F7F9FC;
+            }
+
+        .sf-requested-domain {
+            display: block;
+            margin-top: .5rem;
+            color: #596A80;
+            font-size: .64rem;
+            font-weight: 720;
+        }
 
         .sf-capacity-line {
             display: flex;
@@ -1226,47 +1425,6 @@
                 Model.AssignmentStatus);
 
         <section class="sf-project-context">
-            <form method="get"
-                  class="sf-project-picker"
-                  id="feedbackProjectForm">
-
-                <label for="feedbackProjectSelect">
-                    Current project
-                </label>
-
-                <div class="sf-project-select-wrap">
-                    <select id="feedbackProjectSelect"
-                            name="projectId"
-                            aria-label="Choose project">
-
-                        @foreach (var project
-                            in Model.AccessibleProjects)
-                        {
-                            if (project.Id == Model.ProjectId)
-                            {
-                                <option value="@project.Id"
-                                        selected>
-                                    @project.Title — @DisplayRole(project.Role)
-                                </option>
-                            }
-                            else
-                            {
-                                <option value="@project.Id">
-                                    @project.Title — @DisplayRole(project.Role)
-                                </option>
-                            }
-                        }
-                    </select>
-
-                    <i class="bi bi-chevron-down"></i>
-                </div>
-
-                <small>
-                    Feedback, supervisor assignment and discussions
-                    are separated by project.
-                </small>
-            </form>
-
             @if (Model.CurrentProject != null)
             {
                 <div class="sf-project-summary">
@@ -1308,19 +1466,56 @@
                         </div>
                     </div>
 
-                    <div class="sf-project-supervision">
-                        <span>Project supervisor</span>
+                    <div class="sf-project-facts">
+                        <div class="sf-project-fact">
+                            <span>Project supervisor</span>
 
-                        <strong>
-                            @(Model.CurrentSupervisor?.FullName
-                              ?? Model.CurrentAssignment?.Supervisor?.FullName
-                              ?? "Not assigned")
-                        </strong>
+                            <strong title="@(Model.CurrentSupervisor?.FullName
+                                                                                                                     ?? Model.CurrentAssignment?.Supervisor?.FullName
+                                                                                                                     ?? "Not assigned")">
+                                @(Model.CurrentSupervisor?.FullName
+                                  ?? Model.CurrentAssignment?.Supervisor?.FullName
+                                  ?? "Not assigned")
+                            </strong>
 
-                        <small style="color:@statusMeta.Color;background:@statusMeta.Background">
-                            <i class="bi bi-circle-fill"></i>
-                            @statusMeta.Label
-                        </small>
+                            <small style="color:@statusMeta.Color;background:@statusMeta.Background">
+                                <i class="bi bi-circle-fill"></i>
+                                @statusMeta.Label
+                            </small>
+                        </div>
+
+                        @if (Model.HasProjectDomain)
+                        {
+                            <div class="sf-project-fact
+                                sf-project-domain-fact">
+                                <span>Official project domain</span>
+
+                                <strong title="@Model.ProjectDomain">
+                                    @Model.ProjectDomain
+                                </strong>
+
+                                @if (Model.CurrentSupervisorMatchingSpecializations.Any())
+                                {
+                                    <div class="sf-supervision-match-list">
+                                        @foreach (var specialization
+                                            in Model.CurrentSupervisorMatchingSpecializations)
+                                        {
+                                            <span>
+                                                <i class="bi bi-patch-check"></i>
+                                                @specialization
+                                            </span>
+                                        }
+                                    </div>
+                                }
+                                else if (Model.CurrentSupervisor != null ||
+                                         Model.CurrentAssignment?.Supervisor != null)
+                                {
+                                    <em class="sf-no-direct-match">
+                                        No direct specialization match recorded.
+                                    </em>
+                                }
+                            </div>
+                        }
                     </div>
                 </div>
             }
@@ -1391,20 +1586,42 @@
                               ?? "Supervisor")
                         </strong>
 
-                        <small>
-                            @Model.CurrentAssignment?.Supervisor
-                            ?.SupervisorProfile?.Specialization
+                        @if (!string.IsNullOrWhiteSpace(
+                            Model.CurrentAssignment?.Supervisor
+                                ?.SupervisorProfile?.Department))
+                        {
+                            <small>
+                                @Model.CurrentAssignment?.Supervisor
+                                ?.SupervisorProfile?.Department
+                            </small>
+                        }
 
-                            @if (!string.IsNullOrWhiteSpace(
-                                Model.CurrentAssignment?.Supervisor
-                                    ?.SupervisorProfile?.Department))
+                        @if (Model.HasProjectDomain)
+                        {
+                            <span class="sf-requested-domain">
+                                Matching @Model.ProjectDomain
+                            </span>
+
+                            @if (Model.CurrentSupervisorMatchingSpecializations.Any())
                             {
-                                <text>
-                                    · @Model.CurrentAssignment?.Supervisor
-                                    ?.SupervisorProfile?.Department
-                                </text>
+                                <div class="sf-requested-specializations">
+                                    @foreach (var specialization
+                                        in Model.CurrentSupervisorMatchingSpecializations)
+                                    {
+                                        <span>
+                                            <i class="bi bi-patch-check"></i>
+                                            @specialization
+                                        </span>
+                                    }
+                                </div>
                             }
-                        </small>
+                            else
+                            {
+                                <em class="sf-no-direct-match">
+                                    No direct specialization match was found.
+                                </em>
+                            }
+                        }
                     </div>
 
                     @if (!Model.IsProjectOwner)
@@ -1459,6 +1676,15 @@
                                     Every active collaborator will inherit the
                                     same supervisor, evaluation and meeting flow.
                                 </p>
+
+                                @if (Model.HasProjectDomain)
+                                {
+                                    <div class="sf-domain-banner">
+                                        <i class="bi bi-diagram-3"></i>
+                                        Official project domain:
+                                        <strong>@Model.ProjectDomain</strong>
+                                    </div>
+                                }
                             }
                         </div>
 
@@ -1519,31 +1745,53 @@
                                         </div>
                                     </div>
 
-                                    <div class="sf-supervisor-tags">
-                                        @if (!string.IsNullOrWhiteSpace(
-                                            supervisor.Specialization))
-                                        {
-                                            <span>
-                                                @supervisor.Specialization
-                                            </span>
-                                        }
+                                    <div class="sf-matching-expertise">
+                                        <div class="sf-matching-label">
+                                            <strong>
+                                                <i class="bi bi-patch-check"></i>
+                                                Matching specializations
+                                            </strong>
 
-                                        @if (!string.IsNullOrWhiteSpace(
-                                            supervisor.MeetingMode))
-                                        {
-                                            <span>
-                                                @supervisor.MeetingMode
-                                            </span>
-                                        }
+                                            <small title="@Model.ProjectDomain">
+                                                @Model.ProjectDomain
+                                            </small>
+                                        </div>
 
-                                        @if (!string.IsNullOrWhiteSpace(
-                                            supervisor.OfficeHours))
-                                        {
-                                            <span>
-                                                @supervisor.OfficeHours
-                                            </span>
-                                        }
+                                        <div class="sf-supervisor-tags is-matching">
+                                            @foreach (var specialization
+                                                in supervisor.MatchingSpecializations)
+                                            {
+                                                <span>@specialization</span>
+                                            }
+                                        </div>
                                     </div>
+
+                                    @if (!string.IsNullOrWhiteSpace(
+                                            supervisor.MeetingMode) ||
+                                         !string.IsNullOrWhiteSpace(
+                                            supervisor.OfficeHours))
+                                    {
+                                        <div class="sf-supervisor-tags
+                                            sf-supervisor-logistics">
+                                            @if (!string.IsNullOrWhiteSpace(
+                                                supervisor.MeetingMode))
+                                            {
+                                                <span>
+                                                    <i class="bi bi-camera-video me-1"></i>
+                                                    @supervisor.MeetingMode
+                                                </span>
+                                            }
+
+                                            @if (!string.IsNullOrWhiteSpace(
+                                                supervisor.OfficeHours))
+                                            {
+                                                <span>
+                                                    <i class="bi bi-clock me-1"></i>
+                                                    @supervisor.OfficeHours
+                                                </span>
+                                            }
+                                        </div>
+                                    }
 
                                     <div class="sf-capacity-line">
                                         <span>Project capacity</span>
@@ -1593,15 +1841,31 @@
                     else
                     {
                         <div class="sf-gate-empty">
-                            <strong>
-                                No available supervisors right now.
-                            </strong>
+                            @if (!Model.HasProjectDomain)
+                            {
+                                <strong>
+                                    Select an official project idea first.
+                                </strong>
 
-                            <p>
-                                Matching supervisors may be full, or no
-                                suitable supervisor is currently available.
-                                Please contact the admin.
-                            </p>
+                                <p>
+                                    Supervisor matching requires the domain
+                                    of the project’s official selected idea.
+                                </p>
+                            }
+                            else
+                            {
+                                <strong>
+                                    No available supervisor matches
+                                    @Model.ProjectDomain right now.
+                                </strong>
+
+                                <p>
+                                    Matching supervisors may be full, or no
+                                    supervisor currently has a recorded
+                                    specialization for this project domain.
+                                    Please contact the admin.
+                                </p>
+                            }
                         </div>
                     }
                 }
@@ -1663,7 +1927,7 @@
     }
     else
     {
-        <div class="sf-layout">
+        <div class="sf-main-shell">
 
             <aside class="sf-panel">
                 <div class="sf-panel-head">
@@ -1672,23 +1936,47 @@
                 </div>
 
                 <div class="sf-feedback-list">
-                    @foreach (var item in Model.Feedbacks)
+                    @for (var feedbackIndex = 0;
+                          feedbackIndex < Model.Feedbacks.Count;
+                          feedbackIndex++)
                     {
-                        var meta = StatusMeta(item.Evaluation.Status);
-                        var active = Model.SelectedFeedback?.Evaluation.Id == item.Evaluation.Id;
+                        var item =
+                            Model.Feedbacks[feedbackIndex];
+
+                        var evaluationNumber =
+                            Model.Feedbacks.Count -
+                            feedbackIndex;
+
+                        var meta =
+                            StatusMeta(
+                                item.Evaluation.Status);
+
+                        var active =
+                            Model.SelectedFeedback
+                                ?.Evaluation.Id ==
+                            item.Evaluation.Id;
 
                         <a asp-page="./Feedback"
                            asp-route-projectId="@Model.ProjectId"
                            asp-route-evaluationId="@item.Evaluation.Id"
                            class="sf-feedback-link @(active ? "active" : "")">
 
-                            <div class="sf-item-title">@item.Idea.Title</div>
-
-                            <div class="sf-item-meta">
-                                @item.SupervisorName · @item.Evaluation.UpdatedAt.ToString("MMM d, yyyy")
+                            <div class="sf-item-round">
+                                <i class="bi bi-journal-check"></i>
+                                Evaluation #@evaluationNumber
                             </div>
 
-                            <span class="sf-status" style="color:@meta.Color;background:@meta.Background">
+                            <div class="sf-item-title">
+                                @item.Idea.Title
+                            </div>
+
+                            <div class="sf-item-meta">
+                                @item.SupervisorName ·
+                                @item.Evaluation.UpdatedAt.ToString("MMM d, yyyy")
+                            </div>
+
+                            <span class="sf-status"
+                                  style="color:@meta.Color;background:@meta.Background">
                                 <i class="bi bi-@meta.Icon"></i>
                                 @meta.Label
                             </span>
@@ -1699,16 +1987,32 @@
 
             @if (selected != null)
             {
-                var meta = StatusMeta(selected.Evaluation.Status);
+                var meta =
+                    StatusMeta(
+                        selected.Evaluation.Status);
+
+                var selectedFeedbackIndex =
+                    Model.Feedbacks.FindIndex(
+                        item =>
+                            item.Evaluation.Id ==
+                            selected.Evaluation.Id);
+
+                var selectedEvaluationNumber =
+                    selectedFeedbackIndex >= 0
+                        ? Model.Feedbacks.Count -
+                          selectedFeedbackIndex
+                        : 1;
 
                 <main class="sf-main">
 
-                    <div class="sf-main-head" style="background:@meta.Background">
+                    <div class="sf-main-head">
                         <div>
                             <h2>@selected.Idea.Title</h2>
 
                             <div class="sf-main-sub">
-                                Reviewed by <strong>@selected.SupervisorName</strong>
+                                Evaluation #@selectedEvaluationNumber
+                                · Reviewed by
+                                <strong>@selected.SupervisorName</strong>
                                 · @selected.Evaluation.UpdatedAt.ToString("MMM d, yyyy")
                             </div>
                         </div>
@@ -1777,38 +2081,39 @@
                                 </span>
                             }
                         </div>
+                        <div class="sf-insight-grid">
+                            <section class="sf-section">
+                                <div class="sf-section-head">
+                                    <i class="bi bi-chat-left-text"></i>
+                                    Supervisor Comment
+                                </div>
 
-                        <section class="sf-section">
-                            <div class="sf-section-head">
-                                <i class="bi bi-chat-left-text"></i>
-                                Supervisor Comment
-                            </div>
+                                @if (!string.IsNullOrWhiteSpace(selected.Evaluation.Comment))
+                                {
+                                    <div class="sf-section-body">@selected.Evaluation.Comment</div>
+                                }
+                                else
+                                {
+                                    <div class="sf-section-body sf-muted">No written comment provided.</div>
+                                }
+                            </section>
 
-                            @if (!string.IsNullOrWhiteSpace(selected.Evaluation.Comment))
-                            {
-                                <div class="sf-section-body">@selected.Evaluation.Comment</div>
-                            }
-                            else
-                            {
-                                <div class="sf-section-body sf-muted">No written comment provided.</div>
-                            }
-                        </section>
+                            <section class="sf-section">
+                                <div class="sf-section-head">
+                                    <i class="bi bi-lightbulb"></i>
+                                    Improvement Suggestions
+                                </div>
 
-                        <section class="sf-section">
-                            <div class="sf-section-head">
-                                <i class="bi bi-lightbulb"></i>
-                                Improvement Suggestions
-                            </div>
-
-                            @if (!string.IsNullOrWhiteSpace(selected.Evaluation.ImprovementSuggestions))
-                            {
-                                <div class="sf-section-body">@selected.Evaluation.ImprovementSuggestions</div>
-                            }
-                            else
-                            {
-                                <div class="sf-section-body sf-muted">No improvement suggestions provided.</div>
-                            }
-                        </section>
+                                @if (!string.IsNullOrWhiteSpace(selected.Evaluation.ImprovementSuggestions))
+                                {
+                                    <div class="sf-section-body">@selected.Evaluation.ImprovementSuggestions</div>
+                                }
+                                else
+                                {
+                                    <div class="sf-section-body sf-muted">No improvement suggestions provided.</div>
+                                }
+                            </section>
+                        </div>
 
                         <section class="sf-chat">
                             <div class="sf-chat-head">
@@ -1831,16 +2136,12 @@
                                  data-idea-id="@selected.Idea.Id"
                                  data-other-name="@selected.SupervisorName">
 
-                                @if (!string.IsNullOrWhiteSpace(selected.Evaluation.Comment))
+                                @if (!selected.Messages.Any())
                                 {
-                                    <div class="sf-message supervisor">
-                                        <div class="sf-avatar">
-                                            <i class="bi bi-person-workspace"></i>
-                                        </div>
-
-                                        <div class="sf-bubble">
-                                            @selected.Evaluation.Comment
-                                            <time>@selected.SupervisorName · @selected.Evaluation.UpdatedAt.ToString("HH:mm")</time>
+                                    <div class="sf-chat-empty">
+                                        <div>
+                                            <i class="bi bi-chat-square-text d-block mb-2" style="font-size:1.6rem;color:#516C8D"></i>
+                                            The discussion is still empty. Use the reply box below to start the shared conversation.
                                         </div>
                                     </div>
                                 }
@@ -1856,9 +2157,9 @@
                                         selected.Evaluation.SupervisorId;
 
                                     var messageSide =
-                                        isSupervisorMessage
-                                            ? "supervisor"
-                                            : "student";
+                                        isCurrentUser
+                                            ? "student"
+                                            : "supervisor";
 
                                     var senderDisplayName =
                                         isCurrentUser
@@ -1890,8 +2191,8 @@
                                         <div class="sf-avatar">
                                             <i class="bi
                                             @(isSupervisorMessage
-                                                      ? "bi-person-workspace"
-                                                      : "bi-person")"></i>
+                                                               ? "bi-person-workspace"
+                                                               : "bi-person")"></i>
                                         </div>
 
                                         <div class="sf-bubble">
@@ -1957,7 +2258,6 @@
                                 }
                             </div>
 
-
                             <div class="sf-chat-state">
                                 <span id="feedbackTyping" class="sf-typing">
                                     <span id="feedbackTypingName">Supervisor</span> is typing
@@ -2021,17 +2321,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
 
     <script>
-        const feedbackProjectSelect =
-        document.getElementById("feedbackProjectSelect");
-
-        const feedbackProjectForm =
-        document.getElementById("feedbackProjectForm");
-
-        feedbackProjectSelect?.addEventListener(
-        "change",
-        function () {
-        feedbackProjectForm?.submit();
-        });
 
         const feedbackChatBody = document.getElementById("feedbackChatBody");
         const feedbackForm = document.getElementById("feedbackRealtimeForm");
@@ -2160,9 +2449,9 @@
 
         row.className =
         `sf-message ${
-        isSupervisor
-        ? "supervisor"
-        : "student"
+        isMine
+        ? "student"
+        : "supervisor"
         }`;
 
         row.dataset.messageId =
@@ -2323,17 +2612,26 @@
 
         const replyToId = Number(studentReplyToMessageId.value || 0);
 
+        try {
+        await connection.invoke(
+        "SendFeedbackMessage",
+        evaluationId,
+        ideaId,
+        value,
+        replyToId || null);
+
         feedbackInput.value = "";
         setReplyTarget("", "");
 
-        try {
-        await connection.invoke("SendFeedbackMessage", evaluationId, ideaId, value, replyToId || null);
         if (evaluationId) {
-        await connection.invoke("StopTypingFeedbackRoom", ideaId);
+        await connection.invoke(
+        "StopTypingFeedbackRoom",
+        ideaId);
         }
         } catch (error) {
         console.error(error);
-        alert("Message could not be sent. Please refresh and try again.");
+        alert(error?.message ||
+        "Message could not be sent. Please refresh and try again.");
         }
         });
 
@@ -2365,10 +2663,22 @@
         });
 
         connection.on("ReceiveFeedbackMessage", function (message) {
-        const incomingEvaluationId = Number(message.evaluationId ?? message.EvaluationId);
-        const incomingIdeaId = Number(message.ideaId ?? message.IdeaId);
+        const incomingEvaluationId =
+        Number(message.evaluationId ?? message.EvaluationId);
+
+        const incomingIdeaId =
+        Number(message.ideaId ?? message.IdeaId);
+
+        const incomingMessageId =
+        Number(message.id ?? message.Id);
 
         if (incomingIdeaId && incomingIdeaId !== ideaId) {
+        return;
+        }
+
+        if (incomingMessageId &&
+        feedbackChatBody.querySelector(
+        `[data-message-id="${incomingMessageId}"]`)) {
         return;
         }
 

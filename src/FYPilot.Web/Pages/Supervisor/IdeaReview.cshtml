@@ -5,7 +5,7 @@
 @model FYPilot.Web.Pages.Supervisor.IdeaReviewModel
 @{
     ViewData["Title"] = "Feedback Workspace";
-    ViewData["Subtitle"] = "Review assigned projects, save one shared evaluation, and discuss the official idea with the full project team.";
+    ViewData["Subtitle"] = "Review assigned projects, save separate evaluation rounds, and guide the full project team.";
 }
 
 <section class="sfr-page">
@@ -30,7 +30,7 @@
         <div class="sfr-hero-copy">
             <span>Supervisor Review Center</span>
             <h1>Feedback Workspace</h1>
-            <p>Review each assigned project, evaluate its official idea once, and communicate with every active project member.</p>
+            <p>Review each assigned project across multiple evaluation rounds while preserving every previous decision for the project team.</p>
         </div>
     </header>
 
@@ -118,9 +118,26 @@
                 @if (Model.SelectedIdea == null)
                 {
                     <section class="sfr-empty-page compact">
-                        <i class="bi bi-card-checklist"></i>
-                        <h2>Select a project to review</h2>
-                        <p>Choose an assigned project from the queue to view its official idea and save the shared evaluation.</p>
+                        @if (Model.SelectedProject != null)
+                        {
+                            <i class="bi bi-lightbulb"></i>
+                            <h2>Awaiting an official project idea</h2>
+                            <p>
+                                This project is assigned to you, but its team
+                                has not selected an official idea yet. It will
+                                become reviewable immediately after an idea is
+                                selected.
+                            </p>
+                        }
+                        else
+                        {
+                            <i class="bi bi-card-checklist"></i>
+                            <h2>Select a project to review</h2>
+                            <p>
+                                Choose an assigned project to view its official
+                                idea and save a new evaluation round.
+                            </p>
+                        }
                     </section>
                 }
                 else
@@ -316,7 +333,7 @@
                         <div class="sfr-evaluation-side">
                             <span>Evaluation Studio</span>
                             <h2>Decision & feedback</h2>
-                            <p>Save one shared academic decision and guide the entire project team with clear improvement notes.</p>
+                            <p>Each save creates a new evaluation round. Earlier evaluations remain available in the student feedback history.</p>
 
                             <a href="/Supervisor/IdeaDiscussion?projectId=@(Model.SelectedProject?.Id ?? 0)&amp;ideaId=@idea.Id" class="sfr-soft-discussion">
                                 <i class="bi bi-chat-left-text"></i>
@@ -324,8 +341,24 @@
                             </a>
                         </div>
 
-                        <form method="post" asp-page-handler="SaveEvaluation" class="sfr-evaluation-form">
+                        <form method="post"
+                              asp-page-handler="SaveEvaluation"
+                              class="sfr-evaluation-form"
+                              id="newEvaluationForm">
                             @Html.AntiForgeryToken()
+
+                            <div class="sfr-new-round-note">
+                                <i class="bi bi-plus-circle"></i>
+
+                                <div>
+                                    <strong>New evaluation round</strong>
+                                    <span>
+                                        The form starts empty after every
+                                        successful save. Previous evaluations
+                                        are not edited or replaced.
+                                    </span>
+                                </div>
+                            </div>
 
                             <input type="hidden" asp-for="EvaluationInput.ProjectId" value="@(Model.SelectedProject?.Id ?? 0)" />
                             <input type="hidden" asp-for="EvaluationInput.IdeaId" value="@idea.Id" />
@@ -369,7 +402,7 @@
                             <div class="sfr-form-actions">
                                 <button type="submit" class="btn sfr-primary-btn">
                                     <i class="bi bi-save me-1"></i>
-                                    Save Evaluation
+                                    Save New Evaluation
                                 </button>
                             </div>
                         </form>
@@ -631,6 +664,11 @@
             .sfr-status.pending {
                 background: #FFF7ED;
                 color: #9A3412;
+            }
+
+            .sfr-status.awaiting {
+                background: #EEF2F6;
+                color: var(--sfr-blue);
             }
 
             .sfr-status.approved {
@@ -980,6 +1018,46 @@
             gap: 0.85rem;
         }
 
+        .sfr-new-round-note {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: .6rem;
+            align-items: center;
+            padding: .72rem .78rem;
+            border: 1px solid #DCE5EF;
+            border-radius: 15px;
+            color: #425B7D;
+            background: #F7F9FC;
+        }
+
+            .sfr-new-round-note > i {
+                width: 34px;
+                height: 34px;
+                display: grid;
+                place-items: center;
+                color: #ffffff;
+                background: linear-gradient( 135deg, var(--sfr-navy), var(--sfr-steel));
+                border-radius: 11px;
+            }
+
+            .sfr-new-round-note strong,
+            .sfr-new-round-note span {
+                display: block;
+            }
+
+            .sfr-new-round-note strong {
+                color: var(--sfr-navy);
+                font-size: .76rem;
+                font-weight: 800;
+            }
+
+            .sfr-new-round-note span {
+                margin-top: .12rem;
+                color: var(--sfr-muted);
+                font-size: .66rem;
+                line-height: 1.45;
+            }
+
         .sfr-eval-topline {
             display: grid;
             grid-template-columns: minmax(220px, 0.75fr) minmax(0, 1.25fr);
@@ -1128,6 +1206,34 @@
     </style>
 }
 
+@section Scripts {
+    <script>
+        (() => {
+            const form =
+                document.getElementById(
+                    "newEvaluationForm");
+
+            form?.addEventListener(
+                "submit",
+                () => {
+                    const button =
+                        form.querySelector(
+                            "button[type='submit']");
+
+                    if (!button) {
+                        return;
+                    }
+
+                    button.disabled = true;
+                    button.innerHTML =
+                        '<span class="spinner-border '
+                        + 'spinner-border-sm me-1"></span>'
+                        + 'Saving New Evaluation...';
+                });
+        })();
+    </script>
+}
+
 @functions {
     private static List<string> SplitItems(string? value)
     {
@@ -1197,6 +1303,9 @@
             "approved" => ("Approved", "sfr-status approved"),
             "needs_revision" => ("Needs Revision", "sfr-status revision"),
             "rejected" => ("Rejected", "sfr-status rejected"),
+            "awaiting_idea" => (
+                "Awaiting Idea",
+                "sfr-status awaiting"),
             _ => ("Pending", "sfr-status pending")
         };
     }

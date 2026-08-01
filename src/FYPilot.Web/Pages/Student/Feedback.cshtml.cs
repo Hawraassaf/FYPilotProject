@@ -67,6 +67,28 @@ public class FeedbackModel(
             CurrentProject
                 ?.SupervisorAssignmentStatus);
 
+    /*
+     * Supervisor matching always uses the domain of the
+     * project's official selected idea.
+     *
+     * Student profile preferences are not used as the
+     * domain source of truth.
+     */
+    public string ProjectDomain =>
+        CurrentProject
+            ?.ProjectIdea
+            ?.Domain
+            ?.Trim()
+        ?? "";
+
+    public bool HasProjectDomain =>
+        !string.IsNullOrWhiteSpace(
+            ProjectDomain);
+
+    public List<string>
+        CurrentSupervisorMatchingSpecializations
+    { get; private set; } = [];
+
     public bool CanAccessFeedback =>
         CurrentProject != null &&
         CurrentProject.SupervisorId.HasValue &&
@@ -140,6 +162,14 @@ public class FeedbackModel(
         public int MatchScore { get; set; }
 
         public string MatchReason { get; set; } = "";
+
+        /*
+         * Only the supervisor expertise entries that match
+         * the official project domain are displayed.
+         */
+        public List<string>
+            MatchingSpecializations
+        { get; set; } = [];
     }
 
     public async Task<IActionResult> OnGetAsync(
@@ -348,6 +378,53 @@ public class FeedbackModel(
         {
             ErrorMessage =
                 "The selected supervisor was not found.";
+
+            return RedirectToPage(
+                new
+                {
+                    projectId = ProjectId
+                });
+        }
+
+        var officialProjectDomain =
+            project.ProjectIdea
+                ?.Domain
+                ?.Trim()
+            ?? "";
+
+        if (string.IsNullOrWhiteSpace(
+                officialProjectDomain))
+        {
+            ErrorMessage =
+                "Select the official project idea before "
+                + "requesting a supervisor.";
+
+            return RedirectToPage(
+                new
+                {
+                    projectId = ProjectId
+                });
+        }
+
+        var requestedSupervisorMatches =
+            FindMatchingSpecializations(
+                officialProjectDomain,
+                supervisor.SupervisorProfile
+                    .Specialization,
+                supervisor.SupervisorProfile
+                    .ResearchAreas);
+
+        /*
+         * Validate the domain match again on the server.
+         * A posted supervisor ID cannot bypass the
+         * domain-filtered supervisor list.
+         */
+        if (requestedSupervisorMatches.Count == 0)
+        {
+            ErrorMessage =
+                "This supervisor does not have a "
+                + "specialization matching the official "
+                + "project domain.";
 
             return RedirectToPage(
                 new
@@ -1070,6 +1147,23 @@ public class FeedbackModel(
                 .FirstOrDefaultAsync(
                     cancellationToken);
 
+        var effectiveSupervisorProfile =
+            CurrentSupervisor
+                ?.SupervisorProfile
+            ?? CurrentAssignment
+                ?.Supervisor
+                ?.SupervisorProfile;
+
+        CurrentSupervisorMatchingSpecializations =
+            effectiveSupervisorProfile == null
+                ? []
+                : FindMatchingSpecializations(
+                    ProjectDomain,
+                    effectiveSupervisorProfile
+                        .Specialization,
+                    effectiveSupervisorProfile
+                        .ResearchAreas);
+
         await activeProjectService
             .RememberPageAsync(
                 CurrentUserId,
@@ -1084,7 +1178,8 @@ public class FeedbackModel(
         CancellationToken cancellationToken)
     {
         if (CurrentProject == null ||
-            !IsProjectOwner)
+            !IsProjectOwner ||
+            !HasProjectDomain)
         {
             AvailableSupervisors = [];
             return;
@@ -1171,10 +1266,17 @@ public class FeedbackModel(
                     var profile =
                         supervisor.SupervisorProfile!;
 
+                    var matchingSpecializations =
+                        FindMatchingSpecializations(
+                            ProjectDomain,
+                            profile.Specialization,
+                            profile.ResearchAreas);
+
                     var match =
                         CalculateMatch(
                             matchContext,
-                            profile);
+                            profile,
+                            matchingSpecializations);
 
                     return new SupervisorOption
                     {
@@ -1219,9 +1321,22 @@ public class FeedbackModel(
                             match.Score,
 
                         MatchReason =
-                            match.Reason
+                            match.Reason,
+
+                        MatchingSpecializations =
+                            matchingSpecializations
                     };
                 })
+                /*
+                 * Do not show unrelated supervisors.
+                 * At least one specialization or research
+                 * area must match the official project
+                 * domain.
+                 */
+                .Where(supervisor =>
+                    supervisor
+                        .MatchingSpecializations
+                        .Count > 0)
                 .OrderByDescending(
                     supervisor =>
                         supervisor.MatchScore)
@@ -1284,18 +1399,15 @@ public class FeedbackModel(
                         profile =>
                             profile.Major)),
 
+            /*
+             * The official selected idea is the domain
+             * source of truth for supervisor matching.
+             * Student profile preferences are not mixed
+             * into this value.
+             */
             Domain:
-                JoinValues(
-                    new[]
-                    {
-                        idea?.Domain,
-                        idea?.SupervisorCategory
-                    }
-                    .Concat(
-                        profiles.Select(
-                            profile =>
-                                profile
-                                    .PreferredDomain))),
+                idea?.Domain?.Trim()
+                ?? "",
 
             Interests:
                 JoinValues(
@@ -1354,6 +1466,9 @@ public class FeedbackModel(
                 .OrderByDescending(
                     evaluation =>
                         evaluation.UpdatedAt)
+                .ThenByDescending(
+                    evaluation =>
+                        evaluation.Id)
                 .ToListAsync(
                     cancellationToken);
 
@@ -1392,11 +1507,13 @@ public class FeedbackModel(
                             ?.FullName
                         ?? "Supervisor",
 
-                        messages
-                            .Where(message =>
-                                message.EvaluationId ==
-                                    evaluation.Id)
-                            .ToList()))
+                        /*
+                         * The selected evaluation controls
+                         * scores and written feedback, while
+                         * every evaluation round shares the
+                         * same project discussion.
+                         */
+                        messages.ToList()))
                 .ToList();
 
         if (Feedbacks.Count == 0)
@@ -1591,7 +1708,9 @@ public class FeedbackModel(
     private static (int Score, string Reason)
         CalculateMatch(
             ProjectMatchContext context,
-            SupervisorProfile profile)
+            SupervisorProfile profile,
+            IReadOnlyCollection<string>
+                matchingSpecializations)
     {
         var score =
             10;
@@ -1631,18 +1750,13 @@ public class FeedbackModel(
                 "matches the team’s academic field");
         }
 
-        if (ContainsAny(
-                specialization,
-                context.Domain) ||
-            ContainsAny(
-                researchAreas,
-                context.Domain))
+        if (matchingSpecializations.Count > 0)
         {
             score +=
                 30;
 
             reasons.Add(
-                "matches the project domain");
+                "matches the official project domain");
         }
 
         if (HasAnySharedToken(
@@ -1692,6 +1806,274 @@ public class FeedbackModel(
                 : string.Join(
                     ", ",
                     reasons.Distinct()));
+    }
+
+    private static List<string>
+        FindMatchingSpecializations(
+            string projectDomain,
+            string? specialization,
+            string? researchAreas)
+    {
+        if (string.IsNullOrWhiteSpace(
+                projectDomain))
+        {
+            return [];
+        }
+
+        var projectConcepts =
+            ExtractDomainConcepts(
+                projectDomain);
+
+        var expertiseItems =
+            SplitExpertiseItems(
+                    specialization)
+                .Concat(
+                    SplitExpertiseItems(
+                        researchAreas))
+                .Distinct(
+                    StringComparer
+                        .OrdinalIgnoreCase)
+                .ToList();
+
+        return expertiseItems
+            .Where(item =>
+            {
+                if (ContainsAny(
+                        item,
+                        projectDomain))
+                {
+                    return true;
+                }
+
+                var expertiseConcepts =
+                    ExtractDomainConcepts(
+                        item);
+
+                return expertiseConcepts
+                    .Overlaps(
+                        projectConcepts);
+            })
+            .ToList();
+    }
+
+    private static HashSet<string>
+        ExtractDomainConcepts(
+            string value)
+    {
+        var normalized =
+            NormalizeMatchingText(
+                value);
+
+        var concepts =
+            new HashSet<string>(
+                StringComparer
+                    .OrdinalIgnoreCase);
+
+        AddConcept(
+            concepts,
+            normalized,
+            "ai",
+            "ai",
+            "artificial intelligence",
+            "machine learning",
+            "deep learning",
+            "computer vision",
+            "natural language processing",
+            "nlp");
+
+        AddConcept(
+            concepts,
+            normalized,
+            "data",
+            "data science",
+            "data analytics",
+            "business intelligence",
+            "big data",
+            "data mining");
+
+        AddConcept(
+            concepts,
+            normalized,
+            "web",
+            "web development",
+            "web application",
+            "asp net",
+            "frontend",
+            "backend",
+            "full stack");
+
+        AddConcept(
+            concepts,
+            normalized,
+            "mobile",
+            "mobile development",
+            "android",
+            "ios",
+            "flutter",
+            "react native");
+
+        AddConcept(
+            concepts,
+            normalized,
+            "cybersecurity",
+            "cybersecurity",
+            "cyber security",
+            "information security",
+            "network security");
+
+        AddConcept(
+            concepts,
+            normalized,
+            "fintech",
+            "fintech",
+            "financial technology",
+            "banking technology");
+
+        AddConcept(
+            concepts,
+            normalized,
+            "education",
+            "education technology",
+            "educational technology",
+            "edtech",
+            "e learning");
+
+        AddConcept(
+            concepts,
+            normalized,
+            "healthcare",
+            "healthcare technology",
+            "health technology",
+            "health informatics",
+            "medical informatics");
+
+        AddConcept(
+            concepts,
+            normalized,
+            "iot",
+            "iot",
+            "internet of things",
+            "embedded systems",
+            "embedded");
+
+        AddConcept(
+            concepts,
+            normalized,
+            "software",
+            "software engineering",
+            "software systems",
+            "software development");
+
+        AddConcept(
+            concepts,
+            normalized,
+            "cloud",
+            "cloud computing",
+            "cloud systems",
+            "distributed systems");
+
+        AddConcept(
+            concepts,
+            normalized,
+            "database",
+            "database",
+            "databases",
+            "database systems");
+
+        return concepts;
+    }
+
+    private static void AddConcept(
+        ISet<string> concepts,
+        string normalizedValue,
+        string concept,
+        params string[] aliases)
+    {
+        if (aliases.Any(alias =>
+                ContainsMatchingPhrase(
+                    normalizedValue,
+                    NormalizeMatchingText(
+                        alias))))
+        {
+            concepts.Add(
+                concept);
+        }
+    }
+
+    private static bool ContainsMatchingPhrase(
+        string normalizedValue,
+        string normalizedPhrase)
+    {
+        if (string.IsNullOrWhiteSpace(
+                normalizedValue) ||
+            string.IsNullOrWhiteSpace(
+                normalizedPhrase))
+        {
+            return false;
+        }
+
+        return (
+            " " + normalizedValue + " "
+        ).Contains(
+            " " + normalizedPhrase + " ",
+            StringComparison
+                .OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeMatchingText(
+        string value)
+    {
+        var characters =
+            value
+                .Trim()
+                .ToLowerInvariant()
+                .Select(character =>
+                    char.IsLetterOrDigit(
+                        character)
+                        ? character
+                        : ' ')
+                .ToArray();
+
+        return string.Join(
+            " ",
+            new string(characters)
+                .Split(
+                    ' ',
+                    StringSplitOptions
+                        .RemoveEmptyEntries));
+    }
+
+    private static List<string>
+        SplitExpertiseItems(
+            string? value)
+    {
+        if (string.IsNullOrWhiteSpace(
+                value))
+        {
+            return [];
+        }
+
+        return value
+            .Split(
+                new[]
+                {
+                    ',',
+                    ';',
+                    '/',
+                    '|',
+                    '\n',
+                    '\r'
+                },
+                StringSplitOptions
+                    .RemoveEmptyEntries)
+            .Select(item =>
+                item.Trim())
+            .Where(item =>
+                item.Length >= 2)
+            .Distinct(
+                StringComparer
+                    .OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static bool ContainsAny(

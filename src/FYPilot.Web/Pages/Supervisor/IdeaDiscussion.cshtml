@@ -964,18 +964,26 @@
 
         const replyToId = Number(supervisorReplyToMessageId.value || 0);
 
+        try {
+        await connection.invoke(
+        "SendFeedbackMessage",
+        evaluationId,
+        ideaId,
+        value,
+        replyToId || null);
+
         supervisorInput.value = "";
         setSupervisorReplyTarget("", "");
 
-        try {
-        await connection.invoke("SendFeedbackMessage", evaluationId, ideaId, value, replyToId || null);
-
         if (ideaId) {
-        await connection.invoke("StopTypingFeedbackRoom", ideaId);
+        await connection.invoke(
+        "StopTypingFeedbackRoom",
+        ideaId);
         }
         } catch (error) {
         console.error(error);
-        alert("Message could not be sent. Please refresh and try again.");
+        alert(error?.message ||
+        "Message could not be sent. Please refresh and try again.");
         }
         });
 
@@ -1007,10 +1015,22 @@
         });
 
         connection.on("ReceiveFeedbackMessage", function (message) {
-        const incomingEvaluationId = Number(message.evaluationId ?? message.EvaluationId);
-        const incomingIdeaId = Number(message.ideaId ?? message.IdeaId);
+        const incomingEvaluationId =
+        Number(message.evaluationId ?? message.EvaluationId);
+
+        const incomingIdeaId =
+        Number(message.ideaId ?? message.IdeaId);
+
+        const incomingMessageId =
+        Number(message.id ?? message.Id);
 
         if (incomingIdeaId && incomingIdeaId !== ideaId) {
+        return;
+        }
+
+        if (incomingMessageId &&
+        supervisorThread.querySelector(
+        `[data-message-id="${incomingMessageId}"]`)) {
         return;
         }
 

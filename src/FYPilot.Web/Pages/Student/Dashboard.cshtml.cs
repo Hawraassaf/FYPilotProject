@@ -49,11 +49,16 @@ public class DashboardModel(
     public int ActiveMembersCount =>
         Members.Count;
 
+    /*
+     * Project.MaximumMembers is the shared source of truth.
+     *
+     * Do not clamp it to 3 here because Team Management may
+     * configure a larger project capacity, such as 4.
+     */
     public int MaximumMembers =>
-    Math.Clamp(
-        CurrentProject?.MaximumMembers ?? 1,
-        1,
-        3);
+        Math.Max(
+            CurrentProject?.MaximumMembers ?? 1,
+            ActiveMembersCount);
 
     public string ProjectTitle =>
         string.IsNullOrWhiteSpace(CurrentProject?.Title)
@@ -254,42 +259,57 @@ public class DashboardModel(
     private void BuildStatistics(
         int totalSkills)
     {
-        var progress =
-            Math.Clamp(
-                CurrentProject?.ProgressPercentage ?? 0,
-                0,
-                100);
+        var availableTeamPlaces =
+            Math.Max(
+                MaximumMembers -
+                ActiveMembersCount,
+                0);
 
         Stats =
         [
+            /*
+             * These cards intentionally avoid repeating
+             * readiness, selected-idea and roadmap values
+             * that already appear elsewhere on Dashboard.
+             */
             new StatCard(
-                Label: "Project Progress",
-                Value: $"{progress}%",
-                Icon: "graph-up-arrow",
-                Note: "Progress for this project"),
+                Label: "Assessed Skills",
+                Value: totalSkills.ToString(),
+                Icon: "tools",
+                Note: totalSkills > 0
+                    ? "Technical skills in your profile"
+                    : "Complete your skill assessment"),
 
             new StatCard(
-                Label: "Team Members",
+                Label: "Team Capacity",
                 Value:
                     $"{ActiveMembersCount}/{MaximumMembers}",
                 Icon: "people",
-                Note: "Active project members"),
+                Note: availableTeamPlaces == 0
+                    ? "Project team is full"
+                    : availableTeamPlaces == 1
+                        ? "1 team place available"
+                        : $"{availableTeamPlaces} team places available"),
 
             new StatCard(
-                Label: "Selected Idea",
-                Value: HasSelectedIdea ? "1" : "0",
-                Icon: "lightbulb",
-                Note: HasSelectedIdea
-                    ? "Shared project direction"
-                    : "No idea selected yet"),
+                Label: "Your Project Role",
+                Value: AccessRoleLabel,
+                Icon: "person-badge",
+                Note: string.Equals(
+                    AccessRoleLabel,
+                    "Owner",
+                    StringComparison.OrdinalIgnoreCase)
+                    ? "You manage this project workspace"
+                    : "You collaborate in this project"),
 
             new StatCard(
-                Label: "Roadmaps",
-                Value: RoadmapCount.ToString(),
-                Icon: "map",
-                Note: HasRoadmaps
-                    ? "Planning has started"
-                    : "No roadmap created")
+                Label: "Recent Activity",
+                Value:
+                    RecentActivities.Count.ToString(),
+                Icon: "clock-history",
+                Note: RecentActivities.Count == 0
+                    ? "No project events yet"
+                    : "Latest recorded project events")
         ];
     }
 
