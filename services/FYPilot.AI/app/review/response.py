@@ -37,6 +37,8 @@ def safe_attempt_history(history: list[AttemptRecord]) -> list[dict[str, Any]]:
         {
             "attemptNumber": record.attemptNumber,
             "stage": record.stage,
+            "operation": record.operation,
+            "outcome": record.outcome,
             "outputHash": record.outputHash,
             "firewallPassed": record.firewallPassed,
             "firewallFlags": record.firewallFlags,
@@ -61,6 +63,9 @@ def build_review_response(result: PipelineResult) -> dict[str, Any]:
     return {
         "status": result.status,
         "usable": result.usable,
+        "displayable": result.displayable,
+        "outputOrigin": result.outputOrigin,
+        "outputReviewLevel": result.outputReviewLevel,
         "reviewUnavailable": result.reviewUnavailable,
         "warning": result.warning,
         "qualityScore": findings.qualityScore if findings else None,
@@ -88,6 +93,9 @@ def empty_review_response(reason: str) -> dict[str, Any]:
     return {
         "status": "approved",
         "usable": True,
+        "displayable": True,
+        "outputOrigin": "none",
+        "outputReviewLevel": "approved",
         "reviewUnavailable": False,
         "warning": "",
         "qualityScore": None,

@@ -10,6 +10,7 @@ actually wired) gets none of this pipeline's protection.
 
 import re
 from dataclasses import dataclass, field
+from typing import Literal
 
 from pydantic import BaseModel, model_validator
 
@@ -36,7 +37,13 @@ from app.models.market_needs_models import MarketNeedsResponse
 @dataclass
 class AgentReviewConfig:
     schema: type[BaseModel]
-    max_rewrites: int = 1
+    # Backward-compatible legacy setting. When provided, it initializes both
+    # independent budgets below. New/updated agents should configure the two
+    # budgets explicitly so a JSON/schema repair never consumes the only
+    # semantic content-rewrite opportunity.
+    max_rewrites: int | None = None
+    max_structural_repairs: int = 1
+    max_semantic_rewrites: int = 1
     url_mode: str = "no_urls_allowed"
     allow_unreviewed_output: bool = False
     known_risky_claims: list[str] = field(default_factory=list)
@@ -47,6 +54,28 @@ class AgentReviewConfig:
     # quality, consistency). Empty string changes nothing for agents that
     # don't set it -- purely additive, see ReviewerAgent.build_prompt.
     extra_rubric: str = ""
+    # Consumed only by the job-based Idea Comparison worker's own decision
+    # policy (_classify_idea_comparison_issues in
+    # app/jobs/workers/idea_comparison_worker.py) -- ReviewPipeline.run()
+    # always uses the shared, strict ReviewDecisionEngine regardless of
+    # this value, so setting it here has no effect on any agent routed
+    # through ReviewPipeline. "blocking" (default) lets a validated
+    # high/critical issue reject/rewrite a candidate; "advisory" keeps the
+    # Reviewer running and its findings recorded on every AttemptRecord,
+    # but never lets them set requiresRewrite=True.
+    review_mode: Literal["blocking", "advisory"] = "blocking"
+
+    def __post_init__(self) -> None:
+        if self.max_rewrites is not None:
+            if self.max_rewrites < 0:
+                raise ValueError("max_rewrites cannot be negative")
+            self.max_structural_repairs = self.max_rewrites
+            self.max_semantic_rewrites = self.max_rewrites
+
+        if self.max_structural_repairs < 0:
+            raise ValueError("max_structural_repairs cannot be negative")
+        if self.max_semantic_rewrites < 0:
+            raise ValueError("max_semantic_rewrites cannot be negative")
 
 
 # Migrated (copied, not moved) from app/agents/answer_review_agent.py's
@@ -1247,9 +1276,10 @@ AGENT_REGISTRY: dict[str, AgentReviewConfig] = {
     ),
     "SEDocumentationAgent": AgentReviewConfig(
         schema=SEDocumentationCandidateSchema,
-        max_rewrites=1,
+        max_structural_repairs=1,
+        max_semantic_rewrites=1,
         url_mode="no_urls_allowed",
-        allow_unreviewed_output=False,
+        allow_unreviewed_output=True,
         known_risky_claims=_SEDOC_KNOWN_RISKY_CLAIMS,
         mandatory_fields=["projectTitle", "projectOverview", "problemStatement"],
         # Higher than Roadmap/Mentor Chat's 90s: the Writer stage here makes up
@@ -1277,9 +1307,10 @@ AGENT_REGISTRY: dict[str, AgentReviewConfig] = {
     ),
     "ProjectDNAAgent": AgentReviewConfig(
         schema=ProjectDNACandidateSchema,
-        max_rewrites=1,
+        max_structural_repairs=1,
+        max_semantic_rewrites=1,
         url_mode="no_urls_allowed",
-        allow_unreviewed_output=False,
+        allow_unreviewed_output=True,
         known_risky_claims=_DNA_KNOWN_RISKY_CLAIMS,
         mandatory_fields=["projectDNAType", "summary"],
         max_total_seconds=90.0,
@@ -1287,7 +1318,25 @@ AGENT_REGISTRY: dict[str, AgentReviewConfig] = {
     ),
     "IdeaComparisonAgent": AgentReviewConfig(
         schema=IdeaComparisonCandidateSchema,
-        max_rewrites=1,
+        max_structural_repairs=1,
+        # Semantic rewrite-on-rejection is explicitly OFF for this agent's
+        # job-worker path: live testing on real rejected outputs showed the
+        # reviewer -- an LLM judge on a subjective/creative task -- almost
+        # always finds *something* to flag, so treating every
+        # requiresCorrection=true issue as blocking discarded good,
+        # idea-specific comparisons (see
+        # app/jobs/workers/idea_comparison_worker.py's
+        # _classify_idea_comparison_issues). review_mode="advisory" keeps
+        # the Reviewer running and its findings recorded for future
+        # tuning, but never blocking; max_semantic_rewrites=0 independently
+        # zeroes the rewrite budget so the rewrite path stays unreachable
+        # even if review_mode alone were ever flipped by mistake. Re-enable
+        # both together only after targeted reviewer-precision regression
+        # tests. NOTE: the synchronous /compare-generated-ideas endpoint
+        # (routers/idea_comparison.py) uses the shared strict
+        # ReviewDecisionEngine unchanged and does not read either field.
+        max_semantic_rewrites=0,
+        review_mode="advisory",
         url_mode="no_urls_allowed",
         # Unlike DNA/security-relevant content, a structurally-valid
         # comparison of the student's OWN saved ideas is low-risk to show

@@ -1771,7 +1771,12 @@ class IdeaComparisonRegistryTests(unittest.TestCase):
 
     def test_registry_entry_matches_spec(self):
         config = get_agent_config("IdeaComparisonAgent")
-        self.assertEqual(config.max_rewrites, 1)
+        self.assertEqual(config.max_structural_repairs, 1)
+        # Semantic rewrite-on-rejection is explicitly OFF for this agent
+        # (review_mode="advisory" + a zeroed rewrite budget) -- see that
+        # registry entry's own comment for why.
+        self.assertEqual(config.max_semantic_rewrites, 0)
+        self.assertEqual(config.review_mode, "advisory")
         self.assertEqual(config.url_mode, "no_urls_allowed")
         self.assertTrue(config.allow_unreviewed_output)
         self.assertIn("summary", config.mandatory_fields)

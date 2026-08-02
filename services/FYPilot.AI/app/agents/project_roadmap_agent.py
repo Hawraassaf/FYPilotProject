@@ -457,6 +457,21 @@ class ProjectRoadmapAgent:
     # LLM phase-plan generation
     # =========================================================================
 
+    def _estimate_phase_plan_max_tokens(self, profile: ProjectProfile) -> int:
+        """
+        Sized to the structured per-task schema (title/description/
+        taskType/3 effort numbers/complexity/mandatory/dependencyIds/
+        parallelizable/requiredSkills/acceptanceCriteria/scopeSize -- much
+        larger than a flat task-title-string schema) times the profile's
+        own upper phase-count bound, so a project needing more phases gets
+        a proportionally bigger budget instead of a flat default. A flat
+        2200-token default was observed live truncating a provider's
+        response for a 13-phase advanced AI/medical plan before this
+        existed, which a fixed-budget repair request then couldn't fix
+        either (see DeepInfraProvider._repair_json_with_provider).
+        """
+        return max(3000, min(8000, 1500 + profile.phase_count_max * 700))
+
     def _try_generate_phase_plan(
         self,
         request: ProjectRoadmapRequest,
@@ -469,6 +484,7 @@ class ProjectRoadmapAgent:
             result = self.provider_chain.generate_json(
                 prompt, use_search=False,
                 schema_description=_ROADMAP_PHASE_PLAN_SCHEMA_DESCRIPTION,
+                max_tokens=self._estimate_phase_plan_max_tokens(profile),
             )
         except Exception as ex:
             self.last_error = f"Roadmap generation failed: {ex}"
