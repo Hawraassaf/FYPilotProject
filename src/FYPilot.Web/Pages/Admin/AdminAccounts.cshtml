@@ -2,13 +2,13 @@
 @model FYPilot.Web.Pages.Admin.AdminAccountsModel
 @{
     ViewData["Title"] = "Manage Administrators";
-    ViewData["Subtitle"] = "Create and review privileged administrator accounts.";
+    ViewData["Subtitle"] = "Create, review, and securely remove secondary administrator accounts.";
 }
 
 <section class="admin-accounts-page">
     @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
     {
-        <div class="alert alert-success admin-alert" role="alert">
+        <div class="alert alert-success admin-alert" role="alert" data-auto-dismiss="true">
             <i class="bi bi-check-circle-fill"></i>
             <span>@Model.SuccessMessage</span>
         </div>
@@ -16,7 +16,7 @@
 
     @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
     {
-        <div class="alert alert-danger admin-alert" role="alert">
+        <div class="alert alert-danger admin-alert" role="alert" data-auto-dismiss="true">
             <i class="bi bi-exclamation-triangle-fill"></i>
             <span>@Model.ErrorMessage</span>
         </div>
@@ -25,13 +25,10 @@
     <header class="admin-accounts-hero">
         <div>
             <span class="admin-eyebrow">Main administrator control</span>
-
             <h1>Administrator Accounts</h1>
-
             <p>
                 Create secure administrator accounts without changing PostgreSQL manually.
-                Every new administrator receives a separate account with a temporary password
-                that must be replaced during the first login.
+                Every administrator receives a separate identity and the same operational admin role.
             </p>
         </div>
 
@@ -40,7 +37,6 @@
                 <span>Total administrators</span>
                 <strong>@Model.Admins.Count</strong>
             </div>
-
             <div>
                 <span>Next account</span>
                 <strong class="next-email">@Model.NextAdminEmail</strong>
@@ -54,7 +50,6 @@
                 <div class="heading-icon">
                     <i class="bi bi-person-plus-fill"></i>
                 </div>
-
                 <div>
                     <span>Create account</span>
                     <h2>New Administrator</h2>
@@ -65,7 +60,6 @@
                   asp-page-handler="Create"
                   id="createAdminForm"
                   class="admin-create-form">
-
                 @Html.AntiForgeryToken()
 
                 <div asp-validation-summary="ModelOnly"
@@ -73,104 +67,70 @@
 
                 <div class="form-field">
                     <label>Generated email</label>
-
                     <div class="readonly-email">
                         <i class="bi bi-envelope"></i>
-
                         <input value="@Model.NextAdminEmail"
                                readonly
                                aria-label="Generated administrator email" />
                     </div>
-
-                    <small>
-                        The system generates the next available administrator
-                        number automatically.
-                    </small>
+                    <small>The system generates the next available admin number automatically.</small>
                 </div>
 
                 <div class="form-field">
-                    <label asp-for="Input.FullName">
-                        Display name
-                    </label>
-
+                    <label asp-for="Input.FullName">Display name</label>
                     <input asp-for="Input.FullName"
                            class="form-control"
-                           autocomplete="name"
-                           placeholder="Enter the administrator name" />
-
+                           autocomplete="name" />
                     <span asp-validation-for="Input.FullName"
                           class="text-danger"></span>
                 </div>
 
                 <div class="form-field">
-                    <label asp-for="Input.Password">
-                        Temporary password
-                    </label>
-
+                    <label asp-for="Input.Password">Temporary password</label>
                     <div class="password-wrap">
                         <input asp-for="Input.Password"
                                class="form-control"
-                               autocomplete="new-password"
-                               placeholder="Enter a temporary password" />
-
+                               autocomplete="new-password" />
                         <button type="button"
                                 class="password-toggle"
                                 data-target="Input_Password"
-                                aria-label="Show or hide temporary password">
-
+                                aria-label="Show or hide password">
                             <i class="bi bi-eye"></i>
                         </button>
                     </div>
-
                     <span asp-validation-for="Input.Password"
                           class="text-danger"></span>
-
-                    <small>
-                        Use at least 8 characters with an uppercase letter,
-                        a lowercase letter, and a number. This password is only
-                        for the administrator's first login.
-                    </small>
+                    <small>At least 8 characters with uppercase, lowercase, and a number.</small>
                 </div>
 
                 <div class="form-field">
-                    <label asp-for="Input.ConfirmPassword">
-                        Confirm temporary password
-                    </label>
-
+                    <label asp-for="Input.ConfirmPassword">Confirm password</label>
                     <div class="password-wrap">
                         <input asp-for="Input.ConfirmPassword"
                                class="form-control"
-                               autocomplete="new-password"
-                               placeholder="Re-enter the temporary password" />
-
+                               autocomplete="new-password" />
                         <button type="button"
                                 class="password-toggle"
                                 data-target="Input_ConfirmPassword"
-                                aria-label="Show or hide temporary password confirmation">
-
+                                aria-label="Show or hide password confirmation">
                             <i class="bi bi-eye"></i>
                         </button>
                     </div>
-
                     <span asp-validation-for="Input.ConfirmPassword"
                           class="text-danger"></span>
                 </div>
 
                 <div class="security-note">
                     <i class="bi bi-shield-lock-fill"></i>
-
                     <p>
-                        The temporary password is securely hashed before storage.
-                        After logging in for the first time, the new administrator
-                        will be required to replace it with a private and secure
-                        personal password before accessing administrator pages.
+                        The password is hashed before storage. It cannot be displayed later,
+                        so share it securely with the new administrator.
                     </p>
                 </div>
 
                 <button type="submit"
                         class="create-admin-button"
                         id="createAdminButton">
-
                     <i class="bi bi-person-plus"></i>
                     <span>Create Administrator</span>
                 </button>
@@ -180,16 +140,12 @@
         <article class="admin-directory-card">
             <div class="directory-heading">
                 <div>
-                    <span class="admin-eyebrow">
-                        Account directory
-                    </span>
-
+                    <span class="admin-eyebrow">Account directory</span>
                     <h2>Current Administrators</h2>
                 </div>
 
                 <label class="admin-search">
                     <i class="bi bi-search"></i>
-
                     <input type="search"
                            id="adminSearch"
                            placeholder="Search name or email..."
@@ -200,12 +156,9 @@
             <div class="admin-list" id="adminList">
                 @foreach (var admin in Model.Admins)
                 {
-                    var searchText =
-                        $"{admin.FullName} {admin.Email}".ToLowerInvariant();
+                    var searchText = $"{admin.FullName} {admin.Email}".ToLowerInvariant();
 
-                    <div class="admin-row"
-                         data-search="@searchText">
-
+                    <div class="admin-row" data-search="@searchText">
                         <div class="admin-avatar">
                             @Initials(admin.FullName)
                         </div>
@@ -223,19 +176,13 @@
                                 }
                                 else
                                 {
-                                    <span class="regular-admin-badge">
-                                        Administrator
-                                    </span>
+                                    <span class="regular-admin-badge">Administrator</span>
                                 }
                             </div>
 
                             <span>@admin.Email</span>
-
                             <small>
-                                Created
-                                @admin.CreatedAt
-                                .ToLocalTime()
-                                .ToString("MMM d, yyyy • hh:mm tt")
+                                Created @admin.CreatedAt.ToLocalTime().ToString("MMM d, yyyy • hh:mm tt")
                             </small>
                         </div>
 
@@ -243,12 +190,42 @@
                             <i class="bi bi-check-circle-fill"></i>
                             Active
                         </div>
+
+                        <div class="admin-row-actions">
+                            @if (admin.IsMainAdmin)
+                            {
+                                <span class="protected-admin-state"
+                                      title="The main administrator cannot be deleted.">
+                                    <i class="bi bi-shield-lock-fill"></i>
+                                    Protected
+                                </span>
+                            }
+                            else if (!Model.PermanentDeletionReady)
+                            {
+                                <span class="deletion-pending"
+                                      title="Complete the final database safety stage before enabling permanent deletion.">
+                                    <i class="bi bi-database-lock"></i>
+                                    DB step pending
+                                </span>
+                            }
+                            else
+                            {
+                                <button type="button"
+                                        class="delete-admin-button"
+                                        data-bs-toggle="modal"
+                                        data-bs-target="#deleteAdminModal"
+                                        data-admin-id="@admin.Id"
+                                        data-admin-name="@admin.FullName"
+                                        data-admin-email="@admin.Email">
+                                    <i class="bi bi-trash3"></i>
+                                    Delete
+                                </button>
+                            }
+                        </div>
                     </div>
                 }
 
-                <div class="admin-empty"
-                     id="adminSearchEmpty">
-
+                <div class="admin-empty" id="adminSearchEmpty">
                     <i class="bi bi-search"></i>
                     <p>No administrator matches your search.</p>
                 </div>
@@ -256,15 +233,141 @@
 
             <footer class="directory-footer">
                 <i class="bi bi-info-circle"></i>
-
                 <span>
-                    The list stays inside a fixed-height scroll area,
-                    even when many accounts are created.
+                    The list stays inside a fixed-height scroll area, even when many accounts are created.
                 </span>
             </footer>
         </article>
     </div>
 </section>
+
+<div class="modal fade"
+     id="deleteAdminModal"
+     tabindex="-1"
+     aria-labelledby="deleteAdminModalLabel"
+     aria-hidden="true">
+
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content admin-delete-modal">
+
+            <div class="modal-header">
+                <div>
+                    <span class="admin-eyebrow">Permanent account removal</span>
+                    <h2 class="modal-title"
+                        id="deleteAdminModalLabel">
+                        Delete Administrator
+                    </h2>
+                </div>
+
+                <button type="button"
+                        class="btn-close"
+                        data-bs-dismiss="modal"
+                        aria-label="Close">
+                </button>
+            </div>
+
+            <form method="post"
+                  asp-page-handler="Delete"
+                  id="deleteAdminForm">
+
+                @Html.AntiForgeryToken()
+
+                <input type="hidden"
+                       asp-for="DeleteInput.AdminId"
+                       id="deleteAdminId" />
+
+                <div class="modal-body">
+                    <div class="delete-warning">
+                        <i class="bi bi-exclamation-octagon-fill"></i>
+
+                        <div>
+                            <strong>
+                                This permanently removes login access.
+                            </strong>
+
+                            <p>
+                                The account for
+                                <b id="deleteAdminName">this administrator</b>
+                                will be deleted. Historical administrative
+                                work must remain in the system.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="delete-target-card">
+                        <span>Selected administrator</span>
+                        <strong id="deleteAdminEmailText"></strong>
+                    </div>
+
+                    <div class="form-field">
+                        <label asp-for="DeleteInput.ConfirmationEmail">
+                            Type the administrator email
+                        </label>
+
+                        <input asp-for="DeleteInput.ConfirmationEmail"
+                               class="form-control"
+                               id="deleteConfirmationEmail"
+                               autocomplete="off"
+                               placeholder="Enter the exact email shown above" />
+
+                        <small>
+                            The email must match exactly before deletion
+                            can continue.
+                        </small>
+                    </div>
+
+                    <div class="form-field">
+                        <label asp-for="DeleteInput.CurrentPassword">
+                            Main administrator password
+                        </label>
+
+                        <div class="password-wrap">
+                            <input asp-for="DeleteInput.CurrentPassword"
+                                   class="form-control"
+                                   id="deleteCurrentPassword"
+                                   autocomplete="current-password"
+                                   placeholder="Confirm your current password" />
+
+                            <button type="button"
+                                    class="password-toggle"
+                                    data-target="deleteCurrentPassword"
+                                    aria-label="Show or hide current password">
+
+                                <i class="bi bi-eye"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <label class="delete-confirm-check">
+                        <input asp-for="DeleteInput.ConfirmPermanentDeletion"
+                               id="deletePermanentCheck" />
+
+                        <span>
+                            I understand that this administrator will lose
+                            access permanently and cannot sign in again.
+                        </span>
+                    </label>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button"
+                            class="delete-cancel-button"
+                            data-bs-dismiss="modal">
+                        Cancel
+                    </button>
+
+                    <button type="submit"
+                            class="delete-confirm-button"
+                            id="confirmDeleteAdminButton"
+                            disabled>
+                        <i class="bi bi-trash3-fill"></i>
+                        Permanently Delete
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 
 @section Head {
     <style>
@@ -276,6 +379,8 @@
             --admin-muted: #64748B;
             --admin-soft: #F4F6F9;
             --admin-green: #047857;
+            --admin-red: #B42318;
+            --admin-red-soft: #FFF1F0;
         }
 
         .admin-accounts-page {
@@ -292,7 +397,20 @@
             border: 0;
             border-radius: 16px;
             box-shadow: 0 12px 28px rgba(15, 23, 42, .08);
+            transition: opacity .3s ease, transform .3s ease, margin .3s ease, padding .3s ease, max-height .3s ease;
+            overflow: hidden;
+            max-height: 120px;
         }
+
+            .admin-alert.admin-alert-hiding {
+                opacity: 0;
+                transform: translateY(-8px);
+                margin-top: 0 !important;
+                margin-bottom: 0 !important;
+                padding-top: 0;
+                padding-bottom: 0;
+                max-height: 0;
+            }
 
         .admin-accounts-hero {
             display: grid;
@@ -303,7 +421,7 @@
             margin-bottom: 1rem;
             border-radius: 26px;
             color: #fff;
-            background: radial-gradient( circle at 88% 18%, rgba(255,255,255,.14), transparent 24%), linear-gradient( 135deg, var(--admin-deep), var(--admin-navy) 58%, var(--admin-steel));
+            background: radial-gradient(circle at 88% 18%, rgba(255,255,255,.14), transparent 24%), linear-gradient(135deg, var(--admin-deep), var(--admin-navy) 58%, var(--admin-steel));
             box-shadow: 0 22px 48px rgba(40, 56, 94, .16);
         }
 
@@ -592,7 +710,7 @@
 
         .admin-row {
             display: grid;
-            grid-template-columns: auto minmax(0, 1fr) auto;
+            grid-template-columns: auto minmax(0, 1fr) auto auto;
             gap: .75rem;
             align-items: center;
             padding: .9rem 1.1rem;
@@ -610,7 +728,7 @@
             display: grid;
             place-items: center;
             color: #fff;
-            background: linear-gradient( 135deg, var(--admin-navy), var(--admin-steel));
+            background: linear-gradient(135deg, var(--admin-navy), var(--admin-steel));
             font-size: .74rem;
             font-weight: 800;
         }
@@ -676,6 +794,187 @@
             white-space: nowrap;
         }
 
+        .admin-row-actions {
+            display: flex;
+            justify-content: flex-end;
+            min-width: 118px;
+        }
+
+        .delete-admin-button,
+        .protected-admin-state,
+        .deletion-pending {
+            min-height: 34px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .35rem;
+            padding: .4rem .62rem;
+            border-radius: 10px;
+            font-size: .67rem;
+            font-weight: 800;
+            white-space: nowrap;
+        }
+
+        .delete-admin-button {
+            color: var(--admin-red);
+            background: var(--admin-red-soft);
+            border: 1px solid #FFD0CC;
+            transition: .15s ease;
+        }
+
+            .delete-admin-button:hover {
+                color: #fff;
+                background: var(--admin-red);
+                border-color: var(--admin-red);
+                transform: translateY(-1px);
+            }
+
+        .protected-admin-state {
+            color: var(--admin-navy);
+            background: #E9EEF6;
+            border: 1px solid #DCE5F2;
+        }
+
+        .deletion-pending {
+            color: #7C5A10;
+            background: #FFF8E7;
+            border: 1px solid #F4DF9A;
+        }
+
+        .admin-delete-modal {
+            overflow: hidden;
+            border: 0;
+            border-radius: 22px;
+            box-shadow: 0 28px 70px rgba(15,23,42,.24);
+        }
+
+            .admin-delete-modal .modal-header,
+            .admin-delete-modal .modal-footer {
+                padding: 1rem 1.1rem;
+                border-color: var(--admin-border);
+            }
+
+            .admin-delete-modal .modal-title {
+                margin: 0;
+                color: var(--admin-navy);
+                font-size: 1.18rem;
+                font-weight: 800;
+            }
+
+            .admin-delete-modal .modal-body {
+                display: grid;
+                gap: .9rem;
+                padding: 1.05rem 1.1rem;
+            }
+
+        .delete-warning {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: .7rem;
+            padding: .85rem;
+            color: #7A271A;
+            background: var(--admin-red-soft);
+            border: 1px solid #FFD0CC;
+            border-radius: 15px;
+        }
+
+            .delete-warning > i {
+                margin-top: .1rem;
+                color: var(--admin-red);
+                font-size: 1.15rem;
+            }
+
+            .delete-warning strong,
+            .delete-warning p {
+                display: block;
+            }
+
+            .delete-warning strong {
+                font-size: .8rem;
+            }
+
+            .delete-warning p {
+                margin: .2rem 0 0;
+                font-size: .72rem;
+                line-height: 1.5;
+            }
+
+        .delete-target-card {
+            padding: .75rem .8rem;
+            border: 1px solid var(--admin-border);
+            border-radius: 13px;
+            background: #F8FAFC;
+        }
+
+            .delete-target-card span,
+            .delete-target-card strong {
+                display: block;
+            }
+
+            .delete-target-card span {
+                color: var(--admin-muted);
+                font-size: .65rem;
+                font-weight: 750;
+                text-transform: uppercase;
+                letter-spacing: .07em;
+            }
+
+            .delete-target-card strong {
+                margin-top: .2rem;
+                color: var(--admin-navy);
+                font-size: .82rem;
+                overflow-wrap: anywhere;
+            }
+
+        .delete-confirm-check {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: .55rem;
+            align-items: start;
+            padding: .75rem;
+            color: #475569;
+            background: #F8FAFC;
+            border: 1px solid var(--admin-border);
+            border-radius: 13px;
+            font-size: .72rem;
+            line-height: 1.5;
+            cursor: pointer;
+        }
+
+            .delete-confirm-check input {
+                margin-top: .15rem;
+            }
+
+        .delete-cancel-button,
+        .delete-confirm-button {
+            min-height: 40px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .4rem;
+            padding: .5rem .78rem;
+            border-radius: 11px;
+            font-size: .75rem;
+            font-weight: 800;
+        }
+
+        .delete-cancel-button {
+            color: #475569;
+            background: #fff;
+            border: 1px solid var(--admin-border);
+        }
+
+        .delete-confirm-button {
+            color: #fff;
+            background: var(--admin-red);
+            border: 1px solid var(--admin-red);
+        }
+
+            .delete-confirm-button:disabled {
+                opacity: .45;
+                cursor: not-allowed;
+            }
+
         .admin-empty {
             min-height: 220px;
             display: none;
@@ -739,8 +1038,10 @@
                 grid-template-columns: auto minmax(0, 1fr);
             }
 
-            .admin-status {
+            .admin-status,
+            .admin-row-actions {
                 grid-column: 2;
+                justify-content: flex-start;
             }
         }
     </style>
@@ -751,84 +1052,168 @@
 
     <script>
         document
-            .querySelectorAll(".password-toggle")
-            .forEach(function (button) {
-                button.addEventListener("click", function () {
-                    const input =
-                        document.getElementById(button.dataset.target);
+            .querySelectorAll(
+                ".admin-alert[data-auto-dismiss='true']")
+            .forEach(function (alertElement) {
+                window.setTimeout(function () {
+                    alertElement.classList.add(
+                        "admin-alert-hiding");
 
-                    const icon =
-                        button.querySelector("i");
-
-                    if (!input) {
-                        return;
-                    }
-
-                    const show =
-                        input.type === "password";
-
-                    input.type =
-                        show ? "text" : "password";
-
-                    if (icon) {
-                        icon.className =
-                            show
-                                ? "bi bi-eye-slash"
-                                : "bi bi-eye";
-                    }
-                });
+                    window.setTimeout(function () {
+                        alertElement.remove();
+                    }, 320);
+                }, 3000);
             });
 
-        const searchInput =
-            document.getElementById("adminSearch");
+        document.querySelectorAll(".password-toggle").forEach(function (button) {
+            button.addEventListener("click", function () {
+                const input = document.getElementById(button.dataset.target);
+                const icon = button.querySelector("i");
 
-        const rows =
-            Array.from(
-                document.querySelectorAll(".admin-row"));
+                if (!input) return;
 
-        const emptyState =
-            document.getElementById("adminSearchEmpty");
+                const show = input.type === "password";
+                input.type = show ? "text" : "password";
+
+                if (icon) {
+                    icon.className = show ? "bi bi-eye-slash" : "bi bi-eye";
+                }
+            });
+        });
+
+        const searchInput = document.getElementById("adminSearch");
+        const rows = Array.from(document.querySelectorAll(".admin-row"));
+        const emptyState = document.getElementById("adminSearchEmpty");
 
         searchInput?.addEventListener("input", function () {
-            const value =
-                searchInput.value.trim().toLowerCase();
-
+            const value = searchInput.value.trim().toLowerCase();
             let visibleCount = 0;
 
             rows.forEach(function (row) {
-                const matches =
-                    !value ||
-                    (row.dataset.search || "").includes(value);
+                const matches = !value || (row.dataset.search || "").includes(value);
+                row.style.display = matches ? "grid" : "none";
 
-                row.style.display =
-                    matches ? "grid" : "none";
-
-                if (matches) {
-                    visibleCount++;
-                }
+                if (matches) visibleCount++;
             });
 
             if (emptyState) {
-                emptyState.style.display =
-                    visibleCount === 0
-                        ? "grid"
-                        : "none";
+                emptyState.style.display = visibleCount === 0 ? "grid" : "none";
             }
         });
 
-        const form =
-            document.getElementById("createAdminForm");
+        const deleteModal =
+            document.getElementById("deleteAdminModal");
 
-        const submitButton =
-            document.getElementById("createAdminButton");
+        const deleteAdminId =
+            document.getElementById("deleteAdminId");
 
-        form?.addEventListener("submit", function () {
-            if (!form.checkValidity() || !submitButton) {
+        const deleteAdminName =
+            document.getElementById("deleteAdminName");
+
+        const deleteAdminEmailText =
+            document.getElementById("deleteAdminEmailText");
+
+        const deleteConfirmationEmail =
+            document.getElementById("deleteConfirmationEmail");
+
+        const deleteCurrentPassword =
+            document.getElementById("deleteCurrentPassword");
+
+        const deletePermanentCheck =
+            document.getElementById("deletePermanentCheck");
+
+        const confirmDeleteButton =
+            document.getElementById("confirmDeleteAdminButton");
+
+        let expectedDeleteEmail = "";
+
+        function updateDeleteButtonState() {
+            if (!confirmDeleteButton) {
                 return;
             }
 
-            submitButton.disabled = true;
+            const emailMatches =
+                (deleteConfirmationEmail?.value || "")
+                    .trim()
+                    .toLowerCase() ===
+                expectedDeleteEmail.toLowerCase();
 
+            const passwordProvided =
+                (deleteCurrentPassword?.value || "")
+                    .trim()
+                    .length > 0;
+
+            const confirmed =
+                deletePermanentCheck?.checked === true;
+
+            confirmDeleteButton.disabled =
+                !(emailMatches &&
+                  passwordProvided &&
+                  confirmed);
+        }
+
+        deleteModal?.addEventListener(
+            "show.bs.modal",
+            function (event) {
+                const trigger =
+                    event.relatedTarget;
+
+                expectedDeleteEmail =
+                    trigger?.dataset.adminEmail || "";
+
+                if (deleteAdminId) {
+                    deleteAdminId.value =
+                        trigger?.dataset.adminId || "";
+                }
+
+                if (deleteAdminName) {
+                    deleteAdminName.textContent =
+                        trigger?.dataset.adminName ||
+                        "this administrator";
+                }
+
+                if (deleteAdminEmailText) {
+                    deleteAdminEmailText.textContent =
+                        expectedDeleteEmail;
+                }
+
+                if (deleteConfirmationEmail) {
+                    deleteConfirmationEmail.value = "";
+                }
+
+                if (deleteCurrentPassword) {
+                    deleteCurrentPassword.value = "";
+                    deleteCurrentPassword.type = "password";
+                }
+
+                if (deletePermanentCheck) {
+                    deletePermanentCheck.checked = false;
+                }
+
+                updateDeleteButtonState();
+            });
+
+        [
+            deleteConfirmationEmail,
+            deleteCurrentPassword,
+            deletePermanentCheck
+        ].forEach(function (element) {
+            element?.addEventListener(
+                "input",
+                updateDeleteButtonState);
+
+            element?.addEventListener(
+                "change",
+                updateDeleteButtonState);
+        });
+
+        const form = document.getElementById("createAdminForm");
+        const submitButton = document.getElementById("createAdminButton");
+
+        form?.addEventListener("submit", function () {
+            if (!form.checkValidity() || !submitButton) return;
+
+            submitButton.disabled = true;
             submitButton.innerHTML =
                 '<span class="spinner-border spinner-border-sm"></span>' +
                 '<span>Creating...</span>';
@@ -845,17 +1230,12 @@
         }
 
         var parts = fullName
-            .Split(
-                ' ',
-                StringSplitOptions.RemoveEmptyEntries)
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
             .Take(2)
             .ToList();
 
         return parts.Count == 0
             ? "AD"
-            : string.Join(
-                "",
-                parts.Select(p => p[0]))
-                .ToUpperInvariant();
+            : string.Join("", parts.Select(p => p[0])).ToUpperInvariant();
     }
 }

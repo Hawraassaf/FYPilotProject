@@ -870,15 +870,12 @@ public class FeedbackModel(
             cancellationToken);
 
         /*
-         * Feedback chat messages create an in-app
-         * notification only.
-         *
-         * Sending an email for every chat reply would
-         * create excessive duplicate communication.
+         * Non-SignalR fallback notification path.
+         * The message content is never included.
          */
         try
         {
-            var studentName =
+            var senderName =
                 await db.Users
                     .AsNoTracking()
                     .Where(user =>
@@ -890,36 +887,21 @@ public class FeedbackModel(
                         cancellationToken)
                 ?? "A project member";
 
-            await notificationService.NotifyUserAsync(
-                recipientUserId:
-                    project.SupervisorId.Value,
-
-                title:
-                    "New project feedback reply",
-
-                message:
-                    $"{studentName} replied to feedback "
-                    + $"for project "
-                    + $"\"{SafeProjectTitle(project.Title)}\".",
-
-                type:
-                    "project_feedback_reply",
-
-                url:
-                    $"/Supervisor/IdeaDiscussion"
-                    + $"?projectId={ProjectId}"
-                    + $"&ideaId={evaluation.IdeaId}",
-
-                sendEmail:
-                    false);
+            await NotifyFeedbackDiscussionParticipantsAsync(
+                project,
+                evaluation.Id,
+                evaluation.IdeaId,
+                CurrentUserId,
+                senderName,
+                cancellationToken);
         }
         catch (Exception exception)
         {
             logger.LogWarning(
                 exception,
-                "Feedback reply was saved but the "
-                + "supervisor notification failed for "
-                + "evaluation {EvaluationId}.",
+                "Feedback reply was saved but participant "
+                + "notifications failed for evaluation "
+                + "{EvaluationId}.",
                 evaluation.Id);
         }
 
@@ -1576,6 +1558,113 @@ public class FeedbackModel(
             .Concat(
                 pendingProjectIds)
             .ToHashSet();
+    }
+
+    private async Task
+        NotifyFeedbackDiscussionParticipantsAsync(
+            Project project,
+            int evaluationId,
+            int ideaId,
+            int senderUserId,
+            string senderName,
+            CancellationToken cancellationToken)
+    {
+        var memberIdList =
+            await db.ProjectMembers
+                .AsNoTracking()
+                .Where(member =>
+                    member.ProjectId ==
+                        project.Id &&
+                    member.Status ==
+                        "active")
+                .Select(member =>
+                    member.UserId)
+                .Distinct()
+                .ToListAsync(
+                    cancellationToken);
+
+        var participantIds =
+            memberIdList.ToHashSet();
+
+        participantIds.Add(
+            project.StudentId);
+
+        if (project.SupervisorId.HasValue &&
+            NormalizeStatus(
+                project.SupervisorAssignmentStatus) ==
+                "active")
+        {
+            participantIds.Add(
+                project.SupervisorId.Value);
+        }
+
+        participantIds.Remove(
+            senderUserId);
+
+        var projectTitle =
+            SafeProjectTitle(
+                project.Title);
+
+        foreach (var recipientUserId
+                 in participantIds)
+        {
+            var recipientIsSupervisor =
+                project.SupervisorId.HasValue &&
+                project.SupervisorId.Value ==
+                    recipientUserId;
+
+            var destination =
+                recipientIsSupervisor
+                    ? $"/Supervisor/IdeaDiscussion"
+                      + $"?projectId={project.Id}"
+                      + $"&ideaId={ideaId}"
+                    : $"/Student/Feedback"
+                      + $"?projectId={project.Id}"
+                      + $"&evaluationId={evaluationId}";
+
+            try
+            {
+                await notificationService.NotifyUserAsync(
+                    recipientUserId:
+                        recipientUserId,
+
+                    title:
+                        $"New message in \"{projectTitle}\"",
+
+                    message:
+                        $"{senderName} sent a message "
+                        + "in the Supervisor Feedback "
+                        + "discussion.",
+
+                    type:
+                        "project_feedback_message",
+
+                    url:
+                        destination,
+
+                    sendEmail:
+                        false,
+
+                    projectId:
+                        project.Id,
+
+                    actorUserId:
+                        senderUserId,
+
+                    cancellationToken:
+                        cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(
+                    exception,
+                    "Feedback discussion notification "
+                    + "failed for user {RecipientUserId} "
+                    + "in project {ProjectId}.",
+                    recipientUserId,
+                    project.Id);
+            }
+        }
     }
 
     private async Task

@@ -55,7 +55,9 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     // AiAgentJobCoordinator background service drives to completion
     // independently of any connected browser (see AiAgentJobService).
     public DbSet<AiAgentJob> AiAgentJobs => Set<AiAgentJob>();
-
+    public DbSet<ProjectDnaAnalysisRecord>
+    ProjectDnaAnalyses =>
+        Set<ProjectDnaAnalysisRecord>();
     // FYPilot core
     public DbSet<StudentSkill> StudentSkills { get; set; }
     public DbSet<ProjectIdea> ProjectIdeas { get; set; }
@@ -101,6 +103,18 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
             e.Property(user => user.Role)
                 .HasDefaultValue("student");
+
+            e.Property(user => user.IsMainAdmin)
+                .HasColumnName("is_main_admin")
+                .HasDefaultValue(false);
+
+            /*
+             * PostgreSQL partial unique index:
+             * at most one row can be marked as the main administrator.
+             */
+            e.HasIndex(user => user.IsMainAdmin)
+                .IsUnique()
+                .HasFilter("\"is_main_admin\" = TRUE");
 
             e.Property(user => user.LastProjectPage)
                 .HasMaxLength(200);
@@ -221,7 +235,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             e.HasOne(activity => activity.User)
                 .WithMany(user => user.ProjectActivities)
                 .HasForeignKey(activity => activity.UserId)
-                .OnDelete(DeleteBehavior.Restrict);
+                .OnDelete(DeleteBehavior.SetNull);
 
             e.HasOne(activity => activity.PreviousIdea)
                 .WithMany()
@@ -535,7 +549,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
                     evaluation.SupervisorId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-         
+
             entity.HasIndex(evaluation => new
             {
                 evaluation.ProjectId,
@@ -587,7 +601,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
                     assignment.AssignedByAdminId)
                 .OnDelete(DeleteBehavior.SetNull);
 
-          
+
             entity.HasIndex(assignment =>
                     assignment.ProjectId)
                 .IsUnique()
@@ -728,10 +742,9 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.HasOne(x => x.CreatedByUser)
                 .WithMany()
                 .HasForeignKey(x => x.CreatedByUserId)
-                // Audit-trail actor reference, not an owned child --
-                // deleting the admin's user account must never silently
-                // wipe out institutional guidance they authored.
-                .OnDelete(DeleteBehavior.Restrict);
+                // Keep the guidance row and clear only the deleted
+                // administrator reference.
+                .OnDelete(DeleteBehavior.SetNull);
 
             entity.HasIndex(x => x.IsActive);
             entity.HasIndex(x => x.Major);
@@ -757,7 +770,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.HasOne(x => x.CreatedByUser)
                 .WithMany()
                 .HasForeignKey(x => x.CreatedByUserId)
-                .OnDelete(DeleteBehavior.Restrict);
+                .OnDelete(DeleteBehavior.SetNull);
 
             entity.HasIndex(x => x.IsActive);
             entity.HasIndex(x => x.Major);
@@ -791,7 +804,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.HasOne(x => x.CreatedByUser)
                 .WithMany()
                 .HasForeignKey(x => x.CreatedByUserId)
-                .OnDelete(DeleteBehavior.Restrict);
+                .OnDelete(DeleteBehavior.SetNull);
 
             entity.HasIndex(x => x.IsActive);
             entity.HasIndex(x => x.HistoricalFypProjectId);
@@ -830,6 +843,60 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
             entity.HasIndex(e => e.TokenHash)
                 .IsUnique();
+        });
+
+        modelBuilder.Entity<Notification>(entity =>
+        {
+            entity.ToTable("notifications");
+
+            entity.HasKey(notification => notification.Id);
+
+            entity.Property(notification => notification.Title)
+                .HasMaxLength(200)
+                .IsRequired();
+
+            entity.Property(notification => notification.Message)
+                .HasMaxLength(1200)
+                .IsRequired();
+
+            entity.Property(notification => notification.Type)
+                .HasMaxLength(80)
+                .HasDefaultValue("general")
+                .IsRequired();
+
+            entity.Property(notification => notification.Url)
+                .HasMaxLength(500);
+
+            entity.HasOne(notification => notification.RecipientUser)
+                .WithMany()
+                .HasForeignKey(notification => notification.RecipientUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(notification => notification.Project)
+                .WithMany()
+                .HasForeignKey(notification => notification.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(notification => notification.ActorUser)
+                .WithMany()
+                .HasForeignKey(notification => notification.ActorUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(notification => new
+            {
+                notification.RecipientUserId,
+                notification.IsRead,
+                notification.CreatedAt
+            });
+
+            entity.HasIndex(notification => new
+            {
+                notification.RecipientUserId,
+                notification.CreatedAt
+            });
+
+            entity.HasIndex(notification => notification.ProjectId);
+            entity.HasIndex(notification => notification.ActorUserId);
         });
 
         modelBuilder.Entity<AiOutputReview>(entity =>
@@ -871,13 +938,65 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             // can't express a COALESCE expression over a nullable column).
         });
 
-        // NOTE: SupervisorPreferenceBatch, SupervisorPreference,
-        // SupervisorAssignment, Notification, and GoogleCalendarToken have
-        // no explicit OnModelCreating configuration in either source version
-        // — they were relying on EF Core default conventions (or being
-        // configured elsewhere, e.g. IEntityTypeConfiguration classes, not
-        // present in either file reviewed). Nothing was invented here; if
-        // those entities need explicit table/column mapping, add it the
-        // same way as the blocks above.
+        // SupervisorPreferenceBatch, SupervisorPreference, and
+        // GoogleCalendarToken continue to use their existing convention-based
+        // mappings. Notification now has explicit relationships and indexes.
+        modelBuilder.Entity<ProjectDnaAnalysisRecord>(
+    entity =>
+    {
+        entity.ToTable(
+            "project_dna_analyses");
+
+        entity.HasKey(record =>
+            record.Id);
+
+        entity.Property(record =>
+                record.AnalysisJson)
+            .HasColumnType("text")
+            .IsRequired();
+
+        entity.Property(record =>
+                record.Source)
+            .HasMaxLength(120);
+
+        entity.Property(record =>
+                record.Provider)
+            .HasMaxLength(120);
+
+        entity.Property(record =>
+                record.ModelUsed)
+            .HasMaxLength(200);
+
+        entity.HasOne(record =>
+                record.Project)
+            .WithMany()
+            .HasForeignKey(record =>
+                record.ProjectId)
+            .OnDelete(
+                DeleteBehavior.Cascade);
+
+        entity.HasOne(record =>
+                record.ProjectIdea)
+            .WithMany()
+            .HasForeignKey(record =>
+                record.ProjectIdeaId)
+            .OnDelete(
+                DeleteBehavior.Cascade);
+
+        entity.HasOne(record =>
+                record.GeneratedByUser)
+            .WithMany()
+            .HasForeignKey(record =>
+                record.GeneratedByUserId)
+            .OnDelete(
+                DeleteBehavior.Restrict);
+
+        entity.HasIndex(record => new
+        {
+            record.ProjectId,
+            record.ProjectIdeaId,
+            record.GeneratedAtUtc
+        });
+    });
     }
 }

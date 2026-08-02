@@ -29,6 +29,13 @@ public class User
     [Column("created_at")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+    /// <summary>
+    /// Identifies the single protected main administrator.
+    /// Secondary administrators must always keep this false.
+    /// </summary>
+    [Column("is_main_admin")]
+    public bool IsMainAdmin { get; set; }
+
     public StudentProfile? StudentProfile { get; set; }
 
     public SupervisorProfile? SupervisorProfile { get; set; }

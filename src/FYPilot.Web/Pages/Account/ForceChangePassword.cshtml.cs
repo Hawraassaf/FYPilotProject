@@ -1,6 +1,8 @@
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 using FYPilot.Infrastructure.Data;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -46,39 +48,45 @@ public class ForceChangePasswordModel(
         public string ConfirmPassword { get; set; } = "";
     }
 
-    public async Task<IActionResult> OnGetAsync()
+    public async Task<IActionResult> OnGetAsync(
+        CancellationToken cancellationToken)
     {
-        var user = await GetCurrentUserAsync();
+        var user = await GetCurrentUserAsync(
+            cancellationToken);
 
         if (user == null)
         {
-            return RedirectToPage("/Account/Login");
+            return await SignOutDeletedAccountAsync();
         }
 
         UserEmail = user.Email;
 
         if (!user.MustChangePassword)
         {
-            return RedirectToPage("/Admin/Dashboard");
+            return RedirectToPage(
+                "/Admin/Dashboard");
         }
 
         return Page();
     }
 
-    public async Task<IActionResult> OnPostAsync()
+    public async Task<IActionResult> OnPostAsync(
+        CancellationToken cancellationToken)
     {
-        var user = await GetCurrentUserAsync();
+        var user = await GetCurrentUserAsync(
+            cancellationToken);
 
         if (user == null)
         {
-            return RedirectToPage("/Account/Login");
+            return await SignOutDeletedAccountAsync();
         }
 
         UserEmail = user.Email;
 
         if (!user.MustChangePassword)
         {
-            return RedirectToPage("/Admin/Dashboard");
+            return RedirectToPage(
+                "/Admin/Dashboard");
         }
 
         ValidateNewPasswordStrength();
@@ -111,7 +119,8 @@ public class ForceChangePasswordModel(
         {
             ModelState.AddModelError(
                 "Input.NewPassword",
-                "Your new password must be different from the temporary password.");
+                "Your new password must be different "
+                + "from the temporary password.");
 
             return Page();
         }
@@ -128,13 +137,15 @@ public class ForceChangePasswordModel(
             db.Users.Update(user);
 
             var savedChanges =
-                await db.SaveChangesAsync();
+                await db.SaveChangesAsync(
+                    cancellationToken);
 
             if (savedChanges == 0)
             {
                 ModelState.AddModelError(
                     string.Empty,
-                    "The password change was not saved. Please try again.");
+                    "The password change was not saved. "
+                    + "Please try again.");
 
                 return Page();
             }
@@ -143,7 +154,8 @@ public class ForceChangePasswordModel(
         {
             ModelState.AddModelError(
                 string.Empty,
-                "Your account was updated by another request. Please try again.");
+                "Your account was updated by another request. "
+                + "Please try again.");
 
             return Page();
         }
@@ -151,20 +163,23 @@ public class ForceChangePasswordModel(
         {
             ModelState.AddModelError(
                 string.Empty,
-                "The password could not be saved. Please try again.");
+                "The password could not be saved. "
+                + "Please try again.");
 
             return Page();
         }
 
         TempData["SuccessMessage"] =
-            "Your password was changed successfully. " +
-            "Your administrator account is now secured.";
+            "Your password was changed successfully. "
+            + "Your administrator account is now secured.";
 
-        return RedirectToPage("/Admin/Dashboard");
+        return RedirectToPage(
+            "/Admin/Dashboard");
     }
 
     private async Task<FYPilot.Domain.Entities.User?>
-        GetCurrentUserAsync()
+        GetCurrentUserAsync(
+            CancellationToken cancellationToken)
     {
         var userIdValue =
             User.FindFirst(
@@ -179,7 +194,22 @@ public class ForceChangePasswordModel(
 
         return await db.Users
             .FirstOrDefaultAsync(
-                u => u.Id == userId);
+                user => user.Id == userId,
+                cancellationToken);
+    }
+
+    private async Task<IActionResult>
+        SignOutDeletedAccountAsync()
+    {
+        await HttpContext.SignOutAsync(
+            CookieAuthenticationDefaults.AuthenticationScheme);
+
+        return RedirectToPage(
+            "/Account/Login",
+            new
+            {
+                reason = "account_deleted"
+            });
     }
 
     private void ValidateNewPasswordStrength()
@@ -196,21 +226,24 @@ public class ForceChangePasswordModel(
         {
             ModelState.AddModelError(
                 "Input.NewPassword",
-                "The new password must contain at least one uppercase letter.");
+                "The new password must contain at least "
+                + "one uppercase letter.");
         }
 
         if (!password.Any(char.IsLower))
         {
             ModelState.AddModelError(
                 "Input.NewPassword",
-                "The new password must contain at least one lowercase letter.");
+                "The new password must contain at least "
+                + "one lowercase letter.");
         }
 
         if (!password.Any(char.IsDigit))
         {
             ModelState.AddModelError(
                 "Input.NewPassword",
-                "The new password must contain at least one number.");
+                "The new password must contain at least "
+                + "one number.");
         }
     }
 }

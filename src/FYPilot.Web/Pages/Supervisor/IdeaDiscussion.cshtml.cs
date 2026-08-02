@@ -232,6 +232,9 @@ public class IdeaDiscussionModel(
 
         await NotifyProjectMembersAsync(
             project,
+            supervisorId,
+            evaluation.Id,
+            project.ProjectIdea.Id,
             cancellationToken);
 
         TempData["Success"] =
@@ -635,12 +638,26 @@ public class IdeaDiscussionModel(
 
     private async Task NotifyProjectMembersAsync(
         Project project,
+        int supervisorId,
+        int evaluationId,
+        int ideaId,
         CancellationToken cancellationToken)
     {
         var members =
             await LoadProjectMembersAsync(
                 project,
                 cancellationToken);
+
+        var supervisorName =
+            await db.Users
+                .AsNoTracking()
+                .Where(user =>
+                    user.Id == supervisorId)
+                .Select(user =>
+                    user.FullName)
+                .FirstOrDefaultAsync(
+                    cancellationToken)
+            ?? "The project supervisor";
 
         var projectTitle =
             string.IsNullOrWhiteSpace(
@@ -657,22 +674,32 @@ public class IdeaDiscussionModel(
                         member.UserId,
 
                     title:
-                        "New Supervisor Feedback Message",
+                        $"New message in \"{projectTitle}\"",
 
                     message:
-                        $"Your supervisor sent a new "
-                        + $"message for project "
-                        + $"\"{projectTitle}\".",
+                        $"{supervisorName} sent a message "
+                        + "in the Supervisor Feedback "
+                        + "discussion.",
 
                     type:
                         "project_feedback_message",
 
                     url:
                         $"/Student/Feedback"
-                        + $"?projectId={project.Id}",
+                        + $"?projectId={project.Id}"
+                        + $"&evaluationId={evaluationId}",
 
                     sendEmail:
-                        false);
+                        false,
+
+                    projectId:
+                        project.Id,
+
+                    actorUserId:
+                        supervisorId,
+
+                    cancellationToken:
+                        cancellationToken);
             }
             catch (Exception exception)
             {

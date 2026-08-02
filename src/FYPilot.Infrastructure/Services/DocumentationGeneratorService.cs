@@ -389,7 +389,27 @@ public class DocumentationGeneratorService : IDocumentationGeneratorService
             UpdatedAt = DateTime.UtcNow
         };
     }
+    public async Task<GeneratedDocumentationDto?>
+    GetLatestForIdeaAsync(
+        int projectIdeaId,
+        CancellationToken cancellationToken = default)
+    {
+        var documentation =
+            await _db.ProjectDocumentations
+                .AsNoTracking()
+                .Where(item =>
+                    item.ProjectIdeaId == projectIdeaId)
+                .OrderByDescending(item =>
+                    item.UpdatedAt)
+                .ThenByDescending(item =>
+                    item.Id)
+                .FirstOrDefaultAsync(
+                    cancellationToken);
 
+        return documentation == null
+            ? null
+            : ToDto(documentation);
+    }
     public async Task<GeneratedDocumentationDto?> GetByIdAsync(int id)
     {
         var documentation = await _db.ProjectDocumentations
