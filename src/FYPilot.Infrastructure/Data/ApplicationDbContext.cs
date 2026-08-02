@@ -55,7 +55,9 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     // AiAgentJobCoordinator background service drives to completion
     // independently of any connected browser (see AiAgentJobService).
     public DbSet<AiAgentJob> AiAgentJobs => Set<AiAgentJob>();
-
+    public DbSet<ProjectDnaAnalysisRecord>
+    ProjectDnaAnalyses =>
+        Set<ProjectDnaAnalysisRecord>();
     // FYPilot core
     public DbSet<StudentSkill> StudentSkills { get; set; }
     public DbSet<ProjectIdea> ProjectIdeas { get; set; }
@@ -939,5 +941,62 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         // SupervisorPreferenceBatch, SupervisorPreference, and
         // GoogleCalendarToken continue to use their existing convention-based
         // mappings. Notification now has explicit relationships and indexes.
+        modelBuilder.Entity<ProjectDnaAnalysisRecord>(
+    entity =>
+    {
+        entity.ToTable(
+            "project_dna_analyses");
+
+        entity.HasKey(record =>
+            record.Id);
+
+        entity.Property(record =>
+                record.AnalysisJson)
+            .HasColumnType("text")
+            .IsRequired();
+
+        entity.Property(record =>
+                record.Source)
+            .HasMaxLength(120);
+
+        entity.Property(record =>
+                record.Provider)
+            .HasMaxLength(120);
+
+        entity.Property(record =>
+                record.ModelUsed)
+            .HasMaxLength(200);
+
+        entity.HasOne(record =>
+                record.Project)
+            .WithMany()
+            .HasForeignKey(record =>
+                record.ProjectId)
+            .OnDelete(
+                DeleteBehavior.Cascade);
+
+        entity.HasOne(record =>
+                record.ProjectIdea)
+            .WithMany()
+            .HasForeignKey(record =>
+                record.ProjectIdeaId)
+            .OnDelete(
+                DeleteBehavior.Cascade);
+
+        entity.HasOne(record =>
+                record.GeneratedByUser)
+            .WithMany()
+            .HasForeignKey(record =>
+                record.GeneratedByUserId)
+            .OnDelete(
+                DeleteBehavior.Restrict);
+
+        entity.HasIndex(record => new
+        {
+            record.ProjectId,
+            record.ProjectIdeaId,
+            record.GeneratedAtUtc
+        });
+    });
     }
 }

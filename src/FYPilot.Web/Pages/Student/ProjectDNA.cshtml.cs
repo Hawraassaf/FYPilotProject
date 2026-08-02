@@ -19,6 +19,12 @@ public class ProjectDNAModel(
     IActiveProjectService activeProjectService)
     : PageModel
 {
+    private static readonly JsonSerializerOptions
+    DnaJsonOptions =
+        new(JsonSerializerDefaults.Web)
+        {
+            PropertyNameCaseInsensitive = true
+        };
     [BindProperty(SupportsGet = true)]
     public int ProjectId { get; set; }
 
@@ -73,7 +79,9 @@ public class ProjectDNAModel(
             return contextResult;
         }
 
-        await LoadPageDataAsync(userId);
+        await LoadPageDataAsync(
+     userId,
+     cancellationToken);
 
         await activeProjectService.RememberPageAsync(
             userId,
@@ -100,7 +108,9 @@ public class ProjectDNAModel(
             return contextResult;
         }
 
-        await LoadPageDataAsync(userId);
+        await LoadPageDataAsync(
+     userId,
+     cancellationToken);
 
         if (Idea == null)
         {
@@ -128,11 +138,20 @@ public class ProjectDNAModel(
             LlmUsed = response.LlmUsed;
             Source = response.Source;
 
-            ApplyAiAnalysis(response.Analysis);
+            ApplyAiAnalysis(
+                response.Analysis);
+
+            await PersistAnalysisAsync(
+                userId,
+                Idea.Id,
+                response,
+                cancellationToken);
+
             await PersistReviewAsync(
                 userId,
                 Idea.Id,
-                response);
+                response,
+                cancellationToken);
         }
         catch
         {
@@ -141,8 +160,42 @@ public class ProjectDNAModel(
 
         return Page();
     }
+    private async Task PersistAnalysisAsync(
+    int userId,
+    int ideaId,
+    ProjectDnaServiceResponse response,
+    CancellationToken cancellationToken)
+    {
+        var record =
+            new ProjectDnaAnalysisRecord
+            {
+                ProjectId = ProjectId,
+                ProjectIdeaId = ideaId,
+                GeneratedByUserId = userId,
 
-    private async Task PersistReviewAsync(int userId, int ideaId, ProjectDnaServiceResponse response)
+                AnalysisJson =
+                    JsonSerializer.Serialize(
+                        response.Analysis,
+                        DnaJsonOptions),
+
+                LlmUsed = response.LlmUsed,
+                Source = response.Source,
+                Provider = response.Provider,
+                ModelUsed = response.ModelUsed,
+                GeneratedAtUtc = DateTime.UtcNow
+            };
+
+        db.ProjectDnaAnalyses.Add(
+            record);
+
+        await db.SaveChangesAsync(
+            cancellationToken);
+    }
+    private async Task PersistReviewAsync(
+    int userId,
+    int ideaId,
+    ProjectDnaServiceResponse response,
+    CancellationToken cancellationToken)
     {
         var review = response.Review;
 
@@ -181,16 +234,21 @@ public class ProjectDNAModel(
             CompletedAt = DateTime.UtcNow
         });
 
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(
+    cancellationToken);
 
         LatestReview = await db.AiOutputReviews
             .AsNoTracking()
             .Where(r => r.ProjectIdeaId == ideaId && r.UserId == userId && r.AgentName == "ProjectDNAAgent")
             .OrderByDescending(r => r.CreatedAt)
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(
+    cancellationToken);
     }
 
-    private async Task LoadPageDataAsync(int userId)
+  
+  private async Task LoadPageDataAsync(
+    int userId,
+    CancellationToken cancellationToken)
     {
         /*
          * The active project's official idea is the
@@ -202,29 +260,98 @@ public class ProjectDNAModel(
                 project.Id == ProjectId)
             .Select(project =>
                 project.ProjectIdea)
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync(
+                cancellationToken);
 
         StudentSkills = await db.StudentSkills
             .AsNoTracking()
-            .Where(s => s.UserId == userId)
-            .OrderByDescending(s => s.Rating)
-            .ThenBy(s => s.SkillName)
-            .ToListAsync();
+            .Where(skill =>
+                skill.UserId == userId)
+            .OrderByDescending(skill =>
+                skill.Rating)
+            .ThenBy(skill =>
+                skill.SkillName)
+            .ToListAsync(
+                cancellationToken);
 
         DnaDimensions.Clear();
         Risks.Clear();
         RequiredSkillsAnalysis.Clear();
+
         Analysis = null;
         LlmUsed = false;
         Source = null;
+
+        /*
+         * Reload the latest saved DNA analysis so it survives
+         * refreshes, navigation and application restarts.
+         */
+        if (Idea != null)
+        {
+            var savedAnalysis =
+                await db.ProjectDnaAnalyses
+                    .AsNoTracking()
+                    .Where(record =>
+                        record.ProjectId ==
+                            ProjectId &&
+                        record.ProjectIdeaId ==
+                            Idea.Id)
+                    .OrderByDescending(record =>
+                        record.GeneratedAtUtc)
+                    .ThenByDescending(record =>
+                        record.Id)
+                    .FirstOrDefaultAsync(
+                        cancellationToken);
+
+            if (savedAnalysis != null)
+            {
+                try
+                {
+                    Analysis =
+                        JsonSerializer.Deserialize<
+                            ProjectDnaAnalysisDto>(
+                                savedAnalysis.AnalysisJson,
+                                DnaJsonOptions);
+
+                    LlmUsed =
+                        savedAnalysis.LlmUsed;
+
+                    Source =
+                        savedAnalysis.Source;
+
+                    if (Analysis != null)
+                    {
+                        ApplyAiAnalysis(
+                            Analysis);
+                    }
+                }
+                catch (JsonException)
+                {
+                    Analysis = null;
+
+                    ErrorMessage =
+                        "The saved Project DNA report "
+                        + "could not be read. Generate "
+                        + "the report again.";
+                }
+            }
+        }
 
         LatestReview = Idea == null
             ? null
             : await db.AiOutputReviews
                 .AsNoTracking()
-                .Where(r => r.ProjectIdeaId == Idea.Id && r.UserId == userId && r.AgentName == "ProjectDNAAgent")
-                .OrderByDescending(r => r.CreatedAt)
-                .FirstOrDefaultAsync();
+                .Where(review =>
+                    review.ProjectIdeaId ==
+                        Idea.Id &&
+                    review.UserId ==
+                        userId &&
+                    review.AgentName ==
+                        "ProjectDNAAgent")
+                .OrderByDescending(review =>
+                    review.CreatedAt)
+                .FirstOrDefaultAsync(
+                    cancellationToken);
     }
 
     private ProjectDnaRequest BuildProjectDnaRequest(StudentProfile? profile)

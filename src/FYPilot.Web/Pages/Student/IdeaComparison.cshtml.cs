@@ -259,6 +259,12 @@ public class IdeaComparisonModel(
                 }
             }
         }
+        /*
+ * When the page is opened normally after navigation or refresh,
+ * completedJobId is no longer present in the URL. Load the latest
+ * completed comparison job for this user and project instead.
+ */
+
 
         return Page();
     }

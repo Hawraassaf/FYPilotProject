@@ -127,12 +127,20 @@ builder.Services.AddAuthorization(options =>
         });
 });
 
-// ── AI Service ────────────────────────────────────────────────────────────────
+// ── AI Services ───────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<
     IAiServiceClient,
     AiServiceClient>();
 
-builder.Services.AddHttpClient();
+builder.Services.AddScoped<
+    IAiAgentJobService,
+    AiAgentJobService>();
+
+builder.Services.AddSingleton<
+    IAiJobsPythonClient,
+    AiJobsPythonClient>();
+
+builder.Services.AddHttpClient(); ;
 
 // ── Documentation Generator Service ───────────────────────────────────────────
 builder.Services.AddScoped<
