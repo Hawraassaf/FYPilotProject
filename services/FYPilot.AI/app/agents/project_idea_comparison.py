@@ -37,11 +37,15 @@ import json
 import logging
 import re
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from app.review.models import ReviewerIssue
 from app.services.llm_provider import LLMResult, ProviderChain
+
+if TYPE_CHECKING:
+    from app.jobs.reporter import ProgressReporter
 
 logger = logging.getLogger("fypilot-idea-comparison-agent")
 
@@ -225,6 +229,7 @@ class IdeaComparisonAgent:
         self,
         request: IdeaComparisonRequest,
         deadline: float | None = None,
+        reporter: "ProgressReporter | None" = None,
     ) -> IdeaComparisonResponse:
         self.last_llm_used = False
         self.last_error = None
@@ -248,7 +253,7 @@ class IdeaComparisonAgent:
             ideas=ideas,
         )
 
-        raw, provider, model, error = self._call_provider(limited_request, deadline=deadline)
+        raw, provider, model, error = self._call_provider(limited_request, deadline=deadline, reporter=reporter)
 
         if raw is None:
             self.last_llm_used = False
@@ -314,7 +319,7 @@ class IdeaComparisonAgent:
         self.last_rewrite_attempted = True
 
         retry_raw, retry_provider, retry_model, _retry_error = self._call_provider(
-            limited_request, feedback_idea_ids=flagged, deadline=deadline,
+            limited_request, feedback_idea_ids=flagged, deadline=deadline, reporter=reporter,
         )
 
         if retry_raw is not None:
@@ -401,6 +406,7 @@ class IdeaComparisonAgent:
         *,
         feedback_idea_ids: list[int] | None = None,
         deadline: float | None = None,
+        reporter: "ProgressReporter | None" = None,
     ) -> tuple[dict[str, Any] | None, str | None, str | None, str | None]:
         prompt = self._build_prompt(request, feedback_idea_ids=feedback_idea_ids)
 
@@ -410,6 +416,7 @@ class IdeaComparisonAgent:
                 use_search=False,
                 max_tokens=self._max_tokens_for(request),
                 deadline=deadline,
+                reporter=reporter,
             )
         except Exception as ex:
             logger.exception("Idea comparison generation failed.")
@@ -457,28 +464,20 @@ class IdeaComparisonAgent:
 
         return "general"
 
-    def _build_prompt(
-        self,
-        request: IdeaComparisonRequest,
-        *,
-        feedback_idea_ids: list[int] | None = None,
-    ) -> str:
-        skills_text = (
-            ", ".join(request.studentSkills) if request.studentSkills else "No skills provided"
-        )
+    def _build_ideas_evidence_text(self, request: IdeaComparisonRequest) -> str:
+        """
+        Shared by _build_prompt and build_rewrite_prompt so the rewrite call
+        (job-based flow only, see app/jobs/workers/idea_comparison_worker.py)
+        sees the exact same authorized input evidence as the original
+        writer call -- never a re-derived or abbreviated version of it.
 
-        ratings_text = (
-            ", ".join(f"{skill}: {rating}/5" for skill, rating in request.skillRatings.items())
-            if request.skillRatings
-            else "No ratings provided"
-        )
-
-        # Trimmed, not the full model_dump(): a 12-idea batch with every
-        # field (including three ~150-300 char saved-score reasons each)
-        # at full length produced a 24k-character prompt that measured
-        # >90s on DeepInfra for this task -- too slow for a live defense.
-        # The LLM needs enough to ground idea-specific reasoning, not the
-        # complete verbose text of every field.
+        Trimmed, not the full model_dump(): a 12-idea batch with every field
+        (including three ~150-300 char saved-score reasons each) at full
+        length produced a 24k-character prompt that measured >90s on
+        DeepInfra for this task -- too slow even with the job path's larger
+        90s budget. The LLM needs enough to ground idea-specific reasoning,
+        not the complete verbose text of every field.
+        """
         ideas_payload = []
 
         for idea in request.ideas:
@@ -515,7 +514,130 @@ class IdeaComparisonAgent:
 
             ideas_payload.append(payload)
 
-        ideas_text = json.dumps(ideas_payload, ensure_ascii=False, indent=2)
+        return json.dumps(ideas_payload, ensure_ascii=False, indent=2)
+
+    def build_rewrite_prompt(
+        self,
+        request: IdeaComparisonRequest,
+        original_comparison: dict[str, Any],
+        blocking_issues: list[ReviewerIssue],
+    ) -> str:
+        """
+        Job-based flow only (app/jobs/workers/idea_comparison_worker.py) --
+        one rewrite attempt using the semantic reviewer's own concrete
+        RevisionInstructions as feedback, rather than a generic "try again".
+        Never used by the synchronous /compare-generated-ideas endpoint,
+        which has no rewrite-on-semantic-rejection mechanism at all.
+
+        Includes: the original authorized input evidence, the original
+        generated comparison, the reviewer's issues and revision
+        instructions, the immutable saved scores/reasons (part of the
+        evidence text), the exact response schema, the idea-id/score
+        immutability rule, and the same positive comparative example as the
+        original prompt.
+        """
+        ideas_text = self._build_ideas_evidence_text(request)
+
+        issues_text = "\n".join(
+            f'- [{issue.severity}/{issue.category}] {issue.affectedField}: {issue.description}\n'
+            f'  FIX: {issue.revisionInstruction}'
+            for issue in blocking_issues
+        )
+
+        original_json = json.dumps(original_comparison, ensure_ascii=False, indent=2)
+
+        return f"""
+You are IdeaComparisonAgent inside FYPilot. A semantic reviewer already
+rejected your previous comparison below for specific, concrete reasons.
+Rewrite the ENTIRE comparison, fixing every issue listed, while keeping
+everything else about the ranking and reasoning quality intact.
+
+ORIGINAL AUTHORIZED INPUT EVIDENCE (unchanged -- the same ideas, same
+official saved scores, same student profile as before):
+{ideas_text}
+
+YOUR PREVIOUS (REJECTED) COMPARISON:
+{original_json}
+
+REVIEWER ISSUES TO FIX (each with the exact required fix):
+{issues_text}
+
+STRICT RULES THAT STILL APPLY:
+- Idea IDs (ideaId) must be EXACTLY the same set as in your previous
+  comparison -- never add, remove, or renumber an idea.
+- The official saved Innovation/Feasibility/Market Demand percentages are
+  immutable evidence -- never state, restate, or paraphrase them as a
+  comparative claim (e.g. "stronger feasibility"). Ground every ranking in
+  concrete evidence instead: student skill fit, external dependencies,
+  dataset availability, implementation scope, team capacity, target users,
+  validation needs, or Lebanese context.
+
+GOOD example of comparative reasoning (write like this):
+"It ranks below Idea A because it depends on access to live municipal data
+and external partnerships, while Idea A can be implemented using the
+student's existing ASP.NET, Python and PostgreSQL skills."
+
+BAD example (never write like this): "It has stronger feasibility and
+innovation than the other ideas."
+
+Strict length limits (unchanged from before):
+- contextSummary: max 18 words
+- whyThisRank: max 32 words
+- mainStrength: max 18 words
+- mainRisk: max 18 words
+- bestFor: max 18 words
+- comparisonAdvantage: max 24 words
+- requiredValidation: max 20 words
+- recommendation: max 24 words
+- summary: max two sentences
+- finalRecommendation: max two sentences
+
+Return only valid JSON, no markdown, no code fences, matching exactly this
+structure:
+
+{{
+  "comparisonTitle": "Best Project Match",
+  "totalIdeasCompared": {len(request.ideas)},
+  "bestIdeaId": 0,
+  "bestIdeaTitle": "",
+  "summary": "",
+  "ideas": [
+    {{
+      "ideaId": 0,
+      "rank": 1,
+      "title": "",
+      "contextSummary": "",
+      "whyThisRank": "",
+      "mainStrength": "",
+      "mainRisk": "",
+      "bestFor": "",
+      "comparisonAdvantage": "",
+      "requiredValidation": "",
+      "riskLevel": "",
+      "recommendation": ""
+    }}
+  ],
+  "finalRecommendation": ""
+}}
+"""
+
+    def _build_prompt(
+        self,
+        request: IdeaComparisonRequest,
+        *,
+        feedback_idea_ids: list[int] | None = None,
+    ) -> str:
+        skills_text = (
+            ", ".join(request.studentSkills) if request.studentSkills else "No skills provided"
+        )
+
+        ratings_text = (
+            ", ".join(f"{skill}: {rating}/5" for skill, rating in request.skillRatings.items())
+            if request.skillRatings
+            else "No ratings provided"
+        )
+
+        ideas_text = self._build_ideas_evidence_text(request)
 
         domain_guidance_text = "\n".join(
             f'- "{category}": discuss {guidance}, when the idea\'s domainCategory matches.'
@@ -553,6 +675,29 @@ REINTERPRET OR RETURN ALTERNATIVE NUMERIC SCORES. Do not put any percentage
 or score number anywhere in your response -- your output schema has no field
 for one. A score of 0 for a given metric means it was not evaluated for that
 idea; treat it as unknown, not as a real low score.
+
+Do not justify a ranking by saying one idea has "higher", "stronger",
+"better", or "lower" feasibility, innovation, or market demand than another
+-- that is the saved percentage restated in words, and it is exactly as
+forbidden as writing the number itself. Instead, ground every ranking in
+CONCRETE evidence about the idea itself:
+- student skill fit (which required skills the student already has or is missing)
+- external dependencies (APIs, third-party access, partnerships required)
+- dataset availability (what data is needed and how hard it is to obtain)
+- implementation scope (how much needs to be built)
+- team capacity (team size versus what the idea requires)
+- target users (who would use it and how well-defined that group is)
+- validation needs (what would need to be tested or confirmed)
+- Lebanese context (local market, infrastructure, or regulatory relevance)
+
+GOOD example of comparative reasoning (write like this):
+"It ranks below Idea A because it depends on access to live municipal data
+and external partnerships, while Idea A can be implemented using the
+student's existing ASP.NET, Python and PostgreSQL skills."
+
+BAD example (never write like this): "It has stronger feasibility and
+innovation than the other ideas." -- this restates the saved scores instead
+of explaining WHY using the concrete factors above, and will be rejected.
 
 Compare ONLY the ideas provided below. Do not invent new ideas. Do not compare
 ideas from other students. Do not recommend technologies outside the
@@ -596,16 +741,19 @@ distinguishable from every other idea's without reading the title.
 
 Comparative reasoning rules (do not evaluate ideas independently):
 - For the #1 rank: state its strongest comparative advantage over the other
-  ideas, and which uncertainty is lower than competing ideas.
+  ideas, using the concrete-evidence categories above (skill fit, dependencies,
+  dataset availability, scope, team capacity, target users, validation needs,
+  Lebanese context) -- never "higher/stronger feasibility or innovation".
 - For middle ranks: explain why the idea is still competitive AND exactly
-  what keeps it from ranking higher (be specific, e.g. "ranks below X because
-  its dataset is harder to obtain than X's").
+  what keeps it from ranking higher, using the same concrete-evidence
+  categories (be specific, e.g. "ranks below X because its dataset is harder
+  to obtain than X's").
 - For the lowest ranks: name the concrete blocker (data uncertainty, API
   dependency, excessive scope, weak differentiation, skill gap, privacy
   challenge, or implementation risk).
 - Never write a rank justification like "ranks second because it is useful
   and feasible" -- always compare it to at least one other idea by name or
-  clear reference.
+  clear reference, using a concrete-evidence category, not a restated score.
 
 Risk level rules:
 - riskLevel must be exactly one of: "Low", "Medium", "High".

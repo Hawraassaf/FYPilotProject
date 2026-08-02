@@ -3,6 +3,7 @@ using System;
 using FYPilot.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FYPilot.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260801231610_AddAiAgentJob")]
+    partial class AddAiAgentJob
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -280,10 +283,6 @@ namespace FYPilot.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("issues_json");
 
-                    b.Property<Guid?>("JobId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("job_id");
-
                     b.Property<int?>("MentorChatSessionId")
                         .HasColumnType("integer")
                         .HasColumnName("mentor_chat_session_id");
@@ -340,10 +339,6 @@ namespace FYPilot.Infrastructure.Migrations
                         .HasColumnName("was_rewritten");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("JobId")
-                        .IsUnique()
-                        .HasFilter("\"job_id\" IS NOT NULL");
 
                     b.HasIndex("MentorChatSessionId");
 

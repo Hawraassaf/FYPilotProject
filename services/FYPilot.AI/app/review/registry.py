@@ -830,30 +830,44 @@ class ProjectDNACandidateSchema(ProjectDNAResponse):
 
 _IDEA_COMPARISON_EXTRA_RUBRIC = """
 IDEA COMPARISON-SPECIFIC REVIEW CRITERIA (in addition to the standard criteria above):
-- Fabricated scores: this agent must never state or imply a numeric
-  percentage/score anywhere in free text (contextSummary, whyThisRank,
-  mainStrength, mainRisk, bestFor, comparisonAdvantage, requiredValidation,
-  recommendation, summary, finalRecommendation) -- Innovation, Feasibility,
-  Market Demand and Overall are fixed values already saved on the idea and
-  must never be restated, replaced, or reinterpreted as a different number.
-  Flag any numeric score/percentage found in free text as category
-  "fabricated_score" (critical).
+- Fabricated scores: this agent must never restate, imply, or paraphrase the
+  saved Innovation/Feasibility/Market Demand/Overall percentages as the
+  STATED REASON for a ranking -- e.g. "higher/stronger/better/lower
+  feasibility", "more innovative", "high feasibility (92%)", or any
+  comparison that uses one of these four metric NAMES as the justification.
+  Flag this as category "fabricated_score" (critical) ONLY when a
+  score-metric name (innovation/feasibility/market demand/overall) is used
+  AS the stated reason for the rank or comparison.
+  Do NOT flag a sentence merely for mentioning a concrete, non-score-based
+  reason (e.g. "depends on access to live municipal data", "requires
+  external partnerships", "matches the student's existing ASP.NET/Python/
+  PostgreSQL skills", "narrower implementation scope", "smaller team
+  required") even if that reasoning happens to correlate with a higher or
+  lower saved score elsewhere. The test: would the sentence still make
+  sense if the saved percentages did not exist at all? If yes, it is
+  concrete evidence, not a fabricated score, and must NOT be flagged.
 - Repetitive or generic comparison: flag as category
   "repetitive_or_generic_comparison" (critical) if two or more ideas share
   a copied sentence structure, a title-swapped template, an identical
   comparisonAdvantage, or an identical recommendation, or if any field
   contains no concrete detail specific to that idea (a named technology,
   dataset need, target-user group, domain workflow, missing skill, or
-  duration) and could be pasted onto an unrelated idea unchanged. Do NOT
-  flag ideas merely for sharing domain terminology or the same technology
-  stack (e.g. "ASP.NET Core Razor Pages, Python FastAPI, PostgreSQL") --
-  that is expected and not generic. When two ideas are similar (same
-  domain/concept), whyThisRank or comparisonAdvantage must name the exact
-  feature or scope difference between them; if neither does, flag it.
+  duration) and could be pasted onto an unrelated idea unchanged, or if a
+  required field is left blank. Do NOT flag ideas merely for sharing domain
+  terminology or the same technology stack (e.g. "ASP.NET Core Razor Pages,
+  Python FastAPI, PostgreSQL") -- that is expected and not generic. When two
+  ideas are similar (same domain/concept), whyThisRank or comparisonAdvantage
+  must name the exact feature or scope difference between them; if neither
+  does, flag it.
 - Comparative reasoning: flag (category "contradiction") if whyThisRank
   evaluates an idea in isolation instead of explaining its rank relative to
-  the other ideas in the batch (e.g. "ranks second because it is useful and
-  feasible" is not comparative).
+  the other ideas using CONCRETE evidence -- specifically: student skill
+  fit, external dependencies, dataset availability, implementation scope,
+  team capacity, target users, validation needs, or Lebanese-market context.
+  "Ranks second because it is useful and feasible" is not comparative and
+  must be flagged; a sentence naming a concrete dependency or capability
+  difference relative to another idea by name is acceptable and must NOT be
+  flagged merely for mentioning a domain term.
 - Technology alignment: flag (category "project_alignment") any mention of
   React, Node.js, Vue, Angular, Flutter, Dart, Kafka, Azure, AWS, GCP,
   Kubernetes, blockchain, Web3, or Solidity anywhere in bestFor,

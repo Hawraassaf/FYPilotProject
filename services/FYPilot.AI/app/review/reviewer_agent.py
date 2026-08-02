@@ -15,10 +15,13 @@ this prompt -- explicitly marked as such -- never as instructions.
 """
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.review.context import ReviewContext
 from app.services.llm_provider import LLMResult, ProviderChain
+
+if TYPE_CHECKING:
+    from app.jobs.reporter import ProgressReporter
 
 
 class ReviewerAgent:
@@ -122,6 +125,7 @@ Return exactly this JSON structure:
         mandatory_fields: list[str] | None = None,
         extra_rubric: str = "",
         deadline: float | None = None,
+        reporter: "ProgressReporter | None" = None,
     ) -> LLMResult:
         prompt = self.build_prompt(
             candidate,
@@ -130,4 +134,4 @@ Return exactly this JSON structure:
             mandatory_fields=mandatory_fields or [],
             extra_rubric=extra_rubric,
         )
-        return self.provider_chain.generate_json(prompt, use_search=False, deadline=deadline)
+        return self.provider_chain.generate_json(prompt, use_search=False, deadline=deadline, reporter=reporter)

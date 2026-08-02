@@ -180,8 +180,9 @@ else
             </div>
 
             <form method="post"
-                  asp-page-handler="Compare"
-                  id="ic3CompareForm">
+                  id="ic3CompareForm"
+                  data-project-id="@Model.ProjectId"
+                  data-active-job-id="@Model.ActiveJobId">
                 @Html.AntiForgeryToken()
                 <input type="hidden" name="projectId" value="@Model.ProjectId" />
 
@@ -301,6 +302,8 @@ else
                     <div class="selection-hint" id="ic3SelectHint">
                         Select the ideas you want to compare.
                     </div>
+
+                    <div class="ui-alert ui-alert-danger" id="ic3StartError" role="alert" hidden></div>
 
                     <button type="submit"
                             class="ui-btn ui-btn-primary compare-submit"
@@ -1562,6 +1565,12 @@ else
             color: #6f5117;
             border-color: #ecd9aa;
             background: var(--idea-amber-soft);
+        }
+
+        .ui-alert-danger {
+            color: #7a2f2f;
+            border-color: #f0d3d3;
+            background: #fbebeb;
         }
 
         .ui-alert-icon {
@@ -3269,18 +3278,91 @@ else
 
         updateSelectionState();
 
-        compareForm?.addEventListener("submit", () => {
+        // ── Centralized AI Agent Loading System ─────────────────────────
+        const ic3ProjectId = compareForm ? Number(compareForm.dataset.projectId) : null;
+        const ic3StartError = document.getElementById("ic3StartError");
+        const ic3OriginalBtnHtml = compareBtn ? compareBtn.innerHTML : "";
+
+        const ic3Stages = [
+            { key: "prepare_context", label: "Preparing context" },
+            { key: "generate", label: "Generating recommendation" },
+            { key: "review", label: "Reviewing quality" },
+            { key: "rewrite", label: "Refining based on feedback" },
+            { key: "final_checks", label: "Final quality checks" },
+            { key: "save", label: "Saving recommendation" },
+        ];
+
+        function ic3ShowStartError(message) {
+            if (ic3StartError) {
+                ic3StartError.textContent = message;
+                ic3StartError.hidden = false;
+            }
+        }
+
+        function ic3ResetCompareButton() {
             if (!compareBtn) {
                 return;
             }
+            delete compareBtn.dataset.submitting;
+            compareBtn.disabled = false;
+            compareBtn.innerHTML = ic3OriginalBtnHtml;
+        }
 
+        function ic3SetCompareButtonBusy() {
+            if (!compareBtn) {
+                return;
+            }
             compareBtn.dataset.submitting = "true";
             compareBtn.disabled = true;
-
             compareBtn.innerHTML =
                 '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>' +
-                '<span><strong>Analyzing your shortlist…</strong><small>This normally takes under 45 seconds</small></span>';
+                '<span><strong>Analyzing your shortlist…</strong><small>Watch live progress below</small></span>';
+        }
+
+        compareForm?.addEventListener("submit", (event) => {
+            event.preventDefault();
+
+            if (!compareBtn || compareBtn.disabled) {
+                return;
+            }
+
+            if (ic3StartError) {
+                ic3StartError.hidden = true;
+            }
+
+            ic3SetCompareButtonBusy();
+
+            const selectedIdeaIds = Array.from(selectCheckboxes)
+                .filter(box => box.checked)
+                .map(box => Number(box.value));
+
+            window.AiAgentProgress
+                .start({
+                    agentName: "Idea Comparison",
+                    storageKey: "aip:idea-comparison:" + ic3ProjectId,
+                    stages: ic3Stages,
+                    startUrl: "?handler=StartCompareJob&projectId=" + ic3ProjectId,
+                    startBody: { selectedIdeaIds: selectedIdeaIds },
+                })
+                .catch((error) => {
+                    ic3ResetCompareButton();
+                    ic3ShowStartError(
+                        error && error.message
+                            ? error.message
+                            : "Could not start the comparison. Please try again.");
+                });
         });
+
+        // Reconnect to an already-running job (e.g. after a refresh) using
+        // the server-rendered hint -- never sessionStorage alone.
+        if (compareForm && compareForm.dataset.activeJobId) {
+            ic3SetCompareButtonBusy();
+            window.AiAgentProgress.attach(compareForm.dataset.activeJobId, {
+                agentName: "Idea Comparison",
+                storageKey: "aip:idea-comparison:" + ic3ProjectId,
+                stages: ic3Stages,
+            });
+        }
 
         document
             .getElementById("aiRecommendationResult")
