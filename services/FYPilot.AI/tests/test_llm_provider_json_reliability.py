@@ -238,7 +238,7 @@ class DeepInfraJsonReliabilityTests(unittest.TestCase):
         self.assertIn(_SCHEMA, repair_call["messages"][1]["content"])
 
     def test_repair_request_is_never_sent_more_than_once(self):
-        malformed = '{"a": 1 "b": ' + "x" * 500
+        malformed = '{"a": 1, "b": 2, "c": 3, "d": ' + "x" * 500
         still_malformed = "still not valid json " + "y" * 500
         provider = _ScriptedDeepInfra([malformed, still_malformed])
 
@@ -313,6 +313,20 @@ class GroqJsonReliabilityTests(unittest.TestCase):
         result = provider.generate_json("prompt")
         self.assertEqual(result.error_category, json_reliability.TIMEOUT)
 
+    def test_repair_request_uses_at_least_the_original_max_tokens_budget(self):
+        # A response truncated because the schema needed more room than the
+        # original budget must not be handed to a repair request capped at
+        # a SMALLER budget -- that would just truncate it again (observed
+        # live against a large roadmap phase plan before this was fixed).
+        malformed = '{"a": 1, "b": 2, "c": 3, "d": ' + "x" * 500
+        repaired = '{"a": 1}'
+        provider = _ScriptedGroq([malformed, repaired])
+
+        provider.generate_json("prompt", schema_description=_SCHEMA, max_tokens=6000)
+
+        repair_call = provider._fake_client.chat.completions.calls[1]
+        self.assertGreaterEqual(repair_call["max_tokens"], 6000)
+
     def test_groq_json_mode_disabled_for_search_requests(self):
         provider = _ScriptedGroq(['{"a": 1}'])
         provider.generate_json("prompt", use_search=True)
@@ -370,6 +384,21 @@ class OllamaJsonReliabilityTests(unittest.TestCase):
             if previous is not None:
                 _os.environ["ROADMAP_OLLAMA_TIMEOUT_SECONDS"] = previous
 
+    def test_deepinfra_roadmap_tier_timeout_defaults_to_120_and_is_configurable(self):
+        import os as _os
+        from app.services.llm_provider import _deepinfra_timing_for_tier
+
+        previous = _os.environ.pop("ROADMAP_DEEPINFRA_TIMEOUT_SECONDS", None)
+        try:
+            self.assertEqual(_deepinfra_timing_for_tier("roadmap")["timeout_seconds"], 120.0)
+            _os.environ["ROADMAP_DEEPINFRA_TIMEOUT_SECONDS"] = "150"
+            self.assertEqual(_deepinfra_timing_for_tier("roadmap")["timeout_seconds"], 150.0)
+        finally:
+            if previous is None:
+                _os.environ.pop("ROADMAP_DEEPINFRA_TIMEOUT_SECONDS", None)
+            else:
+                _os.environ["ROADMAP_DEEPINFRA_TIMEOUT_SECONDS"] = previous
+
     def test_ollama_transport_error_is_classified(self):
         import requests
         provider = self._ScriptedOllama([requests.exceptions.ReadTimeout("timed out")])
@@ -378,7 +407,7 @@ class OllamaJsonReliabilityTests(unittest.TestCase):
         self.assertEqual(result.error_category, json_reliability.TIMEOUT)
 
     def test_ollama_provider_repair_uses_native_json_format(self):
-        malformed = '{"a": 1 "b": ' + "x" * 500
+        malformed = '{"a": 1, "b": 2, "c": 3, "d": ' + "x" * 500
         repaired = '{"a": 1, "b": 2}'
         provider = self._ScriptedOllama([malformed, repaired])
 

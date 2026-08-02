@@ -32,6 +32,8 @@ marked skipped (not failed) whenever the first review approves -- a
 rewrite is a bonus recovery path, not an expected step.
 """
 
+import hashlib
+import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -79,6 +81,16 @@ _reviewer_agent = ReviewerAgent(ProviderChain(tier="comparison_review"))
 
 _SEVERITY_RANK: dict[Severity, int] = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 
+
+def _hash_output(value: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        value,
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
 # Idea Comparison job-path-only blocking policy -- deliberately NOT the
 # shared ReviewDecisionEngine (still used unchanged by every other agent's
 # ReviewPipeline and by the synchronous /compare-generated-ideas endpoint),
@@ -104,44 +116,40 @@ _BLOCKING_CATEGORIES = frozenset({
     "missing_mandatory_content",  # summary/finalRecommendation empty or a placeholder -- a genuinely broken response
 })
 
-# Temporary stop-gap master switch. Even after the Reviewer model upgrade
-# (llm_provider.py's "comparison_review" tier) and narrowing blocking to a
-# closed high/critical category allowlist, live testing kept showing the
-# semantic Reviewer's judgment as an unpredictable moving target -- a
-# genuinely good, idea-specific comparison could still get discarded
-# depending on what the Reviewer happened to flag on a given run, since it's
-# an LLM judging a subjective/creative task. Until review strictness is
-# re-tuned with more real data, the Reviewer stage still runs and its
-# findings are still recorded on every AttemptRecord (for that future
-# tuning), but can never block or trigger a rewrite -- the student always
-# sees the real comparison the writer (or, if this is ever flipped back on,
-# the rewrite) actually produced. Deterministic firewall/schema checks are
-# a separate, lower-level safety net and are NOT affected by this flag --
-# see the hard-blocker checks in run_idea_comparison_job below. Flip this
-# back to True to re-enable semantic blocking once ready; every branch this
-# gates is still fully exercised by tests with the flag patched on (see
+# Whether semantic review can actually block/trigger a rewrite for this
+# agent is controlled by app/review/registry.py's AGENT_REGISTRY entry for
+# "IdeaComparisonAgent" (review_mode + max_semantic_rewrites), not by a
+# module-level flag here -- see that entry's own comment for why it is
+# currently set to review_mode="advisory" / max_semantic_rewrites=0. Live
+# testing on real rejected outputs found even this agent's own narrower,
+# closed-category blocking rule below still rejected nearly every real
+# comparison: an LLM judge asked to find problems on a subjective/creative
+# task will almost always find *something* minor to flag, and only one
+# rewrite is ever attempted, so two independent passes both coming back
+# perfectly clean was never realistic. Deterministic firewall/schema checks
+# are a separate, lower-level safety net and are NOT affected by
+# review_mode -- see the hard-blocker checks in run_idea_comparison_job
+# below. Re-enable via the registry entry (review_mode="blocking" +
+# max_semantic_rewrites=1) once review strictness is re-tuned with more real
+# data; every branch this gates is still fully exercised by tests with
+# review_mode patched to "blocking" (see
 # IdeaComparisonRewriteFlowTests/IdeaComparisonBlockingPolicyTests).
-_SEMANTIC_REVIEW_CAN_BLOCK = False
 
 
-def _classify_idea_comparison_issues(findings: ReviewerFindings) -> RewriteDecision:
+def _classify_idea_comparison_issues(
+    findings: ReviewerFindings, *, review_mode: str,
+) -> RewriteDecision:
     """
     Idea Comparison's job-path-only replacement for
-    ReviewDecisionEngine.decide() -- a validated review of real rejected
-    outputs found the shared engine's "any requiresCorrection=true issue
-    blocks" rule was rejecting nearly every real comparison even after the
-    Reviewer model upgrade (see llm_provider.py's "comparison_review" tier)
-    fixed its self-contradictory judgments: an LLM judge asked to find
-    problems on a subjective/creative task will almost always find
-    *something* minor to flag, and only one rewrite is ever attempted, so
-    two independent passes both coming back perfectly clean was never
-    realistic. This narrows blocking to genuinely material issues; every
-    other issue is still surfaced (as a warning), never silently dropped.
+    ReviewDecisionEngine.decide() -- narrows blocking to genuinely material
+    issues on a closed category allowlist (see module-level comment above
+    for why); every other issue is still surfaced (as a warning), never
+    silently dropped.
 
-    An issue only blocks when ALL of: _SEMANTIC_REVIEW_CAN_BLOCK is true,
+    An issue only blocks when ALL of: review_mode == "blocking",
     requiresCorrection is true, severity is high or critical, AND its
     category is on the closed _BLOCKING_CATEGORIES allowlist above.
-    Everything else -- the master switch being off, wrong severity, an
+    Everything else -- review_mode == "advisory", wrong severity, an
     off-allowlist category, or requiresCorrection=false -- becomes a
     warning instead.
     """
@@ -150,7 +158,7 @@ def _classify_idea_comparison_issues(findings: ReviewerFindings) -> RewriteDecis
 
     for issue in findings.issues:
         if (
-            _SEMANTIC_REVIEW_CAN_BLOCK
+            review_mode == "blocking"
             and issue.requiresCorrection
             and issue.severity in ("high", "critical")
             and issue.category in _BLOCKING_CATEGORIES
@@ -290,7 +298,7 @@ def _run_reviewer_sync(
             None, None, llm_result.provider, llm_result.model,
         )
 
-    decision = _classify_idea_comparison_issues(findings)
+    decision = _classify_idea_comparison_issues(findings, review_mode=agent_config.review_mode)
 
     if decision.requiresRewrite:
         warning = f"Semantic review found an issue with this comparison: {decision.reason}"
@@ -433,6 +441,24 @@ def run_idea_comparison_job(request: IdeaComparisonRequest, reporter: ProgressRe
 
     reporter.complete_stage("generate")
 
+    # Record the paid Writer candidate immediately after deterministic checks
+    # pass. Review may later be skipped or unavailable, but the audit trail
+    # must still show that a valid candidate was produced and retained.
+    writer_attempt = AttemptRecord(
+        attemptNumber=1,
+        stage="writer",
+        operation="writer",
+        outcome="candidate_produced",
+        outputHash=_hash_output(comparison),
+        firewallPassed=True,
+        schemaValid=True,
+        reviewed=False,
+        generatorProvider=agent.last_provider,
+        generatorModel=agent.last_model_used,
+        kept=True,
+    )
+    attempt_history.append(writer_attempt)
+
     if reporter.is_cancelled():
         _skip_stages(reporter, ["review", "rewrite", "final_checks"], "Cancelled.")
         return None
@@ -443,7 +469,7 @@ def run_idea_comparison_job(request: IdeaComparisonRequest, reporter: ProgressRe
         _skip_stages(reporter, ["rewrite", "final_checks"], "Skipped -- semantic review did not run.")
         return _build_result(agent, comparison, "automated_checks_passed",
                               "This answer passed automated checks; semantic review was skipped "
-                              "because too little request time remained.", None, None, [], started_at)
+                              "because too little request time remained.", None, None, attempt_history, started_at)
 
     reporter.start_stage("review")
     review_status, review_warning, reviewer_findings, decision, reviewer_provider, reviewer_model = _run_reviewer_sync(
@@ -452,21 +478,12 @@ def run_idea_comparison_job(request: IdeaComparisonRequest, reporter: ProgressRe
 
     review_blocked = review_status == "reviewed" and decision is not None and decision.requiresRewrite
 
-    attempt_history.append(AttemptRecord(
-        attemptNumber=1,
-        stage="writer",
-        outputHash="",
-        firewallPassed=True,
-        schemaValid=True,
-        reviewed=review_status == "reviewed",
-        reviewerFindings=reviewer_findings,
-        decision=decision,
-        generatorProvider=agent.last_provider,
-        generatorModel=agent.last_model_used,
-        reviewerProvider=reviewer_provider,
-        reviewerModel=reviewer_model,
-        kept=not review_blocked,
-    ))
+    writer_attempt.reviewed = review_status == "reviewed"
+    writer_attempt.reviewerFindings = reviewer_findings
+    writer_attempt.decision = decision
+    writer_attempt.reviewerProvider = reviewer_provider
+    writer_attempt.reviewerModel = reviewer_model
+    writer_attempt.kept = not review_blocked
 
     if review_status == "review_unavailable":
         reporter.skip_stage("review", review_warning)
@@ -484,6 +501,19 @@ def run_idea_comparison_job(request: IdeaComparisonRequest, reporter: ProgressRe
     # reflects that honestly. A lower-severity or off-allowlist issue alone
     # would never reach this branch (see _classify_idea_comparison_issues).
     reporter.fail_stage("review", review_warning)
+
+    # Defense-in-depth: review_mode=="advisory" already keeps
+    # decision.requiresRewrite False (so this branch is unreachable while
+    # the registry entry stays at its current default), but the rewrite
+    # budget is checked independently so a future change to review_mode
+    # alone could never silently re-enable rewriting without also raising
+    # this value.
+    if agent_config.max_semantic_rewrites <= 0:
+        reporter.skip_stage("rewrite", "Semantic rewrite budget is 0 for this agent.")
+        reporter.skip_stage("final_checks", "Skipped -- no rewrite was attempted.")
+        comparison = agent.build_safe_fallback(limited_request).model_dump()
+        return _build_result(agent, comparison, "review_rejected_safe_fallback", review_warning,
+                              reviewer_findings, decision, attempt_history, started_at)
 
     blocking_issues: list[ReviewerIssue] = decision.blockingIssues if decision else []
     usable_instructions = [issue for issue in blocking_issues if issue.revisionInstruction.strip()]
@@ -587,6 +617,21 @@ def run_idea_comparison_job(request: IdeaComparisonRequest, reporter: ProgressRe
                               "The revised comparison did not pass structural validation.",
                               reviewer_findings, decision, attempt_history, started_at)
 
+    rewrite_attempt = AttemptRecord(
+        attemptNumber=2,
+        stage="rewrite",
+        operation="semantic_rewrite",
+        outcome="candidate_produced",
+        outputHash=_hash_output(rewritten_comparison),
+        firewallPassed=True,
+        schemaValid=True,
+        reviewed=False,
+        generatorProvider=agent.last_provider,
+        generatorModel=agent.last_model_used,
+        kept=False,
+    )
+    attempt_history.append(rewrite_attempt)
+
     if deadline - time.monotonic() < _MIN_SECONDS_FOR_SYNC_REVIEW:
         # Never show a rewrite that was never re-verified -- safe fallback,
         # not the original rejected text either.
@@ -601,21 +646,12 @@ def run_idea_comparison_job(request: IdeaComparisonRequest, reporter: ProgressRe
 
     final_blocked = final_status == "reviewed" and final_decision is not None and final_decision.requiresRewrite
 
-    attempt_history.append(AttemptRecord(
-        attemptNumber=2,
-        stage="rewrite",
-        outputHash="",
-        firewallPassed=True,
-        schemaValid=True,
-        reviewed=final_status == "reviewed",
-        reviewerFindings=final_findings,
-        decision=final_decision,
-        generatorProvider=agent.last_provider,
-        generatorModel=agent.last_model_used,
-        reviewerProvider=final_reviewer_provider,
-        reviewerModel=final_reviewer_model,
-        kept=not final_blocked,
-    ))
+    rewrite_attempt.reviewed = final_status == "reviewed"
+    rewrite_attempt.reviewerFindings = final_findings
+    rewrite_attempt.decision = final_decision
+    rewrite_attempt.reviewerProvider = final_reviewer_provider
+    rewrite_attempt.reviewerModel = final_reviewer_model
+    rewrite_attempt.kept = final_status == "reviewed" and not final_blocked
 
     if final_status == "review_unavailable":
         reporter.fail_stage("final_checks", final_warning)
@@ -667,12 +703,36 @@ def _build_result(
         "automated_checks_passed", "review_unavailable",
     )
 
+    if review_status in ("approved_after_revision", "approved_after_revision_with_warnings"):
+        output_origin = "semantic_rewrite"
+    elif usable:
+        output_origin = "writer"
+    else:
+        output_origin = "none"
+
+    if review_status in ("approved", "approved_after_revision"):
+        output_review_level = "approved"
+    elif review_status in ("approved_with_warnings", "approved_after_revision_with_warnings"):
+        output_review_level = "reviewed_with_warnings"
+    elif usable:
+        output_review_level = "structural_only"
+    else:
+        output_review_level = "none"
+
+    # Keep the Quality Passport contract internally consistent: unusable
+    # results have an empty output. The top-level comparison follows the same
+    # rule so a .NET finalizer cannot accidentally persist a deterministic
+    # fallback as though it were AI-generated content.
+    delivered_comparison = comparison if usable else {}
+
     review_result = PipelineResult(
         status=review_status,  # type: ignore[arg-type]
         usable=usable,
-        output=comparison,
+        output=delivered_comparison,
         reviewUnavailable=review_status == "review_unavailable",
         warning=review_warning,
+        outputOrigin=output_origin,  # type: ignore[arg-type]
+        outputReviewLevel=output_review_level,  # type: ignore[arg-type]
         reviewerFindings=reviewer_findings,
         decision=decision,
         attempts=len(attempt_history),
@@ -680,17 +740,23 @@ def _build_result(
     )
 
     return {
-        "comparison": comparison,
+        "comparison": delivered_comparison,
         "agent": "IdeaComparisonAgent",
-        "llmUsed": agent.last_llm_used,
-        "source": agent.last_provider if agent.last_llm_used else "dynamic-fallback",
+        "llmUsed": bool(usable and agent.last_llm_used),
+        "source": agent.last_provider if usable and agent.last_llm_used else "none",
         "provider": agent.last_provider,
         "modelUsed": agent.last_model_used,
+        "isFallback": False,
+        "displayable": usable,
         "ollamaError": agent.last_error,
         "ollamaRawPreview": agent.last_raw_llm_response,
         "review": build_review_response(review_result),
         "generatedAt": datetime.now(timezone.utc).isoformat(),
-        "message": "Generated ideas compared successfully",
+        "message": (
+            "Generated ideas compared successfully"
+            if usable
+            else "The AI comparison could not be produced safely. Please try again."
+        ),
     }
 
 

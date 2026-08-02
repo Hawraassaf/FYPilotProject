@@ -624,12 +624,14 @@ class DeepInfraProvider(BaseProvider):
             {"role": "user", "content": prompt},
         ]
 
+        effective_max_tokens = max_tokens or 2200
+
         try:
             if reporter is not None:
                 text = self._stream_completion(
                     messages=messages,
                     temperature=0.2,
-                    max_tokens=max_tokens or 2200,
+                    max_tokens=effective_max_tokens,
                     reporter=reporter,
                 )
                 finish_reason = None
@@ -640,7 +642,7 @@ class DeepInfraProvider(BaseProvider):
                     # Same rationale as GroqProvider: SE Documentation's
                     # richer sections pass an explicit higher budget so
                     # responses aren't silently truncated into invalid JSON.
-                    max_tokens=max_tokens or 2200,
+                    max_tokens=effective_max_tokens,
                     use_json_mode=True,
                 )
         except Exception as ex:
@@ -664,7 +666,9 @@ class DeepInfraProvider(BaseProvider):
         outcome = json_reliability.parse_json_response(
             text,
             repair_fn=(
-                (lambda candidate, error: self._repair_json_with_provider(candidate, error, schema_description))
+                (lambda candidate, error: self._repair_json_with_provider(
+                    candidate, error, schema_description, max_tokens=effective_max_tokens,
+                ))
                 if schema_description else None
             ),
             schema_description=schema_description or "",
@@ -724,6 +728,7 @@ class DeepInfraProvider(BaseProvider):
 
     def _repair_json_with_provider(
         self, malformed_text: str, parse_error: str, schema_description: str | None,
+        max_tokens: int = 2200,
     ) -> str | None:
         """
         ONE additional low-temperature request asking this SAME provider to
@@ -731,12 +736,18 @@ class DeepInfraProvider(BaseProvider):
         json_reliability.parse_json_response only ever calls this once per
         generate_json() attempt. Returns None (never raises) on any
         failure, which the caller treats as "repair unavailable".
+
+        `max_tokens` must be AT LEAST as large as the original request's
+        budget: a response that was truncated because the schema is bigger
+        than the original budget would just be truncated again by a repair
+        call capped at a smaller budget -- observed live against a large
+        roadmap phase plan before this parameter existed.
         """
         try:
             response = self._client().chat.completions.create(
                 model=self.model,
                 temperature=0,
-                max_tokens=2200,
+                max_tokens=max(max_tokens, 2200),
                 messages=[
                     {"role": "system", "content": _JSON_REPAIR_SYSTEM_PROMPT},
                     {"role": "user", "content": _build_repair_prompt(
@@ -1221,16 +1232,19 @@ class GroqProvider(BaseProvider):
 
     def _repair_json_with_provider(
         self, malformed_text: str, parse_error: str, schema_description: str | None,
+        max_tokens: int = 2200,
     ) -> str | None:
         """Same contract as DeepInfraProvider._repair_json_with_provider --
         ONE low-temperature JSON-syntax-only repair request, never raises,
-        never re-runs the full generation prompt."""
+        never re-runs the full generation prompt. `max_tokens` must be at
+        least the original request's budget (see DeepInfraProvider's own
+        docstring for why)."""
         try:
             client = self._client()
             response = client.chat.completions.create(
                 model=self.model,
                 temperature=0,
-                max_tokens=2200,
+                max_tokens=max(max_tokens, 2200),
                 messages=[
                     {"role": "system", "content": _JSON_REPAIR_SYSTEM_PROMPT},
                     {"role": "user", "content": _build_repair_prompt(
@@ -1365,6 +1379,8 @@ class GroqProvider(BaseProvider):
                 "so do not place a sources list inside the JSON."
             )
 
+        effective_max_tokens = max_tokens or 2200
+
         try:
             text, finish_reason, executed_tools, sources = self._request(
                 model=model_to_use,
@@ -1376,7 +1392,7 @@ class GroqProvider(BaseProvider):
                 # silently truncated into invalid JSON, which looked like a
                 # provider failure and collapsed the whole section to a
                 # generic deterministic fallback.
-                max_tokens=max_tokens or 2200,
+                max_tokens=effective_max_tokens,
                 messages=[
                     {"role": "system", "content": system_message},
                     {"role": "user", "content": prompt},
@@ -1410,7 +1426,9 @@ class GroqProvider(BaseProvider):
         outcome = json_reliability.parse_json_response(
             text,
             repair_fn=(
-                (lambda candidate, error: self._repair_json_with_provider(candidate, error, schema_description))
+                (lambda candidate, error: self._repair_json_with_provider(
+                    candidate, error, schema_description, max_tokens=effective_max_tokens,
+                ))
                 if schema_description and not use_search else None
             ),
             schema_description=schema_description or "",
@@ -1754,7 +1772,9 @@ class OllamaProvider(BaseProvider):
         outcome = json_reliability.parse_json_response(
             text,
             repair_fn=(
-                (lambda candidate, error: self._repair_json_with_provider(candidate, error, schema_description))
+                (lambda candidate, error: self._repair_json_with_provider(
+                    candidate, error, schema_description, max_tokens=max_tokens,
+                ))
                 if schema_description else None
             ),
             schema_description=schema_description or "",
@@ -1776,19 +1796,29 @@ class OllamaProvider(BaseProvider):
 
     def _repair_json_with_provider(
         self, malformed_text: str, parse_error: str, schema_description: str | None,
+        max_tokens: int | None = None,
     ) -> str | None:
         """Same contract as DeepInfraProvider._repair_json_with_provider.
         Ollama's /api/generate has no separate system-message slot, so the
         repair instruction is prepended directly to the single prompt
-        field."""
+        field. `max_tokens` mirrors the original request's budget (see
+        DeepInfraProvider's own docstring for why) via the same
+        num_ctx/num_predict scaling generate_json itself uses."""
         try:
             repair_prompt = (
                 f"{_JSON_REPAIR_SYSTEM_PROMPT}\n\n"
                 f"{_build_repair_prompt(malformed_text, parse_error, schema_description or '')}"
             )
+            repair_options: dict[str, Any] = {
+                "temperature": 0,
+                "num_ctx": max(4096, max_tokens * 2) if max_tokens else 4096,
+            }
+            if max_tokens:
+                repair_options["num_predict"] = max_tokens
+
             text = self._generate(
                 prompt=repair_prompt,
-                options={"temperature": 0, "num_ctx": 4096},
+                options=repair_options,
                 extra_body={"format": "json"},
                 reporter=None,
             )
@@ -1996,6 +2026,17 @@ _DEEPINFRA_TIER_TIMING: dict[str, dict[str, float | int]] = {
     # deadline gates (_MIN_SECONDS_FOR_SYNC_REVIEW/_MIN_SECONDS_FOR_REWRITE
     # in idea_comparison_worker.py) are sized to comfortably cover this.
     "comparison_review": {"timeout_seconds": 50.0, "max_retries": 0},
+    # Configurable via ROADMAP_DEEPINFRA_TIMEOUT_SECONDS (default 120s).
+    # The structured per-task phase-plan schema needs a bigger max_tokens
+    # budget than most JSON agents (see ProjectRoadmapAgent.
+    # _estimate_phase_plan_max_tokens), which in turn takes the model
+    # longer to generate -- DeepInfraProvider's own 60s default timeout
+    # was observed live cutting the request off with a timeout error
+    # before the (now-larger) response could finish, immediately after
+    # widening the token budget fixed the previous truncation failure.
+    # max_retries=0 so a genuine timeout fails fast into the Groq fallback
+    # leg rather than the SDK's own retry-with-backoff eating further time.
+    "roadmap": {"timeout_seconds": None, "max_retries": 0},  # resolved by _deepinfra_timing_for_tier
 }
 
 # Same rationale as _DEEPINFRA_TIER_TIMING, for the Groq fallback leg.
@@ -2046,8 +2087,18 @@ def _deepinfra_model_for_tier(tier: str) -> str:
     return os.getenv(env_key, _DEEPINFRA_TIER_DEFAULTS[resolved_tier])
 
 
+_DEFAULT_ROADMAP_DEEPINFRA_TIMEOUT_SECONDS = 120.0
+
+
 def _deepinfra_timing_for_tier(tier: str) -> dict[str, float | int]:
-    return _DEEPINFRA_TIER_TIMING.get(tier, {})
+    timing = dict(_DEEPINFRA_TIER_TIMING.get(tier, {}))
+
+    if tier == "roadmap":
+        timing["timeout_seconds"] = float(
+            os.getenv("ROADMAP_DEEPINFRA_TIMEOUT_SECONDS", str(_DEFAULT_ROADMAP_DEEPINFRA_TIMEOUT_SECONDS)),
+        )
+
+    return timing
 
 
 def _groq_timing_for_tier(tier: str) -> dict[str, float | int]:

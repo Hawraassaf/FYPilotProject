@@ -7,11 +7,15 @@ firewall logic. See review_decision_engine.py, reviewer_agent.py, pipeline.py.
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.llm_firewall.models import FirewallFinding
 
 Severity = Literal["critical", "high", "medium", "low"]
+AttemptOperation = Literal["writer", "structural_repair", "semantic_rewrite"]
+AttemptOutcome = Literal["candidate_produced", "provider_failed", "firewall_blocked"]
+OutputOrigin = Literal["writer", "structural_repair", "semantic_rewrite", "unknown", "none"]
+OutputReviewLevel = Literal["approved", "reviewed_with_warnings", "structural_only", "none"]
 
 
 class ReviewerIssue(BaseModel):
@@ -113,6 +117,8 @@ class AttemptRecord(BaseModel):
 
     attemptNumber: int
     stage: Literal["writer", "rewrite"]
+    operation: AttemptOperation = "writer"
+    outcome: AttemptOutcome = "candidate_produced"
     outputHash: str
     firewallPassed: bool
     firewallFlags: list[str] = Field(default_factory=list)
@@ -139,11 +145,36 @@ class PipelineResult(BaseModel):
     output: dict
     reviewUnavailable: bool = False
     warning: str = ""
+    # Consumer contract: render output whenever displayable/usable is true.
+    # Status explains how the run ended; it is not itself a visibility gate.
+    displayable: bool = False
+    outputOrigin: OutputOrigin = "none"
+    outputReviewLevel: OutputReviewLevel = "none"
     reviewerFindings: ReviewerFindings | None = None
     decision: RewriteDecision | None = None
     attempts: int = 0
     attemptHistory: list[AttemptRecord] = Field(default_factory=list)
-    reviewerVersion: str = "review-pipeline-v1"
+    reviewerVersion: str = "review-pipeline-v2"
     reviewRunId: str = ""
     firewallInputFindings: list[FirewallFinding] = Field(default_factory=list)
     firewallOutputFindings: list[FirewallFinding] = Field(default_factory=list)
+
+
+    @model_validator(mode="after")
+    def _enforce_delivery_contract(self) -> "PipelineResult":
+        has_output = bool(self.output)
+
+        if self.usable and not has_output:
+            raise ValueError("usable=True requires a non-empty output")
+        if not self.usable and has_output:
+            raise ValueError("usable=False requires an empty output")
+
+        # Keep the old `usable` field for backward compatibility while adding
+        # an unambiguous UI-facing name. Both always mean the same thing.
+        self.displayable = self.usable
+
+        if not self.usable:
+            self.outputOrigin = "none"
+            self.outputReviewLevel = "none"
+
+        return self
