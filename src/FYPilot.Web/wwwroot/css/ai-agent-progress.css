@@ -1,0 +1,303 @@
+/*
+    Centralized AI Agent Loading System -- shared circular stage loader.
+    Theme tokens match the FYPilot dashboard palette; no gradients/neon,
+    consistent with the rest of the app's visual language.
+*/
+:root {
+    --aip-primary: #28385E;
+    --aip-secondary: #516C8D;
+    --aip-bg: #EEF2F6;
+    --aip-border: #E8ECF2;
+    --aip-text: #111827;
+    --aip-muted: #64748B;
+    --aip-completed: #39725A;
+    --aip-failed: #A84A4A;
+    --aip-warning: #8A6418;
+}
+
+.aip-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1080;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(17, 24, 39, .45);
+}
+
+.aip-overlay.is-visible {
+    display: flex;
+}
+
+.aip-card {
+    width: min(560px, 100%);
+    max-height: min(80vh, 640px);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 22px 24px;
+    overflow: hidden;
+    color: var(--aip-text);
+    background: #ffffff;
+    border: 1px solid var(--aip-border);
+    border-radius: 18px;
+    box-shadow: 0 24px 60px rgba(17, 24, 39, .22);
+}
+
+.aip-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.aip-header-copy small {
+    display: block;
+    margin-bottom: 2px;
+    color: var(--aip-muted);
+    font-size: .68rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.aip-header-copy strong {
+    display: block;
+    color: var(--aip-primary);
+    font-size: 1.05rem;
+    font-weight: 800;
+}
+
+.aip-cancel-btn {
+    flex: 0 0 auto;
+    padding: 6px 14px;
+    color: var(--aip-secondary);
+    font-size: .8rem;
+    font-weight: 700;
+    background: var(--aip-bg);
+    border: 1px solid var(--aip-border);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background .15s ease, color .15s ease;
+}
+
+.aip-cancel-btn:hover {
+    color: #ffffff;
+    background: var(--aip-secondary);
+}
+
+.aip-cancel-btn:disabled {
+    opacity: .5;
+    cursor: default;
+}
+
+.aip-cancel-banner {
+    padding: 10px 14px;
+    color: var(--aip-warning);
+    font-size: .82rem;
+    font-weight: 600;
+    background: #FBF3E4;
+    border: 1px solid #EFE0BE;
+    border-radius: 12px;
+}
+
+/* ── Stage row: horizontal scroller on wide screens, vertical timeline on narrow ── */
+
+.aip-stages {
+    display: flex;
+    gap: 10px;
+    margin: 0;
+    padding: 4px 2px 10px;
+    list-style: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x proximity;
+}
+
+.aip-stage {
+    display: flex;
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    width: 92px;
+    text-align: center;
+    scroll-snap-align: center;
+}
+
+.aip-stage-circle {
+    width: 34px;
+    height: 34px;
+    display: grid;
+    flex: 0 0 auto;
+    place-items: center;
+    color: var(--aip-muted);
+    background: #ffffff;
+    border: 2px solid var(--aip-border);
+    border-radius: 50%;
+    font-size: .85rem;
+    transition: border-color .2s ease, background .2s ease, color .2s ease;
+}
+
+.aip-stage-label {
+    color: var(--aip-muted);
+    font-size: .68rem;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.aip-stage.is-current .aip-stage-circle {
+    color: #ffffff;
+    background: var(--aip-primary);
+    border-color: var(--aip-primary);
+    animation: aip-pulse 1.4s ease-in-out infinite;
+}
+
+.aip-stage.is-current .aip-stage-label {
+    color: var(--aip-primary);
+    font-weight: 800;
+}
+
+.aip-stage.is-completed .aip-stage-circle {
+    color: #ffffff;
+    background: var(--aip-completed);
+    border-color: var(--aip-completed);
+    animation: none;
+}
+
+.aip-stage.is-completed .aip-stage-label {
+    color: var(--aip-text);
+}
+
+.aip-stage.is-failed .aip-stage-circle {
+    color: #ffffff;
+    background: var(--aip-failed);
+    border-color: var(--aip-failed);
+    animation: none;
+}
+
+.aip-stage.is-failed .aip-stage-label {
+    color: var(--aip-failed);
+    font-weight: 700;
+}
+
+.aip-stage.is-skipped .aip-stage-circle {
+    color: var(--aip-warning);
+    background: #FBF3E4;
+    border-color: #EFE0BE;
+    animation: none;
+}
+
+.aip-stage.is-cancelled .aip-stage-circle {
+    color: var(--aip-muted);
+    background: var(--aip-bg);
+    border-color: var(--aip-border);
+    animation: none;
+}
+
+@keyframes aip-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(40, 56, 94, .35); }
+    50% { box-shadow: 0 0 0 6px rgba(40, 56, 94, 0); }
+}
+
+@media (max-width: 640px) {
+    .aip-stages {
+        flex-direction: column;
+        align-items: stretch;
+        overflow-x: visible;
+        overflow-y: auto;
+        max-height: 260px;
+    }
+
+    .aip-stage {
+        flex-direction: row;
+        width: auto;
+        text-align: left;
+    }
+
+    .aip-stage-label {
+        text-align: left;
+    }
+}
+
+/* ── Live detail line ── */
+
+.aip-live-detail {
+    padding: 10px 12px;
+    background: var(--aip-bg);
+    border: 1px solid var(--aip-border);
+    border-radius: 12px;
+}
+
+.aip-live-message {
+    color: var(--aip-text);
+    font-size: .86rem;
+    font-weight: 600;
+}
+
+.aip-live-meta {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 4px;
+    color: var(--aip-muted);
+    font-size: .74rem;
+}
+
+/* ── Terminal panels ── */
+
+.aip-failed-panel,
+.aip-completed-panel {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: 12px;
+}
+
+.aip-failed-panel {
+    color: var(--aip-failed);
+    background: #FBEBEB;
+    border: 1px solid #F0D3D3;
+}
+
+.aip-failed-panel i {
+    font-size: 1.4rem;
+}
+
+.aip-failed-panel p {
+    margin: 2px 0 0;
+    color: var(--aip-text);
+    font-size: .82rem;
+}
+
+.aip-completed-panel {
+    color: var(--aip-completed);
+    background: #E7F2EC;
+    border: 1px solid #CFE6DA;
+    font-weight: 700;
+}
+
+.aip-completed-panel i {
+    font-size: 1.4rem;
+}
+
+/* ── Compact inline mode (Mentor Chat / Defense Simulator) ── */
+
+.aip-inline {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+    background: var(--aip-bg);
+    border: 1px solid var(--aip-border);
+    border-radius: 12px;
+}
+
+.aip-inline .aip-stages {
+    padding: 0;
+}
+
+.aip-inline .aip-stage {
+    width: 70px;
+}

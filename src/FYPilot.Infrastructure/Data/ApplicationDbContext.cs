@@ -51,6 +51,11 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     // AI Output Review Pipeline (services/FYPilot.AI/app/review/pipeline.py)
     public DbSet<AiOutputReview> AiOutputReviews => Set<AiOutputReview>();
 
+    // Centralized AI Agent Loading System -- durable job records the
+    // AiAgentJobCoordinator background service drives to completion
+    // independently of any connected browser (see AiAgentJobService).
+    public DbSet<AiAgentJob> AiAgentJobs => Set<AiAgentJob>();
+
     // FYPilot core
     public DbSet<StudentSkill> StudentSkills { get; set; }
     public DbSet<ProjectIdea> ProjectIdeas { get; set; }
@@ -825,6 +830,45 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
             entity.HasIndex(e => e.TokenHash)
                 .IsUnique();
+        });
+
+        modelBuilder.Entity<AiOutputReview>(entity =>
+        {
+            // Idempotency guard for IdeaComparisonJobFinalizer (and any
+            // other finalizer that persists AiOutputReview as its job's
+            // parent output row) -- partial so legacy rows with JobId=null
+            // are unaffected.
+            entity.HasIndex(r => r.JobId)
+                .IsUnique()
+                .HasFilter("\"job_id\" IS NOT NULL");
+        });
+
+        modelBuilder.Entity<AiAgentJob>(entity =>
+        {
+            entity.HasIndex(j => j.JobId).IsUnique();
+
+            // Supports the §7 relevance-scoped "current job" lookup
+            // (FindJobByHashAsync / FindActiveJobAsync).
+            entity.HasIndex(j => new { j.UserId, j.ProjectId, j.AgentName, j.RequestHash, j.UpdatedAtUtc });
+
+            entity.HasOne(j => j.User)
+                .WithMany()
+                .HasForeignKey(j => j.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(j => j.Project)
+                .WithMany()
+                .HasForeignKey(j => j.ProjectId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Postgres's built-in xmin system column as the optimistic
+            // concurrency token -- no explicit version column needed.
+            entity.Property<uint>("xmin").IsRowVersion();
+
+            // The true duplicate-job/one-active-job-per-request guard is a
+            // partial unique index over COALESCE(project_id, -1) added via
+            // raw SQL in the AddAiAgentJob migration (EF's fluent HasIndex
+            // can't express a COALESCE expression over a nullable column).
         });
 
         // NOTE: SupervisorPreferenceBatch, SupervisorPreference,

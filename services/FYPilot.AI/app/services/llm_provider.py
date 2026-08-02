@@ -40,10 +40,19 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import requests
+
+if TYPE_CHECKING:
+    # Only for type hints -- avoids this module structurally depending on
+    # app.jobs at runtime. ProgressReporter is duck-typed here: every
+    # provider that accepts one simply calls whichever of its methods
+    # apply, and every existing caller that omits it (reporter=None, the
+    # default everywhere) gets today's exact non-streaming behavior,
+    # unchanged.
+    from app.jobs.reporter import ProgressReporter
 
 
 @dataclass
@@ -337,6 +346,7 @@ class BaseProvider:
         *,
         use_search: bool = False,
         max_tokens: int | None = None,
+        reporter: "ProgressReporter | None" = None,
     ) -> LLMResult:
         raise NotImplementedError
 
@@ -345,6 +355,7 @@ class BaseProvider:
         prompt: str,
         *,
         use_search: bool = False,
+        reporter: "ProgressReporter | None" = None,
     ) -> LLMResult:
         raise NotImplementedError
 
@@ -432,6 +443,7 @@ class DeepInfraProvider(BaseProvider):
         *,
         use_search: bool = False,
         max_tokens: int | None = None,
+        reporter: "ProgressReporter | None" = None,
     ) -> LLMResult:
         if not self.enabled:
             return LLMResult(
@@ -453,20 +465,30 @@ class DeepInfraProvider(BaseProvider):
                 "Do not wrap the response in code fences."
             )
 
-            response = self._client().chat.completions.create(
-                model=self.model,
-                temperature=0.2,
-                # Same rationale as GroqProvider: SE Documentation's richer
-                # sections pass an explicit higher budget so responses
-                # aren't silently truncated into invalid JSON.
-                max_tokens=max_tokens or 2200,
-                messages=[
-                    {"role": "system", "content": system_message},
-                    {"role": "user", "content": prompt},
-                ],
-            )
+            messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": prompt},
+            ]
 
-            text = str(response.choices[0].message.content or "")
+            if reporter is not None:
+                text = self._stream_completion(
+                    messages=messages,
+                    temperature=0.2,
+                    max_tokens=max_tokens or 2200,
+                    reporter=reporter,
+                )
+            else:
+                response = self._client().chat.completions.create(
+                    model=self.model,
+                    temperature=0.2,
+                    # Same rationale as GroqProvider: SE Documentation's
+                    # richer sections pass an explicit higher budget so
+                    # responses aren't silently truncated into invalid JSON.
+                    max_tokens=max_tokens or 2200,
+                    messages=messages,
+                )
+                text = str(response.choices[0].message.content or "")
+
             data = _parse_json(text)
 
             return LLMResult(
@@ -492,11 +514,60 @@ class DeepInfraProvider(BaseProvider):
                 search_failed=use_search,
             )
 
+    def _stream_completion(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        reporter: "ProgressReporter",
+    ) -> str:
+        """
+        Real token streaming (OpenAI-compatible SDK, stream=True) -- called
+        only when a reporter is supplied, so every existing non-job caller
+        keeps today's exact non-streaming request unchanged. Marks the
+        provider succeeded only after the FULL response has been consumed
+        (see the loop below never returning early on is_cancelled() -- an
+        already-started stream is allowed to finish naturally, matching the
+        honest-cancellation requirement: only the NEXT attempt is skipped,
+        never an in-flight one aborted mid-stream). The one and only source
+        of the reported token count is the stream's own final usage chunk
+        (stream_options include_usage) -- never estimated from max_tokens.
+        """
+        stream = self._client().chat.completions.create(
+            model=self.model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            messages=messages,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+
+        text_parts: list[str] = []
+
+        for chunk in stream:
+            choices = getattr(chunk, "choices", None)
+            if choices:
+                delta = choices[0].delta
+                piece = getattr(delta, "content", None)
+                if piece:
+                    text_parts.append(piece)
+                    reporter.provider_chunk_received()
+
+            usage = getattr(chunk, "usage", None)
+            if usage is not None:
+                completion_tokens = getattr(usage, "completion_tokens", None)
+                if isinstance(completion_tokens, int):
+                    reporter.provider_usage_received(completion_tokens)
+
+        return "".join(text_parts)
+
     def generate_text(
         self,
         prompt: str,
         *,
         use_search: bool = False,
+        reporter: "ProgressReporter | None" = None,
     ) -> LLMResult:
         if not self.enabled:
             return LLMResult(
@@ -511,17 +582,26 @@ class DeepInfraProvider(BaseProvider):
             )
 
         try:
-            response = self._client().chat.completions.create(
-                model=self.model,
-                temperature=0.3,
-                max_tokens=1800,
-                messages=[
-                    {"role": "system", "content": "You are a helpful AI assistant."},
-                    {"role": "user", "content": prompt},
-                ],
-            )
+            messages = [
+                {"role": "system", "content": "You are a helpful AI assistant."},
+                {"role": "user", "content": prompt},
+            ]
 
-            text = str(response.choices[0].message.content or "")
+            if reporter is not None:
+                text = self._stream_completion(
+                    messages=messages,
+                    temperature=0.3,
+                    max_tokens=1800,
+                    reporter=reporter,
+                )
+            else:
+                response = self._client().chat.completions.create(
+                    model=self.model,
+                    temperature=0.3,
+                    max_tokens=1800,
+                    messages=messages,
+                )
+                text = str(response.choices[0].message.content or "")
 
             return LLMResult(
                 ok=True,
@@ -955,7 +1035,20 @@ class GroqProvider(BaseProvider):
         *,
         use_search: bool = False,
         max_tokens: int | None = None,
+        reporter: "ProgressReporter | None" = None,
     ) -> LLMResult:
+        # NOTE: reporter is accepted (for a uniform ProviderChain call
+        # signature across every provider) but not yet used for token-level
+        # streaming here, unlike DeepInfraProvider/OllamaProvider. Groq's
+        # _request() extracts executed_tools/sources from the SDK's
+        # non-streaming response shape, which streaming would meaningfully
+        # complicate for this provider specifically (tool-call metadata
+        # timing differs under stream=True) -- deferred rather than risking
+        # that extraction, and called out as a known limitation in the
+        # final report. ProviderChain still reports provider_started/
+        # succeeded/failed/fallback_started around this call either way, so
+        # the loading UI is never silent while Groq is in use, just without
+        # a live chunk/token counter for this one provider.
         if not self.enabled:
             return LLMResult(
                 ok=False,
@@ -1037,7 +1130,10 @@ class GroqProvider(BaseProvider):
         prompt: str,
         *,
         use_search: bool = False,
+        reporter: "ProgressReporter | None" = None,
     ) -> LLMResult:
+        # See generate_json's note -- reporter accepted for signature
+        # uniformity, streaming not yet implemented for Groq.
         if not self.enabled:
             return LLMResult(
                 ok=False,
@@ -1116,7 +1212,11 @@ class GeminiProvider(BaseProvider):
         *,
         use_search: bool = False,
         max_tokens: int | None = None,
+        reporter: "ProgressReporter | None" = None,
     ) -> LLMResult:
+        # Excluded from the default ProviderChain (see the module
+        # docstring) -- reporter accepted for signature uniformity only;
+        # not streamed.
         if not self.enabled:
             return LLMResult(
                 ok=False,
@@ -1176,6 +1276,7 @@ class GeminiProvider(BaseProvider):
         prompt: str,
         *,
         use_search: bool = False,
+        reporter: "ProgressReporter | None" = None,
     ) -> LLMResult:
         if not self.enabled:
             return LLMResult(
@@ -1271,6 +1372,7 @@ class OllamaProvider(BaseProvider):
         *,
         use_search: bool = False,
         max_tokens: int | None = None,
+        reporter: "ProgressReporter | None" = None,
     ) -> LLMResult:
         if not self.enabled:
             return LLMResult(
@@ -1296,22 +1398,12 @@ class OllamaProvider(BaseProvider):
             if max_tokens:
                 options["num_predict"] = max_tokens
 
-            response = requests.post(
-                f"{self.base_url}/api/generate",
-                json={
-                    "model": self.model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "format": "json",
-                    "options": options,
-                },
-                timeout=(5, self.timeout_seconds or 90),
+            text = self._generate(
+                prompt=prompt,
+                options=options,
+                extra_body={"format": "json"},
+                reporter=reporter,
             )
-
-            response.raise_for_status()
-
-            payload = response.json()
-            text = payload.get("response", "")
             data = _parse_json(text)
 
             return LLMResult(
@@ -1342,6 +1434,7 @@ class OllamaProvider(BaseProvider):
         prompt: str,
         *,
         use_search: bool = False,
+        reporter: "ProgressReporter | None" = None,
     ) -> LLMResult:
         if not self.enabled:
             return LLMResult(
@@ -1356,24 +1449,12 @@ class OllamaProvider(BaseProvider):
             )
 
         try:
-            response = requests.post(
-                f"{self.base_url}/api/generate",
-                json={
-                    "model": self.model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.3,
-                        "num_ctx": 4096,
-                    },
-                },
-                timeout=(5, self.timeout_seconds or 90),
+            text = self._generate(
+                prompt=prompt,
+                options={"temperature": 0.3, "num_ctx": 4096},
+                extra_body={},
+                reporter=reporter,
             )
-
-            response.raise_for_status()
-
-            payload = response.json()
-            text = payload.get("response", "")
 
             return LLMResult(
                 ok=True,
@@ -1397,6 +1478,74 @@ class OllamaProvider(BaseProvider):
                 search_used=False,
                 search_failed=False,
             )
+
+    def _generate(
+        self,
+        *,
+        prompt: str,
+        options: dict[str, Any],
+        extra_body: dict[str, Any],
+        reporter: "ProgressReporter | None",
+    ) -> str:
+        """
+        Shared request body for generate_json/generate_text. When reporter
+        is supplied, requests Ollama's own streamed NDJSON response
+        ("stream": true) and reports each line as a real chunk; the
+        deadline-aware (5, timeout) read timeout is unchanged either way.
+        When reporter is None, this is byte-for-byte today's single
+        non-streaming POST.
+        """
+        if reporter is None:
+            response = requests.post(
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": options,
+                    **extra_body,
+                },
+                timeout=(5, self.timeout_seconds or 90),
+            )
+            response.raise_for_status()
+            return response.json().get("response", "")
+
+        response = requests.post(
+            f"{self.base_url}/api/generate",
+            json={
+                "model": self.model,
+                "prompt": prompt,
+                "stream": True,
+                "options": options,
+                **extra_body,
+            },
+            timeout=(5, self.timeout_seconds or 90),
+            stream=True,
+        )
+        response.raise_for_status()
+
+        text_parts: list[str] = []
+
+        for line in response.iter_lines(decode_unicode=True):
+            if not line:
+                continue
+
+            chunk = json.loads(line)
+            piece = chunk.get("response", "")
+            if piece:
+                text_parts.append(piece)
+                reporter.provider_chunk_received()
+
+            if chunk.get("done"):
+                # Ollama's own final line reports real generated-token
+                # counts (eval_count) -- never estimated, never derived
+                # from a num_predict/max_tokens upper bound.
+                eval_count = chunk.get("eval_count")
+                if isinstance(eval_count, int):
+                    reporter.provider_usage_received(eval_count)
+                break
+
+        return "".join(text_parts)
 
 
 # Per-task accuracy/cost tier for the DeepInfra leg of the chain -- some
@@ -1607,44 +1756,16 @@ class ProviderChain:
         use_search: bool = False,
         max_tokens: int | None = None,
         deadline: float | None = None,
+        reporter: "ProgressReporter | None" = None,
     ) -> LLMResult:
-        errors: list[str] = []
-
-        for provider in self.providers:
-            if deadline is not None and (
-                deadline - time.monotonic() < self._MIN_SECONDS_PER_PROVIDER_ATTEMPT
-            ):
-                errors.append(f"{provider.name} -> skipped, insufficient deadline time remaining")
-                break
-
-            result = provider.generate_json(
-                prompt,
-                use_search=use_search,
-                max_tokens=max_tokens,
-            )
-
-            if result.ok and result.data is not None:
-                if not _basic_secret_scan_ok(result):
-                    errors.append(
-                        f"{result.provider}:{result.model} -> response withheld by basic secret scan"
-                    )
-                    continue
-
-                return result
-
-            errors.append(
-                f"{result.provider}:{result.model} -> {result.error}"
-            )
-
-        return LLMResult(
-            ok=False,
-            provider="none",
-            model=None,
-            text="",
-            data=None,
-            error="All providers failed. " + " | ".join(errors),
-            search_used=False,
-            search_failed=use_search,
+        return self._run_cascade(
+            call=lambda provider: provider.generate_json(
+                prompt, use_search=use_search, max_tokens=max_tokens, reporter=reporter,
+            ),
+            is_success=lambda result: result.ok and result.data is not None,
+            deadline=deadline,
+            reporter=reporter,
+            use_search=use_search,
         )
 
     def generate_text(
@@ -1653,33 +1774,82 @@ class ProviderChain:
         *,
         use_search: bool = False,
         deadline: float | None = None,
+        reporter: "ProgressReporter | None" = None,
     ) -> LLMResult:
+        return self._run_cascade(
+            call=lambda provider: provider.generate_text(
+                prompt, use_search=use_search, reporter=reporter,
+            ),
+            is_success=lambda result: bool(result.ok and result.text),
+            deadline=deadline,
+            reporter=reporter,
+            use_search=use_search,
+        )
+
+    def _run_cascade(
+        self,
+        *,
+        call: "Any",
+        is_success: "Any",
+        deadline: float | None,
+        reporter: "ProgressReporter | None",
+        use_search: bool,
+    ) -> LLMResult:
+        """
+        Shared sequential-fallback loop for generate_json/generate_text.
+        When reporter is None, this is byte-for-byte the original
+        loop/break/error-message behavior -- no reporter calls happen at
+        all, so every existing synchronous caller is unaffected. When a
+        reporter is supplied: provider_started fires for the first attempt,
+        fallback_started for every subsequent one, provider_succeeded/
+        provider_failed bracket each call's outcome, deadline_prevented_fallback
+        fires when the remaining-deadline check trips, and is_cancelled() is
+        checked before EVERY attempt (not just the first) so cancellation
+        stops any further fallback from starting -- while never aborting a
+        call already in flight (the honest-cancellation requirement: an
+        already-started attempt is always allowed to finish naturally).
+        """
         errors: list[str] = []
 
-        for provider in self.providers:
+        for index, provider in enumerate(self.providers):
+            if reporter is not None and reporter.is_cancelled():
+                errors.append(f"{provider.name} -> skipped, cancelled")
+                break
+
             if deadline is not None and (
                 deadline - time.monotonic() < self._MIN_SECONDS_PER_PROVIDER_ATTEMPT
             ):
                 errors.append(f"{provider.name} -> skipped, insufficient deadline time remaining")
+                if reporter is not None:
+                    reporter.deadline_prevented_fallback(provider.name)
                 break
 
-            result = provider.generate_text(
-                prompt,
-                use_search=use_search,
-            )
+            if reporter is not None:
+                if index == 0:
+                    reporter.provider_started(provider.name)
+                else:
+                    reporter.fallback_started(provider.name)
 
-            if result.ok and result.text:
+            result = call(provider)
+
+            if is_success(result):
                 if not _basic_secret_scan_ok(result):
                     errors.append(
                         f"{result.provider}:{result.model} -> response withheld by basic secret scan"
                     )
+                    if reporter is not None:
+                        reporter.provider_failed(provider.name, "response withheld by basic secret scan")
                     continue
 
+                if reporter is not None:
+                    reporter.provider_succeeded(result.provider, result.model)
                 return result
 
             errors.append(
                 f"{result.provider}:{result.model} -> {result.error}"
             )
+            if reporter is not None:
+                reporter.provider_failed(provider.name, result.error or "unknown error")
 
         return LLMResult(
             ok=False,

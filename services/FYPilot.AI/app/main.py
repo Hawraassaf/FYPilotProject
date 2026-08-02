@@ -247,6 +247,28 @@ except Exception as exception:
 
 
 try:
+    # Centralized AI Agent Loading System -- generic job endpoints
+    # (POST/GET/cancel/result/events under /ai-jobs) shared by every wired
+    # agent. Each agent's own *_worker.py module (app/jobs/workers/)
+    # self-registers with this router's register_agent_job() when imported
+    # -- an agent that hasn't been wired yet cleanly 404s rather than this
+    # import needing to know about it.
+    from app.routers import ai_jobs
+
+    app.include_router(ai_jobs.router)
+    logger.info("AI Agent Jobs router loaded")
+
+    from app.jobs.workers import idea_comparison_worker  # noqa: F401
+
+    logger.info("Idea Comparison job worker registered")
+except Exception as exception:
+    logger.warning(
+        "AI Agent Jobs router skipped: %s",
+        exception,
+    )
+
+
+try:
     from app.routers import fyp_chat
 
     app.include_router(fyp_chat.router)

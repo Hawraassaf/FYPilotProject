@@ -1,9 +1,12 @@
 using FYPilot.Application.Interfaces;
 using FYPilot.Infrastructure.Data;
 using FYPilot.Infrastructure.Services;
+using FYPilot.Infrastructure.Services.Finalizers;
+using FYPilot.Web.Endpoints;
 using FYPilot.Web.Configuration;
 using FYPilot.Web.Hubs;
 using FYPilot.Web.Middleware;
+using FYPilot.Web.Services.AiAgentJobs;
 using FYPilot.Web.Services.GoogleCalendar;
 using FYPilot.Web.Services.Meetings;
 using FYPilot.Web.Services.Notifications;
@@ -119,6 +122,13 @@ builder.Services.AddSingleton<
     IAiServiceClient,
     AiServiceClient>();
 
+// Separate, short-timeout client for Python's centralized job endpoints --
+// only ever called by AiAgentJobCoordinator's fast poll loop, never from a
+// browser-facing handler (see AiJobsPythonClient's doc comment).
+builder.Services.AddSingleton<
+    IAiJobsPythonClient,
+    AiJobsPythonClient>();
+
 builder.Services.AddHttpClient();
 
 // ── Documentation Generator Service ───────────────────────────────────────────
@@ -180,6 +190,28 @@ builder.Services.AddScoped<
     IAdminIdeaContextService,
     AdminIdeaContextService>();
 
+// ── Centralized AI Agent Loading System ───────────────────────────────────────
+builder.Services.AddScoped<
+    IAiAgentJobService,
+    AiAgentJobService>();
+
+// One IAiAgentJobFinalizer per agent, keyed by AgentName -- resolved by
+// AiAgentJobCoordinator via GetRequiredKeyedService<IAiAgentJobFinalizer>(job.AgentName).
+builder.Services.AddKeyedScoped<
+    IAiAgentJobFinalizer,
+    IdeaComparisonJobFinalizer>("IdeaComparisonAgent");
+
+// In-process broadcast pub/sub for live job events (per-subscriber
+// channels -- see AiAgentJobEventBus) shared between AiAgentJobCoordinator
+// (publisher) and the SSE endpoint (subscriber, added in a later phase).
+builder.Services.AddSingleton<
+    IAiAgentJobEventBus,
+    AiAgentJobEventBus>();
+
+// Drives every AiAgentJob from "Python's worker finished" through
+// "persisted and marked complete" independently of any connected browser.
+builder.Services.AddHostedService<AiAgentJobCoordinator>();
+
 // ── Background Workers ────────────────────────────────────────────────────────
 builder.Services.AddHostedService<MeetingReminderWorker>();
 
@@ -223,6 +255,10 @@ app.MapHub<NotificationHub>(
 app.MapHealthChecks("/healthz");
 app.MapHub<ProjectDiscussionHub>(
     "/hubs/project-discussion");
+
+// Centralized AI Agent Loading System -- shared browser-facing surface
+// (current/snapshot/events/result/cancel) reused by every wired agent.
+app.MapAiAgentJobEndpoints();
 
 app.MapRazorPages();
 app.MapRazorPages();

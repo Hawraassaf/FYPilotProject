@@ -1,0 +1,58 @@
+<!--
+    Shared circular-stage loader for the centralized AI Agent Loading
+    System. One instance per page, driven entirely by wwwroot/js/ai-agent-progress.js
+    (window.AiAgentProgress) -- this markup only provides containers; every
+    stage circle, message, and counter is rendered from real backend state
+    (AiAgentJob rows via /api/ai-agent-jobs/*), never a local timer.
+
+    Two render targets:
+    - The full overlay below (default -- used by reload-style pages).
+    - A compact inline strip a caller builds into its own DOM node via
+      AiAgentProgress.start({ renderTarget: ... }) (Mentor Chat, Defense
+      Simulator) -- this overlay markup is simply left unused for those.
+-->
+<div class="aip-overlay"
+     id="aiAgentProgressOverlay"
+     role="dialog"
+     aria-modal="true"
+     aria-labelledby="aipAgentName"
+     aria-hidden="true">
+    <div class="aip-card">
+        <header class="aip-header">
+            <div class="aip-header-copy">
+                <small>AI Agent</small>
+                <strong id="aipAgentName">Working…</strong>
+            </div>
+            <button type="button" class="aip-cancel-btn" id="aipCancelButton">
+                Cancel
+            </button>
+        </header>
+
+        <div class="aip-cancel-banner" id="aipCancelBanner" hidden>
+            Cancellation requested. Finishing the active provider request safely.
+        </div>
+
+        <ol class="aip-stages" id="aipStages" aria-label="Progress stages"></ol>
+
+        <div class="aip-live-detail">
+            <div class="aip-live-message" id="aipMessage">Starting…</div>
+            <div class="aip-live-meta">
+                <span id="aipProviderModel"></span>
+                <span id="aipElapsed"></span>
+            </div>
+        </div>
+
+        <div class="aip-failed-panel" id="aipFailedPanel" hidden>
+            <i class="bi bi-x-circle"></i>
+            <div>
+                <strong>Something went wrong</strong>
+                <p id="aipFailedMessage"></p>
+            </div>
+        </div>
+
+        <div class="aip-completed-panel" id="aipCompletedPanel" hidden>
+            <i class="bi bi-check-circle"></i>
+            <strong>Completed and saved.</strong>
+        </div>
+    </div>
+</div>

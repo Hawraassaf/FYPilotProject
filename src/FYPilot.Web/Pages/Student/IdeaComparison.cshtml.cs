@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Security.Claims;
 using System.Text.Json;
 using FYPilot.Application.Common;
@@ -6,6 +5,7 @@ using FYPilot.Application.DTOs;
 using FYPilot.Application.Interfaces;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
+using FYPilot.Infrastructure.Services.Finalizers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -16,12 +16,14 @@ namespace FYPilot.Web.Pages.Student;
 [Authorize(Roles = "student")]
 public class IdeaComparisonModel(
     ApplicationDbContext db,
-    IAiServiceClient aiService,
     IProjectAccessService projectAccessService,
     IActiveProjectService activeProjectService,
+    IAiAgentJobService jobService,
+    IAiJobsPythonClient pythonClient,
     ILogger<IdeaComparisonModel> logger
 ) : PageModel
 {
+    private const string AgentName = "IdeaComparisonAgent";
     private const int MaximumProjectMembers = 21;
 
     [BindProperty(SupportsGet = true)]
@@ -47,20 +49,13 @@ public class IdeaComparisonModel(
     public const int HardMaximumIdeasToCompare = 5;
 
     /// <summary>
-    /// End-to-end budget for the whole "Generate Recommendation" round
-    /// trip -- sent to the AI service as X-Request-Deadline-Ms so it stops
-    /// starting new provider/rewrite/reviewer work once spent, and
-    /// enforced here too (see CompareGeneratedIdeasAsync) so the browser
-    /// never waits past it even if the AI service does not respect it.
-    /// </summary>
-    private static readonly TimeSpan ComparisonDeadline = TimeSpan.FromSeconds(45);
-
-    /// <summary>
     /// Ideas the student picked to send to the AI comparison -- bound from
     /// the checkboxes on the Compare form. A normal comparison is the
     /// latest batch (~3-4 ideas); this lets the student swap in older
     /// ideas instead, but never send the AI service everything the project
-    /// has ever generated (see OnPostCompareAsync's count enforcement).
+    /// has ever generated (see ValidateAndAuthorizeSelection's count
+    /// enforcement). The 45-second generation deadline itself is now owned
+    /// by the Python worker (see app/jobs/workers/idea_comparison_worker.py).
     /// </summary>
     [BindProperty]
     public List<int> SelectedIdeaIds { get; set; } = [];
@@ -81,6 +76,9 @@ public class IdeaComparisonModel(
         int? Score,
         string Label,
         string Reason);
+
+    /// <summary>JSON body OnPostStartCompareJobAsync's JS caller posts -- see wwwroot/js/ai-agent-progress.js's start(startBody).</summary>
+    public sealed record StartCompareJobRequestBody(List<int>? SelectedIdeaIds);
 
     /// <summary>
     /// Single view model per idea, reused by the winner spotlight, the
@@ -163,10 +161,52 @@ public class IdeaComparisonModel(
         "review_pending" => ("bg-info text-dark", "Semantic review pending"),
         "provider_unavailable" => ("bg-secondary", "AI service unavailable"),
         "schema_invalid" => ("bg-secondary", "Formatting issue"),
+        // Job-based rewrite-on-rejection statuses (see
+        // app/jobs/workers/idea_comparison_worker.py) -- the first semantic
+        // review rejected the output, one rewrite was attempted using the
+        // reviewer's own feedback, and it was then approved on re-review.
+        "approved_after_revision" => ("bg-success", "Reviewed · revised after feedback"),
+        // Rejected again after a rewrite, or no usable rewrite was
+        // possible at all (no actionable feedback) -- the safe fallback is
+        // shown, never a second rewrite attempt.
+        "review_rejected_safe_fallback" => ("bg-danger", "Rejected · showing safe comparison"),
+        // The first review rejected the output and a rewrite was
+        // warranted, but too little of the job's 90s global deadline
+        // remained to attempt it.
+        "rewrite_unavailable_deadline" => ("bg-secondary", "Rejected · revision skipped (time limit)"),
+        // The first review rejected the output, a rewrite was attempted,
+        // but every provider failed during the rewrite call.
+        "rewrite_provider_unavailable" => ("bg-secondary", "Rejected · revision unavailable"),
         _ => ("bg-secondary", review.Status),
     };
 
+    /// <summary>
+    /// Set when an active (queued/running/etc.) job already exists for the
+    /// page's current default selection (LatestBatchIdeaIds) -- embedded
+    /// into the view as data-active-job-id so ai-agent-progress.js can
+    /// resume watching it on load without an extra AJAX round trip. See
+    /// §7's centralized reconnect design.
+    /// </summary>
+    public Guid? ActiveJobId { get; private set; }
+
+    /// <summary>
+    /// The client-facing stage list for AiAgentProgress.start/attach --
+    /// MUST stay in sync with app/jobs/plans.IDEA_COMPARISON_PLAN on the
+    /// Python side (labels only; stage state itself always comes from the
+    /// server, never guessed here).
+    /// </summary>
+    public static readonly (string Key, string Label)[] StagePlan =
+    [
+        ("prepare_context", "Preparing comparison context"),
+        ("generate", "Generating recommendation"),
+        ("review", "Reviewing quality"),
+        ("rewrite", "Refining based on feedback"),
+        ("final_checks", "Final quality checks"),
+        ("save", "Saving recommendation"),
+    ];
+
     public async Task<IActionResult> OnGetAsync(
+        Guid? completedJobId,
         CancellationToken cancellationToken)
     {
         var userId = UserId();
@@ -189,40 +229,131 @@ public class IdeaComparisonModel(
 
         await LoadLatestReviewAsync();
 
+        // §3(b): scoped strictly to the page's current default selection --
+        // an active job for a DIFFERENT idea selection is never surfaced
+        // here (it would be a different RequestHash and simply not match).
+        if (LatestBatchIdeaIds.Count > 0)
+        {
+            var defaultHash = ComputeRequestHash(LatestBatchIdeaIds);
+            var activeJob = await jobService.FindActiveJobAsync(userId, ProjectId, AgentName, cancellationToken);
+            if (activeJob is not null && activeJob.RequestHash == defaultHash)
+            {
+                ActiveJobId = activeJob.JobId;
+            }
+        }
+
+        // §3(a): the AI ranking (ComparisonResponse/Comparison) was never
+        // domain-persisted -- reconstruct it from the just-completed job's
+        // ResultJson exactly once, right after the finalize-driven reload
+        // that supplies completedJobId, using the exact same in-memory
+        // merge (ApplyAiComparison) the old synchronous POST handler used.
+        if (completedJobId is { } jobId)
+        {
+            var job = await jobService.GetAuthorizedJobAsync(jobId, userId, cancellationToken);
+            if (job is not null && job.AgentName == AgentName && job.Status == AiAgentJobStatus.Completed)
+            {
+                ComparisonResponse = IdeaComparisonJobFinalizer.ReconstructComparisonResponse(job.ResultJson);
+                if (ComparisonResponse is not null)
+                {
+                    ApplyAiComparison(ComparisonResponse.Comparison);
+                }
+            }
+        }
+
         return Page();
     }
 
-    public async Task<IActionResult> OnPostCompareAsync(
+    private string ComputeRequestHash(IEnumerable<int> authorizedIdeaIds) =>
+        AiAgentJobRequestHasher.ComputeHash(AgentName, ProjectId, authorizedIdeaIds.OrderBy(id => id).Select(id => id.ToString()));
+
+    /// <summary>
+    /// AJAX start handler for the centralized AI Agent Loading System --
+    /// replaces the old blocking OnPostCompareAsync. Reuses the exact same
+    /// authorization/validation as before (ValidateAndAuthorizeSelection);
+    /// on success, creates/reuses the AiAgentJob and hands off to Python,
+    /// then returns {jobId} for the browser to watch via
+    /// /api/ai-agent-jobs/* (see wwwroot/js/ai-agent-progress.js). Actual
+    /// generation, review, and persistence happen entirely server-side via
+    /// AiAgentJobCoordinator/IdeaComparisonJobFinalizer -- this handler
+    /// never blocks on the AI call itself.
+    /// </summary>
+    public async Task<IActionResult> OnPostStartCompareJobAsync(
+        [FromBody] StartCompareJobRequestBody body,
         CancellationToken cancellationToken)
     {
         var userId = UserId();
 
-        if (!await LoadProjectContextAsync(
-                userId,
-                cancellationToken))
+        if (!await LoadProjectContextAsync(userId, cancellationToken))
         {
-            TempData["Error"] =
-                "You do not have access to that project.";
-
-            return RedirectToPage(
-                "/Student/MyProjects");
+            return new JsonResult(new { message = "You do not have access to that project." }) { StatusCode = StatusCodes.Status403Forbidden };
         }
 
-        await LoadPageDataAsync(
-            userId,
-            cancellationToken);
+        await LoadPageDataAsync(userId, cancellationToken);
 
-        await LoadLatestReviewAsync();
+        // The JS client posts a JSON body (not form data), so this handler
+        // reads the selection from [FromBody] rather than the [BindProperty]
+        // SelectedIdeaIds the old form-post handler used -- same downstream
+        // validation either way.
+        SelectedIdeaIds = body.SelectedIdeaIds ?? [];
 
+        var (selectedIdeas, validationError) = ValidateAndAuthorizeSelection();
+        if (selectedIdeas is null)
+        {
+            return new JsonResult(new { message = validationError }) { StatusCode = StatusCodes.Status400BadRequest };
+        }
+
+        var requestDto = BuildComparisonRequest(selectedIdeas);
+        var requestJson = JsonSerializer.Serialize(requestDto, PythonRequestJsonOptions);
+        var requestHash = ComputeRequestHash(selectedIdeas.Select(idea => idea.Id));
+
+        var startResult = await jobService.StartJobAsync(userId, ProjectId, AgentName, requestHash, requestJson, cancellationToken);
+
+        if (startResult.CreatedNew)
+        {
+            var accepted = await pythonClient.StartJobAsync(AgentName, startResult.Job.JobId, requestJson, cancellationToken);
+
+            if (accepted.Accepted)
+            {
+                await jobService.MarkPythonAcceptedAsync(startResult.Job.JobId, cancellationToken);
+            }
+            else
+            {
+                logger.LogWarning(
+                    "Idea comparison job {JobId} could not be accepted by the AI service: {Error}",
+                    startResult.Job.JobId,
+                    accepted.ErrorMessage);
+
+                // The browser still gets a jobId and will observe this
+                // failure through the normal snapshot/events flow --
+                // AiAgentJobCoordinator's recovery pass also retries this
+                // automatically in case it was a transient hiccup.
+                await jobService.FailJobAsync(
+                    startResult.Job.JobId,
+                    "ai_service_unreachable",
+                    "The AI recommendation service could not be reached. Please try again.",
+                    cancellationToken);
+            }
+        }
+
+        return new JsonResult(new { jobId = startResult.Job.JobId });
+    }
+
+    private static readonly JsonSerializerOptions PythonRequestJsonOptions = new(JsonSerializerDefaults.Web);
+
+    /// <summary>
+    /// Shared authorization/validation, byte-for-byte what the old
+    /// OnPostCompareAsync enforced before calling the AI service -- never
+    /// trusts posted IDs blindly, only ideas already loaded for this
+    /// project/user are eligible, falls back to the latest batch if the
+    /// form posted no selection at all.
+    /// </summary>
+    private (List<ProjectIdea>? SelectedIdeas, string? ErrorMessage) ValidateAndAuthorizeSelection()
+    {
         if (Ideas.Count < MinimumIdeasToCompare)
         {
-            ErrorMessage = "You need at least two generated ideas before comparing.";
-            return Page();
+            return (null, "You need at least two generated ideas before comparing.");
         }
 
-        // Never trust the posted IDs blindly -- only ideas already loaded
-        // for this project/user are eligible. Falls back to the latest
-        // batch if the form somehow posted no selection at all.
         var authorizedIdeaIds = Ideas.Select(idea => idea.Id).ToHashSet();
 
         var requestedIds = SelectedIdeaIds.Count > 0
@@ -235,101 +366,16 @@ public class IdeaComparisonModel(
 
         if (selectedIdeas.Count < MinimumIdeasToCompare)
         {
-            ErrorMessage = $"Select at least {MinimumIdeasToCompare} ideas to compare.";
-            return Page();
+            return (null, $"Select at least {MinimumIdeasToCompare} ideas to compare.");
         }
 
         if (selectedIdeas.Count > HardMaximumIdeasToCompare)
         {
-            ErrorMessage = $"Select at most {HardMaximumIdeasToCompare} ideas to compare -- " +
-                $"{RecommendedMaximumIdeasToCompare} or fewer is recommended for the fastest result.";
-            return Page();
+            return (null, $"Select at most {HardMaximumIdeasToCompare} ideas to compare -- " +
+                $"{RecommendedMaximumIdeasToCompare} or fewer is recommended for the fastest result.");
         }
 
-        var request = BuildComparisonRequest(selectedIdeas);
-        var stopwatch = Stopwatch.StartNew();
-
-        try
-        {
-            ComparisonResponse = await aiService.CompareGeneratedIdeasAsync(
-                request,
-                ComparisonDeadline,
-                cancellationToken);
-        }
-        catch (HttpRequestException exception)
-        {
-            logger.LogWarning(
-                exception,
-                "The idea-comparison AI service could not be reached for project {ProjectId}, user {UserId}.",
-                ProjectId,
-                userId);
-
-            ErrorMessage =
-                "The AI recommendation is temporarily unavailable. "
-                + "Use the saved score comparison below to evaluate your ideas.";
-
-            return Page();
-        }
-        catch (TaskCanceledException exception)
-            when (!cancellationToken.IsCancellationRequested)
-        {
-            logger.LogWarning(
-                exception,
-                "The idea-comparison AI request timed out for project {ProjectId}, user {UserId}.",
-                ProjectId,
-                userId);
-
-            ErrorMessage =
-                "The AI recommendation took too long to respond. "
-                + "Use the saved score comparison below to evaluate your ideas.";
-
-            return Page();
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            return new EmptyResult();
-        }
-        catch (Exception exception)
-        {
-            logger.LogError(
-                exception,
-                "Unexpected idea-comparison failure for project {ProjectId}, user {UserId}.",
-                ProjectId,
-                userId);
-
-            ErrorMessage =
-                "An unexpected error occurred while generating the AI recommendation. "
-                + "Use the saved score comparison below to evaluate your ideas.";
-
-            return Page();
-        }
-        finally
-        {
-            stopwatch.Stop();
-        }
-
-        if (ComparisonResponse == null)
-        {
-            ErrorMessage = "Idea comparison could not be generated. Make sure the Python AI service is running.";
-            return Page();
-        }
-
-        logger.LogInformation(
-            "Idea comparison generated: project={ProjectId}, ideas={IdeaCount}, provider={Provider}, " +
-            "model={Model}, llmUsed={LlmUsed}, available={Available}, requestMs={ElapsedMs}",
-            ProjectId,
-            selectedIdeas.Count,
-            ComparisonResponse.Provider,
-            ComparisonResponse.ModelUsed,
-            ComparisonResponse.LlmUsed,
-            ComparisonResponse.Comparison.Available,
-            stopwatch.ElapsedMilliseconds);
-
-        ApplyAiComparison(ComparisonResponse.Comparison);
-
-        await PersistReviewAsync(ComparisonResponse);
-
-        return Page();
+        return (selectedIdeas, null);
     }
 
     /// <summary>
@@ -381,51 +427,6 @@ public class IdeaComparisonModel(
                 }
                 : card)
             .ToList();
-    }
-
-    private async Task PersistReviewAsync(IdeaComparisonServiceResponse response)
-    {
-        var review = response.Review;
-
-        if (review == null)
-        {
-            return;
-        }
-
-        var userId = UserId();
-
-        db.AiOutputReviews.Add(new AiOutputReview
-        {
-            ReviewRunId = Guid.TryParse(review.ReviewRunId, out var reviewRunId)
-                ? reviewRunId
-                : Guid.NewGuid(),
-            UserId = userId,
-            ProjectIdeaId = null,
-            MentorChatSessionId = null,
-            AgentName = "IdeaComparisonAgent",
-            Status = review.Status,
-            Usable = review.Usable,
-            WasRewritten = review.Attempts > 1,
-            Attempts = review.Attempts,
-            QualityScore = review.QualityScore,
-            DecisionReason = review.DecisionReason,
-            GeneratorProvider = response.Provider,
-            GeneratorModel = response.ModelUsed,
-            ReviewerProvider = review.ReviewerProvider,
-            ReviewerModel = review.ReviewerModel,
-            FirewallStatus = review.Status == "firewall_blocked" ? "blocked" : "passed",
-            FirewallInputFlagsJson = JsonSerializer.Serialize(review.FirewallInputFlags ?? []),
-            FirewallOutputFlagsJson = JsonSerializer.Serialize(review.FirewallOutputFlags ?? []),
-            IssuesJson = JsonSerializer.Serialize(review.Issues),
-            StrengthsJson = JsonSerializer.Serialize(review.Strengths),
-            AttemptHistoryJson = JsonSerializer.Serialize(review.AttemptHistory ?? []),
-            ReviewerVersion = review.ReviewerVersion,
-            CreatedAt = DateTime.UtcNow,
-            CompletedAt = DateTime.UtcNow
-        });
-
-        await db.SaveChangesAsync();
-        await LoadLatestReviewAsync();
     }
 
     private async Task LoadLatestReviewAsync()

@@ -70,6 +70,14 @@ PipelineStatus = Literal[
     "review_pending",  # reserved for a future async-after-response Reviewer call; not yet emitted (see idea_comparison.py)
     "reviewed",  # Reviewer ran synchronously and found no blocking issue
     "review_rejected",  # Reviewer ran synchronously and found a blocking issue
+    # Statuses below are specific to the job-based Idea Comparison worker's
+    # rewrite-on-rejection flow (app/jobs/workers/idea_comparison_worker.py)
+    # -- distinct from the synchronous /compare-generated-ideas endpoint's
+    # vocabulary above, which is left completely unchanged.
+    "approved_after_revision",  # first review rejected; one rewrite attempted using the reviewer's own RevisionInstructions; second review approved it
+    "review_rejected_safe_fallback",  # rejected and no usable rewrite was possible (no actionable feedback, or the rewrite was itself rejected again) -- safe fallback shown, never a second rewrite attempt
+    "rewrite_unavailable_deadline",  # first review rejected, a rewrite was warranted, but fewer than 25s remained in the job's global deadline -- safe fallback shown
+    "rewrite_provider_unavailable",  # first review rejected, a rewrite was attempted, but every provider failed during the rewrite call -- safe fallback shown
 ]
 
 

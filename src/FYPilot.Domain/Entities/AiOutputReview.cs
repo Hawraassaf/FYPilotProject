@@ -21,6 +21,16 @@ public class AiOutputReview
 
     [Column("review_run_id")] public Guid ReviewRunId { get; set; }
 
+    /// <summary>
+    /// AiAgentJob.JobId this review was persisted for, when written through
+    /// the centralized AI Agent Loading System's IAiAgentJobFinalizer path
+    /// (null for reviews from the legacy synchronous flow). The unique
+    /// index (see ApplicationDbContext) is this row's idempotency guard --
+    /// a finalizer re-run after a coordinator crash must never insert a
+    /// second review for the same job.
+    /// </summary>
+    [Column("job_id")] public Guid? JobId { get; set; }
+
     [Column("user_id")] public int UserId { get; set; }
 
     [Column("project_idea_id")] public int? ProjectIdeaId { get; set; }
