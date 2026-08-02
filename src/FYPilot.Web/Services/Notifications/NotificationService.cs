@@ -1,4 +1,5 @@
-﻿using FYPilot.Domain.Entities;
+﻿using System.Net;
+using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
 using FYPilot.Web.Hubs;
 using Microsoft.AspNetCore.SignalR;
@@ -9,8 +10,9 @@ namespace FYPilot.Web.Services.Notifications;
 public class NotificationService(
     ApplicationDbContext db,
     IHubContext<NotificationHub> hubContext,
-   FYPilot.Infrastructure.Services.IEmailSender emailSender,
-    ILogger<NotificationService> logger) : INotificationService
+    FYPilot.Infrastructure.Services.IEmailSender emailSender,
+    ILogger<NotificationService> logger)
+    : INotificationService
 {
     public async Task NotifyUserAsync(
         int recipientUserId,
@@ -20,44 +22,93 @@ public class NotificationService(
         string url = "",
         bool sendEmail = false,
         string? emailSubject = null,
-        string? emailHtmlBody = null)
+        string? emailHtmlBody = null,
+        int? projectId = null,
+        int? actorUserId = null,
+        CancellationToken cancellationToken = default)
     {
+        if (recipientUserId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(recipientUserId));
+        }
+
+        if (actorUserId.HasValue &&
+            actorUserId.Value == recipientUserId)
+        {
+            return;
+        }
+
+        var recipient = await db.Users
+            .AsNoTracking()
+            .Where(user => user.Id == recipientUserId)
+            .Select(user => new
+            {
+                user.Id,
+                user.Email
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (recipient == null)
+        {
+            logger.LogWarning(
+                "Notification recipient {UserId} no longer exists.",
+                recipientUserId);
+
+            return;
+        }
+
+        var cleanTitle = CleanRequired(title, 200, "Notification");
+        var cleanMessage = CleanRequired(message, 1200, "You have a new update.");
+        var cleanType = CleanRequired(type, 80, "general")
+            .ToLowerInvariant();
+        var cleanUrl = CleanOptional(url, 500);
+
         var notification = new Notification
         {
             RecipientUserId = recipientUserId,
-            Title = title,
-            Message = message,
-            Type = type,
-            Url = url,
+            ProjectId = projectId,
+            ActorUserId = actorUserId,
+            Title = cleanTitle,
+            Message = cleanMessage,
+            Type = cleanType,
+            Url = cleanUrl,
             IsRead = false,
             CreatedAt = DateTime.UtcNow
         };
 
         db.Notifications.Add(notification);
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(cancellationToken);
 
-        await hubContext.Clients
-            .Group($"user-{recipientUserId}")
-            .SendAsync("ReceiveNotification", new
-            {
-                id = notification.Id,
-                title = notification.Title,
-                message = notification.Message,
-                type = notification.Type,
-                url = notification.Url,
-                createdAt = notification.CreatedAt
-            });
-
-        if (!sendEmail)
+        try
         {
-            return;
+            await hubContext.Clients
+                .Group($"user-{recipientUserId}")
+                .SendAsync(
+                    "ReceiveNotification",
+                    new
+                    {
+                        id = notification.Id,
+                        projectId = notification.ProjectId,
+                        actorUserId = notification.ActorUserId,
+                        title = notification.Title,
+                        message = notification.Message,
+                        type = notification.Type,
+                        url = notification.Url,
+                        createdAt = notification.CreatedAt
+                    },
+                    cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Notification {NotificationId} was saved, but its live SignalR push failed.",
+                notification.Id);
         }
 
-        var user = await db.Users
-            .AsNoTracking()
-            .FirstOrDefaultAsync(u => u.Id == recipientUserId);
-
-        if (user == null || string.IsNullOrWhiteSpace(user.Email))
+        if (!sendEmail ||
+            string.IsNullOrWhiteSpace(recipient.Email))
         {
             return;
         }
@@ -65,26 +116,68 @@ public class NotificationService(
         try
         {
             var subject = string.IsNullOrWhiteSpace(emailSubject)
-                ? title
-                : emailSubject;
+                ? notification.Title
+                : emailSubject.Trim();
 
             var body = string.IsNullOrWhiteSpace(emailHtmlBody)
-                ? BuildDefaultEmail(title, message, url)
+                ? BuildDefaultEmail(
+                    notification.Title,
+                    notification.Message,
+                    notification.Url)
                 : emailHtmlBody;
 
-            await emailSender.SendAsync(user.Email, subject, body);
+            await emailSender.SendAsync(
+                recipient.Email,
+                subject,
+                body);
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            logger.LogError(ex, "Failed to send notification email to user {UserId}", recipientUserId);
+            logger.LogError(
+                exception,
+                "Failed to send notification email to user {UserId}.",
+                recipientUserId);
         }
     }
 
-    private static string BuildDefaultEmail(string title, string message, string url)
+    private static string CleanRequired(
+        string? value,
+        int maximumLength,
+        string fallback)
     {
-        var safeTitle = System.Net.WebUtility.HtmlEncode(title);
-        var safeMessage = System.Net.WebUtility.HtmlEncode(message);
-        var safeUrl = System.Net.WebUtility.HtmlEncode(url);
+        var clean = string.IsNullOrWhiteSpace(value)
+            ? fallback
+            : value.Trim();
+
+        return clean.Length <= maximumLength
+            ? clean
+            : clean[..maximumLength];
+    }
+
+    private static string CleanOptional(
+        string? value,
+        int maximumLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "";
+        }
+
+        var clean = value.Trim();
+
+        return clean.Length <= maximumLength
+            ? clean
+            : clean[..maximumLength];
+    }
+
+    private static string BuildDefaultEmail(
+        string title,
+        string message,
+        string url)
+    {
+        var safeTitle = WebUtility.HtmlEncode(title);
+        var safeMessage = WebUtility.HtmlEncode(message);
+        var safeUrl = WebUtility.HtmlEncode(url);
 
         var button = string.IsNullOrWhiteSpace(url)
             ? ""

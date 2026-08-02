@@ -368,6 +368,17 @@ public class TeamManagementModel(
             await transaction.CommitAsync(
                 cancellationToken);
 
+            await NotifyActiveProjectMembersAsync(
+                project.Id,
+                userId.Value,
+                "Team capacity updated",
+                collaboratorCapacity == 0
+                    ? $"Project \"{SafeProjectTitle(project.Title)}\" is now configured for the owner only."
+                    : $"Project \"{SafeProjectTitle(project.Title)}\" now supports up to {collaboratorCapacity} collaborator(s).",
+                "team_capacity_updated",
+                $"/Student/TeamManagement?projectId={project.Id}",
+                cancellationToken);
+
             TempData["Success"] =
                 collaboratorCapacity == 0
                     ? "The project is now configured "
@@ -729,7 +740,9 @@ public class TeamManagementModel(
                 invitedUser,
                 ownerName,
                 project,
-                invitation.Id);
+                invitation.Id,
+                userId.Value,
+                cancellationToken);
 
             TempData["Success"] =
                 $"Invitation sent to "
@@ -968,7 +981,16 @@ public class TeamManagementModel(
                         "/Student/MyProjects",
 
                     sendEmail:
-                        false);
+                        false,
+
+                    projectId:
+                        ProjectId,
+
+                    actorUserId:
+                        ownerUserId.Value,
+
+                    cancellationToken:
+                        cancellationToken);
             }
             catch (Exception notificationException)
             {
@@ -1052,6 +1074,8 @@ public class TeamManagementModel(
                 await db.ProjectInvitations
                     .Include(item =>
                         item.InvitedUser)
+                    .Include(item =>
+                        item.Project)
                     .FirstOrDefaultAsync(
                         item =>
                             item.Id == invitationId &&
@@ -1108,6 +1132,40 @@ public class TeamManagementModel(
             await transaction.CommitAsync(
                 cancellationToken);
 
+            if (invitation.InvitedUserId.HasValue)
+            {
+                try
+                {
+                    await notificationService.NotifyUserAsync(
+                        recipientUserId:
+                            invitation.InvitedUserId.Value,
+                        title:
+                            "Project invitation cancelled",
+                        message:
+                            $"The invitation to join \"{SafeProjectTitle(invitation.Project?.Title)}\" was cancelled by the project owner.",
+                        type:
+                            "invitation_cancelled",
+                        url:
+                            "/Student/MyProjects",
+                        sendEmail:
+                            false,
+                        projectId:
+                            ProjectId,
+                        actorUserId:
+                            userId.Value,
+                        cancellationToken:
+                            cancellationToken);
+                }
+                catch (Exception notificationException)
+                {
+                    logger.LogWarning(
+                        notificationException,
+                        "Invitation {InvitationId} was cancelled, but user {UserId} could not be notified.",
+                        invitation.Id,
+                        invitation.InvitedUserId.Value);
+                }
+            }
+
             TempData["Success"] =
                 "The invitation was cancelled.";
 
@@ -1138,7 +1196,9 @@ public class TeamManagementModel(
         User invitedUser,
         string? ownerName,
         Project project,
-        int invitationId)
+        int invitationId,
+        int ownerUserId,
+        CancellationToken cancellationToken)
     {
         var projectTitle =
             SafeProjectTitle(
@@ -1327,7 +1387,16 @@ public class TeamManagementModel(
                     + emailSubjectProjectTitle,
 
                 emailHtmlBody:
-                    emailBody);
+                    emailBody,
+
+                projectId:
+                    project.Id,
+
+                actorUserId:
+                    ownerUserId,
+
+                cancellationToken:
+                    cancellationToken);
         }
         catch (Exception notificationException)
         {
@@ -1343,6 +1412,51 @@ public class TeamManagementModel(
                 + "user {InvitedUserId}.",
                 invitationId,
                 invitedUser.Id);
+        }
+    }
+
+    private async Task NotifyActiveProjectMembersAsync(
+        int projectId,
+        int actorUserId,
+        string title,
+        string message,
+        string type,
+        string url,
+        CancellationToken cancellationToken)
+    {
+        var recipientIds = await db.ProjectMembers
+            .AsNoTracking()
+            .Where(member =>
+                member.ProjectId == projectId &&
+                member.Status == "active" &&
+                member.UserId != actorUserId)
+            .Select(member => member.UserId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        foreach (var recipientId in recipientIds)
+        {
+            try
+            {
+                await notificationService.NotifyUserAsync(
+                    recipientUserId: recipientId,
+                    title: title,
+                    message: message,
+                    type: type,
+                    url: url,
+                    sendEmail: false,
+                    projectId: projectId,
+                    actorUserId: actorUserId,
+                    cancellationToken: cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(
+                    exception,
+                    "Project {ProjectId} changed, but user {UserId} could not be notified.",
+                    projectId,
+                    recipientId);
+            }
         }
     }
 

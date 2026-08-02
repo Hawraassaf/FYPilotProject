@@ -1431,7 +1431,10 @@ public class SupervisorAssignmentsModel(
                         supervisorName,
                         ideaTitle,
                         memberNames),
-                cancellationToken);
+                projectId:
+                    project.Id,
+                cancellationToken:
+                    cancellationToken);
         }
 
         await TryNotifyAsync(
@@ -1452,7 +1455,10 @@ public class SupervisorAssignmentsModel(
                     projectTitle,
                     ideaTitle,
                     memberNames),
-            cancellationToken);
+            projectId:
+                    project.Id,
+                cancellationToken:
+                    cancellationToken);
     }
 
     private async Task
@@ -1520,7 +1526,10 @@ public class SupervisorAssignmentsModel(
                         projectTitle,
                         supervisorName,
                         assignment.AdminNote),
-                cancellationToken);
+                projectId:
+                    project.Id,
+                cancellationToken:
+                    cancellationToken);
         }
     }
 
@@ -1616,7 +1625,10 @@ public class SupervisorAssignmentsModel(
                         newSupervisorName,
                         ideaTitle,
                         reason),
-                cancellationToken);
+                projectId:
+                    project.Id,
+                cancellationToken:
+                    cancellationToken);
         }
 
         if (oldSupervisor != null)
@@ -1640,7 +1652,10 @@ public class SupervisorAssignmentsModel(
                         newSupervisorName,
                         memberNames,
                         reason),
-                cancellationToken);
+                projectId:
+                    project.Id,
+                cancellationToken:
+                    cancellationToken);
         }
 
         await TryNotifyAsync(
@@ -1664,7 +1679,10 @@ public class SupervisorAssignmentsModel(
                     ideaTitle,
                     memberNames,
                     reason),
-            cancellationToken);
+            projectId:
+                    project.Id,
+                cancellationToken:
+                    cancellationToken);
     }
 
     private async Task<List<ProjectRecipient>>
@@ -1735,6 +1753,7 @@ public class SupervisorAssignmentsModel(
         bool sendEmail,
         string emailSubject,
         string emailHtmlBody,
+        int? projectId,
         CancellationToken cancellationToken)
     {
         try
@@ -1762,7 +1781,16 @@ public class SupervisorAssignmentsModel(
                     emailSubject,
 
                 emailHtmlBody:
-                    emailHtmlBody);
+                    emailHtmlBody,
+
+                projectId:
+                    projectId,
+
+                actorUserId:
+                    GetCurrentUserId(),
+
+                cancellationToken:
+                    cancellationToken);
         }
         catch (Exception exception)
         {

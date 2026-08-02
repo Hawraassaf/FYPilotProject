@@ -4,6 +4,7 @@ using FYPilot.Application.DTOs;
 using FYPilot.Application.Interfaces;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
+using FYPilot.Web.Services.Notifications;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -73,7 +74,9 @@ public class RoadmapModel(
     ApplicationDbContext db,
     IAiServiceClient aiService,
     IProjectAccessService projectAccessService,
-    IActiveProjectService activeProjectService)
+    IActiveProjectService activeProjectService,
+    INotificationService notificationService,
+    ILogger<RoadmapModel> logger)
     : PageModel
 {
     /// <summary>
@@ -260,7 +263,14 @@ public class RoadmapModel(
             });
         }
 
-        await db.SaveChangesAsync();
+        await db.SaveChangesAsync(cancellationToken);
+
+        await NotifySupervisorAsync(
+            userId,
+            "Project roadmap generated",
+            $"A new AI roadmap with {phases.Count(p => p.Name != DeferredScopePhaseMarker)} phase(s) was generated for the project.",
+            "roadmap_generated",
+            cancellationToken);
 
         var realPhaseCount = phases.Count(p => p.Name != DeferredScopePhaseMarker);
         TempData["Success"] = $"AI roadmap with {realPhaseCount} phases generated.";
@@ -326,6 +336,13 @@ public class RoadmapModel(
             });
         }
 
+        await NotifySupervisorAsync(
+            userId,
+            "Roadmap phase completed",
+            "A roadmap phase was marked as completed by a project member.",
+            "roadmap_phase_completed",
+            cancellationToken);
+
         TempData["Success"] =
             "Phase marked as completed.";
 
@@ -334,6 +351,59 @@ public class RoadmapModel(
             projectId = ProjectId,
             ideaId = Idea.Id
         });
+    }
+
+    private async Task NotifySupervisorAsync(
+        int actorUserId,
+        string title,
+        string message,
+        string type,
+        CancellationToken cancellationToken)
+    {
+        var projectInfo = await db.Projects
+            .AsNoTracking()
+            .Where(project =>
+                project.Id == ProjectId &&
+                project.SupervisorId.HasValue &&
+                project.SupervisorAssignmentStatus == "active")
+            .Select(project => new
+            {
+                SupervisorId = project.SupervisorId!.Value,
+                project.Title
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (projectInfo == null ||
+            projectInfo.SupervisorId == actorUserId)
+        {
+            return;
+        }
+
+        var projectTitle = string.IsNullOrWhiteSpace(projectInfo.Title)
+            ? "Untitled Project"
+            : projectInfo.Title.Trim();
+
+        try
+        {
+            await notificationService.NotifyUserAsync(
+                recipientUserId: projectInfo.SupervisorId,
+                title: title,
+                message: $"{message} Project: \"{projectTitle}\".",
+                type: type,
+                url: $"/Supervisor/ProgressTracking?projectId={ProjectId}",
+                sendEmail: false,
+                projectId: ProjectId,
+                actorUserId: actorUserId,
+                cancellationToken: cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Roadmap action succeeded for project {ProjectId}, but supervisor {SupervisorId} could not be notified.",
+                ProjectId,
+                projectInfo.SupervisorId);
+        }
     }
 
     private async Task LoadPageDataAsync(int userId)

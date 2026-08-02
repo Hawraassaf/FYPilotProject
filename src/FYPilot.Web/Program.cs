@@ -1,12 +1,9 @@
 using FYPilot.Application.Interfaces;
 using FYPilot.Infrastructure.Data;
 using FYPilot.Infrastructure.Services;
-using FYPilot.Infrastructure.Services.Finalizers;
-using FYPilot.Web.Endpoints;
 using FYPilot.Web.Configuration;
 using FYPilot.Web.Hubs;
 using FYPilot.Web.Middleware;
-using FYPilot.Web.Services.AiAgentJobs;
 using FYPilot.Web.Services.GoogleCalendar;
 using FYPilot.Web.Services.Meetings;
 using FYPilot.Web.Services.Notifications;
@@ -47,13 +44,13 @@ static string BuildConnectionString()
         ?? "123456";
 
     return
-        $"Host={host};" +
-        $"Port={port};" +
-        $"Database={database};" +
-        $"Username={user};" +
-        $"Password={password};" +
-        "SSL Mode=Disable;" +
-        "Trust Server Certificate=true;";
+        $"Host={host};"
+        + $"Port={port};"
+        + $"Database={database};"
+        + $"Username={user};"
+        + $"Password={password};"
+        + "SSL Mode=Disable;"
+        + "Trust Server Certificate=true;";
 }
 
 // ── AI Service Key ────────────────────────────────────────────────────────────
@@ -68,20 +65,22 @@ static string GetRequiredAiServiceApiKey(
     if (string.IsNullOrWhiteSpace(key))
     {
         throw new InvalidOperationException(
-            "AI_SERVICE_API_KEY is missing. " +
-            "Set the same key in both the .NET app " +
-            "and the FastAPI service.");
+            "AI_SERVICE_API_KEY is missing. "
+            + "Set the same key in both the .NET app "
+            + "and the FastAPI service.");
     }
 
     return key;
 }
 
-_ = GetRequiredAiServiceApiKey(builder.Configuration);
+_ = GetRequiredAiServiceApiKey(
+    builder.Configuration);
 
 // ── Database Context ──────────────────────────────────────────────────────────
 builder.Services.AddDbContext<ApplicationDbContext>(
     options =>
-        options.UseNpgsql(BuildConnectionString()));
+        options.UseNpgsql(
+            BuildConnectionString()));
 
 // ── Cookie Authentication ─────────────────────────────────────────────────────
 builder.Services
@@ -115,19 +114,23 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy(
         "AdminOnly",
         policy => policy.RequireRole("admin"));
+
+    options.AddPolicy(
+        "MainAdminOnly",
+        policy =>
+        {
+            policy.RequireAuthenticatedUser();
+            policy.RequireRole("admin");
+            policy.RequireClaim(
+                "is_main_admin",
+                "true");
+        });
 });
 
 // ── AI Service ────────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<
     IAiServiceClient,
     AiServiceClient>();
-
-// Separate, short-timeout client for Python's centralized job endpoints --
-// only ever called by AiAgentJobCoordinator's fast poll loop, never from a
-// browser-facing handler (see AiJobsPythonClient's doc comment).
-builder.Services.AddSingleton<
-    IAiJobsPythonClient,
-    AiJobsPythonClient>();
 
 builder.Services.AddHttpClient();
 
@@ -190,28 +193,6 @@ builder.Services.AddScoped<
     IAdminIdeaContextService,
     AdminIdeaContextService>();
 
-// ── Centralized AI Agent Loading System ───────────────────────────────────────
-builder.Services.AddScoped<
-    IAiAgentJobService,
-    AiAgentJobService>();
-
-// One IAiAgentJobFinalizer per agent, keyed by AgentName -- resolved by
-// AiAgentJobCoordinator via GetRequiredKeyedService<IAiAgentJobFinalizer>(job.AgentName).
-builder.Services.AddKeyedScoped<
-    IAiAgentJobFinalizer,
-    IdeaComparisonJobFinalizer>("IdeaComparisonAgent");
-
-// In-process broadcast pub/sub for live job events (per-subscriber
-// channels -- see AiAgentJobEventBus) shared between AiAgentJobCoordinator
-// (publisher) and the SSE endpoint (subscriber, added in a later phase).
-builder.Services.AddSingleton<
-    IAiAgentJobEventBus,
-    AiAgentJobEventBus>();
-
-// Drives every AiAgentJob from "Python's worker finished" through
-// "persisted and marked complete" independently of any connected browser.
-builder.Services.AddHostedService<AiAgentJobCoordinator>();
-
 // ── Background Workers ────────────────────────────────────────────────────────
 builder.Services.AddHostedService<MeetingReminderWorker>();
 
@@ -234,11 +215,8 @@ app.UseSession();
 app.UseAuthentication();
 
 /*
- * Blocks a newly created administrator from opening any other page
- * until the temporary password has been changed.
- *
- * It must remain after UseAuthentication because it needs to know
- * which user is currently logged in.
+ * Rejects cookies whose User row no longer exists
+ * and enforces the temporary-password workflow.
  */
 app.UseMiddleware<ForcePasswordChangeMiddleware>();
 
@@ -251,16 +229,12 @@ app.MapHub<FeedbackChatHub>(
 app.MapHub<NotificationHub>(
     "/hubs/notifications");
 
-// ── Endpoints ─────────────────────────────────────────────────────────────────
-app.MapHealthChecks("/healthz");
 app.MapHub<ProjectDiscussionHub>(
     "/hubs/project-discussion");
 
-// Centralized AI Agent Loading System -- shared browser-facing surface
-// (current/snapshot/events/result/cancel) reused by every wired agent.
-app.MapAiAgentJobEndpoints();
+// ── Endpoints ─────────────────────────────────────────────────────────────────
+app.MapHealthChecks("/healthz");
 
-app.MapRazorPages();
 app.MapRazorPages();
 
 // ── Database Startup ──────────────────────────────────────────────────────────
@@ -277,12 +251,13 @@ using (var scope = app.Services.CreateScope())
                 "The application could not connect to the database.");
         }
 
-        app.Logger.LogInformation("Database connection ready.");
+        app.Logger.LogInformation(
+            "Database connection ready.");
     }
-    catch (Exception ex)
+    catch (Exception exception)
     {
         app.Logger.LogError(
-            ex,
+            exception,
             "Database startup error — continuing anyway.");
     }
 }

@@ -1,6 +1,7 @@
 ﻿using System.Security.Claims;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
+using FYPilot.Web.Services.Notifications;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -10,6 +11,7 @@ namespace FYPilot.Web.Hubs;
 [Authorize]
 public class FeedbackChatHub(
     ApplicationDbContext db,
+    INotificationService notificationService,
     ILogger<FeedbackChatHub> logger)
     : Hub
 {
@@ -284,6 +286,13 @@ public class FeedbackChatHub(
             context.Project,
             "ReceiveFeedbackMessage",
             payload);
+
+        await NotifyDiscussionParticipantsAsync(
+            context.Project,
+            evaluation.Id,
+            evaluation.IdeaId,
+            userId,
+            SafeName(user.FullName));
     }
 
     public async Task EditFeedbackMessage(
@@ -949,6 +958,94 @@ public class FeedbackChatHub(
                 seenAt =
                     now
             });
+    }
+
+    private async Task NotifyDiscussionParticipantsAsync(
+        Project project,
+        int evaluationId,
+        int ideaId,
+        int senderUserId,
+        string senderName)
+    {
+        var participantIds =
+            await LoadProjectParticipantIdsAsync(
+                project);
+
+        participantIds.Remove(
+            senderUserId);
+
+        if (participantIds.Count == 0)
+        {
+            return;
+        }
+
+        var projectTitle =
+            string.IsNullOrWhiteSpace(
+                project.Title)
+                ? "Untitled Project"
+                : project.Title.Trim();
+
+        foreach (var recipientUserId
+                 in participantIds)
+        {
+            var recipientIsSupervisor =
+                project.SupervisorId.HasValue &&
+                project.SupervisorId.Value ==
+                    recipientUserId;
+
+            var destination =
+                recipientIsSupervisor
+                    ? $"/Supervisor/IdeaDiscussion"
+                      + $"?projectId={project.Id}"
+                      + $"&ideaId={ideaId}"
+                    : $"/Student/Feedback"
+                      + $"?projectId={project.Id}"
+                      + $"&evaluationId={evaluationId}";
+
+            try
+            {
+                await notificationService.NotifyUserAsync(
+                    recipientUserId:
+                        recipientUserId,
+
+                    title:
+                        $"New message in \"{projectTitle}\"",
+
+                    message:
+                        $"{senderName} sent a message "
+                        + "in the Supervisor Feedback "
+                        + "discussion.",
+
+                    type:
+                        "project_feedback_message",
+
+                    url:
+                        destination,
+
+                    sendEmail:
+                        false,
+
+                    projectId:
+                        project.Id,
+
+                    actorUserId:
+                        senderUserId,
+
+                    cancellationToken:
+                        Context.ConnectionAborted);
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(
+                    exception,
+                    "Feedback discussion message was "
+                    + "saved, but notification failed "
+                    + "for user {RecipientUserId} in "
+                    + "project {ProjectId}.",
+                    recipientUserId,
+                    project.Id);
+            }
+        }
     }
 
     private async Task SendToProjectParticipantsAsync(

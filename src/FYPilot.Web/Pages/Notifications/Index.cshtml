@@ -1,0 +1,673 @@
+﻿@page
+@model FYPilot.Web.Pages.Notifications.IndexModel
+@{
+    ViewData["Title"] = "Notifications";
+    ViewData["Subtitle"] =
+        "Project updates, invitations, meetings, and supervisor activity.";
+
+    string TypeLabel(string? type)
+    {
+        if (string.IsNullOrWhiteSpace(type))
+        {
+            return "General";
+        }
+
+        return string.Join(
+            " ",
+            type.Split(
+                    '_',
+                    StringSplitOptions.RemoveEmptyEntries)
+                .Select(word =>
+                    char.ToUpperInvariant(word[0])
+                    + word[1..].ToLowerInvariant()));
+    }
+
+    string TypeIcon(string? type)
+    {
+        return type?.ToLowerInvariant() switch
+        {
+            "project_invitation" => "bi-envelope-paper",
+            "invitation_accepted" => "bi-person-check-fill",
+            "invitation_rejected" => "bi-person-x",
+            "invitation_cancelled" => "bi-envelope-x",
+            "project_membership_removed" => "bi-person-dash",
+            "project_supervisor_approved" => "bi-person-check",
+            "project_supervisor_rejected" => "bi-person-x",
+            "project_supervisor_transferred" => "bi-arrow-left-right",
+            "project_assigned" => "bi-folder-check",
+            "project_transferred_in" => "bi-box-arrow-in-right",
+            "project_transferred_out" => "bi-box-arrow-right",
+            "roadmap_generated" => "bi-map",
+            "roadmap_phase_completed" => "bi-check2-circle",
+            "project_renamed" => "bi-pencil-square",
+            "team_capacity_updated" => "bi-people",
+            _ => "bi-bell"
+        };
+    }
+
+    string FilterUrl(
+        string filter,
+        int pageNumber = 1)
+    {
+        var query = new List<string>
+        {
+            $"filter={Uri.EscapeDataString(filter)}",
+            $"pageNumber={pageNumber}"
+        };
+
+        if (Model.ProjectId.HasValue)
+        {
+            query.Add($"projectId={Model.ProjectId.Value}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(Model.Type))
+        {
+            query.Add($"type={Uri.EscapeDataString(Model.Type)}");
+        }
+
+        return "/Notifications?" + string.Join("&", query);
+    }
+}
+
+@section Head {
+    <style>
+        .notification-center {
+            max-width: 1160px;
+            margin: 0 auto;
+            padding-bottom: 32px;
+        }
+
+        .notification-hero {
+            display: grid;
+            grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(170px, .5fr));
+            gap: 14px;
+            margin-bottom: 16px;
+        }
+
+        .notification-stat {
+            min-height: 122px;
+            padding: 20px;
+            background: #fff;
+            border: 1px solid #e1e7ef;
+            border-radius: 20px;
+            box-shadow: 0 14px 34px rgba(28, 45, 77, .07);
+        }
+
+        .notification-stat.is-primary {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            color: #fff;
+            background: linear-gradient(135deg, #28385e, #516c8d);
+            border-color: transparent;
+        }
+
+        .notification-stat-icon {
+            width: 58px;
+            height: 58px;
+            display: grid;
+            place-items: center;
+            flex: 0 0 auto;
+            background: rgba(255, 255, 255, .14);
+            border-radius: 18px;
+            font-size: 1.35rem;
+        }
+
+        .notification-stat small,
+        .notification-stat strong,
+        .notification-stat span {
+            display: block;
+        }
+
+        .notification-stat small {
+            color: #7b889d;
+            font-size: .66rem;
+            font-weight: 850;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+        }
+
+        .notification-stat strong {
+            margin-top: 5px;
+            color: #1d2a45;
+            font-size: 1.7rem;
+            font-weight: 850;
+        }
+
+        .notification-stat span {
+            margin-top: 7px;
+            color: #768398;
+            font-size: .72rem;
+            line-height: 1.5;
+        }
+
+        .notification-stat.is-primary small,
+        .notification-stat.is-primary strong {
+            color: #fff;
+        }
+
+        .notification-stat.is-primary span {
+            color: rgba(255, 255, 255, .72);
+        }
+
+        .notification-tools {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            margin-bottom: 13px;
+            padding: 13px;
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 17px;
+        }
+
+        .notification-tabs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 7px;
+        }
+
+        .notification-tab,
+        .notification-button {
+            min-height: 38px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 7px;
+            padding: 0 13px;
+            border-radius: 11px;
+            font-size: .7rem;
+            font-weight: 800;
+            text-decoration: none;
+        }
+
+        .notification-tab {
+            color: #607089;
+            background: #f7f9fc;
+            border: 1px solid #e3e9f1;
+        }
+
+        .notification-tab.is-active {
+            color: #fff;
+            background: linear-gradient(135deg, #28385e, #516c8d);
+            border-color: transparent;
+        }
+
+        .notification-button {
+            color: #28385e;
+            background: #fff;
+            border: 1px solid #ced9e7;
+        }
+
+        .notification-button.is-primary {
+            color: #fff;
+            background: #28385e;
+            border-color: #28385e;
+        }
+
+        .notification-button:disabled {
+            color: #9aa5b4;
+            background: #f7f9fb;
+            cursor: not-allowed;
+        }
+
+        .notification-filters {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 280px)) auto;
+            gap: 10px;
+            margin-bottom: 14px;
+            padding: 13px;
+            background: #f8fafc;
+            border: 1px solid #e5eaf1;
+            border-radius: 15px;
+        }
+
+        .notification-filters .form-select {
+            min-height: 39px;
+            border-color: #d8e1ec;
+            border-radius: 10px;
+            font-size: .72rem;
+            font-weight: 700;
+        }
+
+        .notification-list {
+            display: grid;
+            gap: 10px;
+        }
+
+        .notification-item {
+            display: grid;
+            grid-template-columns: 48px minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 14px;
+            padding: 16px;
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 17px;
+            box-shadow: 0 9px 24px rgba(28, 45, 77, .045);
+        }
+
+        .notification-item.is-unread {
+            background: linear-gradient(90deg, #f1f6fc, #fff 44%);
+            border-color: #cad8e9;
+            box-shadow: inset 4px 0 0 #516c8d, 0 10px 26px rgba(28, 45, 77, .06);
+        }
+
+        .notification-item-icon {
+            width: 48px;
+            height: 48px;
+            display: grid;
+            place-items: center;
+            color: #516c8d;
+            background: #edf2f8;
+            border-radius: 15px;
+            font-size: 1.05rem;
+        }
+
+        .notification-item-copy {
+            min-width: 0;
+        }
+
+        .notification-item-title {
+            margin: 0;
+            color: #17223d;
+            font-size: .86rem;
+            font-weight: 850;
+        }
+
+        .notification-item-message {
+            margin: 5px 0 0;
+            color: #65738a;
+            font-size: .74rem;
+            line-height: 1.55;
+        }
+
+        .notification-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 7px;
+            margin-top: 8px;
+            color: #8c98a9;
+            font-size: .61rem;
+            font-weight: 700;
+        }
+
+        .notification-meta span {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .notification-actions {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 7px;
+        }
+
+        .notification-empty {
+            padding: 60px 24px;
+            text-align: center;
+            background: #fff;
+            border: 1px dashed #cbd6e4;
+            border-radius: 20px;
+        }
+
+        .notification-empty i {
+            display: block;
+            margin-bottom: 12px;
+            color: #647895;
+            font-size: 2rem;
+        }
+
+        .notification-empty h3 {
+            margin: 0;
+            color: #28385e;
+            font-size: 1rem;
+            font-weight: 850;
+        }
+
+        .notification-empty p {
+            margin: 7px 0 0;
+            color: #7b8798;
+            font-size: .74rem;
+        }
+
+        .notification-pagination {
+            display: flex;
+            justify-content: center;
+            gap: 7px;
+            margin-top: 18px;
+        }
+
+        .notification-page-link {
+            min-width: 38px;
+            height: 38px;
+            display: grid;
+            place-items: center;
+            color: #52637d;
+            text-decoration: none;
+            background: #fff;
+            border: 1px solid #dce4ee;
+            border-radius: 11px;
+            font-size: .7rem;
+            font-weight: 800;
+        }
+
+        .notification-page-link.is-active {
+            color: #fff;
+            background: #28385e;
+            border-color: #28385e;
+        }
+
+        .notification-page-link.is-disabled {
+            color: #abb4c1;
+            pointer-events: none;
+            background: #f6f8fb;
+        }
+
+        .notification-status {
+            margin-bottom: 13px;
+            padding: 12px 14px;
+            color: #176347;
+            background: #eaf8f2;
+            border: 1px solid #caebdc;
+            border-radius: 13px;
+            font-size: .72rem;
+            font-weight: 750;
+            transition: opacity .3s ease, transform .3s ease;
+        }
+
+        .notification-status.is-hiding {
+            opacity: 0;
+            transform: translateY(-7px);
+        }
+
+        @@media (max-width: 900px) {
+            .notification-hero {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .notification-stat.is-primary {
+                grid-column: 1 / -1;
+            }
+
+            .notification-tools {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .notification-item {
+                grid-template-columns: 44px minmax(0, 1fr);
+            }
+
+            .notification-actions {
+                grid-column: 1 / -1;
+                justify-content: flex-start;
+                padding-left: 58px;
+            }
+        }
+
+        @@media (max-width: 620px) {
+            .notification-hero,
+            .notification-filters {
+                grid-template-columns: 1fr;
+            }
+
+            .notification-stat.is-primary {
+                grid-column: auto;
+            }
+
+            .notification-tabs {
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+
+            .notification-actions {
+                padding-left: 0;
+            }
+        }
+    </style>
+}
+
+<section class="notification-center">
+    @if (!string.IsNullOrWhiteSpace(Model.StatusMessage))
+    {
+        <div class="notification-status"
+             id="notificationStatusMessage">
+            <i class="bi bi-check-circle-fill me-1"></i>
+            @Model.StatusMessage
+        </div>
+    }
+
+    <div class="notification-hero">
+        <article class="notification-stat is-primary">
+            <div class="notification-stat-icon">
+                <i class="bi bi-bell-fill"></i>
+            </div>
+            <div>
+                <small>Notification center</small>
+                <strong>
+                    @(Model.UnreadCount == 0
+                        ? "You're up to date"
+                        : $"{Model.UnreadCount} unread")
+                </strong>
+                <span>
+                    Important project activity remains available until you review it.
+                </span>
+            </div>
+        </article>
+
+        <article class="notification-stat">
+            <small>Matching results</small>
+            <strong>@Model.TotalCount</strong>
+            <span>Based on the selected filters.</span>
+        </article>
+
+        <article class="notification-stat">
+            <small>Current page</small>
+            <strong>@Model.PageNumber/@Model.TotalPages</strong>
+            <span>Up to 12 notifications per page.</span>
+        </article>
+    </div>
+
+    <div class="notification-tools">
+        <nav class="notification-tabs" aria-label="Notification status filter">
+            <a class="notification-tab @(Model.Filter == "all" ? "is-active" : "")"
+               href="@FilterUrl("all")">
+                All
+            </a>
+            <a class="notification-tab @(Model.Filter == "unread" ? "is-active" : "")"
+               href="@FilterUrl("unread")">
+                Unread
+            </a>
+            <a class="notification-tab @(Model.Filter == "read" ? "is-active" : "")"
+               href="@FilterUrl("read")">
+                Read
+            </a>
+        </nav>
+
+        <form method="post" asp-page-handler="MarkAllRead">
+            <input type="hidden" asp-for="Filter" />
+            <input type="hidden" asp-for="ProjectId" />
+            <input type="hidden" asp-for="Type" />
+            <input type="hidden" asp-for="PageNumber" />
+
+            <button type="submit"
+                    class="notification-button"
+                    disabled="@(Model.UnreadCount == 0 ? "disabled" : null)">
+                <i class="bi bi-check2-all"></i>
+                Mark all as read
+            </button>
+        </form>
+    </div>
+
+    <form method="get" class="notification-filters">
+        <input type="hidden" name="filter" value="@Model.Filter" />
+
+        <select name="projectId" class="form-select" aria-label="Filter by project">
+            <option value="">All projects</option>
+            @foreach (var project in Model.Projects)
+            {
+                <option value="@project.Id"
+                        selected="@(Model.ProjectId == project.Id ? "selected" : null)">
+                    @(string.IsNullOrWhiteSpace(project.Title)
+                        ? "Untitled Project"
+                        : project.Title)
+                </option>
+            }
+        </select>
+
+        <select name="type" class="form-select" aria-label="Filter by type">
+            <option value="">All notification types</option>
+            @foreach (var type in Model.Types)
+            {
+                <option value="@type"
+                        selected="@(string.Equals(Model.Type, type, StringComparison.OrdinalIgnoreCase) ? "selected" : null)">
+                    @TypeLabel(type)
+                </option>
+            }
+        </select>
+
+        <button type="submit" class="notification-button is-primary">
+            <i class="bi bi-funnel"></i>
+            Apply filters
+        </button>
+    </form>
+
+    @if (Model.Notifications.Count == 0)
+    {
+        <div class="notification-empty">
+            <i class="bi bi-bell-slash"></i>
+            <h3>No notifications found</h3>
+            <p>There are no notifications matching the selected filters.</p>
+        </div>
+    }
+    else
+    {
+        <div class="notification-list">
+            @foreach (var notification in Model.Notifications)
+            {
+                <article class="notification-item @(!notification.IsRead ? "is-unread" : "")">
+                    <div class="notification-item-icon">
+                        <i class="bi @TypeIcon(notification.Type)"></i>
+                    </div>
+
+                    <div class="notification-item-copy">
+                        <h3 class="notification-item-title">
+                            @notification.Title
+                        </h3>
+
+                        <p class="notification-item-message">
+                            @notification.Message
+                        </p>
+
+                        <div class="notification-meta">
+                            <span>
+                                <i class="bi bi-clock"></i>
+                                <time class="notification-local-time"
+                                      datetime="@notification.CreatedAtUtc.ToString("O")">
+                                    @notification.CreatedAtUtc.ToString("dd MMM yyyy, HH:mm") UTC
+                                </time>
+                            </span>
+
+                            <span>
+                                <i class="bi bi-tag"></i>
+                                @TypeLabel(notification.Type)
+                            </span>
+
+                            @if (!string.IsNullOrWhiteSpace(notification.ProjectTitle))
+                            {
+                                <span>
+                                    <i class="bi bi-folder2"></i>
+                                    @notification.ProjectTitle
+                                </span>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="notification-actions">
+                        @if (!notification.IsRead)
+                        {
+                            <form method="post" asp-page-handler="MarkRead">
+                                <input type="hidden" name="notificationId" value="@notification.Id" />
+                                <input type="hidden" asp-for="Filter" />
+                                <input type="hidden" asp-for="ProjectId" />
+                                <input type="hidden" asp-for="Type" />
+                                <input type="hidden" asp-for="PageNumber" />
+
+                                <button type="submit" class="notification-button">
+                                    <i class="bi bi-check2"></i>
+                                    Mark read
+                                </button>
+                            </form>
+                        }
+
+                        <form method="post" asp-page-handler="Open">
+                            <input type="hidden" name="notificationId" value="@notification.Id" />
+                            <button type="submit" class="notification-button is-primary">
+                                <i class="bi bi-box-arrow-up-right"></i>
+                                Open
+                            </button>
+                        </form>
+                    </div>
+                </article>
+            }
+        </div>
+
+        <nav class="notification-pagination" aria-label="Notification pages">
+            <a class="notification-page-link @(Model.PageNumber <= 1 ? "is-disabled" : "")"
+               href="@FilterUrl(Model.Filter, Model.PageNumber - 1)">
+                <i class="bi bi-chevron-left"></i>
+            </a>
+
+            @for (var page = Math.Max(1, Model.PageNumber - 2);
+                  page <= Math.Min(Model.TotalPages, Model.PageNumber + 2);
+                  page++)
+            {
+                <a class="notification-page-link @(page == Model.PageNumber ? "is-active" : "")"
+                   href="@FilterUrl(Model.Filter, page)">
+                    @@page
+                </a>
+            }
+
+            <a class="notification-page-link @(Model.PageNumber >= Model.TotalPages ? "is-disabled" : "")"
+               href="@FilterUrl(Model.Filter, Model.PageNumber + 1)">
+                <i class="bi bi-chevron-right"></i>
+            </a>
+        </nav>
+    }
+</section>
+
+@section Scripts {
+    <script>
+        document
+            .querySelectorAll(".notification-local-time")
+            .forEach(function (element) {
+                const value = element.getAttribute("datetime");
+                const date = new Date(value);
+
+                if (!Number.isNaN(date.getTime())) {
+                    element.textContent = date.toLocaleString([], {
+                        dateStyle: "medium",
+                        timeStyle: "short"
+                    });
+                }
+            });
+
+        const statusMessage =
+            document.getElementById("notificationStatusMessage");
+
+        if (statusMessage) {
+            window.setTimeout(function () {
+                statusMessage.classList.add("is-hiding");
+
+                window.setTimeout(function () {
+                    statusMessage.remove();
+                }, 320);
+            }, 3000);
+        }
+    </script>
+}

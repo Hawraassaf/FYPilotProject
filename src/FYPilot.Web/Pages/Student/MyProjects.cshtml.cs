@@ -3,6 +3,7 @@ using System.Security.Claims;
 using FYPilot.Application.Interfaces;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
+using FYPilot.Web.Services.Notifications;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -15,6 +16,7 @@ public class MyProjectsModel(
     ApplicationDbContext db,
     IProjectAccessService projectAccessService,
     IActiveProjectService activeProjectService,
+    INotificationService notificationService,
     ILogger<MyProjectsModel> logger) : PageModel
 {
     private const int MaximumCollaborators = 20;
@@ -627,6 +629,15 @@ public class MyProjectsModel(
             await transaction.CommitAsync(
                 cancellationToken);
 
+            await NotifyProjectParticipantsAsync(
+                project.Id,
+                userId.Value,
+                "Project renamed",
+                $"{SafeName(currentUser.FullName)} renamed the project from \"{oldTitle}\" to \"{cleanTitle}\".",
+                "project_renamed",
+                $"/Student/MyProjects",
+                cancellationToken);
+
             TempData["Success"] =
                 "The project name was updated "
                 + "for every project member.";
@@ -894,6 +905,15 @@ public class MyProjectsModel(
             await transaction.CommitAsync(
                 cancellationToken);
 
+            await NotifyInvitationSenderAsync(
+                invitation.InvitedByUserId,
+                "Invitation accepted",
+                $"{SafeName(currentUser.FullName)} accepted the invitation and joined \"{SafeProjectTitle(project.Title)}\".",
+                "invitation_accepted",
+                project.Id,
+                userId.Value,
+                cancellationToken);
+
             TempData["Success"] =
                 "Invitation accepted. You are now a "
                 + "collaborator on "
@@ -1031,6 +1051,18 @@ public class MyProjectsModel(
             await transaction.CommitAsync(
                 cancellationToken);
 
+            if (!expired)
+            {
+                await NotifyInvitationSenderAsync(
+                    invitation.InvitedByUserId,
+                    "Invitation rejected",
+                    $"{SafeName(currentUser.FullName)} declined the invitation to join \"{SafeProjectTitle(invitation.Project?.Title)}\".",
+                    "invitation_rejected",
+                    invitation.ProjectId,
+                    userId.Value,
+                    cancellationToken);
+            }
+
             TempData[
                 expired ? "Error" : "Success"] =
                 expired
@@ -1058,6 +1090,113 @@ public class MyProjectsModel(
             return RedirectToPage();
         }
     }
+    private async Task NotifyInvitationSenderAsync(
+        int senderUserId,
+        string title,
+        string message,
+        string type,
+        int projectId,
+        int actorUserId,
+        CancellationToken cancellationToken)
+    {
+        var senderRole = await db.Users
+            .AsNoTracking()
+            .Where(user => user.Id == senderUserId)
+            .Select(user => user.Role)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var destination = senderRole?.Trim().ToLowerInvariant() switch
+        {
+            "supervisor" =>
+                $"/Supervisor/ProgressTracking?projectId={projectId}",
+            "admin" =>
+                $"/Admin/Projects?projectId={projectId}",
+            _ =>
+                $"/Student/TeamManagement?projectId={projectId}"
+        };
+
+        await TryNotifyAsync(
+            senderUserId,
+            title,
+            message,
+            type,
+            destination,
+            projectId,
+            actorUserId,
+            cancellationToken);
+    }
+
+    private async Task NotifyProjectParticipantsAsync(
+        int projectId,
+        int actorUserId,
+        string title,
+        string message,
+        string type,
+        string url,
+        CancellationToken cancellationToken)
+    {
+        var recipientIds = await db.ProjectMembers
+            .AsNoTracking()
+            .Where(member =>
+                member.ProjectId == projectId &&
+                member.Status == "active" &&
+                member.UserId != actorUserId)
+            .Select(member => member.UserId)
+            .ToListAsync(cancellationToken);
+
+        foreach (var recipientId in recipientIds.Distinct())
+        {
+            await TryNotifyAsync(
+                recipientId,
+                title,
+                message,
+                type,
+                url,
+                projectId,
+                actorUserId,
+                cancellationToken);
+        }
+    }
+
+    private async Task TryNotifyAsync(
+        int recipientUserId,
+        string title,
+        string message,
+        string type,
+        string url,
+        int? projectId,
+        int actorUserId,
+        CancellationToken cancellationToken)
+    {
+        if (recipientUserId <= 0 ||
+            recipientUserId == actorUserId)
+        {
+            return;
+        }
+
+        try
+        {
+            await notificationService.NotifyUserAsync(
+                recipientUserId: recipientUserId,
+                title: title,
+                message: message,
+                type: type,
+                url: url,
+                sendEmail: false,
+                projectId: projectId,
+                actorUserId: actorUserId,
+                cancellationToken: cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Project {ProjectId} changed, but notification delivery failed for user {UserId}.",
+                projectId,
+                recipientUserId);
+        }
+    }
+
     private static bool IsInvitationRecipient(
     ProjectInvitation invitation,
     User currentUser)

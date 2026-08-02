@@ -3,6 +3,7 @@ using System;
 using FYPilot.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FYPilot.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260802150719_AddMainAdminFlag")]
+    partial class AddMainAdminFlag
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1480,10 +1483,6 @@ namespace FYPilot.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
-                    b.Property<int?>("ActorUserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("actor_user_id");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
@@ -1494,13 +1493,8 @@ namespace FYPilot.Infrastructure.Migrations
 
                     b.Property<string>("Message")
                         .IsRequired()
-                        .HasMaxLength(1200)
-                        .HasColumnType("character varying(1200)")
+                        .HasColumnType("text")
                         .HasColumnName("message");
-
-                    b.Property<int?>("ProjectId")
-                        .HasColumnType("integer")
-                        .HasColumnName("project_id");
 
                     b.Property<DateTime?>("ReadAt")
                         .HasColumnType("timestamp with time zone")
@@ -1512,35 +1506,24 @@ namespace FYPilot.Infrastructure.Migrations
 
                     b.Property<string>("Title")
                         .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
+                        .HasColumnType("text")
                         .HasColumnName("title");
 
                     b.Property<string>("Type")
                         .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)")
-                        .HasDefaultValue("general")
+                        .HasColumnType("text")
                         .HasColumnName("type");
 
                     b.Property<string>("Url")
                         .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)")
+                        .HasColumnType("text")
                         .HasColumnName("url");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ActorUserId");
+                    b.HasIndex("RecipientUserId");
 
-                    b.HasIndex("ProjectId");
-
-                    b.HasIndex("RecipientUserId", "CreatedAt");
-
-                    b.HasIndex("RecipientUserId", "IsRead", "CreatedAt");
-
-                    b.ToTable("notifications", (string)null);
+                    b.ToTable("notifications");
                 });
 
             modelBuilder.Entity("FYPilot.Domain.Entities.PasswordResetToken", b =>
@@ -1764,7 +1747,7 @@ namespace FYPilot.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("project_id");
 
-                    b.Property<int?>("UserId")
+                    b.Property<int>("UserId")
                         .HasColumnType("integer")
                         .HasColumnName("user_id");
 
@@ -3111,7 +3094,7 @@ namespace FYPilot.Infrastructure.Migrations
                     b.HasOne("FYPilot.Domain.Entities.User", "CreatedByUser")
                         .WithMany()
                         .HasForeignKey("CreatedByUserId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("FYPilot.Domain.Entities.HistoricalFypProject", "HistoricalFypProject")
                         .WithMany("FutureOpportunities")
@@ -3129,7 +3112,7 @@ namespace FYPilot.Infrastructure.Migrations
                     b.HasOne("FYPilot.Domain.Entities.User", "CreatedByUser")
                         .WithMany()
                         .HasForeignKey("CreatedByUserId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("CreatedByUser");
                 });
@@ -3139,7 +3122,7 @@ namespace FYPilot.Infrastructure.Migrations
                     b.HasOne("FYPilot.Domain.Entities.User", "CreatedByUser")
                         .WithMany()
                         .HasForeignKey("CreatedByUserId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("CreatedByUser");
                 });
@@ -3256,25 +3239,11 @@ namespace FYPilot.Infrastructure.Migrations
 
             modelBuilder.Entity("FYPilot.Domain.Entities.Notification", b =>
                 {
-                    b.HasOne("FYPilot.Domain.Entities.User", "ActorUser")
-                        .WithMany()
-                        .HasForeignKey("ActorUserId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("FYPilot.Domain.Entities.Project", "Project")
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade);
-
                     b.HasOne("FYPilot.Domain.Entities.User", "RecipientUser")
                         .WithMany()
                         .HasForeignKey("RecipientUserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("ActorUser");
-
-                    b.Navigation("Project");
 
                     b.Navigation("RecipientUser");
                 });
@@ -3336,7 +3305,8 @@ namespace FYPilot.Infrastructure.Migrations
                     b.HasOne("FYPilot.Domain.Entities.User", "User")
                         .WithMany("ProjectActivities")
                         .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.Navigation("NewIdea");
 

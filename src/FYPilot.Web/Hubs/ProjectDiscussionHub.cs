@@ -2,6 +2,7 @@
 using FYPilot.Application.Interfaces;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
+using FYPilot.Web.Services.Notifications;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -12,6 +13,7 @@ namespace FYPilot.Web.Hubs;
 public class ProjectDiscussionHub(
     ApplicationDbContext db,
     IProjectAccessService projectAccessService,
+    INotificationService notificationService,
     ILogger<ProjectDiscussionHub> logger)
     : Hub
 {
@@ -224,6 +226,11 @@ public class ProjectDiscussionHub(
             projectId,
             "MessageCreated",
             payload);
+
+        await NotifyOtherProjectMembersAsync(
+            projectId,
+            userId,
+            SafeName(user.FullName));
     }
 
     public async Task EditMessage(
@@ -514,6 +521,110 @@ public class ProjectDiscussionHub(
         return (
             userId.Value,
             access);
+    }
+
+    private async Task NotifyOtherProjectMembersAsync(
+        int projectId,
+        int senderUserId,
+        string senderName)
+    {
+        var project =
+            await db.Projects
+                .AsNoTracking()
+                .Where(item =>
+                    item.Id == projectId)
+                .Select(item => new
+                {
+                    item.StudentId,
+                    item.Title
+                })
+                .FirstOrDefaultAsync(
+                    Context.ConnectionAborted);
+
+        if (project == null)
+        {
+            return;
+        }
+
+        var recipientList =
+            await db.ProjectMembers
+                .AsNoTracking()
+                .Where(member =>
+                    member.ProjectId == projectId &&
+                    member.Status == "active")
+                .Select(member =>
+                    member.UserId)
+                .Distinct()
+                .ToListAsync(
+                    Context.ConnectionAborted);
+
+        var recipientIds =
+            recipientList.ToHashSet();
+
+        recipientIds.Add(
+            project.StudentId);
+
+        recipientIds.Remove(
+            senderUserId);
+
+        if (recipientIds.Count == 0)
+        {
+            return;
+        }
+
+        var projectTitle =
+            string.IsNullOrWhiteSpace(
+                project.Title)
+                ? "Untitled Project"
+                : project.Title.Trim();
+
+        foreach (var recipientUserId
+                 in recipientIds)
+        {
+            try
+            {
+                await notificationService.NotifyUserAsync(
+                    recipientUserId:
+                        recipientUserId,
+
+                    title:
+                        $"New message in \"{projectTitle}\"",
+
+                    message:
+                        $"{senderName} sent a message "
+                        + "in the Project Workspace discussion.",
+
+                    type:
+                        "project_workspace_message",
+
+                    url:
+                        $"/Student/ProjectWorkspace"
+                        + $"?projectId={projectId}",
+
+                    sendEmail:
+                        false,
+
+                    projectId:
+                        projectId,
+
+                    actorUserId:
+                        senderUserId,
+
+                    cancellationToken:
+                        Context.ConnectionAborted);
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(
+                    exception,
+                    "Project workspace message was saved, "
+                    + "but notification failed for user "
+                    + "{RecipientUserId} in project "
+                    + "{ProjectId}.",
+                    recipientUserId,
+                    projectId);
+            }
+        }
     }
 
     private async Task SendToActiveProjectMembersAsync(
