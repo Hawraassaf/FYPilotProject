@@ -36,12 +36,17 @@ This file lets agents switch providers without rewriting every agent.
 """
 
 import json
+import logging
 import os
 import re
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
+
+from app.services import json_reliability
+
+logger = logging.getLogger("fypilot-llm-provider")
 
 import requests
 
@@ -70,6 +75,139 @@ class LLMResult:
     # from model-generated JSON.
     sources: list[dict[str, str]] = field(default_factory=list)
     executed_tools: list[dict[str, Any]] = field(default_factory=list)
+
+    # WHY ok=False, when it is -- one of json_reliability's categories
+    # (transport_failure/timeout/provider_http_error/empty_response/
+    # invalid_json_syntax) or None on success. Purely internal diagnostics:
+    # never serialized to .NET (LLMResult itself never crosses that
+    # boundary), always defaults to None so no existing construction site
+    # anywhere in the codebase needs to change. See json_reliability.py's
+    # module docstring for why HTTP-200-but-malformed-JSON must never be
+    # reported the same way as a genuine transport failure.
+    error_category: str | None = None
+    # Diagnostics from json_reliability.parse_json_response, when this
+    # result went through JSON parsing -- repair method/success, whether
+    # truncation was detected, bounded+redacted error context. None when no
+    # parsing was attempted (e.g. transport failure) or not applicable
+    # (generate_text). Internal only, same as error_category.
+    parse_diagnostics: dict[str, Any] | None = None
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Shared JSON-repair-request plumbing -- used by every provider whose SDK
+# exposes an OpenAI-compatible chat.completions.create surface (DeepInfra,
+# Groq) for the ONE-extra-request "fix only JSON syntax" step (see
+# json_reliability.py's module docstring for the full pipeline this plugs
+# into). Kept provider-agnostic so it isn't duplicated per adapter.
+# ─────────────────────────────────────────────────────────────────────────
+
+_JSON_REPAIR_SYSTEM_PROMPT = (
+    "You are a JSON syntax repair engine. Preserve all semantic values exactly. "
+    "Do not add, remove, summarize, improve, or rewrite roadmap content. Correct "
+    "only JSON syntax so it conforms to the supplied schema. Return JSON only."
+)
+
+
+def _build_repair_prompt(malformed_text: str, parse_error: str, schema_description: str) -> str:
+    schema_block = f"EXPECTED SCHEMA (compact description):\n{schema_description}\n\n" if schema_description else ""
+    return (
+        f"{schema_block}"
+        f"PARSER ERROR:\n{parse_error}\n\n"
+        "MALFORMED RESPONSE TO FIX (return the corrected JSON only, no prose, no code fences):\n"
+        f"{malformed_text}"
+    )
+
+
+def _classify_sdk_exception(ex: Exception) -> str:
+    """
+    Maps an exception raised by the `openai` or `groq` SDKs (structurally
+    identical exception hierarchies -- both APITimeoutError/
+    APIConnectionError/APIStatusError-with-status_code) to a
+    json_reliability error category. Falls back to transport_failure for
+    anything unrecognized. Never returns invalid_json_syntax -- that
+    category only ever applies to a response that WAS received (HTTP 200)
+    but failed to parse, classified separately by json_reliability itself,
+    never here.
+    """
+    name = type(ex).__name__
+
+    if "Timeout" in name:
+        return json_reliability.TIMEOUT
+
+    if "Connection" in name:
+        return json_reliability.TRANSPORT_FAILURE
+
+    if getattr(ex, "status_code", None) is not None:
+        return json_reliability.PROVIDER_HTTP_ERROR
+
+    return json_reliability.TRANSPORT_FAILURE
+
+
+def _classify_requests_exception(ex: Exception) -> str:
+    """Same purpose as _classify_sdk_exception, for OllamaProvider's raw
+    `requests`-based calls instead of an SDK exception hierarchy."""
+    if isinstance(ex, requests.exceptions.Timeout):
+        return json_reliability.TIMEOUT
+
+    if isinstance(ex, requests.exceptions.ConnectionError):
+        return json_reliability.TRANSPORT_FAILURE
+
+    if isinstance(ex, requests.exceptions.HTTPError):
+        return json_reliability.PROVIDER_HTTP_ERROR
+
+    return json_reliability.TRANSPORT_FAILURE
+
+
+def _is_client_side_rejection(ex: Exception) -> bool:
+    """True for a 4xx-style API status error -- the signal used to decide
+    whether a response_format={"type": "json_object"} request was
+    rejected by this provider/model combination and is worth retrying
+    once without it, versus a timeout/connection/5xx failure that
+    wouldn't be fixed by dropping the parameter."""
+    status_code = getattr(ex, "status_code", None)
+    return isinstance(status_code, int) and 400 <= status_code < 500
+
+
+def _parse_diagnostics(outcome: "json_reliability.ParseOutcome") -> dict[str, Any]:
+    return {
+        "initialJsonValid": outcome.initial_json_valid,
+        "isTruncated": outcome.is_truncated,
+        "repairAttempted": outcome.repair_attempted,
+        "repairMethod": outcome.repair_method,
+        "repairSuccess": outcome.repair_success,
+        "repairedCharCount": outcome.repaired_char_count,
+        "errorContext": outcome.error_context,
+    }
+
+
+def _log_json_parse_result(
+    *, provider: str, model: str | None, outcome: "json_reliability.ParseOutcome",
+) -> None:
+    """
+    One structured log line per generate_json() attempt, distinguishing
+    "provider responded but output JSON was malformed" from every other
+    outcome -- see json_reliability.py's module docstring for the full
+    category list. Never logs the full raw response/prompt, only the
+    bounded+redacted error_context (already redacted by build_error_context).
+    """
+    if outcome.success and outcome.initial_json_valid:
+        logger.info(
+            "llm_provider.json_parse provider=%s model=%s initial_json_valid=true",
+            provider, model,
+        )
+        return
+
+    logger.info(
+        "llm_provider.json_parse provider=%s model=%s initial_json_valid=false "
+        "is_truncated=%s repair_method=%s repair_success=%s repaired_chars=%s "
+        "line=%s column=%s position=%s context=%r",
+        provider, model, outcome.is_truncated, outcome.repair_method,
+        outcome.repair_success, outcome.repaired_char_count,
+        (outcome.error_context or {}).get("line"),
+        (outcome.error_context or {}).get("column"),
+        (outcome.error_context or {}).get("position"),
+        (outcome.error_context or {}).get("context"),
+    )
 
 
 def _clean_url(value: str) -> str:
@@ -340,6 +478,14 @@ def _basic_secret_scan_ok(result: "LLMResult") -> bool:
 class BaseProvider:
     name: str = "base"
 
+    # Capability flags -- inspected before opting into a provider's native
+    # structured-output mode (see json_reliability.py / each provider's
+    # generate_json). Default False here so a not-yet-audited provider
+    # never silently gets a parameter it hasn't been confirmed to accept;
+    # each concrete class below overrides what it actually supports.
+    supports_json_object: bool = False
+    supports_json_schema: bool = False
+
     def generate_json(
         self,
         prompt: str,
@@ -347,6 +493,7 @@ class BaseProvider:
         use_search: bool = False,
         max_tokens: int | None = None,
         reporter: "ProgressReporter | None" = None,
+        schema_description: str | None = None,
     ) -> LLMResult:
         raise NotImplementedError
 
@@ -392,6 +539,12 @@ class DeepInfraProvider(BaseProvider):
     """
 
     name = "deepinfra"
+    # OpenAI-compatible endpoint -- response_format={"type": "json_object"}
+    # is a standard chat.completions.create parameter; whether the specific
+    # backend model actually honors it varies (DeepInfra proxies many model
+    # families), so _chat_completion_text always falls back to a plain
+    # request on a 4xx-style rejection rather than assuming support blindly.
+    supports_json_object = True
 
     def __init__(
         self,
@@ -444,6 +597,7 @@ class DeepInfraProvider(BaseProvider):
         use_search: bool = False,
         max_tokens: int | None = None,
         reporter: "ProgressReporter | None" = None,
+        schema_description: str | None = None,
     ) -> LLMResult:
         if not self.enabled:
             return LLMResult(
@@ -455,21 +609,22 @@ class DeepInfraProvider(BaseProvider):
                 error="DEEPINFRA_API_KEY is missing",
                 search_used=False,
                 search_failed=use_search,
+                error_category=json_reliability.TRANSPORT_FAILURE,
             )
+
+        system_message = (
+            "You are a precise JSON-only AI engine. "
+            "Return valid JSON only. "
+            "Do not use markdown. "
+            "Do not wrap the response in code fences."
+        )
+
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": prompt},
+        ]
 
         try:
-            system_message = (
-                "You are a precise JSON-only AI engine. "
-                "Return valid JSON only. "
-                "Do not use markdown. "
-                "Do not wrap the response in code fences."
-            )
-
-            messages = [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": prompt},
-            ]
-
             if reporter is not None:
                 text = self._stream_completion(
                     messages=messages,
@@ -477,32 +632,23 @@ class DeepInfraProvider(BaseProvider):
                     max_tokens=max_tokens or 2200,
                     reporter=reporter,
                 )
+                finish_reason = None
             else:
-                response = self._client().chat.completions.create(
-                    model=self.model,
+                text, finish_reason = self._chat_completion_text(
+                    messages=messages,
                     temperature=0.2,
                     # Same rationale as GroqProvider: SE Documentation's
                     # richer sections pass an explicit higher budget so
                     # responses aren't silently truncated into invalid JSON.
                     max_tokens=max_tokens or 2200,
-                    messages=messages,
+                    use_json_mode=True,
                 )
-                text = str(response.choices[0].message.content or "")
-
-            data = _parse_json(text)
-
-            return LLMResult(
-                ok=data is not None,
-                provider=self.name,
-                model=self.model,
-                text=text,
-                data=data,
-                error=None if data is not None else "DeepInfra returned invalid JSON.",
-                search_used=False,
-                search_failed=use_search,
-            )
-
         except Exception as ex:
+            category = _classify_sdk_exception(ex)
+            logger.warning(
+                "llm_provider.transport_failure provider=%s model=%s category=%s error=%s",
+                self.name, self.model, category, ex,
+            )
             return LLMResult(
                 ok=False,
                 provider=self.name,
@@ -512,7 +658,96 @@ class DeepInfraProvider(BaseProvider):
                 error=str(ex),
                 search_used=False,
                 search_failed=use_search,
+                error_category=category,
             )
+
+        outcome = json_reliability.parse_json_response(
+            text,
+            repair_fn=(
+                (lambda candidate, error: self._repair_json_with_provider(candidate, error, schema_description))
+                if schema_description else None
+            ),
+            schema_description=schema_description or "",
+            finish_reason=finish_reason,
+        )
+        _log_json_parse_result(provider=self.name, model=self.model, outcome=outcome)
+
+        return LLMResult(
+            ok=outcome.success,
+            provider=self.name,
+            model=self.model,
+            text=text,
+            data=outcome.data,
+            error=None if outcome.success else (outcome.error or "DeepInfra returned invalid JSON."),
+            search_used=False,
+            search_failed=use_search,
+            error_category=None if outcome.success else outcome.category,
+            parse_diagnostics=_parse_diagnostics(outcome),
+        )
+
+    def _chat_completion_text(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        use_json_mode: bool,
+    ) -> tuple[str, str | None]:
+        """
+        Returns (text, finish_reason). Raises the underlying SDK exception
+        on failure -- the caller classifies it via _classify_sdk_exception.
+        Tries response_format={"type": "json_object"} first when
+        use_json_mode is True and this provider/model combination is
+        expected to support it; on a 4xx-style rejection specifically
+        (never a timeout/connection/5xx, which a retry without the
+        parameter would not fix), retries once without it so an
+        unsupported model never breaks the whole call.
+        """
+        request_kwargs: dict[str, Any] = dict(
+            model=self.model, temperature=temperature, max_tokens=max_tokens, messages=messages,
+        )
+
+        if use_json_mode and self.supports_json_object:
+            try:
+                response = self._client().chat.completions.create(
+                    response_format={"type": "json_object"}, **request_kwargs,
+                )
+                choice = response.choices[0]
+                return str(choice.message.content or ""), getattr(choice, "finish_reason", None)
+            except Exception as ex:
+                if not _is_client_side_rejection(ex):
+                    raise
+
+        response = self._client().chat.completions.create(**request_kwargs)
+        choice = response.choices[0]
+        return str(choice.message.content or ""), getattr(choice, "finish_reason", None)
+
+    def _repair_json_with_provider(
+        self, malformed_text: str, parse_error: str, schema_description: str | None,
+    ) -> str | None:
+        """
+        ONE additional low-temperature request asking this SAME provider to
+        fix ONLY JSON syntax -- never re-runs the full generation prompt.
+        json_reliability.parse_json_response only ever calls this once per
+        generate_json() attempt. Returns None (never raises) on any
+        failure, which the caller treats as "repair unavailable".
+        """
+        try:
+            response = self._client().chat.completions.create(
+                model=self.model,
+                temperature=0,
+                max_tokens=2200,
+                messages=[
+                    {"role": "system", "content": _JSON_REPAIR_SYSTEM_PROMPT},
+                    {"role": "user", "content": _build_repair_prompt(
+                        malformed_text, parse_error, schema_description or "",
+                    )},
+                ],
+            )
+            return str(response.choices[0].message.content or "") or None
+        except Exception as ex:
+            logger.warning("llm_provider.provider_repair_failed provider=%s error=%s", self.name, ex)
+            return None
 
     def _stream_completion(
         self,
@@ -879,6 +1114,11 @@ class GroqProvider(BaseProvider):
     """
 
     name = "groq"
+    # Groq's API documents response_format={"type": "json_object"} support
+    # for its own hosted models; _request always falls back to a plain
+    # request on a 4xx-style rejection regardless, so this stays safe even
+    # if a specific model/mode combination doesn't honor it.
+    supports_json_object = True
 
     def __init__(
         self,
@@ -939,25 +1179,69 @@ class GroqProvider(BaseProvider):
         temperature: float,
         max_tokens: int,
         messages: list[dict[str, str]],
-    ) -> tuple[str, list[dict[str, Any]], list[dict[str, str]]]:
-        """Normal Groq chat request used for structured generation."""
+        use_json_mode: bool = False,
+    ) -> tuple[str, str | None, list[dict[str, Any]], list[dict[str, str]]]:
+        """
+        Normal Groq chat request used for structured generation. Returns
+        (text, finish_reason, executed_tools, sources). When use_json_mode
+        is set and this provider supports it, tries
+        response_format={"type": "json_object"} first and falls back to a
+        plain request on a 4xx-style rejection (see
+        _is_client_side_rejection) -- never on a timeout/connection/5xx,
+        which dropping the parameter wouldn't fix anyway.
+        """
         client = self._client()
-
-        response = client.chat.completions.create(
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            messages=messages,
+        request_kwargs: dict[str, Any] = dict(
+            model=model, temperature=temperature, max_tokens=max_tokens, messages=messages,
         )
 
-        message = response.choices[0].message
+        response = None
+        if use_json_mode and self.supports_json_object:
+            try:
+                response = client.chat.completions.create(
+                    response_format={"type": "json_object"}, **request_kwargs,
+                )
+            except Exception as ex:
+                if not _is_client_side_rejection(ex):
+                    raise
+
+        if response is None:
+            response = client.chat.completions.create(**request_kwargs)
+
+        choice = response.choices[0]
+        message = choice.message
         text = str(message.content or "")
+        finish_reason = getattr(choice, "finish_reason", None)
         executed_tools = _normalize_executed_tools(
             getattr(message, "executed_tools", None) or []
         )
         sources = _extract_sources_from_executed_tools(executed_tools)
 
-        return text, executed_tools, sources
+        return text, finish_reason, executed_tools, sources
+
+    def _repair_json_with_provider(
+        self, malformed_text: str, parse_error: str, schema_description: str | None,
+    ) -> str | None:
+        """Same contract as DeepInfraProvider._repair_json_with_provider --
+        ONE low-temperature JSON-syntax-only repair request, never raises,
+        never re-runs the full generation prompt."""
+        try:
+            client = self._client()
+            response = client.chat.completions.create(
+                model=self.model,
+                temperature=0,
+                max_tokens=2200,
+                messages=[
+                    {"role": "system", "content": _JSON_REPAIR_SYSTEM_PROMPT},
+                    {"role": "user", "content": _build_repair_prompt(
+                        malformed_text, parse_error, schema_description or "",
+                    )},
+                ],
+            )
+            return str(response.choices[0].message.content or "") or None
+        except Exception as ex:
+            logger.warning("llm_provider.provider_repair_failed provider=%s error=%s", self.name, ex)
+            return None
 
     def search_web(self, query: str) -> LLMResult:
         """
@@ -1036,6 +1320,7 @@ class GroqProvider(BaseProvider):
         use_search: bool = False,
         max_tokens: int | None = None,
         reporter: "ProgressReporter | None" = None,
+        schema_description: str | None = None,
     ) -> LLMResult:
         # NOTE: reporter is accepted (for a uniform ProviderChain call
         # signature across every provider) but not yet used for token-level
@@ -1059,28 +1344,29 @@ class GroqProvider(BaseProvider):
                 error="GROQ_API_KEY is missing",
                 search_used=False,
                 search_failed=use_search,
+                error_category=json_reliability.TRANSPORT_FAILURE,
             )
 
         model_to_use = self.search_model if use_search else self.model
 
-        try:
-            system_message = (
-                "You are a precise JSON-only AI engine. "
-                "Return valid JSON only. "
-                "Do not use markdown. "
-                "Do not wrap the response in code fences."
+        system_message = (
+            "You are a precise JSON-only AI engine. "
+            "Return valid JSON only. "
+            "Do not use markdown. "
+            "Do not wrap the response in code fences."
+        )
+
+        if use_search:
+            system_message += (
+                " You must use the live web-search tool before answering. "
+                "Use current evidence for market, trend, competitor, and adoption claims. "
+                "Do not invent citations or URLs. "
+                "The application will read real sources directly from tool metadata, "
+                "so do not place a sources list inside the JSON."
             )
 
-            if use_search:
-                system_message += (
-                    " You must use the live web-search tool before answering. "
-                    "Use current evidence for market, trend, competitor, and adoption claims. "
-                    "Do not invent citations or URLs. "
-                    "The application will read real sources directly from tool metadata, "
-                    "so do not place a sources list inside the JSON."
-                )
-
-            text, executed_tools, sources = self._request(
+        try:
+            text, finish_reason, executed_tools, sources = self._request(
                 model=model_to_use,
                 temperature=0.2,
                 # Default (2200) fits every other agent's existing JSON shape.
@@ -1095,25 +1381,18 @@ class GroqProvider(BaseProvider):
                     {"role": "system", "content": system_message},
                     {"role": "user", "content": prompt},
                 ],
+                # Native JSON mode conflicts with Compound's tool-calling
+                # search flow (and that response never places sources
+                # inside the JSON body anyway) -- only requested for plain,
+                # non-search generation.
+                use_json_mode=not use_search,
             )
-
-            data = _parse_json(text)
-            web_tool_used = _used_web_tool(executed_tools)
-
-            return LLMResult(
-                ok=data is not None,
-                provider=self.name,
-                model=model_to_use,
-                text=text,
-                data=data,
-                error=None if data is not None else "Groq returned invalid JSON.",
-                search_used=web_tool_used,
-                search_failed=bool(use_search and not web_tool_used),
-                sources=sources,
-                executed_tools=executed_tools,
-            )
-
         except Exception as ex:
+            category = _classify_sdk_exception(ex)
+            logger.warning(
+                "llm_provider.transport_failure provider=%s model=%s category=%s error=%s",
+                self.name, model_to_use, category, ex,
+            )
             return LLMResult(
                 ok=False,
                 provider=self.name,
@@ -1123,7 +1402,36 @@ class GroqProvider(BaseProvider):
                 error=str(ex),
                 search_used=False,
                 search_failed=use_search,
+                error_category=category,
             )
+
+        web_tool_used = _used_web_tool(executed_tools)
+
+        outcome = json_reliability.parse_json_response(
+            text,
+            repair_fn=(
+                (lambda candidate, error: self._repair_json_with_provider(candidate, error, schema_description))
+                if schema_description and not use_search else None
+            ),
+            schema_description=schema_description or "",
+            finish_reason=finish_reason,
+        )
+        _log_json_parse_result(provider=self.name, model=model_to_use, outcome=outcome)
+
+        return LLMResult(
+            ok=outcome.success,
+            provider=self.name,
+            model=model_to_use,
+            text=text,
+            data=outcome.data,
+            error=None if outcome.success else (outcome.error or "Groq returned invalid JSON."),
+            search_used=web_tool_used,
+            search_failed=bool(use_search and not web_tool_used),
+            sources=sources,
+            executed_tools=executed_tools,
+            error_category=None if outcome.success else outcome.category,
+            parse_diagnostics=_parse_diagnostics(outcome),
+        )
 
     def generate_text(
         self,
@@ -1213,10 +1521,13 @@ class GeminiProvider(BaseProvider):
         use_search: bool = False,
         max_tokens: int | None = None,
         reporter: "ProgressReporter | None" = None,
+        schema_description: str | None = None,
     ) -> LLMResult:
         # Excluded from the default ProviderChain (see the module
         # docstring) -- reporter accepted for signature uniformity only;
-        # not streamed.
+        # not streamed. schema_description accepted for signature
+        # uniformity too but unused -- this provider predates the JSON
+        # reliability pipeline and isn't part of the default chain.
         if not self.enabled:
             return LLMResult(
                 ok=False,
@@ -1338,6 +1649,11 @@ class OllamaProvider(BaseProvider):
     """
 
     name = "ollama"
+    # Ollama's /api/generate natively supports format="json" (a hard
+    # server-side JSON-object constraint, already passed as extra_body
+    # below) -- no response_format-style fallback dance needed here, unlike
+    # the OpenAI-compatible providers.
+    supports_json_object = True
 
     def __init__(self, timeout_seconds: float | None = None):
         self.base_url = os.getenv(
@@ -1373,6 +1689,7 @@ class OllamaProvider(BaseProvider):
         use_search: bool = False,
         max_tokens: int | None = None,
         reporter: "ProgressReporter | None" = None,
+        schema_description: str | None = None,
     ) -> LLMResult:
         if not self.enabled:
             return LLMResult(
@@ -1384,40 +1701,38 @@ class OllamaProvider(BaseProvider):
                 error="OLLAMA_FALLBACK_ENABLED is false",
                 search_used=False,
                 search_failed=False,
+                error_category=json_reliability.TRANSPORT_FAILURE,
             )
 
-        try:
-            options: dict[str, Any] = {
-                "temperature": 0.2,
-                # Scale the context window with the requested output budget
-                # so a larger SE Documentation section isn't cut short by a
-                # fixed 4096-token window -- default preserved for every
-                # other caller that doesn't pass max_tokens.
-                "num_ctx": max(4096, max_tokens * 2) if max_tokens else 4096,
-            }
-            if max_tokens:
-                options["num_predict"] = max_tokens
+        options: dict[str, Any] = {
+            "temperature": 0.2,
+            # Scale the context window with the requested output budget
+            # so a larger SE Documentation section isn't cut short by a
+            # fixed 4096-token window -- default preserved for every
+            # other caller that doesn't pass max_tokens.
+            "num_ctx": max(4096, max_tokens * 2) if max_tokens else 4096,
+        }
+        if max_tokens:
+            options["num_predict"] = max_tokens
 
+        started_at = time.monotonic()
+        effective_timeout = self.timeout_seconds or 90
+
+        try:
             text = self._generate(
                 prompt=prompt,
                 options=options,
                 extra_body={"format": "json"},
                 reporter=reporter,
             )
-            data = _parse_json(text)
-
-            return LLMResult(
-                ok=True,
-                provider=self.name,
-                model=self.model,
-                text=text,
-                data=data,
-                error=None,
-                search_used=False,
-                search_failed=False,
-            )
-
         except Exception as ex:
+            elapsed = time.monotonic() - started_at
+            category = _classify_requests_exception(ex)
+            logger.warning(
+                "llm_provider.transport_failure provider=%s model=%s category=%s "
+                "elapsed=%.1fs timeout=%.1fs error=%s",
+                self.name, self.model, category, elapsed, effective_timeout, ex,
+            )
             return LLMResult(
                 ok=False,
                 provider=self.name,
@@ -1427,7 +1742,60 @@ class OllamaProvider(BaseProvider):
                 error=str(ex),
                 search_used=False,
                 search_failed=False,
+                error_category=category,
             )
+
+        elapsed = time.monotonic() - started_at
+        logger.info(
+            "llm_provider.ollama_request_completed provider=%s model=%s elapsed=%.1fs timeout=%.1fs",
+            self.name, self.model, elapsed, effective_timeout,
+        )
+
+        outcome = json_reliability.parse_json_response(
+            text,
+            repair_fn=(
+                (lambda candidate, error: self._repair_json_with_provider(candidate, error, schema_description))
+                if schema_description else None
+            ),
+            schema_description=schema_description or "",
+        )
+        _log_json_parse_result(provider=self.name, model=self.model, outcome=outcome)
+
+        return LLMResult(
+            ok=outcome.success,
+            provider=self.name,
+            model=self.model,
+            text=text,
+            data=outcome.data,
+            error=None if outcome.success else (outcome.error or "Ollama returned invalid JSON."),
+            search_used=False,
+            search_failed=False,
+            error_category=None if outcome.success else outcome.category,
+            parse_diagnostics=_parse_diagnostics(outcome),
+        )
+
+    def _repair_json_with_provider(
+        self, malformed_text: str, parse_error: str, schema_description: str | None,
+    ) -> str | None:
+        """Same contract as DeepInfraProvider._repair_json_with_provider.
+        Ollama's /api/generate has no separate system-message slot, so the
+        repair instruction is prepended directly to the single prompt
+        field."""
+        try:
+            repair_prompt = (
+                f"{_JSON_REPAIR_SYSTEM_PROMPT}\n\n"
+                f"{_build_repair_prompt(malformed_text, parse_error, schema_description or '')}"
+            )
+            text = self._generate(
+                prompt=repair_prompt,
+                options={"temperature": 0, "num_ctx": 4096},
+                extra_body={"format": "json"},
+                reporter=None,
+            )
+            return text or None
+        except Exception as ex:
+            logger.warning("llm_provider.provider_repair_failed provider=%s error=%s", self.name, ex)
+            return None
 
     def generate_text(
         self,
@@ -1582,6 +1950,26 @@ _DEEPINFRA_TIER_DEFAULTS: dict[str, str] = {
 # already-generated ideas doesn't need the highest-accuracy tier.
 _DEEPINFRA_TIER_DEFAULTS["comparison"] = _DEEPINFRA_TIER_DEFAULTS["light"]
 
+# Project Roadmap gets its OWN tier (same DeepInfra model as "high", since
+# it needs the same accuracy) so its Ollama fallback leg (see
+# _OLLAMA_TIER_TIMING below) can use a longer, roadmap-specific timeout
+# without changing the shared "high" tier's timing for SE Documentation/
+# Idea Generator, which don't need it and shouldn't wait longer just
+# because roadmap generation does.
+_DEEPINFRA_TIER_DEFAULTS["roadmap"] = _DEEPINFRA_TIER_DEFAULTS["high"]
+
+# Idea Comparison's job-based Reviewer stage only (app/jobs/workers/
+# idea_comparison_worker.py) -- kept separate from "comparison" above, which
+# stays on gemma-3-12b-it for the Writer/Rewrite calls. Live testing showed
+# the 12B model judging its own rubric inconsistently -- e.g. flagging a
+# concrete, non-score-based justification as "fabricated_score" while its own
+# description text said "this is a concrete reason, not a fabricated score" --
+# so the Reviewer specifically needs a more reliable model. gemma-3-27b-it is
+# the same model family (so it should follow the existing rubric wording more
+# consistently than switching families) at roughly 2.25x the parameters,
+# priced well below the "standard" 70B tier.
+_DEEPINFRA_TIER_DEFAULTS["comparison_review"] = "google/gemma-3-27b-it"
+
 # Per-tier timing overrides for the DeepInfra leg of the chain. Absent here
 # (every tier except "comparison") means "use DeepInfraProvider's own
 # defaults" (DEEPINFRA_TIMEOUT_SECONDS env var, openai SDK's default retry
@@ -1601,6 +1989,13 @@ _DEEPINFRA_TIER_TIMING: dict[str, dict[str, float | int]] = {
     # in the 45s end-to-end deadline for the Groq/Ollama fallback legs
     # below (each now tightly bounded) if DeepInfra genuinely fails.
     "comparison": {"timeout_seconds": 34.0, "max_retries": 0},
+    # Sized for the job-based Reviewer call on gemma-3-27b-it (see
+    # "comparison_review" above) -- a bigger model with a larger input
+    # prompt (full candidate JSON + rubric + context) than the writer call,
+    # so it gets more room than "comparison"'s 34s. The job path's own
+    # deadline gates (_MIN_SECONDS_FOR_SYNC_REVIEW/_MIN_SECONDS_FOR_REWRITE
+    # in idea_comparison_worker.py) are sized to comfortably cover this.
+    "comparison_review": {"timeout_seconds": 50.0, "max_retries": 0},
 }
 
 # Same rationale as _DEEPINFRA_TIER_TIMING, for the Groq fallback leg.
@@ -1614,6 +2009,12 @@ _DEEPINFRA_TIER_TIMING: dict[str, dict[str, float | int]] = {
 # defaults" -- unchanged for every other agent.
 _GROQ_TIER_TIMING: dict[str, dict[str, float | int]] = {
     "comparison": {"timeout_seconds": 6.0, "max_retries": 0},
+    # Same tight fallback budget as "comparison" -- Groq/Ollama always use
+    # their own single globally-configured model regardless of DeepInfra
+    # tier (see GroqProvider/OllamaProvider's GROQ_MODEL/OLLAMA_MODEL env
+    # vars), so this is purely about keeping a fallback attempt fast, not
+    # about the Reviewer's bigger primary model.
+    "comparison_review": {"timeout_seconds": 6.0, "max_retries": 0},
 }
 
 # Same rationale again, for the final local-Ollama fallback leg. Its
@@ -1627,6 +2028,15 @@ _GROQ_TIER_TIMING: dict[str, dict[str, float | int]] = {
 # (5, 90) timeout" -- unchanged for every other agent.
 _OLLAMA_TIER_TIMING: dict[str, dict[str, float]] = {
     "comparison": {"timeout_seconds": 3.0},
+    "comparison_review": {"timeout_seconds": 3.0},
+    # Configurable via ROADMAP_OLLAMA_TIMEOUT_SECONDS (default 180s) rather
+    # than a hardcoded literal -- the structured roadmap phase/task schema
+    # is large enough that a small local model can legitimately need more
+    # than the generic 90s default, without raising the timeout for every
+    # other "high"-tier agent (see _DEEPINFRA_TIER_DEFAULTS["roadmap"]
+    # above). Evaluated lazily (a function, not a literal) so the env var
+    # can still be changed without a process restart in tests.
+    "roadmap": {"timeout_seconds": None},  # resolved by _ollama_timing_for_tier
 }
 
 
@@ -1644,8 +2054,18 @@ def _groq_timing_for_tier(tier: str) -> dict[str, float | int]:
     return _GROQ_TIER_TIMING.get(tier, {})
 
 
+_DEFAULT_ROADMAP_OLLAMA_TIMEOUT_SECONDS = 180.0
+
+
 def _ollama_timing_for_tier(tier: str) -> dict[str, float]:
-    return _OLLAMA_TIER_TIMING.get(tier, {})
+    timing = dict(_OLLAMA_TIER_TIMING.get(tier, {}))
+
+    if tier == "roadmap":
+        timing["timeout_seconds"] = float(
+            os.getenv("ROADMAP_OLLAMA_TIMEOUT_SECONDS", str(_DEFAULT_ROADMAP_OLLAMA_TIMEOUT_SECONDS)),
+        )
+
+    return timing
 
 
 class ProviderChain:
@@ -1757,10 +2177,22 @@ class ProviderChain:
         max_tokens: int | None = None,
         deadline: float | None = None,
         reporter: "ProgressReporter | None" = None,
+        schema_description: str | None = None,
     ) -> LLMResult:
+        """
+        `schema_description` is an OPTIONAL, opt-in compact description of
+        the expected JSON shape -- when given, a provider whose deterministic
+        local JSON repair fails may make ONE additional low-temperature
+        "fix only JSON syntax" request to itself before this call is
+        considered failed and the cascade moves to the next provider (see
+        json_reliability.py / each provider's generate_json). Omitted
+        (None, the default) preserves every existing caller's behavior
+        exactly -- no provider-repair-request is ever attempted without it.
+        """
         return self._run_cascade(
             call=lambda provider: provider.generate_json(
                 prompt, use_search=use_search, max_tokens=max_tokens, reporter=reporter,
+                schema_description=schema_description,
             ),
             is_success=lambda result: result.ok and result.data is not None,
             deadline=deadline,
@@ -1846,7 +2278,7 @@ class ProviderChain:
                 return result
 
             errors.append(
-                f"{result.provider}:{result.model} -> {result.error}"
+                f"{result.provider}:{result.model} -> [{result.error_category or 'unknown'}] {result.error}"
             )
             if reporter is not None:
                 reporter.provider_failed(provider.name, result.error or "unknown error")
@@ -1863,29 +2295,3 @@ class ProviderChain:
         )
 
 
-def _parse_json(text: str) -> dict[str, Any]:
-    """
-    Parse strict JSON, or extract the first JSON object from messy model output.
-    """
-
-    cleaned = (text or "").strip()
-
-    if cleaned.startswith("```"):
-        cleaned = cleaned.replace("```json", "")
-        cleaned = cleaned.replace("```", "")
-        cleaned = cleaned.strip()
-
-    try:
-        return json.loads(cleaned)
-    except Exception:
-        pass
-
-    start = cleaned.find("{")
-    end = cleaned.rfind("}")
-
-    if start == -1 or end == -1 or end <= start:
-        raise ValueError(
-            f"No valid JSON found in model output. Preview: {cleaned[:500]}"
-        )
-
-    return json.loads(cleaned[start:end + 1])

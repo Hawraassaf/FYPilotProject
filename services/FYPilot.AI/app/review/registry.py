@@ -200,6 +200,7 @@ class RoadmapCandidateSchema(ProjectRoadmapResponse):
             total_weeks=self.totalWeeks,
             team_size=self.teamSize,
             hours_per_week_per_member=self.hoursPerWeekPerMember,
+            difficulty_level=self.difficultyLevel,
         )
 
         # Re-parse through the declared field types rather than assigning

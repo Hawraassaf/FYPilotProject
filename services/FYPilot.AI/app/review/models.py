@@ -41,12 +41,27 @@ class ReviewerFindings(BaseModel):
 
 class RewriteDecision(BaseModel):
     """
-    Output of the deterministic ReviewDecisionEngine. Never produced by an LLM.
+    Output of a deterministic decision step. Never produced by an LLM.
+
+    Produced by either the shared ReviewDecisionEngine (every agent except
+    the job-based Idea Comparison path below) or, for that one path only,
+    app/jobs/workers/idea_comparison_worker.py's own
+    _classify_idea_comparison_issues -- a deliberately separate, looser
+    policy (see that function's docstring) that never touches
+    ReviewDecisionEngine itself, so no other agent is affected.
     """
 
     requiresRewrite: bool
     reason: str
     blockingIssues: list[ReviewerIssue] = Field(default_factory=list)
+    # Only ever populated by the Idea Comparison job worker's own
+    # classification -- issues that didn't qualify as a validated blocker
+    # (wrong severity, category not on the closed blocking allowlist, or
+    # requiresCorrection=false) but are still surfaced to the student
+    # instead of being silently dropped. Always empty for every other
+    # caller of RewriteDecision (the shared ReviewDecisionEngine never sets
+    # this field).
+    warningIssues: list[ReviewerIssue] = Field(default_factory=list)
     highestBlockingSeverity: Severity | None = None
 
 
@@ -74,10 +89,17 @@ PipelineStatus = Literal[
     # rewrite-on-rejection flow (app/jobs/workers/idea_comparison_worker.py)
     # -- distinct from the synchronous /compare-generated-ideas endpoint's
     # vocabulary above, which is left completely unchanged.
-    "approved_after_revision",  # first review rejected; one rewrite attempted using the reviewer's own RevisionInstructions; second review approved it
+    "approved_after_revision",  # first review rejected; one rewrite attempted using the reviewer's own RevisionInstructions; second review approved it (no warnings either)
     "review_rejected_safe_fallback",  # rejected and no usable rewrite was possible (no actionable feedback, or the rewrite was itself rejected again) -- safe fallback shown, never a second rewrite attempt
-    "rewrite_unavailable_deadline",  # first review rejected, a rewrite was warranted, but fewer than 25s remained in the job's global deadline -- safe fallback shown
+    "rewrite_unavailable_deadline",  # first review rejected, a rewrite was warranted, but insufficient time remained in the job's global deadline -- safe fallback shown
     "rewrite_provider_unavailable",  # first review rejected, a rewrite was attempted, but every provider failed during the rewrite call -- safe fallback shown
+    # Statuses below are specific to the job worker's own looser blocking
+    # policy (_classify_idea_comparison_issues) -- a comparison is approved
+    # as long as it has no VALIDATED high/critical blocker, even if the
+    # Reviewer raised lower-severity or off-allowlist issues; those are
+    # surfaced as warnings rather than discarding a good comparison.
+    "approved_with_warnings",  # first review found no blocking issue, but did find at least one non-blocking warning
+    "approved_after_revision_with_warnings",  # first review blocked; one rewrite attempted; second review found no blocking issue but at least one non-blocking warning
 ]
 
 

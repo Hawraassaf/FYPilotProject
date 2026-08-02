@@ -1,22 +1,24 @@
 """
 ProjectRoadmapAgent — LLM-based customized project roadmap generation for FYPilot.
 
-Design (v2):
-- The LLM designs 4-7 PHASES tailored to the specific idea, each with a
-  flexible duration (1-4 weeks) and concrete, idea-specific tasks.
-- Python then does everything structural deterministically:
-    * normalizes phase durations so they sum exactly to expectedDurationWeeks
-      (largest-remainder scaling, minimum 1 week per phase)
-    * expands phases into week entries (3-5 tasks per week)
-    * derives per-member responsibilities FROM that week's actual tasks,
-      guaranteeing exactly teamSize items, specific and non-repeating
-    * places deliverables and supervisor checkpoints on phase-final weeks
-    * front-loads missing skills as learning items in the first weeks
+Design (v3 -- hybrid AI + deterministic planning engine):
+- A deterministic ProjectProfile (app/agents/roadmap/project_profile.py) is
+  built from the request FIRST -- project type, risk flags, required
+  lifecycle coverage, and a duration/domain-sensitive phase-count range.
+  This replaces a single fixed "design 4-7 phases" instruction that used to
+  apply to every project regardless of its actual duration or domain.
+- The LLM still designs the PHASES (names, goals, concrete tasks,
+  deliverables, skills to learn, risk, checkpoint) for this specific idea,
+  guided by the profile. Python owns everything else: lifecycle coverage
+  validation, task classification, PERT effort estimation, dependency
+  ordering, capacity-aware weekly scheduling, and phase duration (which is
+  reconstructed from where tasks actually land, never taken directly from
+  the LLM's guessed phase-week weight).
 - The public request/response contract is UNCHANGED: .NET still sends
   ProjectRoadmapRequest and receives week-based ProjectRoadmapResponse.
-- One small LLM call (~1300 output tokens) instead of one giant week-by-week
-  generation: no truncation, faster on CPU-only Ollama.
-- If Ollama fails, the previous safe fallback roadmap is returned.
+- If every AI provider fails, a profile-aware deterministic fallback
+  roadmap is built from a lifecycle-driven phase catalog and run through
+  the exact same scheduler as an AI-generated plan.
 """
 
 import json
@@ -27,6 +29,11 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 from app.agents import roadmap_scheduler
+from app.agents.roadmap import project_profile, task_metadata, task_taxonomy
+from app.agents.roadmap.lexicon import contains_any
+from app.agents.roadmap.project_profile import ProjectProfile, ProjectProfileInput
+from app.agents.roadmap.task_metadata import InternalTaskProposal
+from app.services import json_reliability
 from app.services.llm_provider import LLMResult, ProviderChain
 
 logger = logging.getLogger("fypilot-roadmap-agent")
@@ -182,9 +189,9 @@ class ProjectRoadmapResponse(BaseModel):
 
 class _PhasePlan(BaseModel):
     name: str
-    weeks: int = 1
+    weeks: int = 1  # advisory weight only -- see module docstring
     goal: str = ""
-    tasks: list[str] = Field(default_factory=list)
+    tasks: list[InternalTaskProposal] = Field(default_factory=list)
     deliverables: list[str] = Field(default_factory=list)
     skillsToLearn: list[str] = Field(default_factory=list)
     riskWarning: str = ""
@@ -198,6 +205,68 @@ class _RoadmapPlan(BaseModel):
     phases: list[_PhasePlan] = Field(default_factory=list)
 
 
+# Compact description of the phase-plan JSON shape, given to a provider's
+# OWN one-shot JSON-syntax repair request (see llm_provider.py's
+# _repair_json_with_provider on each provider) -- deliberately terse (a
+# repair call only needs to know the shape to restore, not the full
+# generation prompt's rules/examples) so that request stays small.
+_ROADMAP_PHASE_PLAN_SCHEMA_DESCRIPTION = """{
+  "roadmapTitle": string, "teamStrategy": string, "finalAdvice": string,
+  "phases": [{
+    "name": string, "weeks": number, "goal": string,
+    "tasks": [{
+      "localId": string, "title": string, "description": string, "taskType": string,
+      "effortMinHours": number, "effortLikelyHours": number, "effortMaxHours": number,
+      "complexity": string, "mandatory": boolean, "dependencyIds": [string],
+      "parallelizable": boolean, "requiredSkills": [string],
+      "acceptanceCriteria": string, "scopeSize": string
+    }],
+    "deliverables": [string], "skillsToLearn": [string],
+    "riskWarning": string, "checkpoint": string
+  }]
+}"""
+
+
+# Human-readable phrasing for each lifecycle category key, used only to
+# build prompt guidance -- the category KEYS themselves are the ones
+# project_profile.lifecycle_coverage() checks against real phase text.
+_LIFECYCLE_LABELS: dict[str, str] = {
+    "requirements_scope": "requirements and scope definition",
+    "architecture_design": "architecture / database design",
+    "core_implementation": "core feature implementation",
+    "integration": "backend-frontend / service integration",
+    "testing_validation": "testing and validation",
+    "documentation": "documentation",
+    "final_delivery": "final deployment, submission, or presentation",
+    "data_sourcing": "dataset sourcing",
+    "data_preprocessing": "data cleaning / preprocessing / annotation",
+    "baseline_model": "a baseline model",
+    "model_evaluation": "model evaluation and error analysis",
+    "data_governance_privacy": "data governance / privacy handling",
+    "safety_validation": "safety or supervisor/domain-expert validation",
+    "threat_modeling": "threat modeling",
+    "security_testing": "security testing",
+    "hardware_integration": "hardware/firmware integration",
+    "calibration_reliability": "calibration and reliability testing",
+}
+
+# A gap here (the fundamentals every FYP roadmap needs) always blocks
+# acceptance of the LLM's phase plan; a gap in a domain-specific category is
+# tolerated in moderation (keyword coverage is inherently imperfect) but not
+# if more than half of them are missing -- see _lifecycle_gap_is_blocking.
+_CORE_LIFECYCLE_CATEGORIES = {
+    "requirements_scope", "core_implementation", "testing_validation", "final_delivery",
+}
+
+
+def _lifecycle_gap_is_blocking(missing_mandatory: list[str]) -> bool:
+    if any(category in _CORE_LIFECYCLE_CATEGORIES for category in missing_mandatory):
+        return True
+
+    domain_missing = [c for c in missing_mandatory if c not in _CORE_LIFECYCLE_CATEGORIES]
+    return len(domain_missing) > 1
+
+
 # =============================================================================
 # Agent
 # =============================================================================
@@ -207,21 +276,36 @@ class ProjectRoadmapAgent:
     """
     AI-based Project Roadmap Generator.
 
-    The LLM customizes phase design; Python owns structure, durations,
-    weekly expansion, and team responsibility derivation. Uses the "high"
-    DeepInfra tier -- the phase plan is the structural backbone every week
-    entry, deliverable, and team-responsibility derivation downstream is
-    built from, so it warrants the same accuracy tier as SE Documentation.
+    The LLM customizes phase content (names, goals, concrete tasks,
+    deliverables, skills, risk, checkpoint) for this specific idea, guided
+    by a deterministic ProjectProfile. Python owns lifecycle-coverage
+    validation, task classification, effort estimation, dependency
+    ordering, capacity-aware scheduling, and phase duration -- see
+    app/agents/roadmap_scheduler.py and app/agents/roadmap/*.py. Uses the
+    "high" DeepInfra tier -- the phase plan is the structural backbone
+    every week entry, deliverable, and team-responsibility derivation
+    downstream is built from, so it warrants the same accuracy tier as SE
+    Documentation.
     """
 
     def __init__(self):
-        self.provider_chain = ProviderChain(tier="high")
+        # Own tier (not "high") so its Ollama fallback leg can use a
+        # roadmap-specific timeout (ROADMAP_OLLAMA_TIMEOUT_SECONDS, default
+        # 180s) without changing the shared "high" tier's timing for SE
+        # Documentation/Idea Generator -- see llm_provider.py's
+        # _DEEPINFRA_TIER_DEFAULTS["roadmap"] / _OLLAMA_TIER_TIMING.
+        self.provider_chain = ProviderChain(tier="roadmap")
 
         self.last_llm_used = False
         self.last_error = None
         self.last_raw_llm_response = None
         self.last_provider: str | None = None
         self.last_model_used: str | None = None
+        # One of "original_ai_candidate" / "original_ai_candidate_repaired"
+        # / "provider_repaired_ai_candidate" / None (fallback, or not yet
+        # attempted) -- classifies which stage actually produced the
+        # accepted phase plan, for the roadmap.generated log line.
+        self.last_generation_source: str | None = None
 
         self.blocked_terms = [
             "react",
@@ -245,19 +329,26 @@ class ProjectRoadmapAgent:
             "figma",
         ]
 
-        self.generic_task_phrases = [
-            "develop core features",
-            "work on the project",
-            "continue development",
-            "implement features",
-            "do the tasks",
-            "complete the phase",
-            "work on the planned",
-        ]
-
     # =========================================================================
     # Main entry point
     # =========================================================================
+
+    def _build_profile(self, request: ProjectRoadmapRequest, total_weeks: int) -> ProjectProfile:
+        return project_profile.build_profile(ProjectProfileInput(
+            idea_title=request.ideaTitle,
+            problem_statement=request.problemStatement,
+            required_technologies=request.requiredTechnologies,
+            required_skills=request.requiredSkills,
+            missing_skills=request.missingSkills,
+            domain=request.domain,
+            final_deliverables=request.finalDeliverables,
+            difficulty_level=request.difficultyLevel,
+            total_weeks=total_weeks,
+            team_size=request.teamSize,
+            hours_per_week=request.availableHoursPerWeek,
+            student_skills=request.studentSkills,
+            skill_ratings=request.skillRatings,
+        ))
 
     def generate(self, request: ProjectRoadmapRequest) -> ProjectRoadmapResponse:
         self.last_llm_used = False
@@ -265,16 +356,42 @@ class ProjectRoadmapAgent:
         self.last_raw_llm_response = None
         self.last_provider = None
         self.last_model_used = None
+        self.last_generation_source = None
+        # Defensive reset: a stale registry from an earlier request/attempt
+        # in this same thread/task context must never be consulted for this
+        # one -- see roadmap_scheduler.py's task-metadata bridge docstring.
+        roadmap_scheduler.clear_task_metadata_registry()
 
         total_weeks = self._normalize_weeks(request.expectedDurationWeeks)
+        profile = self._build_profile(request, total_weeks)
 
-        plan = self._try_generate_phase_plan(request, total_weeks)
+        logger.info(
+            "roadmap.profile idea=%r types=%s risks=%s phases=[%d,%d] weekly_capacity=%d skill_gap=%s",
+            request.ideaTitle[:60], profile.project_types, sorted(profile.risk_flags),
+            profile.phase_count_min, profile.phase_count_max,
+            profile.weekly_team_capacity, profile.skill_gap_level,
+        )
+
+        plan = self._try_generate_phase_plan(request, total_weeks, profile)
 
         if plan is not None and plan.phases:
-            self.last_llm_used = True
-            return self._expand_plan_to_weeks(request, plan, total_weeks)
-
-        self.last_llm_used = False
+            try:
+                response = self._expand_plan_to_weeks(request, plan, total_weeks, profile)
+            except Exception:
+                logger.exception("roadmap.expand_plan_failed -- falling back to deterministic roadmap.")
+                self.last_error = "Failed to expand the AI phase plan into a schedule. Used fallback roadmap."
+                self.last_llm_used = False
+                roadmap_scheduler.clear_task_metadata_registry()
+            else:
+                self.last_llm_used = True
+                logger.info(
+                    "roadmap.generated source=%s phases=%d weeks=%d totalPlannedHours=%d feasibility=%s",
+                    self.last_generation_source or "original_ai_candidate",
+                    len(response.phases), response.totalWeeks,
+                    response.planningSummary.totalPlannedHours if response.planningSummary else -1,
+                    response.planningSummary.scheduleFeasibility if response.planningSummary else "unknown",
+                )
+                return response
 
         if self.last_error is None:
             self.last_error = (
@@ -282,8 +399,16 @@ class ProjectRoadmapAgent:
                 "Used fallback roadmap."
             )
 
-        raw = self._fallback_raw_roadmap(request, total_weeks)
-        return self._complete_and_validate(request, raw, total_weeks)
+        raw = self._fallback_raw_roadmap(request, total_weeks, profile)
+        response = self._complete_and_validate(request, raw, total_weeks)
+        logger.info(
+            "roadmap.generated source=fallback phases=%d weeks=%d totalPlannedHours=%d feasibility=%s reason=%s",
+            len(response.phases), response.totalWeeks,
+            response.planningSummary.totalPlannedHours if response.planningSummary else -1,
+            response.planningSummary.scheduleFeasibility if response.planningSummary else "unknown",
+            self.last_error,
+        )
+        return response
 
     # =========================================================================
     # Review pipeline integration (app/review/pipeline.py)
@@ -296,16 +421,18 @@ class ProjectRoadmapAgent:
         every provider fails, exposed publicly so routers never reach into a
         private method (matches FypMentorAgent.build_safe_fallback).
         """
+        roadmap_scheduler.clear_task_metadata_registry()
         total_weeks = self._normalize_weeks(request.expectedDurationWeeks)
-        raw = self._fallback_raw_roadmap(request, total_weeks)
+        profile = self._build_profile(request, total_weeks)
+        raw = self._fallback_raw_roadmap(request, total_weeks, profile)
         return self._complete_and_validate(request, raw, total_weeks)
 
     def generate_candidate(self, request: ProjectRoadmapRequest) -> LLMResult | None:
         """
         Writer-stage entry point for ReviewPipeline. Reuses generate() end to
-        end (LLM phase design -> deterministic week expansion) rather than
-        duplicating it, then wraps the result as an LLMResult so it can flow
-        through guarded_call like any other LLM stage.
+        end (LLM phase design -> deterministic capacity-aware scheduling)
+        rather than duplicating it, then wraps the result as an LLMResult so
+        it can flow through guarded_call like any other LLM stage.
 
         Returns None -- signaling "no real provider output" to guarded_call,
         which the pipeline maps to status="provider_unavailable" -- when
@@ -334,11 +461,15 @@ class ProjectRoadmapAgent:
         self,
         request: ProjectRoadmapRequest,
         total_weeks: int,
+        profile: ProjectProfile,
     ) -> Optional[_RoadmapPlan]:
-        prompt = self._build_phase_prompt(request, total_weeks)
+        prompt = self._build_phase_prompt(request, total_weeks, profile)
 
         try:
-            result = self.provider_chain.generate_json(prompt, use_search=False)
+            result = self.provider_chain.generate_json(
+                prompt, use_search=False,
+                schema_description=_ROADMAP_PHASE_PLAN_SCHEMA_DESCRIPTION,
+            )
         except Exception as ex:
             self.last_error = f"Roadmap generation failed: {ex}"
             logger.exception("Roadmap generation failed.")
@@ -349,7 +480,30 @@ class ProjectRoadmapAgent:
         )
         self.last_model_used = result.model
 
+        diagnostics = result.parse_diagnostics or {}
+        is_transport_failure = result.error_category in (
+            json_reliability.TRANSPORT_FAILURE, json_reliability.TIMEOUT, json_reliability.PROVIDER_HTTP_ERROR,
+        )
+
+        def log_provider_output(*, schema_valid: bool, semantic_valid: bool) -> None:
+            # Matches the production log shape requested for this
+            # stabilization pass -- distinguishes "provider responded but
+            # output JSON was malformed" (transport=success,
+            # initial_json_valid=false) from "provider failed to respond"
+            # (transport=failure) from schema/semantic rejection of an
+            # otherwise well-formed candidate.
+            logger.info(
+                "roadmap.provider_output provider=%s model=%s transport=%s "
+                "initial_json_valid=%s repair_method=%s repair_success=%s "
+                "schema_valid=%s semantic_valid=%s",
+                self.last_provider, self.last_model_used,
+                "failure" if is_transport_failure else "success",
+                diagnostics.get("initialJsonValid"), diagnostics.get("repairMethod"),
+                diagnostics.get("repairSuccess"), schema_valid, semantic_valid,
+            )
+
         if not result.ok or not isinstance(result.data, dict):
+            log_provider_output(schema_valid=False, semantic_valid=False)
             self.last_error = result.error or "No provider returned valid roadmap JSON."
             return None
 
@@ -361,49 +515,86 @@ class ProjectRoadmapAgent:
         try:
             plan = _RoadmapPlan.model_validate(result.data)
         except Exception as ex:
+            log_provider_output(schema_valid=False, semantic_valid=False)
             self.last_error = f"Roadmap plan failed validation: {str(ex)}"
             return None
 
-        plan.phases = self._sanitize_phases(plan.phases, total_weeks)
+        plan.phases = self._sanitize_phases(plan.phases, profile)
 
         if len(plan.phases) < 3:
+            log_provider_output(schema_valid=True, semantic_valid=False)
             self.last_error = (
                 "Roadmap plan contained fewer than 3 usable phases. "
                 "Used fallback roadmap."
             )
             return None
 
+        phase_texts = [
+            " ".join([phase.name, phase.goal, *(task.title for task in phase.tasks)])
+            for phase in plan.phases
+        ]
+        _covered, missing_mandatory = project_profile.lifecycle_coverage(profile, phase_texts)
+
+        if missing_mandatory and _lifecycle_gap_is_blocking(missing_mandatory):
+            readable = ", ".join(_LIFECYCLE_LABELS.get(c, c) for c in missing_mandatory)
+            log_provider_output(schema_valid=True, semantic_valid=False)
+            self.last_error = (
+                f"Roadmap plan is missing mandatory lifecycle coverage for this "
+                f"project type: {readable}. Used fallback roadmap."
+            )
+            logger.info("roadmap.lifecycle_gap_rejected missing=%s", missing_mandatory)
+            return None
+
+        if missing_mandatory:
+            logger.info("roadmap.lifecycle_gap_tolerated missing=%s", missing_mandatory)
+
+        log_provider_output(schema_valid=True, semantic_valid=True)
+
+        repair_method = diagnostics.get("repairMethod")
+        if repair_method == "provider_repair":
+            self.last_generation_source = "provider_repaired_ai_candidate"
+        elif repair_method == "local_json_repair":
+            self.last_generation_source = "original_ai_candidate_repaired"
+        else:
+            self.last_generation_source = "original_ai_candidate"
+
         return plan
 
     def _sanitize_phases(
         self,
         phases: list[_PhasePlan],
-        total_weeks: int,
+        profile: ProjectProfile,
     ) -> list[_PhasePlan]:
-        """Drop empty/generic phases, clean blocked terms and generic tasks."""
+        """
+        Drop empty/vague phases, strip vague/blocked tasks. Never pads a
+        phase back up with invented "Review and refine:"/"Test and verify:"
+        filler -- a phase with too few genuine tasks is dropped rather than
+        padded, since its real scheduled duration will now be derived from
+        actual task effort, not from an artificially inflated task count.
+        """
         cleaned: list[_PhasePlan] = []
 
-        for phase in phases[:8]:
+        for phase in phases[: profile.phase_count_max + 4]:
             name = phase.name.strip()
 
             if not name:
                 continue
 
             tasks = [
-                task.strip()
+                task
                 for task in phase.tasks
-                if task.strip()
-                and not self._is_generic_task(task)
-                and not self._contains_blocked_term(task)
+                if task.title.strip()
+                and not task_taxonomy.is_vague_task(task.title)
+                and not self._contains_blocked_term(task.title)
             ]
 
             if len(tasks) < 2:
                 continue
 
             phase.name = name[:120]
-            phase.weeks = max(1, min(int(phase.weeks or 1), 4))
+            phase.weeks = max(1, min(int(phase.weeks or 1), 6))
             phase.goal = phase.goal.strip()[:400]
-            phase.tasks = tasks[:10]
+            phase.tasks = self._normalize_task_ids(tasks[:12])
             phase.deliverables = [
                 item.strip() for item in phase.deliverables if item.strip()
             ][:4]
@@ -415,20 +606,54 @@ class ProjectRoadmapAgent:
 
             cleaned.append(phase)
 
-        return cleaned[: max(3, min(len(cleaned), total_weeks))]
+        return cleaned[: max(3, min(len(cleaned), profile.phase_count_max + 2))]
 
-    def _is_generic_task(self, task: str) -> bool:
-        lowered = task.lower()
-        return any(phrase in lowered for phrase in self.generic_task_phrases)
+    def _normalize_task_ids(
+        self, tasks: list[InternalTaskProposal], id_prefix: str = "T",
+    ) -> list[InternalTaskProposal]:
+        """
+        Reassigns every task in this phase a fresh, deterministic
+        "{id_prefix}1".."{id_prefix}N" localId (in list order) and rewrites
+        dependencyIds to match, using whatever localIds the LLM originally
+        supplied to resolve them first. A dependencyId that never matched
+        any task in THIS phase (missing, duplicated, self-referential, or
+        pointing at a different phase) is silently dropped rather than left
+        dangling -- the scheduler only ever trusts a dependency it can
+        resolve to a real sibling task.
+
+        Safe to call repeatedly (e.g. once per phase after sanitizing,
+        again after merging two phases together) -- `id_prefix` lets two
+        already-normalized phases (which independently reused "T1", "T2",
+        ...) be combined without their ids colliding: normalize each side
+        with a DIFFERENT prefix before concatenating, see
+        _merge_phases_to_fit.
+        """
+        old_id_to_index = {
+            task.localId: index for index, task in enumerate(tasks) if task.localId
+        }
+
+        renumbered: list[InternalTaskProposal] = []
+        for index, task in enumerate(tasks):
+            new_id = f"{id_prefix}{index + 1}"
+            resolved_dependency_indices = sorted({
+                old_id_to_index[old_id]
+                for old_id in task.dependencyIds
+                if old_id in old_id_to_index and old_id_to_index[old_id] != index
+            })
+            task.dependencyIds = [f"{id_prefix}{i + 1}" for i in resolved_dependency_indices]
+            task.localId = new_id
+            renumbered.append(task)
+
+        return renumbered
 
     def _contains_blocked_term(self, text: str) -> bool:
-        lowered = text.lower()
-        return any(term in lowered for term in self.blocked_terms)
+        return contains_any(text, self.blocked_terms)
 
     def _build_phase_prompt(
         self,
         request: ProjectRoadmapRequest,
         total_weeks: int,
+        profile: ProjectProfile,
     ) -> str:
         skills_text = (
             ", ".join(request.studentSkills)
@@ -448,7 +673,7 @@ class ProjectRoadmapAgent:
         missing = self._split_items(request.missingSkills)
         missing_text = ", ".join(missing) if missing else "None"
 
-        weekly_capacity = request.teamSize * request.availableHoursPerWeek
+        weekly_capacity = profile.weekly_team_capacity
 
         if weekly_capacity <= 12:
             capacity_note = (
@@ -465,18 +690,26 @@ class ProjectRoadmapAgent:
                 "parallel workstreams are possible."
             )
 
+        lifecycle_lines = "\n".join(
+            f"  - {_LIFECYCLE_LABELS.get(category, category)}"
+            for category in profile.mandatory_lifecycle
+        )
+
+        task_type_options = ", ".join(task_taxonomy.TASK_TYPES.keys())
+
         return f"""
 You are ProjectRoadmapAgent inside FYPilot, an Academic Intelligence System for Final Year Project planning.
 
-Design the PHASE PLAN for implementing this specific final year project. You design phases; the platform will expand them into a weekly schedule.
+Design the PHASE PLAN for implementing this specific final year project. You design phases; the platform will run a deterministic capacity-aware scheduler on top of your tasks to produce the final week-by-week timeline, so treat "weeks" below as a rough emphasis weight, not a guaranteed final duration.
 
 Project idea:
 - Title: {request.ideaTitle}
 - Problem statement: {request.problemStatement}
 - Domain: {request.domain}
+- Detected project type(s): {', '.join(profile.project_types)}
 - Required technologies: {request.requiredTechnologies}
 - Required skills: {request.requiredSkills}
-- Missing skills (must be learned): {missing_text}
+- Missing skills (must appear in skillsToLearn, see rules below): {missing_text}
 - Difficulty level: {request.difficultyLevel}
 - Final deliverables: {request.finalDeliverables}
 
@@ -490,21 +723,37 @@ Student/team:
 
 Timeline:
 - Total project duration: {total_weeks} weeks.
-- Design 4 to 7 phases. Each phase lasts 1 to 4 weeks ("weeks" field).
-- Phase durations should roughly add up to {total_weeks} weeks (the platform will adjust exact numbers).
-- Give MORE weeks to the phases that are hardest FOR THIS SPECIFIC PROJECT AND TEAM: complex core features, AI/data work, and areas where skills are missing. Give FEWER weeks to easy or routine phases.
+- Design between {profile.phase_count_min} and {profile.phase_count_max} phases -- this range already accounts for this project's duration and domain, so do not default to a generic 4-7 regardless of what is asked. Each phase's "weeks" field should be a rough weight (1-6).
+- This project must have identifiable phase coverage for EACH of the following lifecycle areas (multiple areas may share one phase when they are genuinely one unit of work, but do not compress clearly different areas into one vague "umbrella" phase):
+{lifecycle_lines}
+- Give MORE weeks/effort to the phases that are hardest FOR THIS SPECIFIC PROJECT AND TEAM: complex core features, AI/data work, and areas where skills are missing. Give FEWER weeks to easy or routine phases.
 
 Phase design rules:
-- The phase structure must fit THIS project. A data/AI-heavy project needs dataset/model/evaluation phases. A workflow web app needs core-workflow phases named after its real features. Do NOT use a generic template.
-- Phase names must mention the project's actual features or components, not generic labels like "Core Feature Development".
-- Every task must be concrete and name a real feature, screen, entity, endpoint, or technology from this project. 
-  BAD: "Implement main features". 
-  GOOD: "Implement the medicine reminder scheduling form and store reminders in PostgreSQL".
-- The FIRST phase must include learning tasks for each missing skill: {missing_text}.
-- 4 to 10 tasks per phase, 2 to 4 deliverables per phase, 0 to 4 skillsToLearn per phase.
+- The phase structure must fit THIS project. Phase names must mention the project's actual features, data, or components, not generic labels like "Core Feature Development".
+- Every task must be concrete, testable, and connected to a real deliverable of THIS project -- one clear unit of work.
+  BAD (too vague to estimate or test): "Implement main features", "Learn NLP", "Work on the backend", "Continue development".
+  GOOD: "Implement the medicine reminder scheduling form and store reminders in PostgreSQL"; "Build an Arabic text-normalization prototype covering diacritics, letter variants, and tokenization, validated on 100 sample records".
+- Do NOT invent filler tasks (e.g. "review and refine X", "test and verify X") just to pad the task count -- write only genuine, distinct units of work. A phase with fewer, better tasks is preferred over one padded with restatements.
+- Missing skills ({missing_text}) must be listed in skillsToLearn. Only add a task for one when it produces a measurable artifact (e.g. a working prototype validated against sample data) -- never a bare "Learn X" task.
+- Each phase needs enough distinct tasks to be independently schedulable -- roughly 3-5 concrete tasks per phase is typical; more for phases covering more lifecycle ground.
+- 2 to 4 deliverables per phase, 0 to 4 skillsToLearn per phase.
 - riskWarning: one short sentence about the biggest risk of that phase for this team.
 - checkpoint: one short sentence describing what the supervisor should verify at the end of the phase.
 - Technology constraints: use ASP.NET Core Razor Pages, Python FastAPI, PostgreSQL, Bootstrap, JavaScript, and Ollama where relevant. Do not suggest React, Node.js, Flutter, AWS, Azure, Kubernetes, blockchain, Flask, Balsamiq, or Figma.
+
+Task fields -- the platform validates and clamps every number below against defensible per-type ranges before using it, so propose your honest best estimate rather than guessing conservatively:
+- localId: short id unique WITHIN this phase only, e.g. "T1", "T2".
+- title: the concrete task itself (see rules above).
+- description: 1 short sentence of extra detail (optional).
+- taskType: the SINGLE best match from this exact list -- {task_type_options}.
+- effortMinHours / effortLikelyHours / effortMaxHours: your honest 3-point estimate in hours (min <= likely <= max) for THIS specific task, considering its measurable SCOPE where relevant (e.g. a task covering 10,000 records or 8 endpoints needs more hours than one covering 200 records or a single endpoint -- state the scope explicitly in scopeSize).
+- complexity: one of "simple", "small", "medium", "complex", "testing".
+- mandatory: true if this task is essential to the project working at all; false if it is genuinely optional/nice-to-have polish.
+- dependencyIds: localIds of OTHER tasks in THIS SAME phase that must complete first (e.g. model evaluation depends on the model-training task's id; leave empty if nothing in this phase must finish first). Do not reference a task in a different phase -- cross-phase order is handled automatically.
+- parallelizable: true if this task has no real dependency on other tasks in this phase and can run alongside them.
+- requiredSkills: short list of concrete skills/technologies this task needs.
+- acceptanceCriteria: 1 short sentence describing when this task is done.
+- scopeSize: a short, explicit statement of this task's measurable scope when one exists (e.g. "200 annotated records", "8 API endpoints", "4 user roles", "3 model architectures compared") -- leave empty if the task genuinely has no such quantity.
 - Return only valid JSON. No markdown, no explanations, no code fences.
 
 Return exactly this JSON structure:
@@ -518,7 +767,24 @@ Return exactly this JSON structure:
       "name": "string",
       "weeks": 2,
       "goal": "string",
-      "tasks": ["string"],
+      "tasks": [
+        {{
+          "localId": "T1",
+          "title": "string",
+          "description": "string",
+          "taskType": "string",
+          "effortMinHours": 4,
+          "effortLikelyHours": 8,
+          "effortMaxHours": 14,
+          "complexity": "medium",
+          "mandatory": true,
+          "dependencyIds": [],
+          "parallelizable": true,
+          "requiredSkills": ["string"],
+          "acceptanceCriteria": "string",
+          "scopeSize": "string"
+        }}
+      ],
       "deliverables": ["string"],
       "skillsToLearn": ["string"],
       "riskWarning": "string",
@@ -529,7 +795,7 @@ Return exactly this JSON structure:
 """
 
     # =========================================================================
-    # Deterministic expansion: phases -> weeks
+    # Deterministic expansion: phase plan -> capacity-aware schedule -> weeks
     # =========================================================================
 
     def _expand_plan_to_weeks(
@@ -537,60 +803,55 @@ Return exactly this JSON structure:
         request: ProjectRoadmapRequest,
         plan: _RoadmapPlan,
         total_weeks: int,
+        profile: ProjectProfile,
     ) -> ProjectRoadmapResponse:
-        phases = self._merge_phases_to_fit(plan.phases, total_weeks)
-        durations = roadmap_scheduler.allocate_phase_durations(
-            weights=[phase.weeks for phase in phases],
-            total_weeks=total_weeks,
-        )
+        phases = self._merge_phases_to_fit(plan.phases, total_weeks, profile)
+        phase_plan_by_name = {phase.name: phase for phase in phases}
 
-        missing_skills = self._split_items(request.missingSkills)
+        # Validate every proposed task against task_taxonomy's defensible
+        # ranges/known categories and resolve its dependencyIds into
+        # sibling task TITLES (task_metadata.py) -- this registry, keyed by
+        # title, is what lets a task's structured effort/dependency/
+        # priority metadata survive into deterministic scheduling despite
+        # `weeks[i].tasks` only ever carrying plain title strings publicly.
+        # Set on the request-scoped bridge right before scheduling runs, so
+        # it's still visible to RoadmapCandidateSchema's own validation
+        # pass moments later (see roadmap_scheduler.py's registry bridge).
+        metadata_registry = task_metadata.build_registry(phases)
+        roadmap_scheduler.set_task_metadata_registry(metadata_registry)
 
-        weeks: list[RoadmapWeek] = []
-        week_number = 1
-
-        for phase, duration in zip(phases, durations):
-            task_chunks = self._chunk_tasks(phase.tasks, duration)
-
-            for week_in_phase in range(1, duration + 1):
-                is_last_week = week_in_phase == duration
-                week_tasks = self._ensure_task_count(
-                    tasks=task_chunks[week_in_phase - 1],
-                    phase=phase,
-                )
-
-                weeks.append(
-                    RoadmapWeek(
-                        weekNumber=week_number,
-                        phaseTitle=phase.name,
-                        mainGoal=self._week_goal(phase, week_in_phase, duration),
-                        tasks=week_tasks,
-                        deliverables=self._week_deliverables(
-                            phase, is_last_week
-                        ),
-                        teamResponsibilities=self._derive_responsibilities(
-                            request, week_tasks, phase
-                        ),
-                        skillsToLearn=self._week_skills(
-                            phase, missing_skills, week_number
-                        ),
-                        riskWarning=(
-                            phase.riskWarning
-                            or "Avoid expanding the scope beyond this phase's goal."
-                        ),
-                        checkpoint=self._week_checkpoint(
-                            phase, is_last_week
-                        ),
-                    )
-                )
-
-                week_number += 1
+        # One seed "week" per phase, carrying that phase's full task TITLE
+        # list -- only used so roadmap_scheduler can re-group them back
+        # into a phase and run the real capacity-aware scheduler on them
+        # (which looks up each title in metadata_registry above). The LLM's
+        # phase.weeks weight is intentionally NOT used to pre-allocate week
+        # spans here; see module docstring.
+        seed_weeks = [
+            {
+                "weekNumber": index + 1,
+                "phaseTitle": phase.name,
+                "mainGoal": phase.goal,
+                "tasks": [task.title for task in phase.tasks],
+                "deliverables": phase.deliverables,
+                "skillsToLearn": phase.skillsToLearn,
+            }
+            for index, phase in enumerate(phases)
+        ]
 
         phases_summary, planning_summary, deferred_tasks = roadmap_scheduler.build_phases_and_summary(
-            weeks=[week.model_dump() for week in weeks],
+            weeks=seed_weeks,
             total_weeks=total_weeks,
             team_size=request.teamSize,
             hours_per_week_per_member=request.availableHoursPerWeek,
+            difficulty_level=request.difficultyLevel,
+        )
+
+        if not phases_summary:
+            raise ValueError("Capacity-aware scheduling produced zero usable phases.")
+
+        missing_skills = self._split_items(request.missingSkills)
+        weeks = self._build_public_weeks(
+            request, phase_plan_by_name, phases_summary, total_weeks, missing_skills,
         )
 
         return ProjectRoadmapResponse(
@@ -614,32 +875,27 @@ Return exactly this JSON structure:
             ),
             teamSize=request.teamSize,
             hoursPerWeekPerMember=request.availableHoursPerWeek,
-            phases=phases_summary,
-            planningSummary=planning_summary,
-            deferredTasks=deferred_tasks,
+            phases=[RoadmapPhaseSummary.model_validate(p) for p in phases_summary],
+            planningSummary=RoadmapPlanningSummary.model_validate(planning_summary),
+            deferredTasks=[RoadmapDeferredTask.model_validate(d) for d in deferred_tasks],
         )
 
     def _merge_phases_to_fit(
         self,
         phases: list[_PhasePlan],
         total_weeks: int,
+        profile: ProjectProfile,
     ) -> list[_PhasePlan]:
         """
-        When the LLM proposes more phases than there are total weeks
-        available, merge the lowest-weighted adjacent phases (concatenating
-        their tasks/deliverables/skillsToLearn) until every remaining phase
-        can have at least 1 week without exceeding total_weeks.
-
-        Replaces the previous behavior, which silently forced every single
-        phase to exactly one week whenever proposed phase count >= total
-        weeks (and could even let the total exceed the declared totalWeeks)
-        -- this was the dominant real-world cause of "every phase is one
-        week", since the prompt itself asks for 4-7 phases and short
-        projects easily fall into that case.
+        Merge the lowest-weighted adjacent phases (concatenating their
+        tasks/deliverables/skillsToLearn) down to at most
+        profile.phase_count_max (and never more than total_weeks, since a
+        phase's own scheduled span cannot exceed the project's duration).
         """
+        cap = max(3, min(profile.phase_count_max, total_weeks))
         merged = list(phases)
 
-        while len(merged) > total_weeks and len(merged) > 1:
+        while len(merged) > cap and len(merged) > 1:
             best_index = 0
             best_combined: int | None = None
 
@@ -653,7 +909,14 @@ Return exactly this JSON structure:
             first.name = f"{first.name} & {second.name}"[:120]
             first.weeks = max(1, (first.weeks or 1) + (second.weeks or 1) - 1)
             first.goal = first.goal or second.goal
-            first.tasks = (first.tasks + second.tasks)[:14]
+            # Both sides may reuse the same localIds ("T1", "T2", ...) --
+            # normalize each side under a DIFFERENT prefix first so
+            # concatenating them can never collide or scramble
+            # dependencyIds resolution downstream.
+            first.tasks = (
+                self._normalize_task_ids(first.tasks, id_prefix="A")
+                + self._normalize_task_ids(second.tasks, id_prefix="B")
+            )[:16]
             first.deliverables = list(
                 dict.fromkeys(first.deliverables + second.deliverables)
             )[:4]
@@ -667,118 +930,166 @@ Return exactly this JSON structure:
 
         return merged
 
-    def _chunk_tasks(self, tasks: list[str], duration: int) -> list[list[str]]:
-        """Split a phase's tasks across its weeks in order (contiguous
-        chunks), so early-phase tasks land in early weeks."""
-        if duration <= 1:
-            return [list(tasks)]
-
-        chunks: list[list[str]] = [[] for _ in range(duration)]
-
-        for index, task in enumerate(tasks):
-            chunks[min(index * duration // max(1, len(tasks)), duration - 1)].append(task)
-
-        return chunks
-
-    def _ensure_task_count(
+    def _build_public_weeks(
         self,
-        tasks: list[str],
-        phase: _PhasePlan,
-    ) -> list[str]:
-        """Guarantee 3-5 tasks per week without inventing content: pad with
-        review/refinement variants of the phase's own tasks."""
-        result = list(tasks)
+        request: ProjectRoadmapRequest,
+        phase_plan_by_name: dict[str, _PhasePlan],
+        phases_summary: list[dict[str, Any]],
+        total_weeks: int,
+        missing_skills: list[str],
+    ) -> list[RoadmapWeek]:
+        """
+        Builds the public per-week view FROM the scheduler's actual task
+        placement -- a week shows exactly the tasks genuinely scheduled
+        into it (which may be zero on a legitimate buffer week, never
+        invented filler). Deliverables/checkpoint are surfaced on a phase's
+        real final scheduled week, not on a pre-guessed one.
 
-        pad_sources = [task for task in phase.tasks if task not in result]
-        pad_templates = [
-            "Review and refine: {task}",
-            "Test and verify: {task}",
-        ]
+        A week's OWNING phase (used for phaseTitle/goal/deliverables/
+        checkpoint) is decided by which phase has the MOST of its own
+        tasks active that week, not by which phase's [startWeek, endWeek]
+        RANGE happens to include it -- two adjacent phases' ranges can
+        legitimately share a boundary week (phase B's first task starts
+        the same week phase A's last task ends, if capacity allows), and
+        picking "whichever phase's range was seen last" would mislabel
+        that week's phaseTitle -- which would then make the SCHEMA
+        re-validation pass (which re-derives phases purely from `weeks`,
+        see roadmap_scheduler._group_weeks_into_phases) merge phase A's
+        tasks into phase B's group, silently losing a phase on a Rewrite
+        pass even though nothing about the schedule actually changed.
+        """
+        active_tasks_by_week: dict[int, list[str]] = {week: [] for week in range(1, total_weeks + 1)}
+        active_phases_by_week: dict[int, list[dict[str, Any]]] = {week: [] for week in range(1, total_weeks + 1)}
 
-        template_index = 0
-        source_index = 0
+        for phase in phases_summary:
+            for task in phase["tasks"]:
+                for week_number in range(task["startWeek"], task["endWeek"] + 1):
+                    if 1 <= week_number <= total_weeks:
+                        active_tasks_by_week.setdefault(week_number, []).append(task["title"])
+                        active_phases_by_week.setdefault(week_number, []).append(phase)
 
-        while len(result) < 3:
-            if pad_sources:
-                source = pad_sources[source_index % len(pad_sources)]
-                source_index += 1
-            elif phase.tasks:
-                source = phase.tasks[source_index % len(phase.tasks)]
-                source_index += 1
-            else:
-                result.append(f"Progress the {phase.name} work and record blockers.")
+        owning_phase_by_week: dict[int, dict[str, Any]] = {}
+        for week_number, phases_active_this_week in active_phases_by_week.items():
+            if not phases_active_this_week:
                 continue
 
-            candidate = pad_templates[template_index % len(pad_templates)].format(
-                task=self._lower_first(source)
+            counts: dict[int, int] = {}
+            first_seen_order: dict[int, int] = {}
+            for order, phase in enumerate(phases_active_this_week):
+                key = id(phase)
+                counts[key] = counts.get(key, 0) + 1
+                first_seen_order.setdefault(key, order)
+
+            best_key = max(counts, key=lambda key: (counts[key], -first_seen_order[key]))
+            owning_phase_by_week[week_number] = next(
+                phase for phase in phases_active_this_week if id(phase) == best_key
             )
-            template_index += 1
 
-            if candidate not in result:
-                result.append(candidate)
+        weeks: list[RoadmapWeek] = []
 
-        return result[:5]
+        for week_number in range(1, total_weeks + 1):
+            phase = owning_phase_by_week.get(week_number) or (
+                phases_summary[-1] if phases_summary else None
+            )
+            original_plan = phase_plan_by_name.get(phase["name"]) if phase else None
+            week_tasks = active_tasks_by_week.get(week_number, [])
+            is_last_week_of_phase = bool(phase) and week_number == phase["endWeek"]
+            is_buffer_week = week_number not in owning_phase_by_week
 
-    def _week_goal(self, phase: _PhasePlan, week_in_phase: int, duration: int) -> str:
-        goal = phase.goal or f"Advance the {phase.name} phase."
+            weeks.append(RoadmapWeek(
+                weekNumber=week_number,
+                phaseTitle=phase["name"] if phase else "Buffer & Supervisor Feedback",
+                mainGoal=self._week_goal(phase, original_plan, is_buffer_week),
+                tasks=week_tasks,
+                deliverables=self._week_deliverables(phase, is_last_week_of_phase, is_buffer_week),
+                teamResponsibilities=self._derive_responsibilities(
+                    request, week_tasks, phase["name"] if phase else "buffer time",
+                ),
+                skillsToLearn=self._week_skills(original_plan, missing_skills, week_number),
+                riskWarning=(
+                    (original_plan.riskWarning if original_plan else "")
+                    or ("" if is_buffer_week else "Avoid expanding the scope beyond this phase's goal.")
+                ),
+                checkpoint=self._week_checkpoint(phase, original_plan, is_last_week_of_phase, is_buffer_week),
+            ))
 
-        if duration == 1:
-            return goal
+        return weeks
 
-        if week_in_phase == 1:
-            return f"Start: {goal}"
+    def _week_goal(
+        self,
+        phase: dict[str, Any] | None,
+        original_plan: _PhasePlan | None,
+        is_buffer_week: bool,
+    ) -> str:
+        if is_buffer_week or phase is None:
+            return (
+                "Buffer week: no additional scheduled work this week -- use it "
+                "for supervisor feedback, rework, or getting ahead on the next phase."
+            )
 
-        if week_in_phase == duration:
-            return f"Complete: {goal}"
-
-        return f"Continue (week {week_in_phase} of {duration}): {goal}"
+        return (original_plan.goal if original_plan and original_plan.goal else "") or (
+            phase.get("objective") or f"Advance the {phase['name']} phase."
+        )
 
     def _week_deliverables(
         self,
-        phase: _PhasePlan,
-        is_last_week: bool,
+        phase: dict[str, Any] | None,
+        is_last_week_of_phase: bool,
+        is_buffer_week: bool,
     ) -> list[str]:
-        if is_last_week and phase.deliverables:
-            return phase.deliverables[:3]
+        if is_buffer_week or phase is None:
+            return []
 
-        if phase.deliverables:
-            return [f"Progress update: {phase.deliverables[0]}"]
+        deliverables = phase.get("deliverables") or []
 
-        return [f"Progress update on {phase.name}"]
+        if is_last_week_of_phase and deliverables:
+            return deliverables[:3]
 
-    def _week_checkpoint(self, phase: _PhasePlan, is_last_week: bool) -> str:
-        if is_last_week:
+        if deliverables:
+            return [f"Progress update: {deliverables[0]}"]
+
+        return [f"Progress update on {phase['name']}"]
+
+    def _week_checkpoint(
+        self,
+        phase: dict[str, Any] | None,
+        original_plan: _PhasePlan | None,
+        is_last_week_of_phase: bool,
+        is_buffer_week: bool,
+    ) -> str:
+        if is_buffer_week or phase is None:
+            return ""
+
+        if is_last_week_of_phase:
             return (
-                phase.checkpoint
-                or f"Supervisor reviews the completed {phase.name} phase."
+                (original_plan.checkpoint if original_plan else "")
+                or f"Supervisor reviews the completed {phase['name']} phase."
             )
 
-        return f"Internal team review of {phase.name} progress."
+        return f"Internal team review of {phase['name']} progress."
 
     def _week_skills(
         self,
-        phase: _PhasePlan,
+        original_plan: _PhasePlan | None,
         missing_skills: list[str],
         week_number: int,
     ) -> list[str]:
-        skills = list(phase.skillsToLearn)
+        skills = list(original_plan.skillsToLearn) if original_plan else []
 
-        # Front-load missing skills in the first two weeks of the roadmap.
+        # Front-load missing skills in the first two weeks of the roadmap
+        # -- as skills to learn, never as a standalone vague task.
         if week_number <= 2:
             for skill in missing_skills:
                 if skill not in skills:
                     skills.insert(0, skill)
 
-        if not skills:
-            return ["progress tracking"]
-
-        return skills[:4]
+        return skills[:4] if skills else []
 
     def _derive_responsibilities(
         self,
         request: ProjectRoadmapRequest,
         week_tasks: list[str],
-        phase: _PhasePlan,
+        phase_name: str,
     ) -> list[str]:
         """
         Responsibilities are DERIVED from the week's actual tasks — one per
@@ -791,7 +1102,7 @@ Return exactly this JSON structure:
             first_task = (
                 self._lower_first(week_tasks[0])
                 if week_tasks
-                else f"progress the {phase.name} work"
+                else f"progress the {phase_name} work"
             )
             return [f"Student: lead this week's work, starting with {first_task}"]
 
@@ -812,7 +1123,7 @@ Return exactly this JSON structure:
                     )
             else:
                 responsibilities.append(
-                    f"Member {member_index + 1}: progress the {phase.name} work."
+                    f"Member {member_index + 1}: progress the {phase_name} work."
                 )
 
         return responsibilities
@@ -826,11 +1137,9 @@ Return exactly this JSON structure:
         return clean[0].lower() + clean[1:]
 
     # =========================================================================
-    # Ollama JSON parsing
-    # =========================================================================
-
-    # =========================================================================
-    # Fallback path (unchanged behavior from v1, used only when the LLM fails)
+    # Fallback path (used only when every AI provider fails) -- profile-aware,
+    # lifecycle-driven, and run through the exact same deterministic
+    # scheduler as an AI-generated candidate.
     # =========================================================================
 
     def _complete_and_validate(
@@ -840,7 +1149,7 @@ Return exactly this JSON structure:
         total_weeks: int,
     ) -> ProjectRoadmapResponse:
         raw_weeks = raw.get("weeks")
-        fallback_weeks = self._fallback_raw_roadmap(request, total_weeks)["weeks"]
+        fallback_weeks = raw["weeks"]
 
         completed_weeks: list[RoadmapWeek] = []
 
@@ -855,7 +1164,7 @@ Return exactly this JSON structure:
                 raw_week = fallback_weeks[index]
 
             completed_weeks.append(
-                self._complete_week(request, raw_week, index + 1)
+                self._complete_week(request, raw_week, index + 1, fallback_weeks[index])
             )
 
         phases_summary, planning_summary, deferred_tasks = roadmap_scheduler.build_phases_and_summary(
@@ -863,6 +1172,7 @@ Return exactly this JSON structure:
             total_weeks=total_weeks,
             team_size=request.teamSize,
             hours_per_week_per_member=request.availableHoursPerWeek,
+            difficulty_level=request.difficultyLevel,
         )
 
         return ProjectRoadmapResponse(
@@ -889,9 +1199,9 @@ Return exactly this JSON structure:
             ),
             teamSize=request.teamSize,
             hoursPerWeekPerMember=request.availableHoursPerWeek,
-            phases=phases_summary,
-            planningSummary=planning_summary,
-            deferredTasks=deferred_tasks,
+            phases=[RoadmapPhaseSummary.model_validate(p) for p in phases_summary],
+            planningSummary=RoadmapPlanningSummary.model_validate(planning_summary),
+            deferredTasks=[RoadmapDeferredTask.model_validate(d) for d in deferred_tasks],
         )
 
     def _complete_week(
@@ -899,8 +1209,8 @@ Return exactly this JSON structure:
         request: ProjectRoadmapRequest,
         raw_week: dict[str, Any],
         week_number: int,
+        fallback: dict[str, Any],
     ) -> RoadmapWeek:
-        fallback = self._fallback_week(request, week_number)
         team_count = max(1, min(request.teamSize, 5))
 
         return RoadmapWeek(
@@ -916,13 +1226,13 @@ Return exactly this JSON structure:
             tasks=self._list_of_strings(
                 raw_week.get("tasks"),
                 fallback["tasks"],
-                min_items=3,
-                max_items=5,
+                min_items=0,
+                max_items=8,
             ),
             deliverables=self._list_of_strings(
                 raw_week.get("deliverables"),
                 fallback["deliverables"],
-                min_items=1,
+                min_items=0,
                 max_items=3,
             ),
             teamResponsibilities=self._list_of_strings(
@@ -934,7 +1244,7 @@ Return exactly this JSON structure:
             skillsToLearn=self._list_of_strings(
                 raw_week.get("skillsToLearn"),
                 fallback["skillsToLearn"],
-                min_items=1,
+                min_items=0,
                 max_items=4,
             ),
             riskWarning=self._clean_text(
@@ -951,6 +1261,7 @@ Return exactly this JSON structure:
         self,
         request: ProjectRoadmapRequest,
         total_weeks: int,
+        profile: ProjectProfile,
     ) -> dict[str, Any]:
         return {
             "roadmapTitle": f"Implementation Roadmap for {request.ideaTitle}",
@@ -958,7 +1269,7 @@ Return exactly this JSON structure:
             "difficultyLevel": request.difficultyLevel,
             "teamStrategy": self._default_team_strategy(request),
             "weeks": [
-                self._fallback_week(request, week_number)
+                self._fallback_week(request, week_number, total_weeks, profile)
                 for week_number in range(1, total_weeks + 1)
             ],
             "finalAdvice": (
@@ -971,15 +1282,16 @@ Return exactly this JSON structure:
         self,
         request: ProjectRoadmapRequest,
         week_number: int,
+        total_weeks: int,
+        profile: ProjectProfile,
     ) -> dict[str, Any]:
-        total_weeks = self._normalize_weeks(request.expectedDurationWeeks)
-        phase = self._phase_for_week(total_weeks, week_number)
+        phase = self._phase_for_week(total_weeks, week_number, profile)
 
         return {
             "weekNumber": week_number,
             "phaseTitle": phase,
             "mainGoal": f"Complete the {phase.lower()} phase for {request.ideaTitle}.",
-            "tasks": self._default_tasks_for_phase(phase),
+            "tasks": self._default_tasks_for_phase(phase, request),
             "deliverables": self._default_deliverables_for_phase(phase),
             "teamResponsibilities": self._default_responsibilities(request, phase),
             "skillsToLearn": self._default_skills_to_learn(request, week_number),
@@ -987,64 +1299,188 @@ Return exactly this JSON structure:
             "checkpoint": f"Supervisor reviews the {phase.lower()} progress.",
         }
 
-    # Relative effort weight per canonical fallback phase -- drives dynamic,
-    # non-uniform phase durations in the safe-fallback path (used only when
-    # every AI provider is unavailable).
-    _FALLBACK_PHASE_WEIGHTS = {
-        "Requirements and Scope Definition": 1.0,
-        "UI/UX Design and User Flow": 1.0,
-        "Database Design and Architecture": 1.0,
-        "Authentication and Core Setup": 1.0,
-        "Core Feature Development": 3.0,
-        "AI/API Service Integration": 2.0,
-        "Dashboard and Reports": 1.5,
-        "Testing and Bug Fixing": 2.0,
-        "Documentation and User Guide": 1.0,
-        "Final Demo and Presentation Preparation": 1.0,
-        "Supervisor Feedback Improvements": 1.0,
-        "Final Deployment and Submission": 1.0,
-    }
+    # -- Fallback phase catalog -------------------------------------------
+    #
+    # Each entry: (name, relative effort weight, essential-for-this-profile).
+    # "Essential" phases are always kept when trimming to fit; the rest are
+    # dropped first on a short project. Task/deliverable content for every
+    # name below lives in _default_tasks_for_phase / _default_deliverables_for_phase.
 
-    # When a short project can't fit all 12 canonical phases, this decides
-    # which to keep -- the essentials (requirements, core work, testing,
-    # deployment) always survive; polish phases (dashboard, demo prep,
-    # supervisor-feedback pass) are dropped first.
-    _FALLBACK_INCLUSION_PRIORITY = [
-        "Requirements and Scope Definition",
-        "Core Feature Development",
-        "Testing and Bug Fixing",
-        "Final Deployment and Submission",
-        "Database Design and Architecture",
-        "Authentication and Core Setup",
-        "AI/API Service Integration",
-        "UI/UX Design and User Flow",
-        "Documentation and User Guide",
-        "Dashboard and Reports",
-        "Final Demo and Presentation Preparation",
-        "Supervisor Feedback Improvements",
+    _WEB_BASE_CATALOG: list[tuple[str, float, bool]] = [
+        ("Requirements and Scope Definition", 1.0, True),
+        ("UI/UX Design and User Flow", 1.0, False),
+        ("Database Design and Architecture", 1.0, True),
+        ("Authentication and Core Setup", 1.0, False),
+        ("Core Feature Development", 3.0, True),
+        ("AI/API Service Integration", 2.0, False),
+        ("Dashboard and Reports", 1.5, False),
+        ("Testing and Bug Fixing", 2.0, True),
+        ("Documentation and User Guide", 1.0, True),
+        ("Final Demo and Presentation Preparation", 1.0, False),
+        ("Supervisor Feedback Improvements", 1.0, False),
+        ("Final Deployment and Submission", 1.0, True),
     ]
 
-    def _dynamic_phase_ranges(self, total_weeks: int) -> list[tuple[str, int, int]]:
-        """
-        Select as many canonical fallback phases as fit total_weeks
-        (essentials first, see _FALLBACK_INCLUSION_PRIORITY), restore their
-        natural dependency order, then allocate dynamic, weighted week
-        ranges via roadmap_scheduler -- replacing the previous one-phase-
-        per-week-index mapping, which was the fallback path's own copy of
-        the "every phase is one week" bug.
-        """
-        base_order = self._phase_names(len(self._FALLBACK_INCLUSION_PRIORITY))
-        # Reserve a little slack below total_weeks so weighting has room to
-        # matter -- with phase count == total_weeks, every phase is forced
-        # to exactly 1 week (the minimum) with zero remainder to distribute,
-        # which would silently reproduce a "one week per phase" outcome
-        # even though it's no longer the static bug (see the 16-week case
-        # above, where slack naturally exists and durations do vary).
-        selected_count = min(len(base_order), max(4, total_weeks - 3))
-        selected_names = set(self._FALLBACK_INCLUSION_PRIORITY[:selected_count])
-        names = [name for name in base_order if name in selected_names]
+    _AI_DATA_CATALOG: list[tuple[str, float, bool]] = [
+        ("Dataset Sourcing and Governance", 1.5, True),
+        ("Data Preprocessing and Annotation", 1.5, True),
+        ("Baseline Model Development", 2.0, True),
+        ("Model Training and Tuning", 2.0, True),
+        ("Model Evaluation and Error Analysis", 1.5, True),
+    ]
 
-        weights = [self._FALLBACK_PHASE_WEIGHTS.get(name, 1.0) for name in names]
+    _SAFETY_CATALOG: list[tuple[str, float, bool]] = [
+        ("Safety Validation and Supervisor Review", 1.0, True),
+    ]
+
+    _SECURITY_CATALOG: list[tuple[str, float, bool]] = [
+        ("Threat Modeling and Security Requirements", 1.0, True),
+        ("Security and Penetration Testing", 1.0, True),
+    ]
+
+    _IOT_CATALOG: list[tuple[str, float, bool]] = [
+        ("Hardware and Firmware Integration", 1.5, True),
+        ("Calibration and Reliability Testing", 1.5, True),
+    ]
+
+    # Phase-granularity review: combine two closely-related, typically
+    # one-week catalog phases into one academically-clearer phase, so a
+    # profile that pulls in several domain-specific catalog blocks (AI +
+    # medical + security + ...) doesn't fragment into many thin phases.
+    # Lifecycle coverage is preserved -- the merged phase's own task
+    # content (see _default_tasks_for_phase) still covers both original
+    # areas, just as one phase instead of two. (first_name, second_name,
+    # merged_name); applied only when BOTH halves are present.
+    _GRANULARITY_MERGE_GROUPS: tuple[tuple[str, str, str], ...] = (
+        ("Baseline Model Development", "Model Training and Tuning", "Model Development and Tuning"),
+        ("Model Evaluation and Error Analysis", "Safety Validation and Supervisor Review",
+         "Model Evaluation and Safety Validation"),
+        ("Documentation and User Guide", "Final Deployment and Submission",
+         "Documentation and Final Deployment"),
+        ("Threat Modeling and Security Requirements", "Security and Penetration Testing",
+         "Security Threat Modeling and Testing"),
+        ("Hardware and Firmware Integration", "Calibration and Reliability Testing",
+         "Hardware Integration and Reliability Testing"),
+    )
+
+    # Normally target ~7-10 major phases for a full-length (16-week-ish)
+    # project -- exceptions (a very long or lifecycle-heavy project) are
+    # still allowed via profile.phase_count_max, but never above this.
+    _FALLBACK_MAX_PHASES = 10
+
+    def _apply_granularity_merges(
+        self, catalog: list[tuple[str, float, bool]],
+    ) -> list[tuple[str, float, bool]]:
+        by_name = {name: (weight, essential) for name, weight, essential in catalog}
+        order = [name for name, _weight, _essential in catalog]
+        merged_away: set[str] = set()
+        replacements: dict[str, tuple[str, float, bool]] = {}
+
+        for first_name, second_name, merged_name in self._GRANULARITY_MERGE_GROUPS:
+            if first_name not in by_name or second_name not in by_name:
+                continue
+
+            first_weight, first_essential = by_name[first_name]
+            second_weight, second_essential = by_name[second_name]
+
+            replacements[first_name] = (
+                merged_name, first_weight + second_weight, first_essential or second_essential,
+            )
+            merged_away.add(second_name)
+
+        result: list[tuple[str, float, bool]] = []
+        for name in order:
+            if name in merged_away:
+                continue
+            if name in replacements:
+                result.append(replacements[name])
+            else:
+                weight, essential = by_name[name]
+                result.append((name, weight, essential))
+
+        return result
+
+    def _fallback_phase_catalog(self, profile: ProjectProfile) -> list[tuple[str, float, bool]]:
+        catalog = list(self._WEB_BASE_CATALOG)
+
+        is_ai_data = any(
+            project_type in profile.project_types
+            for project_type in ("ai_ml", "nlp", "computer_vision", "data_science")
+        )
+
+        if is_ai_data:
+            catalog = [entry for entry in catalog if entry[0] != "AI/API Service Integration"]
+            insert_at = next(
+                (i for i, entry in enumerate(catalog) if entry[0] == "Core Feature Development"),
+                len(catalog),
+            )
+            for offset, entry in enumerate(self._AI_DATA_CATALOG):
+                catalog.insert(insert_at + offset, entry)
+
+        testing_index = next(
+            (i for i, entry in enumerate(catalog) if entry[0] == "Testing and Bug Fixing"),
+            len(catalog),
+        )
+
+        if profile.is_safety_sensitive:
+            for offset, entry in enumerate(self._SAFETY_CATALOG):
+                catalog.insert(testing_index + offset, entry)
+            testing_index += len(self._SAFETY_CATALOG)
+
+        if profile.is_security_sensitive:
+            for offset, entry in enumerate(self._SECURITY_CATALOG):
+                catalog.insert(testing_index + offset, entry)
+            testing_index += len(self._SECURITY_CATALOG)
+
+        if "iot" in profile.project_types:
+            core_index = next(
+                (i for i, entry in enumerate(catalog) if entry[0] == "Core Feature Development"),
+                len(catalog),
+            )
+            for offset, entry in enumerate(self._IOT_CATALOG):
+                catalog.insert(core_index + offset, entry)
+
+        return self._apply_granularity_merges(catalog)
+
+    def _dynamic_phase_ranges(
+        self, total_weeks: int, profile: ProjectProfile,
+    ) -> list[tuple[str, int, int]]:
+        """
+        Select as many catalog phases as fit total_weeks/profile guidance
+        (essential ones always kept, see _fallback_phase_catalog), restore
+        their natural dependency order, then allocate dynamic, weighted
+        week ranges via roadmap_scheduler.allocate_phase_durations. This is
+        only the SEED span used to build fallback weeks -- the final
+        phase/task schedule reported to .NET is still reconstructed from
+        actual scheduled task effort by build_phases_and_summary, exactly
+        like the AI-generated path.
+        """
+        catalog = self._fallback_phase_catalog(profile)
+        essential = [entry for entry in catalog if entry[2]]
+        optional = [entry for entry in catalog if not entry[2]]
+
+        # Essential phases are never dropped even if that exceeds
+        # _FALLBACK_MAX_PHASES (lifecycle completeness wins), but the
+        # OPTIONAL fill-in never pushes a normal project past it -- see
+        # _apply_granularity_merges for the primary way phase count is
+        # kept in the ~7-10 range for a full-length project.
+        target_count = max(
+            len(essential), min(profile.phase_count_max, total_weeks, self._FALLBACK_MAX_PHASES),
+        )
+        selected = list(essential)
+
+        for entry in optional:
+            if len(selected) >= target_count:
+                break
+            selected.append(entry)
+
+        # Restore original catalog order (essential-first insertion above
+        # would otherwise scramble the natural build sequence).
+        order_index = {entry[0]: i for i, entry in enumerate(catalog)}
+        selected.sort(key=lambda entry: order_index[entry[0]])
+
+        names = [entry[0] for entry in selected]
+        weights = [entry[1] for entry in selected]
         durations = roadmap_scheduler.allocate_phase_durations(weights, total_weeks)
 
         ranges: list[tuple[str, int, int]] = []
@@ -1055,184 +1491,213 @@ Return exactly this JSON structure:
 
         return ranges
 
-    def _phase_for_week(self, total_weeks: int, week_number: int) -> str:
-        for name, start_week, end_week in self._dynamic_phase_ranges(total_weeks):
+    def _phase_for_week(self, total_weeks: int, week_number: int, profile: ProjectProfile) -> str:
+        for name, start_week, end_week in self._dynamic_phase_ranges(total_weeks, profile):
             if start_week <= week_number <= end_week:
                 return name
 
-        return self._FALLBACK_INCLUSION_PRIORITY[0]
+        return "Requirements and Scope Definition"
 
     def _normalize_weeks(self, weeks: int) -> int:
-        # Reuses the caller's real requested duration (roadmap_scheduler
-        # only guards against non-numeric/pathological values) -- this used
-        # to collapse every project into a fixed [6, 12] band regardless of
-        # what was actually requested, which was the primary cause of every
-        # phase ending up with a static one-week duration for any project
-        # whose real duration fell outside that band.
         return roadmap_scheduler.normalize_total_weeks(weeks)
 
-    def _phase_names(self, total_weeks: int) -> list[str]:
-        base = [
-            "Requirements and Scope Definition",
-            "UI/UX Design and User Flow",
-            "Database Design and Architecture",
-            "Authentication and Core Setup",
-            "Core Feature Development",
-            "AI/API Service Integration",
-            "Dashboard and Reports",
-            "Testing and Bug Fixing",
-            "Documentation and User Guide",
-            "Final Demo and Presentation Preparation",
-            "Supervisor Feedback Improvements",
-            "Final Deployment and Submission",
-        ]
+    def _default_tasks_for_phase(self, phase: str, request: ProjectRoadmapRequest) -> list[str]:
+        title = request.ideaTitle or "the project"
 
-        return base[:total_weeks]
-
-    def _default_tasks_for_phase(self, phase: str) -> list[str]:
         mapping = {
             "Requirements and Scope Definition": [
-                "Refine the final problem statement.",
-                "Define target users and MVP features.",
-                "Confirm project boundaries with the supervisor.",
-                "Write functional requirements.",
+                f"Refine the final problem statement for {title}.",
+                "Define target users and MVP feature list.",
+                "Confirm project boundaries and out-of-scope items with the supervisor.",
+                "Write functional requirements for each core feature.",
             ],
             "UI/UX Design and User Flow": [
-                "Design main page layouts.",
-                "Create the navigation flow.",
-                "Prepare simple wireframes.",
-                "Review user experience with the team.",
+                "Design the main page layouts and navigation flow.",
+                "Create wireframes for the primary user workflow.",
+                "Review the user experience and page flow with the team.",
             ],
             "Database Design and Architecture": [
-                "Identify main entities.",
-                "Create database tables and relationships.",
-                "Plan how project data will be stored.",
-                "Review database schema with the supervisor.",
+                "Identify the main entities and their relationships.",
+                "Create the database tables, keys, and relationships in PostgreSQL.",
+                "Document how project data will be stored and queried.",
+                "Review the database schema with the supervisor.",
             ],
             "Authentication and Core Setup": [
-                "Set up the project structure.",
-                "Implement login and user roles.",
-                "Prepare the main dashboard layout.",
-                "Connect the database to the web app.",
+                "Set up the ASP.NET Core Razor Pages project structure.",
+                "Implement login, roles, and access control.",
+                "Connect the web application to the PostgreSQL database.",
             ],
             "Core Feature Development": [
-                "Implement the main project workflow.",
-                "Connect forms to the database.",
-                "Validate user inputs.",
-                "Test the core feature manually.",
+                f"Implement the main {title} workflow end to end.",
+                "Connect the primary forms to the database with validation.",
+                "Build the core business logic for the main use case.",
+                "Manually verify the core feature against the requirements.",
             ],
             "AI/API Service Integration": [
-                "Create or connect the Python FastAPI endpoint.",
-                "Send selected project data to the AI service.",
-                "Display structured AI results in the web app.",
-                "Handle fallback if the AI service is unavailable.",
+                "Create the Python FastAPI endpoint for the AI feature.",
+                "Send the relevant project data from .NET to the AI service.",
+                "Display the structured AI results in the web application.",
+                "Handle a graceful fallback when the AI service is unavailable.",
             ],
             "Dashboard and Reports": [
-                "Create summary cards.",
-                "Display roadmap and analysis results.",
-                "Improve readability of the UI.",
-                "Add progress indicators.",
+                "Build summary cards for the main dashboard.",
+                "Display roadmap/analysis results in a readable layout.",
+                "Add progress indicators for ongoing work.",
             ],
             "Testing and Bug Fixing": [
-                "Test all main user flows.",
-                "Fix validation and database issues.",
-                "Check edge cases.",
-                "Improve error messages.",
+                "Write and run functional tests for the main user flows.",
+                "Fix validation and database issues found during testing.",
+                "Test edge cases (empty input, invalid data, concurrent use).",
+                "Improve error messages shown to the user.",
             ],
             "Documentation and User Guide": [
-                "Write technical documentation.",
-                "Prepare screenshots.",
-                "Explain system features clearly.",
-                "Write setup and run instructions.",
+                "Write the technical documentation for the implemented system.",
+                "Prepare annotated screenshots of each major screen.",
+                "Write setup and run instructions for both the .NET and Python services.",
             ],
             "Final Demo and Presentation Preparation": [
-                "Prepare the demo scenario.",
-                "Practice explaining the AI workflow.",
-                "Finalize presentation points.",
-                "Test the full project before the demo.",
+                "Prepare a concrete demo scenario covering the core workflow.",
+                "Practice explaining the AI/service integration to the panel.",
+                "Test the full project end to end before the demo.",
             ],
             "Supervisor Feedback Improvements": [
-                "Apply supervisor feedback.",
-                "Polish UI and reports.",
-                "Fix remaining issues.",
-                "Improve final deliverables.",
+                "Apply the supervisor's feedback from the last checkpoint.",
+                "Polish the UI and reports based on that feedback.",
+                "Verify the previously reported issues are actually fixed.",
             ],
             "Final Deployment and Submission": [
-                "Prepare final project package.",
-                "Check database and service configuration.",
-                "Prepare final submission files.",
-                "Run the final demo test.",
+                "Prepare the final project package and configuration.",
+                "Verify the database and AI service configuration for submission.",
+                "Assemble the final submission files per the FYP checklist.",
+                "Run a final end-to-end demo test before submission.",
+            ],
+            "Dataset Sourcing and Governance": [
+                f"Identify and collect a dataset appropriate for {title}.",
+                "Document dataset provenance, licensing, and consent constraints.",
+                "Define a data governance policy (storage, access, retention).",
+            ],
+            "Data Preprocessing and Annotation": [
+                "Clean and normalize the raw dataset (missing values, duplicates, formatting).",
+                "Build the text/data preprocessing pipeline (tokenization, normalization).",
+                "Annotate or label a representative sample of the data.",
+                "Validate preprocessing output on a held-out sample of records.",
+            ],
+            "Baseline Model Development": [
+                "Implement a simple baseline model as a performance reference.",
+                "Train the baseline on the prepared dataset.",
+                "Record the baseline's metrics for later comparison.",
+            ],
+            "Model Training and Tuning": [
+                "Select and implement the target model architecture.",
+                "Train the model and tune its key hyperparameters.",
+                "Track training runs and their configurations for reproducibility.",
+            ],
+            "Model Evaluation and Error Analysis": [
+                "Evaluate the trained model on a held-out test set with concrete metrics.",
+                "Perform error analysis on a sample of misclassified/incorrect cases.",
+                "Document the model's known limitations and failure patterns.",
+            ],
+            "Safety Validation and Supervisor Review": [
+                "Define explicit safety boundaries and disclaimers for the AI output.",
+                "Run the system against known failure-case / edge-case scenarios.",
+                "Review the AI output and safety boundaries with the supervisor or domain expert.",
+            ],
+            "Threat Modeling and Security Requirements": [
+                "Identify the system's attack surface and likely threat scenarios.",
+                "Define security requirements (authentication, authorization, data protection).",
+                "Document the threat model and mitigation plan.",
+            ],
+            "Security and Penetration Testing": [
+                "Test authentication and access-control boundaries for common bypasses.",
+                "Run a basic vulnerability/security review of the deployed endpoints.",
+                "Fix and re-verify any security issues found.",
+            ],
+            "Hardware and Firmware Integration": [
+                "Assemble and wire the required hardware/sensor components.",
+                "Implement the firmware/communication logic for the device.",
+                "Integrate the hardware layer with the backend service.",
+            ],
+            "Calibration and Reliability Testing": [
+                "Calibrate sensor readings against known reference values.",
+                "Run extended reliability/stress testing of the hardware-software link.",
+                "Document calibration results and reliability findings.",
+            ],
+            # Phase-granularity merges (see _GRANULARITY_MERGE_GROUPS) --
+            # curated, trimmed task lists for the combined phase rather
+            # than a raw concatenation of both source phases' tasks.
+            "Model Development and Tuning": [
+                "Implement a simple baseline model as a performance reference.",
+                "Select and implement the target model architecture.",
+                "Train the model and tune its key hyperparameters against the baseline.",
+                "Track training runs and their configurations for reproducibility.",
+            ],
+            "Model Evaluation and Safety Validation": [
+                "Evaluate the trained model on a held-out test set with concrete metrics.",
+                "Perform error analysis on a sample of misclassified/incorrect cases.",
+                "Define explicit safety boundaries and disclaimers for the AI output.",
+                "Review the model output and safety boundaries with the supervisor or domain expert.",
+            ],
+            "Documentation and Final Deployment": [
+                "Write the technical documentation for the implemented system.",
+                "Write setup and run instructions for both the .NET and Python services.",
+                "Prepare the final project package and configuration.",
+                "Run a final end-to-end demo test before submission.",
+            ],
+            "Security Threat Modeling and Testing": [
+                "Identify the system's attack surface and likely threat scenarios.",
+                "Define security requirements (authentication, authorization, data protection).",
+                "Test authentication and access-control boundaries for common bypasses.",
+                "Fix and re-verify any security issues found.",
+            ],
+            "Hardware Integration and Reliability Testing": [
+                "Assemble and wire the required hardware/sensor components.",
+                "Implement the firmware/communication logic for the device.",
+                "Calibrate sensor readings against known reference values.",
+                "Run extended reliability/stress testing of the hardware-software link.",
             ],
         }
 
         return mapping.get(
             phase,
             [
-                "Work on the planned project phase.",
-                "Review progress with the team.",
-                "Prepare a deliverable for this week.",
+                f"Progress the {phase.lower()} work for {title}.",
+                "Review progress with the team and record blockers.",
+                "Prepare a concrete deliverable for this phase.",
             ],
         )
 
     def _default_deliverables_for_phase(self, phase: str) -> list[str]:
         mapping = {
-            "Requirements and Scope Definition": [
-                "Requirements document",
-                "MVP feature list",
-            ],
-            "UI/UX Design and User Flow": [
-                "Wireframes",
-                "User flow diagram",
-            ],
-            "Database Design and Architecture": [
-                "Database schema",
-                "Entity relationship plan",
-            ],
-            "Authentication and Core Setup": [
-                "Authentication pages",
-                "Initial dashboard",
-            ],
-            "Core Feature Development": [
-                "Working core feature",
-                "Database-connected forms",
-            ],
-            "AI/API Service Integration": [
-                "Connected AI endpoint",
-                "Displayed AI results",
-            ],
-            "Dashboard and Reports": [
-                "Dashboard cards",
-                "Report section",
-            ],
-            "Testing and Bug Fixing": [
-                "Tested workflows",
-                "Bug fix list",
-            ],
-            "Documentation and User Guide": [
-                "Technical documentation",
-                "User guide",
-            ],
-            "Final Demo and Presentation Preparation": [
-                "Demo script",
-                "Presentation outline",
-            ],
-            "Supervisor Feedback Improvements": [
-                "Improved UI",
-                "Updated features",
-            ],
-            "Final Deployment and Submission": [
-                "Final project package",
-                "Submission checklist",
-            ],
+            "Requirements and Scope Definition": ["Requirements document", "MVP feature list"],
+            "UI/UX Design and User Flow": ["Wireframes", "User flow diagram"],
+            "Database Design and Architecture": ["Database schema", "Entity relationship plan"],
+            "Authentication and Core Setup": ["Authentication pages", "Initial project skeleton"],
+            "Core Feature Development": ["Working core feature", "Database-connected forms"],
+            "AI/API Service Integration": ["Connected AI endpoint", "Displayed AI results"],
+            "Dashboard and Reports": ["Dashboard cards", "Report section"],
+            "Testing and Bug Fixing": ["Tested workflows", "Bug fix list"],
+            "Documentation and User Guide": ["Technical documentation", "User guide"],
+            "Final Demo and Presentation Preparation": ["Demo script", "Presentation outline"],
+            "Supervisor Feedback Improvements": ["Improved UI", "Updated features"],
+            "Final Deployment and Submission": ["Final project package", "Submission checklist"],
+            "Dataset Sourcing and Governance": ["Sourced dataset", "Data governance notes"],
+            "Data Preprocessing and Annotation": ["Cleaned dataset", "Preprocessing pipeline"],
+            "Baseline Model Development": ["Baseline model", "Baseline metrics"],
+            "Model Training and Tuning": ["Trained model", "Training configuration log"],
+            "Model Evaluation and Error Analysis": ["Evaluation report", "Error analysis notes"],
+            "Safety Validation and Supervisor Review": ["Safety boundary documentation", "Supervisor sign-off notes"],
+            "Threat Modeling and Security Requirements": ["Threat model document", "Security requirements list"],
+            "Security and Penetration Testing": ["Security test report", "Fixed vulnerabilities list"],
+            "Hardware and Firmware Integration": ["Assembled hardware unit", "Firmware build"],
+            "Calibration and Reliability Testing": ["Calibration report", "Reliability test results"],
+            "Model Development and Tuning": ["Trained model", "Training configuration log"],
+            "Model Evaluation and Safety Validation": ["Evaluation report", "Safety boundary documentation"],
+            "Documentation and Final Deployment": ["Technical documentation", "Final project package"],
+            "Security Threat Modeling and Testing": ["Threat model document", "Security test report"],
+            "Hardware Integration and Reliability Testing": ["Assembled hardware unit", "Reliability test results"],
         }
 
-        return mapping.get(
-            phase,
-            [
-                f"{phase} output",
-                "Updated project progress",
-            ],
-        )
+        return mapping.get(phase, [f"{phase} output", "Updated project progress"])
 
     def _default_responsibilities(
         self,
@@ -1283,6 +1748,59 @@ Return exactly this JSON structure:
                 "Member 3: test database-connected features.",
                 "Member 4: write validation scenarios.",
                 "Member 5: document feature behavior.",
+            ]
+        elif "dataset" in phase_lower or "data preprocessing" in phase_lower or "annotation" in phase_lower:
+            responsibilities = [
+                "Member 1: source and document the dataset.",
+                "Member 2: build the preprocessing/cleaning pipeline.",
+                "Member 3: annotate/label the sample data.",
+                "Member 4: validate preprocessing output quality.",
+                "Member 5: document governance and licensing constraints.",
+            ]
+        elif (
+            "baseline model" in phase_lower
+            or "model training" in phase_lower
+            or "model tuning" in phase_lower
+            or "model development" in phase_lower
+        ):
+            responsibilities = [
+                "Member 1: implement and train the model.",
+                "Member 2: tune hyperparameters and track experiments.",
+                "Member 3: prepare the evaluation harness.",
+                "Member 4: document model architecture decisions.",
+                "Member 5: prepare training data splits.",
+            ]
+        elif "model evaluation" in phase_lower or "error analysis" in phase_lower:
+            responsibilities = [
+                "Member 1: run evaluation metrics on the test set.",
+                "Member 2: perform error analysis on failure cases.",
+                "Member 3: document model limitations.",
+                "Member 4: compare against the baseline.",
+                "Member 5: prepare the evaluation report.",
+            ]
+        elif "safety" in phase_lower:
+            responsibilities = [
+                "Member 1: define safety boundaries and disclaimers.",
+                "Member 2: run failure-case/edge-case testing.",
+                "Member 3: coordinate supervisor/domain-expert review.",
+                "Member 4: document safety findings.",
+                "Member 5: verify fixes to any safety issue found.",
+            ]
+        elif "threat model" in phase_lower or "security" in phase_lower:
+            responsibilities = [
+                "Member 1: define the threat model and attack surface.",
+                "Member 2: implement security controls.",
+                "Member 3: run security/penetration tests.",
+                "Member 4: document findings and mitigations.",
+                "Member 5: verify fixes against the original threat model.",
+            ]
+        elif "hardware" in phase_lower or "firmware" in phase_lower or "calibration" in phase_lower:
+            responsibilities = [
+                "Member 1: assemble and wire hardware components.",
+                "Member 2: implement firmware/communication logic.",
+                "Member 3: calibrate sensors against reference values.",
+                "Member 4: run reliability/stress testing.",
+                "Member 5: document hardware integration results.",
             ]
         elif "ai" in phase_lower or "api" in phase_lower:
             responsibilities = [

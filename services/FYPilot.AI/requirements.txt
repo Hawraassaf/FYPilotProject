@@ -18,3 +18,4 @@ seaborn==0.13.2
 plotly==5.24.1
 groq==1.5.0
 google-genai==2.12.1
+json-repair==0.61.7

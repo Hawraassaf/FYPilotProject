@@ -183,16 +183,32 @@ class WorkloadReconciliationTests(unittest.TestCase):
         self.assertEqual(summary["workloadByMember"][0]["assignedHours"], summary["totalPlannedHours"])
 
     def test_two_member_collaboration_splits_without_duplication(self):
+        # Weekly-per-member capacity (10h) deliberately smaller than the
+        # task's own effort, so a single member genuinely cannot absorb it
+        # in one week -- collaboration here is capacity-driven, not an
+        # arbitrary "complex tasks always get 2 people" rule.
         weeks = [_week(1, "Integration", tasks=[
             "Implement OAuth integration with Google Calendar FreeBusy API",
         ])]
-        phases, summary, _ = roadmap_scheduler.build_phases_and_summary(weeks, 1, 2, 40)
+        phases, summary, _ = roadmap_scheduler.build_phases_and_summary(weeks, 1, 2, 10)
         task = phases[0]["tasks"][0]
         self.assertEqual(len(task["memberAllocations"]), 2)
         total_allocated = sum(a["allocatedHours"] for a in task["memberAllocations"])
         self.assertEqual(total_allocated, task["estimatedHours"])
         total_workload = sum(m["assignedHours"] for m in summary["workloadByMember"])
         self.assertEqual(total_workload, summary["totalPlannedHours"])
+
+    def test_single_member_handles_task_within_their_own_capacity(self):
+        # The complement of the above: when one member's own weekly
+        # capacity can already absorb the task, the scheduler assigns it to
+        # a single owner instead of manufacturing a second collaborator.
+        weeks = [_week(1, "Integration", tasks=[
+            "Implement OAuth integration with Google Calendar FreeBusy API",
+        ])]
+        phases, _, _ = roadmap_scheduler.build_phases_and_summary(weeks, 1, 2, 40)
+        task = phases[0]["tasks"][0]
+        self.assertEqual(len(task["memberAllocations"]), 1)
+        self.assertEqual(task["memberAllocations"][0]["allocatedHours"], task["estimatedHours"])
 
     def test_three_member_workloads_sum_to_total_planned_hours(self):
         weeks = [
@@ -267,11 +283,17 @@ class BuildPhasesAndSummaryTests(unittest.TestCase):
         self.assertEqual(len(summary["workloadByMember"]), 1)
 
     def test_team_size_two_divides_independent_tasks(self):
-        weeks = [
-            _week(i, f"Phase {i}", tasks=[f"Implement feature {i}", f"Design feature {i}", f"Test feature {i}"])
-            for i in range(1, 5)
-        ]
-        phases, _, _ = roadmap_scheduler.build_phases_and_summary(weeks, 4, 2, 40)
+        # Two genuinely distinct, same-tier (both "setup_config") tasks in
+        # one phase/week -- independent enough to share the week, and
+        # worded so they don't collapse into each other under duplicate
+        # detection (unlike e.g. "Implement feature 1" / "Design feature
+        # 1", whose core tokens are identical once the shared "feature 1"
+        # noun and their action verbs are stripped).
+        weeks = [_week(1, "Setup", tasks=[
+            "Initialize the ASP.NET Core project structure",
+            "Configure the PostgreSQL connection string",
+        ])]
+        phases, _, _ = roadmap_scheduler.build_phases_and_summary(weeks, 1, 2, 40)
         assigned_members = {
             member for phase in phases for task in phase["tasks"] for member in task["assignedMembers"]
         }
@@ -485,6 +507,63 @@ class WeeklyCapacityTests(unittest.TestCase):
         _, summary, _ = roadmap_scheduler.build_phases_and_summary(weeks, 5, 1, 40)
         self.assertEqual([entry["week"] for entry in summary["weeklyCapacity"]], [1, 2, 3, 4, 5])
 
+    def test_no_feasible_week_exceeds_capacity(self):
+        # A deliberately heavy task (complex_workflow ~24h PERT) against a
+        # tight weekly capacity (10h/week) -- if reported feasible, no week
+        # may show more planned hours than its nominal capacity.
+        weeks = [_week(1, "Phase", tasks=[
+            "Implement the core booking workflow business logic",
+        ], goal="core")]
+        phases, summary, _ = roadmap_scheduler.build_phases_and_summary(weeks, 4, 1, 10)
+        if summary["scheduleFeasibility"] != "over_capacity":
+            for entry in summary["weeklyCapacity"]:
+                self.assertLessEqual(entry["plannedHours"], entry["capacityHours"])
+
+    def test_heavy_task_spans_multiple_weeks_under_tight_capacity(self):
+        weeks = [_week(1, "Phase", tasks=[
+            "Implement the core booking workflow business logic",
+        ])]
+        phases, summary, _ = roadmap_scheduler.build_phases_and_summary(weeks, 4, 1, 10)
+        task = phases[0]["tasks"][0]
+        self.assertGreater(task["estimatedHours"], 10)
+        self.assertGreater(task["endWeek"], task["startWeek"])
+
+    def test_no_task_scheduled_outside_total_duration(self):
+        weeks = [_week(i, f"Phase {i}", tasks=[f"Implement part {i}", f"Design part {i}"]) for i in range(1, 4)]
+        phases, _, _ = roadmap_scheduler.build_phases_and_summary(weeks, 3, 1, 6)
+        for phase in phases:
+            for task in phase["tasks"]:
+                self.assertGreaterEqual(task["startWeek"], 1)
+                self.assertLessEqual(task["endWeek"], 3)
+
+    def test_independent_same_tier_tasks_can_share_a_week(self):
+        # Two independent setup-type tasks (same phase, same stage tier) --
+        # with ample capacity, both should land in week 1 rather than being
+        # forced one-per-week by an artificial sequential chain.
+        weeks = [_week(1, "Setup", tasks=[
+            "Initialize the ASP.NET Core project structure",
+            "Configure the PostgreSQL connection string",
+        ])]
+        phases, _, _ = roadmap_scheduler.build_phases_and_summary(weeks, 2, 1, 40)
+        tasks = phases[0]["tasks"]
+        self.assertEqual(len(tasks), 2)
+        self.assertEqual(tasks[0]["startWeek"], tasks[1]["startWeek"])
+        # Same-tier tasks have no dependency on each other.
+        self.assertNotIn(tasks[1]["taskId"], tasks[0]["dependencies"])
+        self.assertNotIn(tasks[0]["taskId"], tasks[1]["dependencies"])
+
+    def test_weekly_totals_equal_distributed_task_effort(self):
+        weeks = [_week(1, "Phase", tasks=[
+            "Implement the core booking workflow business logic",
+            "Design the login page",
+        ])]
+        phases, summary, _ = roadmap_scheduler.build_phases_and_summary(weeks, 4, 1, 10)
+        all_tasks = phases[0]["tasks"]
+
+        total_task_hours = sum(task["estimatedHours"] for task in all_tasks)
+        total_weekly_planned = sum(entry["plannedHours"] for entry in summary["weeklyCapacity"])
+        self.assertEqual(total_task_hours, total_weekly_planned)
+
 
 class FallbackRoadmapTests(unittest.TestCase):
     def _request(self, **overrides):
@@ -498,10 +577,27 @@ class FallbackRoadmapTests(unittest.TestCase):
         return ProjectRoadmapRequest(**defaults)
 
     def test_fallback_respects_requested_total_weeks(self):
+        # Phase spans are reconstructed from actually-scheduled task weeks
+        # (not a pre-allocated weight split), so they stay within
+        # [1, totalWeeks] and progress in phase order, but their sum is no
+        # longer required to equal totalWeeks exactly -- a phase may start
+        # the same week its predecessor's last task ends (shared boundary,
+        # scheduled correctly), and when the template's full scope doesn't
+        # fit the requested capacity (see scheduleFeasibility), the tail
+        # phases are honestly compressed rather than force-tiled.
         agent = ProjectRoadmapAgent()
         response = agent.build_safe_fallback(self._request(expectedDurationWeeks=18))
         self.assertEqual(response.totalWeeks, 18)
-        self.assertEqual(sum(phase.durationWeeks for phase in response.phases), 18)
+
+        previous_start = 0
+        for phase in response.phases:
+            self.assertGreaterEqual(phase.startWeek, 1)
+            self.assertLessEqual(phase.endWeek, 18)
+            self.assertGreaterEqual(phase.endWeek, phase.startWeek)
+            self.assertGreaterEqual(phase.startWeek, previous_start)
+            previous_start = phase.startWeek
+
+        self.assertEqual(response.phases[0].startWeek, 1)
 
     def test_fallback_respects_team_size(self):
         agent = ProjectRoadmapAgent()

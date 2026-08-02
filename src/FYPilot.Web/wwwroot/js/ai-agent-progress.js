@@ -468,7 +468,16 @@
         }
 
         window.setTimeout(function () {
-            window.location.href = window.location.pathname + window.location.search;
+            // completedJobId tells the reloaded page's own OnGetAsync which
+            // just-finished job to reconstruct the transient AI output from
+            // (e.g. IdeaComparison.cshtml.cs's ComparisonResponse) -- the
+            // ranking itself is never domain-persisted, only the job's
+            // ResultJson, so without this the page reloads in its default
+            // no-recommendation state even though the job completed and
+            // saved successfully.
+            var url = new URL(window.location.href);
+            url.searchParams.set("completedJobId", self.jobId);
+            window.location.href = url.toString();
         }, 500);
     };
 

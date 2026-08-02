@@ -166,6 +166,12 @@ public class IdeaComparisonModel(
         // review rejected the output, one rewrite was attempted using the
         // reviewer's own feedback, and it was then approved on re-review.
         "approved_after_revision" => ("bg-success", "Reviewed · revised after feedback"),
+        // The job path's own looser blocking policy (see
+        // _classify_idea_comparison_issues in the worker) -- the Reviewer
+        // found only non-blocking warnings (no validated high/critical
+        // issue), so the comparison shown is real AI output, not a fallback.
+        "approved_with_warnings" => ("bg-success", "Reviewed · minor notes"),
+        "approved_after_revision_with_warnings" => ("bg-success", "Reviewed · revised after feedback, minor notes"),
         // Rejected again after a rewrite, or no usable rewrite was
         // possible at all (no actionable feedback) -- the safe fallback is
         // shown, never a second rewrite attempt.

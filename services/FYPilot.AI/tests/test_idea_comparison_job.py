@@ -24,6 +24,13 @@ catch a regression in the specific wording the semantic reviewer keys off
 of (forbidding score-proxy language, requiring concrete evidence
 categories), not to judge real model output.
 
+IdeaComparisonBlockingPolicyTests unit-tests _classify_idea_comparison_issues
+directly (no LLM, no fakes, no full worker run) -- this job path's own
+blocking policy, deliberately separate from the shared ReviewDecisionEngine
+(still used unchanged by every other agent and the synchronous endpoint),
+which only blocks a comparison for a validated high/critical issue on the
+closed blocking-category allowlist; everything else becomes a warning.
+
 The provider-fallback/cancellation MECHANICS themselves (provider_started,
 fallback_started, provider_succeeded/failed sequencing) are already covered
 generically against fake providers in test_provider_chain_reporter.py,
@@ -34,6 +41,7 @@ Run from services/FYPilot.AI:
     python -m unittest discover tests
 """
 
+import json
 import os
 import sys
 import unittest
@@ -55,7 +63,7 @@ from app.jobs.plans import stage_keys_for  # noqa: E402
 from app.jobs.reporter import ProgressReporter  # noqa: E402
 from app.jobs.workers import idea_comparison_worker  # noqa: E402
 from app.jobs.workers.idea_comparison_worker import run_idea_comparison_job  # noqa: E402
-from app.review.models import ReviewerIssue  # noqa: E402
+from app.review.models import ReviewerFindings, ReviewerIssue  # noqa: E402
 from app.review.registry import get_agent_config  # noqa: E402
 from app.services.llm_provider import LLMResult, ProviderChain  # noqa: E402
 
@@ -130,9 +138,9 @@ class IdeaComparisonJobWorkerTests(unittest.TestCase):
         for key in snapshot:
             self.assertNotIn("percent", key.lower())
 
-    def test_global_deadline_is_ninety_seconds_not_per_provider_call(self):
-        """The job path's whole point (vs the 45s synchronous endpoint) is one larger 90s budget for the ENTIRE job, not per call -- see the module docstring."""
-        self.assertEqual(idea_comparison_worker._GLOBAL_DEADLINE_SECONDS, 90.0)
+    def test_global_deadline_is_one_budget_for_the_whole_job_not_per_provider_call(self):
+        """The job path's whole point (vs the 45s synchronous endpoint) is one larger budget for the ENTIRE job, not per call -- see the module docstring."""
+        self.assertEqual(idea_comparison_worker._GLOBAL_DEADLINE_SECONDS, 180.0)
 
 
 # =============================================================================
@@ -292,6 +300,17 @@ def _make_fake_generate_json(*, writer_data, reviewer_data_sequence, rewrite_dat
 
 
 class IdeaComparisonRewriteFlowTests(unittest.TestCase):
+    """
+    Exercises the rewrite-on-rejection mechanism itself with
+    _SEMANTIC_REVIEW_CAN_BLOCK patched on -- this mechanism is a temporary
+    stop-gap OFF by default in production right now (see that flag's
+    docstring), but stays fully tested here so it's ready to re-enable once
+    review strictness is re-tuned. IdeaComparisonJobWorkerTests' own
+    test_semantic_review_never_blocks_by_default proves the actual
+    production default (flag off) never rejects, using the real module
+    state with nothing patched.
+    """
+
     def setUp(self):
         self.manager = AgentJobManager()
         self.manager.create_job("job-1", "IdeaComparisonAgent", stage_keys_for("IdeaComparisonAgent"))
@@ -300,13 +319,14 @@ class IdeaComparisonRewriteFlowTests(unittest.TestCase):
     def _run(self, *, global_deadline_seconds=None, **kwargs):
         fake_generate_json, state = _make_fake_generate_json(**kwargs)
 
-        if global_deadline_seconds is not None:
-            with patch.object(ProviderChain, "generate_json", new=fake_generate_json), \
-                 patch.object(idea_comparison_worker, "_GLOBAL_DEADLINE_SECONDS", global_deadline_seconds):
-                result = run_idea_comparison_job(_build_request(), self.reporter)
-        else:
-            with patch.object(ProviderChain, "generate_json", new=fake_generate_json):
-                result = run_idea_comparison_job(_build_request(), self.reporter)
+        with patch.object(idea_comparison_worker, "_SEMANTIC_REVIEW_CAN_BLOCK", True):
+            if global_deadline_seconds is not None:
+                with patch.object(ProviderChain, "generate_json", new=fake_generate_json), \
+                     patch.object(idea_comparison_worker, "_GLOBAL_DEADLINE_SECONDS", global_deadline_seconds):
+                    result = run_idea_comparison_job(_build_request(), self.reporter)
+            else:
+                with patch.object(ProviderChain, "generate_json", new=fake_generate_json):
+                    result = run_idea_comparison_job(_build_request(), self.reporter)
 
         return result, state
 
@@ -382,16 +402,16 @@ class IdeaComparisonRewriteFlowTests(unittest.TestCase):
 
     def test_deadline_gated_skip_when_insufficient_time_remains_for_a_rewrite(self):
         """
-        21s comfortably clears prepare_context's 10s and the first review's
-        20s minimums (the fakes are instant, so real elapsed time is
-        milliseconds), but is under the rewrite gate's 25s minimum -- forces
+        70s comfortably clears prepare_context's 15s and the first review's
+        60s minimums (the fakes are instant, so real elapsed time is
+        milliseconds), but is under the rewrite gate's 90s minimum -- forces
         rewrite_unavailable_deadline without needing to fake real elapsed
         time.
         """
         result, state = self._run(
             writer_data=_SAMPLE_COMPARISON,
             reviewer_data_sequence=[_rejecting_findings()],
-            global_deadline_seconds=21.0,
+            global_deadline_seconds=70.0,
         )
 
         self.assertEqual(result["review"]["status"], "rewrite_unavailable_deadline")
@@ -399,6 +419,249 @@ class IdeaComparisonRewriteFlowTests(unittest.TestCase):
         self.assertEqual(state["reviewer_calls"], 1)
         stage_states = self.manager.snapshot("job-1")["stageStates"]
         self.assertEqual(stage_states["rewrite"], "skipped")
+
+    def test_deterministic_schema_failure_blocks_regardless_of_reviewer_output(self):
+        """
+        Deterministic/security failures (here: schema validation) are hard
+        blockers "regardless of semantic review" per the looser policy's own
+        spec -- even a writer output the Reviewer would have approved
+        cleanly must never be shown if it fails structural validation.
+        whyThisRank exceeding the 32-word limit fails
+        IdeaComparisonCandidateSchema before the Reviewer is ever called.
+        """
+        overlong_comparison = json.loads(json.dumps(_SAMPLE_COMPARISON))
+        overlong_comparison["ideas"][0]["whyThisRank"] = " ".join(["word"] * 40)
+
+        result, state = self._run(
+            writer_data=overlong_comparison,
+            reviewer_data_sequence=[_approving_findings()],
+        )
+
+        self.assertEqual(result["review"]["status"], "schema_invalid")
+        self.assertFalse(result["comparison"]["available"])
+        # The Reviewer must never even be called -- the schema check runs
+        # (and blocks) before the "review" stage starts.
+        self.assertEqual(state["reviewer_calls"], 0)
+        stage_states = self.manager.snapshot("job-1")["stageStates"]
+        self.assertEqual(stage_states["generate"], "failed")
+        self.assertEqual(stage_states["review"], "skipped")
+
+
+class IdeaComparisonSemanticReviewStopGapTests(unittest.TestCase):
+    """
+    Proves the ACTUAL production default -- _SEMANTIC_REVIEW_CAN_BLOCK is
+    NOT patched here at all, unlike every other fake-provider test class in
+    this file, which explicitly turns it on to exercise the (currently
+    dormant) rewrite mechanism. This is the one place that tests reality as
+    it ships today: the semantic Reviewer runs and its findings are
+    recorded, but even a critical, on-allowlist issue can never reject a
+    real comparison or trigger a rewrite.
+    """
+
+    def setUp(self):
+        self.manager = AgentJobManager()
+        self.manager.create_job("job-1", "IdeaComparisonAgent", stage_keys_for("IdeaComparisonAgent"))
+        self.reporter = ProgressReporter("job-1", self.manager)
+
+    def test_a_critical_blocking_category_issue_never_rejects_by_default(self):
+        fake_generate_json, state = _make_fake_generate_json(
+            writer_data=_SAMPLE_COMPARISON,
+            reviewer_data_sequence=[_rejecting_findings()],  # severity=critical, category=fabricated_score
+        )
+
+        with patch.object(ProviderChain, "generate_json", new=fake_generate_json):
+            result = run_idea_comparison_job(_build_request(), self.reporter)
+
+        self.assertIn(result["review"]["status"], ("approved", "approved_with_warnings"))
+        self.assertTrue(result["review"]["usable"])
+        self.assertTrue(result["comparison"]["available"])
+        # Never attempted a rewrite -- there was nothing to recover from,
+        # since nothing ever blocked in the first place.
+        self.assertEqual(state["reviewer_calls"], 1)
+        stage_states = self.manager.snapshot("job-1")["stageStates"]
+        self.assertEqual(stage_states["review"], "completed")
+        self.assertEqual(stage_states["rewrite"], "skipped")
+
+
+def _findings_with_one_issue(*, severity: str, category: str, requires_correction: bool = True) -> ReviewerFindings:
+    return ReviewerFindings(
+        strengths=[],
+        issues=[
+            ReviewerIssue(
+                severity=severity,
+                requiresCorrection=requires_correction,
+                category=category,
+                affectedField="ideas[0].whyThisRank",
+                description="test issue",
+                revisionInstruction="test fix",
+            )
+        ],
+        qualityScore=70,
+        overallAssessment="test",
+    )
+
+
+class IdeaComparisonBlockingPolicyTests(unittest.TestCase):
+    """
+    Direct unit tests of idea_comparison_worker._classify_idea_comparison_issues
+    -- no LLM, no fakes, no worker run. This is the job path's own blocking
+    policy (deliberately separate from the shared ReviewDecisionEngine, which
+    every other agent and the synchronous endpoint still use unchanged): an
+    issue only blocks when requiresCorrection is true AND severity is high or
+    critical AND its category is on the closed blocking allowlist. Everything
+    else becomes a warning instead of rejecting a good comparison.
+
+    _SEMANTIC_REVIEW_CAN_BLOCK is patched on for every test here -- these
+    tests exist to prove the classification RULES themselves are correct,
+    independent of the temporary master on/off switch (currently off by
+    default in production, see that flag's docstring).
+    """
+
+    def setUp(self):
+        patcher = patch.object(idea_comparison_worker, "_SEMANTIC_REVIEW_CAN_BLOCK", True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_medium_severity_generic_wording_does_not_block(self):
+        findings = _findings_with_one_issue(severity="medium", category="repetitive_or_generic_comparison")
+
+        decision = idea_comparison_worker._classify_idea_comparison_issues(findings)
+
+        self.assertFalse(decision.requiresRewrite)
+        self.assertEqual(len(decision.blockingIssues), 0)
+        self.assertEqual(len(decision.warningIssues), 1)
+
+    def test_low_severity_repetition_does_not_block(self):
+        findings = _findings_with_one_issue(severity="low", category="repetitive_or_generic_comparison")
+
+        decision = idea_comparison_worker._classify_idea_comparison_issues(findings)
+
+        self.assertFalse(decision.requiresRewrite)
+        self.assertEqual(len(decision.blockingIssues), 0)
+        self.assertEqual(len(decision.warningIssues), 1)
+
+    def test_high_severity_wrong_idea_comparison_blocks(self):
+        findings = _findings_with_one_issue(severity="high", category="wrong_idea_comparison")
+
+        decision = idea_comparison_worker._classify_idea_comparison_issues(findings)
+
+        self.assertTrue(decision.requiresRewrite)
+        self.assertEqual(len(decision.blockingIssues), 1)
+        self.assertEqual(len(decision.warningIssues), 0)
+
+    def test_critical_severity_factual_contradiction_blocks(self):
+        findings = _findings_with_one_issue(severity="critical", category="critical_factual_contradiction")
+
+        decision = idea_comparison_worker._classify_idea_comparison_issues(findings)
+
+        self.assertTrue(decision.requiresRewrite)
+        self.assertEqual(len(decision.blockingIssues), 1)
+        self.assertEqual(len(decision.warningIssues), 0)
+
+    def test_high_severity_off_allowlist_category_does_not_block(self):
+        """A high/critical severity issue with requiresCorrection=true still only becomes a warning when its category isn't on the closed blocking allowlist."""
+        findings = _findings_with_one_issue(severity="high", category="weak_comparison_wording")
+
+        decision = idea_comparison_worker._classify_idea_comparison_issues(findings)
+
+        self.assertFalse(decision.requiresRewrite)
+        self.assertEqual(len(decision.warningIssues), 1)
+
+    def test_requires_correction_false_never_blocks_even_at_critical_severity(self):
+        findings = _findings_with_one_issue(
+            severity="critical", category="critical_factual_contradiction", requires_correction=False,
+        )
+
+        decision = idea_comparison_worker._classify_idea_comparison_issues(findings)
+
+        self.assertFalse(decision.requiresRewrite)
+        self.assertEqual(len(decision.warningIssues), 1)
+
+    def test_no_issues_at_all_produces_no_blockers_and_no_warnings(self):
+        findings = ReviewerFindings(strengths=[], issues=[], qualityScore=95, overallAssessment="clean")
+
+        decision = idea_comparison_worker._classify_idea_comparison_issues(findings)
+
+        self.assertFalse(decision.requiresRewrite)
+        self.assertEqual(decision.blockingIssues, [])
+        self.assertEqual(decision.warningIssues, [])
+
+
+class IdeaComparisonWarningApprovalTests(unittest.TestCase):
+    """
+    Full-flow tests (fakes, per IdeaComparisonRewriteFlowTests' convention)
+    proving warnings-only outcomes are approved rather than rejected --
+    with _SEMANTIC_REVIEW_CAN_BLOCK patched on for the same reason as
+    IdeaComparisonRewriteFlowTests (the rewrite mechanism these tests
+    exercise only ever triggers when blocking is enabled).
+    """
+
+    def setUp(self):
+        self.manager = AgentJobManager()
+        self.manager.create_job("job-1", "IdeaComparisonAgent", stage_keys_for("IdeaComparisonAgent"))
+        self.reporter = ProgressReporter("job-1", self.manager)
+
+    def _run(self, **kwargs):
+        fake_generate_json, state = _make_fake_generate_json(**kwargs)
+        with patch.object(idea_comparison_worker, "_SEMANTIC_REVIEW_CAN_BLOCK", True), \
+             patch.object(ProviderChain, "generate_json", new=fake_generate_json):
+            result = run_idea_comparison_job(_build_request(), self.reporter)
+        return result, state
+
+    def test_first_review_with_only_warning_issues_is_approved_with_warnings(self):
+        warning_only_findings = {
+            "strengths": [],
+            "issues": [{
+                "severity": "medium",
+                "requiresCorrection": True,
+                "category": "repetitive_or_generic_comparison",
+                "affectedField": "ideas[0].comparisonAdvantage",
+                "description": "a bit generic",
+                "revisionInstruction": "be more specific",
+            }],
+            "qualityScore": 75,
+            "overallAssessment": "mostly fine",
+        }
+
+        result, state = self._run(writer_data=_SAMPLE_COMPARISON, reviewer_data_sequence=[warning_only_findings])
+
+        self.assertEqual(result["review"]["status"], "approved_with_warnings")
+        self.assertTrue(result["review"]["usable"])
+        self.assertTrue(result["comparison"]["available"])
+        self.assertEqual(state["reviewer_calls"], 1)
+        stage_states = self.manager.snapshot("job-1")["stageStates"]
+        self.assertEqual(stage_states["review"], "completed")
+        self.assertEqual(stage_states["rewrite"], "skipped")
+
+    def test_warnings_after_a_successful_rewrite_produce_approved_after_revision_with_warnings(self):
+        warning_only_findings = {
+            "strengths": [],
+            "issues": [{
+                "severity": "low",
+                "requiresCorrection": True,
+                "category": "insufficient_detail",
+                "affectedField": "summary",
+                "description": "could say a bit more",
+                "revisionInstruction": "add one more concrete detail",
+            }],
+            "qualityScore": 80,
+            "overallAssessment": "good after revision",
+        }
+
+        result, state = self._run(
+            writer_data=_SAMPLE_COMPARISON,
+            reviewer_data_sequence=[_rejecting_findings(), warning_only_findings],
+            rewrite_data=_SAMPLE_COMPARISON,
+        )
+
+        self.assertEqual(result["review"]["status"], "approved_after_revision_with_warnings")
+        self.assertTrue(result["review"]["usable"])
+        self.assertTrue(result["comparison"]["available"])
+        self.assertEqual(state["reviewer_calls"], 2)
+        stage_states = self.manager.snapshot("job-1")["stageStates"]
+        self.assertEqual(stage_states["review"], "failed")
+        self.assertEqual(stage_states["rewrite"], "completed")
+        self.assertEqual(stage_states["final_checks"], "completed")
 
 
 if __name__ == "__main__":

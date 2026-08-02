@@ -347,6 +347,20 @@ else
                 ? null
                 : Model.Ideas.FirstOrDefault(i => i.Id == winner.IdeaId);
 
+            // The AI ranks by fit for THIS student (skills, team size, hours,
+            // Lebanese context) -- not by re-sorting the saved Overall%, which
+            // is a separate, generic score from Idea Generator (see
+            // project_idea_comparison.py's prompt). That's by design, but a
+            // reader skimming percentages before reading the reasoning can
+            // otherwise mistake a lower-scored #1 for a bug -- so call it out
+            // explicitly whenever it happens, rather than only implying it.
+            var higherScoredOther = winner?.OverallScore is int winnerScore
+                ? others
+                    .Where(o => o.OverallScore.HasValue && o.OverallScore.Value > winnerScore)
+                    .OrderByDescending(o => o.OverallScore)
+                    .FirstOrDefault()
+                : null;
+
             <section class="ui-panel ai-result-panel" id="aiRecommendationResult">
                 <div class="ui-panel-heading ai-result-heading">
                     <div class="step-heading">
@@ -421,6 +435,21 @@ else
                                 <span>Why it wins</span>
                                 <p>@winner.AiWhyThisRank</p>
                             </div>
+
+                            @if (higherScoredOther != null)
+                            {
+                                <div class="winner-score-note">
+                                    <i class="bi bi-info-circle"></i>
+                                    <span>
+                                        Ranked #1 even though its saved Overall score
+                                        (@winner.OverallScore%) is lower than
+                                        <strong>@higherScoredOther.Title</strong>'s
+                                        (@higherScoredOther.OverallScore%) &mdash; the AI weighs this
+                                        student's skill fit and project-specific factors above, not
+                                        just the saved percentages.
+                                    </span>
+                                </div>
+                            }
 
                             <div class="winner-insight-grid">
                                 <div class="winner-insight">
@@ -1717,6 +1746,24 @@ else
             color: #4d4128;
             font-size: .82rem;
             line-height: 1.55;
+        }
+
+        .winner-score-note {
+            display: flex;
+            align-items: flex-start;
+            gap: .5rem;
+            margin-top: .6rem;
+            padding: .65rem .8rem;
+            color: var(--idea-blue);
+            font-size: .78rem;
+            line-height: 1.5;
+            border-radius: 10px;
+            background: var(--idea-blue-soft);
+        }
+
+        .winner-score-note i {
+            margin-top: .15rem;
+            font-size: .85rem;
         }
 
         .winner-insight-grid {

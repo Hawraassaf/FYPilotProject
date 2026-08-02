@@ -39,7 +39,7 @@ class _FakeProvider:
         self._error = error
         self.calls = 0
 
-    def generate_json(self, prompt, *, use_search=False, max_tokens=None, reporter=None):
+    def generate_json(self, prompt, *, use_search=False, max_tokens=None, reporter=None, schema_description=None):
         self.calls += 1
         return LLMResult(
             ok=self._ok,
