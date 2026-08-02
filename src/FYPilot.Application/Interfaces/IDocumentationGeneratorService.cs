@@ -9,4 +9,7 @@ public interface IDocumentationGeneratorService
     Task<List<GeneratedDocumentationDto>> GetByUserIdAsync(int userId);
     Task<List<GeneratedDocumentationDto>> GetAllForSupervisorAsync();
     Task AddSupervisorFeedbackAsync(int documentationId, string status, string comment);
+    Task<GeneratedDocumentationDto?> GetLatestForIdeaAsync(
+     int projectIdeaId,
+     CancellationToken cancellationToken = default);
 }

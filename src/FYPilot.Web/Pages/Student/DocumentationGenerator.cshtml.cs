@@ -410,6 +410,12 @@ public class DocumentationGeneratorModel : PageModel
         Request.ProjectIdeaId = ideaId;
 
         await LoadLatestReviewAsync(ideaId, userId);
+
+        GeneratedDocumentation =
+        await _documentationGeneratorService
+        .GetLatestForIdeaAsync(
+            ideaId,
+            cancellationToken);
     }
 
     private async Task<ProjectIdea?> GetUserProjectIdeaAsync(

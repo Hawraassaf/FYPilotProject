@@ -1431,7 +1431,8 @@ public class MeetingsModel(
                         metadata.Type,
 
                     url:
-                        "/Student/Dashboard",
+                        $"/Student/Dashboard"
+                        + $"?projectId={project.Id}",
 
                     sendEmail:
                         sendFallbackEmail,
@@ -1451,7 +1452,16 @@ public class MeetingsModel(
                             meeting.DurationMinutes,
                             meetingLink,
                             meeting.Agenda,
-                            meeting.NotesToPrepare));
+                            meeting.NotesToPrepare),
+
+                    projectId:
+                        project.Id,
+
+                    actorUserId:
+                        meeting.SupervisorId,
+
+                    cancellationToken:
+                        cancellationToken);
             }
             catch (Exception exception)
             {

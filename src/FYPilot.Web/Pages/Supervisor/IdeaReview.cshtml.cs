@@ -562,6 +562,8 @@ public class IdeaReviewModel(
          */
         await NotifyProjectMembersOfMessageAsync(
             project,
+            supervisorId,
+            evaluation.Id,
             cancellationToken);
 
         TempData["Success"] =
@@ -1301,7 +1303,16 @@ public class IdeaReviewModel(
                             evaluation
                                 .ImprovementSuggestions,
                             evaluation.OriginalityScore,
-                            evaluation.SimilarityScore));
+                            evaluation.SimilarityScore),
+
+                    projectId:
+                        project.Id,
+
+                    actorUserId:
+                        evaluation.SupervisorId,
+
+                    cancellationToken:
+                        cancellationToken);
             }
             catch (Exception exception)
             {
@@ -1319,6 +1330,8 @@ public class IdeaReviewModel(
     private async Task
         NotifyProjectMembersOfMessageAsync(
             Project project,
+            int supervisorId,
+            int evaluationId,
             CancellationToken cancellationToken)
     {
         var recipients =
@@ -1326,6 +1339,18 @@ public class IdeaReviewModel(
                 project.Id,
                 project.StudentId,
                 cancellationToken);
+
+        var supervisorName =
+            await db.Users
+                .AsNoTracking()
+                .Where(user =>
+                    user.Id ==
+                        supervisorId)
+                .Select(user =>
+                    user.FullName)
+                .FirstOrDefaultAsync(
+                    cancellationToken)
+            ?? "The project supervisor";
 
         var projectTitle =
             SafeProjectTitle(
@@ -1340,22 +1365,33 @@ public class IdeaReviewModel(
                         recipient.UserId,
 
                     title:
-                        "New Supervisor Feedback Message",
+                        $"New message in "
+                        + $"\"{projectTitle}\"",
 
                     message:
-                        $"Your supervisor sent a message "
-                        + $"for project "
-                        + $"\"{projectTitle}\".",
+                        $"{supervisorName} sent a message "
+                        + "in the Supervisor Feedback "
+                        + "discussion.",
 
                     type:
                         "project_feedback_message",
 
                     url:
                         $"/Student/Feedback"
-                        + $"?projectId={project.Id}",
+                        + $"?projectId={project.Id}"
+                        + $"&evaluationId={evaluationId}",
 
                     sendEmail:
-                        false);
+                        false,
+
+                    projectId:
+                        project.Id,
+
+                    actorUserId:
+                        supervisorId,
+
+                    cancellationToken:
+                        cancellationToken);
             }
             catch (Exception exception)
             {

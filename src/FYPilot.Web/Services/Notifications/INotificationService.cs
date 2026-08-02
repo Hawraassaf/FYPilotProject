@@ -10,5 +10,8 @@ public interface INotificationService
         string url = "",
         bool sendEmail = false,
         string? emailSubject = null,
-        string? emailHtmlBody = null);
+        string? emailHtmlBody = null,
+        int? projectId = null,
+        int? actorUserId = null,
+        CancellationToken cancellationToken = default);
 }

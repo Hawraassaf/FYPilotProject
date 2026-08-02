@@ -15,9 +15,11 @@ public class ProjectActivity
 
     /// <summary>
     /// The user who performed the action.
+    /// Null means the original account was permanently deleted,
+    /// while the historical project activity remains preserved.
     /// </summary>
     [Column("user_id")]
-    public int UserId { get; set; }
+    public int? UserId { get; set; }
 
     /// <summary>
     /// Examples:

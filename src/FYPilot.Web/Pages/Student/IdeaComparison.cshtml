@@ -772,7 +772,7 @@ else
                             {
                                 var visible = metric.Key is "feasibility" or "innovation";
 
-                                <th class="metric-column @(visible ? "" : "d-none")"
+                                <th class="metric-column @(visible ? "" : "ic-hidden")"
                                     data-metric-column="@metric.Key">
                                     <i class="bi bi-@metric.Icon"></i>
                                     @metric.Label
@@ -865,7 +865,7 @@ else
                                         source = "Idea Generator";
                                     }
 
-                                    <td class="score-cell @(visible ? "" : "d-none")"
+                                    <td class="score-cell @(visible ? "" : "ic-hidden")"
                                         data-metric-cell="@metric.Key"
                                         data-score="@(score?.ToString() ?? "")">
 
@@ -2542,7 +2542,7 @@ else
             transform: rotate(180deg);
         }
 
-        .d-none {
+        .ic-hidden {
             display: none !important;
         }
 
@@ -3109,13 +3109,13 @@ else
         function updateMetricVisibility(selectedMetrics) {
             metricColumns.forEach(column => {
                 column.classList.toggle(
-                    "d-none",
+                    "ic-hidden",
                     !selectedMetrics.includes(column.dataset.metricColumn));
             });
 
             metricCells.forEach(cell => {
                 cell.classList.toggle(
-                    "d-none",
+                    "ic-hidden",
                     !selectedMetrics.includes(cell.dataset.metricCell));
             });
         }

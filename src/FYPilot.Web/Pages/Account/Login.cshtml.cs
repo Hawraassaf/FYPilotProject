@@ -35,9 +35,21 @@ public class LoginModel(
 
     public async Task<IActionResult> OnGetAsync(
         string? returnUrl = null,
+        string? reason = null,
         CancellationToken cancellationToken = default)
     {
         ReturnUrl = returnUrl;
+
+        ErrorMessage = reason?.Trim().ToLowerInvariant() switch
+        {
+            "account_deleted" =>
+                "This administrator account has been permanently deleted.",
+
+            "session_invalid" =>
+                "Your previous session is no longer valid. Sign in again.",
+
+            _ => null
+        };
 
         if (User.Identity?.IsAuthenticated != true)
         {
@@ -47,13 +59,13 @@ public class LoginModel(
         var userIdValue = User.FindFirst(
             ClaimTypes.NameIdentifier)?.Value;
 
-        if (!int.TryParse(
-                userIdValue,
-                out var userId))
+        if (!int.TryParse(userIdValue, out var userId))
         {
             await HttpContext.SignOutAsync(
-                CookieAuthenticationDefaults
-                    .AuthenticationScheme);
+                CookieAuthenticationDefaults.AuthenticationScheme);
+
+            ErrorMessage =
+                "Your previous session is no longer valid. Sign in again.";
 
             return Page();
         }
@@ -67,8 +79,10 @@ public class LoginModel(
         if (currentUser == null)
         {
             await HttpContext.SignOutAsync(
-                CookieAuthenticationDefaults
-                    .AuthenticationScheme);
+                CookieAuthenticationDefaults.AuthenticationScheme);
+
+            ErrorMessage =
+                "This administrator account has been permanently deleted.";
 
             return Page();
         }
@@ -105,8 +119,7 @@ public class LoginModel(
 
         var user = await db.Users
             .FirstOrDefaultAsync(
-                item =>
-                    item.Email.ToLower() == email,
+                item => item.Email.ToLower() == email,
                 cancellationToken);
 
         if (user == null ||
@@ -139,40 +152,36 @@ public class LoginModel(
                 user.Role),
 
             new(
+                "is_main_admin",
+                user.IsMainAdmin
+                    ? "true"
+                    : "false"),
+
+            new(
                 "userId",
                 user.Id.ToString())
         };
 
         var identity = new ClaimsIdentity(
             claims,
-            CookieAuthenticationDefaults
-                .AuthenticationScheme);
+            CookieAuthenticationDefaults.AuthenticationScheme);
 
-        var principal =
-            new ClaimsPrincipal(identity);
+        var principal = new ClaimsPrincipal(identity);
 
         await HttpContext.SignInAsync(
-            CookieAuthenticationDefaults
-                .AuthenticationScheme,
+            CookieAuthenticationDefaults.AuthenticationScheme,
             principal,
             new AuthenticationProperties
             {
                 IsPersistent = true
             });
 
-        /*
-         * Administrators who still use the temporary password
-         * cannot bypass the forced password-change page.
-         */
         if (user.MustChangePassword)
         {
             return RedirectToPage(
                 "/Account/ForceChangePassword");
         }
 
-        /*
-         * Preserve valid local return URLs.
-         */
         if (!string.IsNullOrWhiteSpace(returnUrl) &&
             Url.IsLocalUrl(returnUrl))
         {
@@ -185,22 +194,16 @@ public class LoginModel(
             cancellationToken);
     }
 
-    private async Task<IActionResult>
-        RedirectAfterLoginAsync(
-            int userId,
-            string? role,
-            CancellationToken cancellationToken)
+    private async Task<IActionResult> RedirectAfterLoginAsync(
+        int userId,
+        string? role,
+        CancellationToken cancellationToken)
     {
         var normalizedRole =
             role?.Trim().ToLowerInvariant();
 
         if (normalizedRole == "student")
         {
-            /*
-             * Try to resume the student's last valid project.
-             * The service checks membership again before returning
-             * the destination.
-             */
             var destination =
                 await activeProjectService
                     .GetResumeDestinationAsync(
@@ -213,15 +216,10 @@ public class LoginModel(
                     destination.PageName,
                     new
                     {
-                        projectId =
-                            destination.ProjectId
+                        projectId = destination.ProjectId
                     });
             }
 
-            /*
-             * A student without an active accessible project must
-             * choose or create one first.
-             */
             return RedirectToPage(
                 "/Student/MyProjects");
         }
@@ -238,12 +236,8 @@ public class LoginModel(
                 "/Admin/Dashboard");
         }
 
-        /*
-         * Unknown roles are not sent to a student page.
-         */
         await HttpContext.SignOutAsync(
-            CookieAuthenticationDefaults
-                .AuthenticationScheme);
+            CookieAuthenticationDefaults.AuthenticationScheme);
 
         ErrorMessage =
             "Your account role could not be recognized.";
