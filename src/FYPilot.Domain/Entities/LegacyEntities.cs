@@ -25,9 +25,19 @@ public class Project
     [Column("updated_at")] public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     [ForeignKey(nameof(StudentId))] public User? Student { get; set; }
     [ForeignKey(nameof(SupervisorId))] public User? Supervisor { get; set; }
+    
     [ForeignKey(nameof(ProjectIdeaId))]
     public ProjectIdea? ProjectIdea { get; set; }
+    [ForeignKey(nameof(DeletedByUserId))]
+    public User? DeletedByUser { get; set; }
+    [Column("is_deleted")]
+    public bool IsDeleted { get; set; }
 
+    [Column("deleted_at_utc")]
+    public DateTime? DeletedAtUtc { get; set; }
+
+    [Column("deleted_by_user_id")]
+    public int? DeletedByUserId { get; set; }
     public ICollection<ProjectMember> Members { get; set; } = [];
     public ICollection<ProjectIdea> GeneratedCandidateIdeas { get;  set;  } = [];
 

@@ -362,7 +362,28 @@
                 <i class="bi bi-filter-left"></i>
             </label>
         </div>
+        <section class="archive-drop-zone"
+                 id="archiveDropZone"
+                 aria-label="Archive project drop area">
 
+            <div class="archive-drop-icon">
+                <i class="bi bi-archive-fill"></i>
+            </div>
+
+            <div class="archive-drop-copy">
+                <strong>Move a project to Archive</strong>
+
+                <span>
+                    Drag a project card here, then confirm.
+                    Archived projects become read-only until restored.
+                </span>
+            </div>
+
+            <span class="archive-drop-label">
+                <i class="bi bi-arrows-move"></i>
+                Drop here
+            </span>
+        </section>
         @if (Model.Projects.Count == 0)
         {
             <section class="projects-empty-state">
@@ -407,9 +428,19 @@
                 {
                     <article class="project-card
                         @(project.IsActiveProject
-                                                     ? "active-project-card"
-                                                     : "")"
+                                 ? "active-project-card"
+                                 : "")"
                              data-project-card
+                             data-project-id="@project.Id"
+                             data-project-title="@project.Title"
+                             data-name="@project.Title.ToLowerInvariant()"
+                             data-idea="@project.SelectedIdeaTitle.ToLowerInvariant()"
+                             data-domain="@project.Domain.ToLowerInvariant()"
+                             data-role="@project.Role"
+                             data-status="@project.Status"
+                             data-created="@project.CreatedSortValue"
+                             data-team="@project.ActiveMembersCount"
+                             draggable="true">
                              data-name="@project.Title.ToLowerInvariant()"
                              data-idea="@project.SelectedIdeaTitle.ToLowerInvariant()"
                              data-domain="@project.Domain.ToLowerInvariant()"
@@ -444,16 +475,42 @@
                                 </div>
                             </div>
 
-                            <button type="button"
-                                    class="project-more-button"
-                                    data-open-rename
-                                    data-project-id="@project.Id"
-                                    data-project-title="@project.Title"
-                                    aria-label="Rename @project.Title"
-                                    title="Rename project">
+                            <div class="project-card-menu">
+                                <button type="button"
+                                        class="project-more-button"
+                                        data-open-rename
+                                        data-project-id="@project.Id"
+                                        data-project-title="@project.Title"
+                                        aria-label="Rename @project.Title"
+                                        title="Rename project">
 
-                                <i class="bi bi-pencil-square"></i>
-                            </button>
+                                    <i class="bi bi-pencil-square"></i>
+                                </button>
+
+                                <button type="button"
+                                        class="project-more-button
+                                    project-archive-button"
+                                        data-open-archive
+                                        data-project-id="@project.Id"
+                                        data-project-title="@project.Title"
+                                        aria-label="Archive @project.Title"
+                                        title="Move to Archive">
+
+                                    <i class="bi bi-archive"></i>
+                                </button>
+
+                                <button type="button"
+                                        class="project-more-button
+                                    project-remove-button"
+                                        data-open-remove
+                                        data-project-id="@project.Id"
+                                        data-project-title="@project.Title"
+                                        aria-label="Remove @project.Title"
+                                        title="Delete project">
+
+                                    <i class="bi bi-trash3"></i>
+                                </button>
+                            </div>
                         </header>
 
                         <div class="project-badges">
@@ -764,8 +821,206 @@
     </section>
 </div>
 
+<div class="project-modal"
+     id="archiveProjectModal"
+     aria-hidden="true">
 
+    <div class="project-modal-backdrop"
+         data-close-archive>
+    </div>
 
+    <section class="project-modal-dialog"
+             role="dialog"
+             aria-modal="true"
+             aria-labelledby="archiveModalTitle">
+
+        <header class="project-modal-header">
+            <div class="modal-title-icon
+                archive-modal-icon">
+                <i class="bi bi-archive-fill"></i>
+            </div>
+
+            <div>
+                <span class="page-eyebrow">
+                    Personal Archive
+                </span>
+
+                <h2 id="archiveModalTitle">
+                    Move to Archive
+                </h2>
+            </div>
+
+            <button type="button"
+                    class="modal-close-button"
+                    data-close-archive
+                    aria-label="Close archive window">
+
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </header>
+
+        <p class="modal-description">
+            Move
+            <strong id="archiveProjectName">
+                this project
+            </strong>
+            to your Archive?
+        </p>
+
+        <div class="lifecycle-info-panel">
+            <i class="bi bi-eye"></i>
+
+            <span>
+                It will be hidden from My Projects and opened
+                in read-only mode until you restore it.
+                Other collaborators can continue normally.
+            </span>
+        </div>
+
+        <form method="post"
+              asp-page-handler="Archive"
+              id="archiveProjectForm">
+
+            @Html.AntiForgeryToken()
+
+            <input type="hidden"
+                   name="projectId"
+                   id="archiveProjectId" />
+
+            <div class="modal-actions">
+                <button type="button"
+                        class="modal-secondary-button"
+                        data-close-archive>
+                    Cancel
+                </button>
+
+                <button type="submit"
+                        class="modal-primary-button
+                    archive-confirm-button"
+                        id="archiveSubmitButton">
+
+                    <i class="bi bi-archive"></i>
+                    Move to Archive
+                </button>
+            </div>
+        </form>
+    </section>
+</div>
+<div class="project-modal"
+     id="removeProjectModal"
+     aria-hidden="true">
+
+    <div class="project-modal-backdrop"
+         data-close-remove>
+    </div>
+
+    <section class="project-modal-dialog"
+             role="dialog"
+             aria-modal="true"
+             aria-labelledby="removeModalTitle">
+
+        <header class="project-modal-header">
+            <div class="modal-title-icon
+                remove-modal-icon">
+                <i class="bi bi-trash3-fill"></i>
+            </div>
+
+            <div>
+                <span class="page-eyebrow">
+                    Project action
+                </span>
+
+                <h2 id="removeModalTitle">
+                    Delete Project
+                </h2>
+            </div>
+
+            <button type="button"
+                    class="modal-close-button"
+                    data-close-remove
+                    aria-label="Close delete window">
+
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </header>
+
+        <p class="modal-description">
+            Remove
+            <strong id="removeProjectName">
+                this project
+            </strong>
+            from your projects?
+        </p>
+
+        <div class="lifecycle-loading"
+             id="removePreviewLoading">
+
+            <span class="spinner-border
+                spinner-border-sm"
+                  aria-hidden="true">
+            </span>
+
+            Checking project members...
+        </div>
+
+        <div class="lifecycle-info-panel
+            remove-preview-panel"
+             id="removePreviewPanel"
+             hidden>
+
+            <i class="bi bi-info-circle"></i>
+
+            <span id="removePreviewMessage"></span>
+        </div>
+
+        <div class="remove-owner-selection"
+             id="removeOwnerSelection"
+             hidden>
+
+            <span class="remove-owner-label">
+                Select the new project owner
+            </span>
+
+            <div class="owner-candidate-list"
+                 id="removeOwnerCandidates">
+            </div>
+        </div>
+
+        <div class="lifecycle-error"
+             id="removePreviewError"
+             role="alert"
+             hidden>
+        </div>
+
+        <form method="post"
+              asp-page-handler="Remove"
+              id="removeProjectForm">
+
+            @Html.AntiForgeryToken()
+
+            <input type="hidden"
+                   name="projectId"
+                   id="removeProjectId" />
+
+            <div class="modal-actions">
+                <button type="button"
+                        class="modal-secondary-button"
+                        data-close-remove>
+                    Cancel
+                </button>
+
+                <button type="submit"
+                        class="modal-danger-button"
+                        id="removeSubmitButton"
+                        disabled>
+
+                    <i class="bi bi-trash3"></i>
+                    Delete Project
+                </button>
+            </div>
+        </form>
+    </section>
+</div>
 @section Head {
     <style>
         :root {
@@ -2410,7 +2665,276 @@
                     font-size: clamp(1.5rem, 7vw, 2rem);
                 }
         }
+        .project-card-menu {
+            display: flex;
+            flex: 0 0 auto;
+            align-items: center;
+            gap: .15rem;
+        }
 
+        .project-archive-button:hover {
+            color: #9a6700;
+            background: #fff7df;
+        }
+
+        .project-remove-button:hover {
+            color: #b42318;
+            background: #fff1f2;
+        }
+
+        .project-card.is-dragging {
+            opacity: .5;
+            border-color: #8eaae0;
+            transform: scale(.985);
+        }
+
+        .archive-drop-zone {
+            min-height: 72px;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: .8rem;
+            margin-bottom: 1rem;
+            padding: .8rem 1rem;
+            border: 1.5px dashed #aebdd1;
+            border-radius: 14px;
+            color: #526075;
+            background: linear-gradient( 135deg, #fbfcfe, #f4f7fb);
+            transition: border-color .16s ease, background .16s ease, transform .16s ease, box-shadow .16s ease;
+        }
+
+            .archive-drop-zone.is-ready {
+                border-color: #7392c0;
+                background: #f3f7fd;
+            }
+
+            .archive-drop-zone.is-over {
+                border-color: #28385e;
+                background: #eaf0f9;
+                box-shadow: 0 0 0 4px rgba(40, 56, 94, .08);
+                transform: translateY(-1px);
+            }
+
+        .archive-drop-icon {
+            width: 43px;
+            height: 43px;
+            display: grid;
+            place-items: center;
+            border-radius: 12px;
+            color: #28385e;
+            background: #e7edf7;
+            font-size: 1rem;
+        }
+
+        .archive-drop-copy {
+            min-width: 0;
+        }
+
+            .archive-drop-copy strong,
+            .archive-drop-copy span {
+                display: block;
+            }
+
+            .archive-drop-copy strong {
+                color: #28385e;
+                font-size: .72rem;
+                font-weight: 850;
+            }
+
+            .archive-drop-copy span {
+                margin-top: .18rem;
+                color: #758196;
+                font-size: .62rem;
+                line-height: 1.45;
+            }
+
+        .archive-drop-label {
+            display: inline-flex;
+            align-items: center;
+            gap: .32rem;
+            padding: .38rem .58rem;
+            border: 1px solid #d4deea;
+            border-radius: 999px;
+            color: #516c8d;
+            background: #fff;
+            font-size: .59rem;
+            font-weight: 800;
+            white-space: nowrap;
+        }
+
+        .archive-modal-icon {
+            background: linear-gradient( 135deg, #516c8d, #28385e);
+        }
+
+        .remove-modal-icon {
+            background: linear-gradient( 135deg, #b42318, #d64545);
+        }
+
+        .lifecycle-info-panel {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            align-items: flex-start;
+            gap: .6rem;
+            padding: .75rem;
+            border: 1px solid #d7e1ef;
+            border-radius: 11px;
+            color: #4a5e7b;
+            background: #f5f8fc;
+            font-size: .66rem;
+            line-height: 1.55;
+        }
+
+            .lifecycle-info-panel > i {
+                margin-top: .08rem;
+                color: #516c8d;
+            }
+
+        .lifecycle-loading {
+            display: flex;
+            align-items: center;
+            gap: .55rem;
+            padding: .8rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 11px;
+            color: #64748b;
+            background: #f8fafc;
+            font-size: .67rem;
+            font-weight: 700;
+        }
+
+            .remove-preview-panel[hidden],
+            .remove-owner-selection[hidden],
+            .lifecycle-error[hidden],
+            .lifecycle-loading[hidden] {
+                display: none;
+            }
+
+        .remove-owner-selection {
+            margin-top: .85rem;
+        }
+
+        .remove-owner-label {
+            display: block;
+            margin-bottom: .48rem;
+            color: #334155;
+            font-size: .68rem;
+            font-weight: 850;
+        }
+
+        .owner-candidate-list {
+            display: grid;
+            gap: .45rem;
+        }
+
+        .owner-candidate-option {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: .6rem;
+            padding: .68rem;
+            border: 1px solid #dce3ed;
+            border-radius: 11px;
+            background: #fff;
+            cursor: pointer;
+            transition: border-color .15s ease, background .15s ease;
+        }
+
+            .owner-candidate-option:hover {
+                border-color: #9eb5d9;
+                background: #f7f9fd;
+            }
+
+            .owner-candidate-option:has(input:checked) {
+                border-color: #516c8d;
+                background: #eef3fa;
+            }
+
+            .owner-candidate-option input {
+                accent-color: #28385e;
+            }
+
+        .owner-candidate-copy {
+            min-width: 0;
+        }
+
+            .owner-candidate-copy strong,
+            .owner-candidate-copy small {
+                display: block;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .owner-candidate-copy strong {
+                color: #28385e;
+                font-size: .68rem;
+            }
+
+            .owner-candidate-copy small {
+                margin-top: .15rem;
+                color: #8792a3;
+                font-size: .57rem;
+            }
+
+        .owner-archived-badge {
+            padding: .25rem .42rem;
+            border-radius: 999px;
+            color: #986300;
+            background: #fff1ce;
+            font-size: .53rem;
+            font-weight: 800;
+        }
+
+        .lifecycle-error {
+            margin-top: .75rem;
+            padding: .68rem .75rem;
+            border: 1px solid #fecaca;
+            border-radius: 10px;
+            color: #b42318;
+            background: #fff1f2;
+            font-size: .64rem;
+            font-weight: 700;
+        }
+
+        .modal-danger-button {
+            min-height: 42px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .4rem;
+            padding: 0 .9rem;
+            border: 0;
+            border-radius: 9px;
+            color: #fff;
+            background: #b42318;
+            font-size: .68rem;
+            font-weight: 800;
+        }
+
+            .modal-danger-button:hover:not(:disabled) {
+                background: #961c13;
+            }
+
+            .modal-danger-button:disabled,
+            .modal-primary-button:disabled {
+                opacity: .55;
+                cursor: not-allowed;
+            }
+
+        @@media (max-width: 600px) {
+            .archive-drop-zone {
+                grid-template-columns: auto minmax(0, 1fr);
+            }
+
+            .archive-drop-label {
+                grid-column: 1 / -1;
+                justify-content: center;
+            }
+
+            .project-card-menu {
+                gap: 0;
+            }
+        }
     </style>
 }
 
@@ -2580,12 +3104,114 @@
                 document.getElementById(
                     "renameProjectTitle");
 
+            const archiveModal =
+                document.getElementById(
+                    "archiveProjectModal");
+
+            const archiveProjectId =
+                document.getElementById(
+                    "archiveProjectId");
+
+            const archiveProjectName =
+                document.getElementById(
+                    "archiveProjectName");
+
+            const archiveForm =
+                document.getElementById(
+                    "archiveProjectForm");
+
+            const archiveSubmitButton =
+                document.getElementById(
+                    "archiveSubmitButton");
+
+            const removeModal =
+                document.getElementById(
+                    "removeProjectModal");
+
+            const removeProjectId =
+                document.getElementById(
+                    "removeProjectId");
+
+            const removeProjectName =
+                document.getElementById(
+                    "removeProjectName");
+
+            const removeForm =
+                document.getElementById(
+                    "removeProjectForm");
+
+            const removeSubmitButton =
+                document.getElementById(
+                    "removeSubmitButton");
+
+            const removePreviewLoading =
+                document.getElementById(
+                    "removePreviewLoading");
+
+            const removePreviewPanel =
+                document.getElementById(
+                    "removePreviewPanel");
+
+            const removePreviewMessage =
+                document.getElementById(
+                    "removePreviewMessage");
+
+            const removePreviewError =
+                document.getElementById(
+                    "removePreviewError");
+
+            const removeOwnerSelection =
+                document.getElementById(
+                    "removeOwnerSelection");
+
+            const removeOwnerCandidates =
+                document.getElementById(
+                    "removeOwnerCandidates");
+
+            const archiveDropZone =
+                document.getElementById(
+                    "archiveDropZone");
+
+            let draggedProject = null;
+
+            function openModal(modal) {
+                if (!modal) {
+                    return;
+                }
+
+                modal.classList.add("is-open");
+
+                modal.setAttribute(
+                    "aria-hidden",
+                    "false");
+
+                document.body.style.overflow =
+                    "hidden";
+            }
+
+            function closeModal(modal) {
+                if (!modal) {
+                    return;
+                }
+
+                modal.classList.remove("is-open");
+
+                modal.setAttribute(
+                    "aria-hidden",
+                    "true");
+
+                if (!document.querySelector(
+                        ".project-modal.is-open")) {
+                    document.body.style.overflow =
+                        "";
+                }
+            }
+
             function openRenameModal(
                 projectId,
                 projectTitle) {
 
-                if (!renameModal ||
-                    !renameProjectId ||
+                if (!renameProjectId ||
                     !renameProjectTitle) {
                     return;
                 }
@@ -2596,15 +3222,7 @@
                 renameProjectTitle.value =
                     projectTitle;
 
-                renameModal.classList.add(
-                    "is-open");
-
-                renameModal.setAttribute(
-                    "aria-hidden",
-                    "false");
-
-                document.body.style.overflow =
-                    "hidden";
+                openModal(renameModal);
 
                 window.setTimeout(
                     () => {
@@ -2614,20 +3232,279 @@
                     50);
             }
 
-            function closeRenameModal() {
-                if (!renameModal) {
+            function openArchiveModal(
+                projectId,
+                projectTitle) {
+
+                if (!archiveProjectId ||
+                    !archiveProjectName) {
                     return;
                 }
 
-                renameModal.classList.remove(
-                    "is-open");
+                archiveProjectId.value =
+                    projectId;
 
-                renameModal.setAttribute(
-                    "aria-hidden",
-                    "true");
+                archiveProjectName.textContent =
+                    projectTitle || "this project";
 
-                document.body.style.overflow =
+                if (archiveSubmitButton) {
+                    archiveSubmitButton.disabled =
+                        false;
+
+                    archiveSubmitButton.innerHTML =
+                        `
+                        <i class="bi bi-archive"></i>
+                        Move to Archive
+                        `;
+                }
+
+                openModal(archiveModal);
+            }
+
+            function resetRemovePreview() {
+                if (removePreviewLoading) {
+                    removePreviewLoading.hidden =
+                        false;
+                }
+
+                if (removePreviewPanel) {
+                    removePreviewPanel.hidden =
+                        true;
+                }
+
+                if (removePreviewError) {
+                    removePreviewError.hidden =
+                        true;
+
+                    removePreviewError.textContent =
+                        "";
+                }
+
+                if (removeOwnerSelection) {
+                    removeOwnerSelection.hidden =
+                        true;
+                }
+
+                if (removeOwnerCandidates) {
+                    removeOwnerCandidates.innerHTML =
+                        "";
+                }
+
+                if (removeSubmitButton) {
+                    removeSubmitButton.disabled =
+                        true;
+
+                    removeSubmitButton.innerHTML =
+                        `
+                        <i class="bi bi-trash3"></i>
+                        Delete Project
+                        `;
+                }
+            }
+
+            function showRemoveError(message) {
+                if (removePreviewLoading) {
+                    removePreviewLoading.hidden =
+                        true;
+                }
+
+                if (removePreviewPanel) {
+                    removePreviewPanel.hidden =
+                        true;
+                }
+
+                if (removeOwnerSelection) {
+                    removeOwnerSelection.hidden =
+                        true;
+                }
+
+                if (removePreviewError) {
+                    removePreviewError.textContent =
+                        message;
+
+                    removePreviewError.hidden =
+                        false;
+                }
+
+                if (removeSubmitButton) {
+                    removeSubmitButton.disabled =
+                        true;
+                }
+            }
+
+            function renderOwnerCandidates(
+                candidates) {
+
+                if (!removeOwnerCandidates ||
+                    !removeOwnerSelection) {
+                    return;
+                }
+
+                removeOwnerCandidates.innerHTML =
                     "";
+
+                candidates.forEach(candidate => {
+                    const option =
+                        document.createElement(
+                            "label");
+
+                    option.className =
+                        "owner-candidate-option";
+
+                    const radio =
+                        document.createElement(
+                            "input");
+
+                    radio.type = "radio";
+                    radio.name = "newOwnerUserId";
+                    radio.value =
+                        String(candidate.userId);
+                    radio.required = true;
+
+                    const copy =
+                        document.createElement(
+                            "span");
+
+                    copy.className =
+                        "owner-candidate-copy";
+
+                    const name =
+                        document.createElement(
+                            "strong");
+
+                    name.textContent =
+                        candidate.fullName;
+
+                    const email =
+                        document.createElement(
+                            "small");
+
+                    email.textContent =
+                        candidate.email || "";
+
+                    copy.append(name, email);
+
+                    option.append(radio, copy);
+
+                    if (candidate.isArchived) {
+                        const badge =
+                            document.createElement(
+                                "span");
+
+                        badge.className =
+                            "owner-archived-badge";
+
+                        badge.textContent =
+                            "Archived";
+
+                        option.appendChild(badge);
+                    }
+
+                    removeOwnerCandidates
+                        .appendChild(option);
+                });
+
+                removeOwnerSelection.hidden =
+                    false;
+            }
+
+            async function openRemoveModal(
+                projectId,
+                projectTitle) {
+
+                if (!removeProjectId ||
+                    !removeProjectName) {
+                    return;
+                }
+
+                removeProjectId.value =
+                    projectId;
+
+                removeProjectName.textContent =
+                    projectTitle || "this project";
+
+                resetRemovePreview();
+                openModal(removeModal);
+
+                try {
+                    const url =
+                        new URL(
+                            window.location.href);
+
+                    url.search = "";
+
+                    url.searchParams.set(
+                        "handler",
+                        "RemovalPreview");
+
+                    url.searchParams.set(
+                        "projectId",
+                        projectId);
+
+                    const response =
+                        await fetch(
+                            url.toString(),
+                            {
+                                method: "GET",
+                                credentials: "same-origin",
+                                headers: {
+                                    "Accept":
+                                        "application/json"
+                                }
+                            });
+
+                    if (!response.ok) {
+                        throw new Error(
+                            "The project details "
+                            + "could not be loaded.");
+                    }
+
+                    const preview =
+                        await response.json();
+
+                    if (!preview.succeeded) {
+                        showRemoveError(
+                            preview.message ??
+                            "The project cannot "
+                            + "be removed.");
+
+                        return;
+                    }
+
+                    if (removePreviewLoading) {
+                        removePreviewLoading.hidden =
+                            true;
+                    }
+
+                    if (removePreviewMessage) {
+                        removePreviewMessage.textContent =
+                            preview.message;
+                    }
+
+                    if (removePreviewPanel) {
+                        removePreviewPanel.hidden =
+                            false;
+                    }
+
+                    if (preview.isOwner &&
+                        preview.activeCollaboratorCount > 1) {
+
+                        renderOwnerCandidates(
+                            preview.ownerCandidates ?? []);
+                    }
+
+                    if (removeSubmitButton) {
+                        removeSubmitButton.disabled =
+                            false;
+                    }
+                }
+                catch (error) {
+                    showRemoveError(
+                        error instanceof Error
+                            ? error.message
+                            : "The project details "
+                              + "could not be loaded.");
+                }
             }
 
             document
@@ -2647,27 +3524,244 @@
 
             document
                 .querySelectorAll(
+                    "[data-open-archive]")
+                .forEach(button => {
+                    button.addEventListener(
+                        "click",
+                        () => {
+                            openArchiveModal(
+                                button.dataset.projectId ??
+                                    "",
+                                button.dataset.projectTitle ??
+                                    "");
+                        });
+                });
+
+            document
+                .querySelectorAll(
+                    "[data-open-remove]")
+                .forEach(button => {
+                    button.addEventListener(
+                        "click",
+                        () => {
+                            openRemoveModal(
+                                button.dataset.projectId ??
+                                    "",
+                                button.dataset.projectTitle ??
+                                    "");
+                        });
+                });
+
+            document
+                .querySelectorAll(
                     "[data-close-rename]")
                 .forEach(button => {
                     button.addEventListener(
                         "click",
-                        closeRenameModal);
+                        () => closeModal(renameModal));
                 });
 
-            renameModal?.addEventListener(
-                "click",
+            document
+                .querySelectorAll(
+                    "[data-close-archive]")
+                .forEach(button => {
+                    button.addEventListener(
+                        "click",
+                        () => closeModal(archiveModal));
+                });
+
+            document
+                .querySelectorAll(
+                    "[data-close-remove]")
+                .forEach(button => {
+                    button.addEventListener(
+                        "click",
+                        () => closeModal(removeModal));
+                });
+
+            cards.forEach(card => {
+                card.addEventListener(
+                    "dragstart",
+                    event => {
+                        const target =
+                            event.target;
+
+                        if (target instanceof Element &&
+                            target.closest(
+                                "button, a, form, input, select")) {
+
+                            event.preventDefault();
+                            return;
+                        }
+
+                        draggedProject = {
+                            id:
+                                card.dataset.projectId ??
+                                "",
+                            title:
+                                card.dataset.projectTitle ??
+                                "this project"
+                        };
+
+                        card.classList.add(
+                            "is-dragging");
+
+                        archiveDropZone?.classList.add(
+                            "is-ready");
+
+                        if (event.dataTransfer) {
+                            event.dataTransfer.effectAllowed =
+                                "move";
+
+                            event.dataTransfer.setData(
+                                "text/plain",
+                                draggedProject.id);
+                        }
+                    });
+
+                card.addEventListener(
+                    "dragend",
+                    () => {
+                        card.classList.remove(
+                            "is-dragging");
+
+                        archiveDropZone?.classList.remove(
+                            "is-ready",
+                            "is-over");
+
+                        draggedProject = null;
+                    });
+            });
+
+            archiveDropZone?.addEventListener(
+                "dragover",
                 event => {
-                    if (event.target === renameModal) {
-                        closeRenameModal();
+                    event.preventDefault();
+
+                    archiveDropZone.classList.add(
+                        "is-over");
+
+                    if (event.dataTransfer) {
+                        event.dataTransfer.dropEffect =
+                            "move";
                     }
+                });
+
+            archiveDropZone?.addEventListener(
+                "dragleave",
+                event => {
+                    if (!archiveDropZone.contains(
+                            event.relatedTarget)) {
+                        archiveDropZone.classList.remove(
+                            "is-over");
+                    }
+                });
+
+            archiveDropZone?.addEventListener(
+                "drop",
+                event => {
+                    event.preventDefault();
+
+                    archiveDropZone.classList.remove(
+                        "is-ready",
+                        "is-over");
+
+                    if (!draggedProject?.id) {
+                        return;
+                    }
+
+                    openArchiveModal(
+                        draggedProject.id,
+                        draggedProject.title);
+                });
+
+            archiveForm?.addEventListener(
+                "submit",
+                () => {
+                    if (!archiveSubmitButton) {
+                        return;
+                    }
+
+                    archiveSubmitButton.disabled =
+                        true;
+
+                    archiveSubmitButton.innerHTML =
+                        `
+                        <span class="spinner-border
+                                     spinner-border-sm"
+                              aria-hidden="true">
+                        </span>
+                        Archiving...
+                        `;
+                });
+
+            removeForm?.addEventListener(
+                "submit",
+                event => {
+                    const ownerSelectionVisible =
+                        removeOwnerSelection &&
+                        !removeOwnerSelection.hidden;
+
+                    if (ownerSelectionVisible) {
+                        const selectedOwner =
+                            removeForm.querySelector(
+                                "input[name='newOwnerUserId']:checked");
+
+                        if (!selectedOwner) {
+                            event.preventDefault();
+
+                            if (removePreviewError) {
+                                removePreviewError.textContent =
+                                    "Choose the new project owner.";
+
+                                removePreviewError.hidden =
+                                    false;
+                            }
+
+                            return;
+                        }
+                    }
+
+                    if (!removeSubmitButton) {
+                        return;
+                    }
+
+                    removeSubmitButton.disabled =
+                        true;
+
+                    removeSubmitButton.innerHTML =
+                        `
+                        <span class="spinner-border
+                                     spinner-border-sm"
+                              aria-hidden="true">
+                        </span>
+                        Deleting...
+                        `;
+                });
+
+            document
+                .querySelectorAll(
+                    ".project-modal")
+                .forEach(modal => {
+                    modal.addEventListener(
+                        "click",
+                        event => {
+                            if (event.target === modal) {
+                                closeModal(modal);
+                            }
+                        });
                 });
 
             document.addEventListener(
                 "keydown",
                 event => {
-                    if (event.key === "Escape") {
-                        closeRenameModal();
+                    if (event.key !== "Escape") {
+                        return;
                     }
+
+                    closeModal(renameModal);
+                    closeModal(archiveModal);
+                    closeModal(removeModal);
                 });
 
             document
@@ -2704,18 +3798,18 @@
                             submittedButton.innerHTML =
                                 isAcceptButton
                                     ? `
-                                        <span class="spinner-border
-                                                     spinner-border-sm"
-                                              aria-hidden="true">
-                                        </span>
-                                        Accepting...
+                                      <span class="spinner-border
+                                                   spinner-border-sm"
+                                            aria-hidden="true">
+                                      </span>
+                                      Accepting...
                                       `
                                     : `
-                                        <span class="spinner-border
-                                                     spinner-border-sm"
-                                              aria-hidden="true">
-                                        </span>
-                                        Rejecting...
+                                      <span class="spinner-border
+                                                   spinner-border-sm"
+                                            aria-hidden="true">
+                                      </span>
+                                      Rejecting...
                                       `;
                         });
                 });

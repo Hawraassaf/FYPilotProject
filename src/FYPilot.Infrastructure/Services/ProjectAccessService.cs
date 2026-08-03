@@ -7,8 +7,11 @@ namespace FYPilot.Infrastructure.Services;
 /// <summary>
 /// Central authorization service for shared projects.
 ///
-/// Students receive access through an active ProjectMember record.
-/// Supervisors receive access through Project.SupervisorId.
+/// Students receive access through an active
+/// ProjectMember record.
+///
+/// Supervisors receive access through
+/// Project.SupervisorId.
 /// </summary>
 public sealed class ProjectAccessService(
     ApplicationDbContext db)
@@ -47,38 +50,44 @@ public sealed class ProjectAccessService(
         return null;
     }
 
-    private async Task<ProjectAccessResult?> GetStudentAccessAsync(
-        int projectId,
-        int userId,
-        CancellationToken cancellationToken)
+    private async Task<ProjectAccessResult?>
+        GetStudentAccessAsync(
+            int projectId,
+            int userId,
+            CancellationToken cancellationToken)
     {
-        var membership = await db.ProjectMembers
-            .AsNoTracking()
-            .Where(member =>
-                member.ProjectId == projectId &&
-                member.UserId == userId &&
-                member.Status == "active")
-            .Select(member => new
-            {
-                member.ProjectId,
-                member.Role,
+        var membership =
+            await db.ProjectMembers
+                .AsNoTracking()
+                .Where(member =>
+                    member.ProjectId == projectId &&
+                    member.UserId == userId &&
+                    member.Status == "active" &&
+                    member.Project != null &&
+                    !member.Project.IsDeleted)
+                .Select(member => new
+                {
+                    member.ProjectId,
+                    member.Role,
+                    member.IsArchived,
 
-                ProjectIdeaId =
-                    member.Project != null
-                        ? member.Project.ProjectIdeaId
-                        : null,
+                    ProjectIdeaId =
+                        member.Project != null
+                            ? member.Project.ProjectIdeaId
+                            : null,
 
-                OwnerUserId =
-                    member.Project != null
-                        ? member.Project.StudentId
-                        : 0,
+                    OwnerUserId =
+                        member.Project != null
+                            ? member.Project.StudentId
+                            : 0,
 
-                SupervisorId =
-                    member.Project != null
-                        ? member.Project.SupervisorId
-                        : null
-            })
-            .FirstOrDefaultAsync(cancellationToken);
+                    SupervisorId =
+                        member.Project != null
+                            ? member.Project.SupervisorId
+                            : null
+                })
+                .FirstOrDefaultAsync(
+                    cancellationToken);
 
         if (membership == null ||
             membership.OwnerUserId <= 0)
@@ -86,53 +95,83 @@ public sealed class ProjectAccessService(
             return null;
         }
 
-        var accessRole =
+        var storedRole =
             Normalize(membership.Role);
 
+        /*
+         * Project.StudentId is the authoritative
+         * ownership value.
+         */
         var isOwner =
-            accessRole == "owner";
+            membership.OwnerUserId == userId;
 
         var isCollaborator =
-            accessRole == "collaborator";
+            !isOwner &&
+            storedRole == "collaborator";
 
-        /*
-         * A student membership should normally be either owner or
-         * collaborator. Unknown membership roles are rejected.
-         */
         if (!isOwner && !isCollaborator)
         {
             return null;
         }
 
+        var accessRole =
+            isOwner
+                ? "owner"
+                : "collaborator";
+
+        var canView = true;
+
+        var canEdit =
+            !membership.IsArchived;
+
         return new ProjectAccessResult(
             ProjectId: membership.ProjectId,
-            ProjectIdeaId: membership.ProjectIdeaId,
-            OwnerUserId: membership.OwnerUserId,
-            SupervisorId: membership.SupervisorId,
-            AccessRole: accessRole,
-            IsOwner: isOwner,
-            IsCollaborator: isCollaborator,
-            IsSupervisor: false);
+            ProjectIdeaId:
+                membership.ProjectIdeaId,
+            OwnerUserId:
+                membership.OwnerUserId,
+            SupervisorId:
+                membership.SupervisorId,
+            AccessRole:
+                accessRole,
+            IsOwner:
+                isOwner,
+            IsCollaborator:
+                isCollaborator,
+            IsSupervisor:
+                false,
+            IsArchived:
+                membership.IsArchived,
+            IsProjectDeleted:
+                false,
+            CanView:
+                canView,
+            CanEdit:
+                canEdit);
     }
 
-    private async Task<ProjectAccessResult?> GetSupervisorAccessAsync(
-        int projectId,
-        int userId,
-        CancellationToken cancellationToken)
+    private async Task<ProjectAccessResult?>
+        GetSupervisorAccessAsync(
+            int projectId,
+            int userId,
+            CancellationToken cancellationToken)
     {
-        var project = await db.Projects
-            .AsNoTracking()
-            .Where(item =>
-                item.Id == projectId &&
-                item.SupervisorId == userId)
-            .Select(item => new
-            {
-                item.Id,
-                item.ProjectIdeaId,
-                item.StudentId,
-                item.SupervisorId
-            })
-            .FirstOrDefaultAsync(cancellationToken);
+        var project =
+            await db.Projects
+                .AsNoTracking()
+                .Where(item =>
+                    item.Id == projectId &&
+                    item.SupervisorId == userId)
+                .Select(item => new
+                {
+                    item.Id,
+                    item.ProjectIdeaId,
+                    item.StudentId,
+                    item.SupervisorId,
+                    item.IsDeleted
+                })
+                .FirstOrDefaultAsync(
+                    cancellationToken);
 
         if (project == null)
         {
@@ -140,17 +179,34 @@ public sealed class ProjectAccessService(
         }
 
         return new ProjectAccessResult(
-            ProjectId: project.Id,
-            ProjectIdeaId: project.ProjectIdeaId,
-            OwnerUserId: project.StudentId,
-            SupervisorId: project.SupervisorId,
-            AccessRole: "supervisor",
-            IsOwner: false,
-            IsCollaborator: false,
-            IsSupervisor: true);
+            ProjectId:
+                project.Id,
+            ProjectIdeaId:
+                project.ProjectIdeaId,
+            OwnerUserId:
+                project.StudentId,
+            SupervisorId:
+                project.SupervisorId,
+            AccessRole:
+                "supervisor",
+            IsOwner:
+                false,
+            IsCollaborator:
+                false,
+            IsSupervisor:
+                true,
+            IsArchived:
+                false,
+            IsProjectDeleted:
+                project.IsDeleted,
+            CanView:
+                true,
+            CanEdit:
+                !project.IsDeleted);
     }
 
-    private static string Normalize(string? value)
+    private static string Normalize(
+        string? value)
     {
         return string.IsNullOrWhiteSpace(value)
             ? string.Empty
