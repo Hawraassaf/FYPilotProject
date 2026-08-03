@@ -31,6 +31,14 @@ public class ProjectMember
 
     [Column("left_at")]
     public DateTime? LeftAt { get; set; }
+    [Column("is_archived")]
+    public bool IsArchived { get; set; }
+
+    [Column("archived_at_utc")]
+    public DateTime? ArchivedAtUtc { get; set; }
+
+    [Column("removed_at_utc")]
+    public DateTime? RemovedAtUtc { get; set; }
 
     [ForeignKey(nameof(ProjectId))]
     public Project? Project { get; set; }

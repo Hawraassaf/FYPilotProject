@@ -8,6 +8,7 @@ using FYPilot.Web.Services.GoogleCalendar;
 using FYPilot.Web.Services.Meetings;
 using FYPilot.Web.Services.Notifications;
 using FYPilot.Web.Services.Supervisors;
+using FYPilot.Web.Services.Projects;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
 
@@ -140,7 +141,7 @@ builder.Services.AddSingleton<
     IAiJobsPythonClient,
     AiJobsPythonClient>();
 
-builder.Services.AddHttpClient(); ;
+builder.Services.AddHttpClient(); 
 
 // ── Documentation Generator Service ───────────────────────────────────────────
 builder.Services.AddScoped<
@@ -195,7 +196,9 @@ builder.Services.AddScoped<
 builder.Services.AddScoped<
     IActiveProjectService,
     ActiveProjectService>();
-
+builder.Services.AddScoped<
+    IProjectLifecycleService,
+    ProjectLifecycleService>();
 // ── Idea Generation Knowledge Base ────────────────────────────────────────────
 builder.Services.AddScoped<
     IAdminIdeaContextService,

@@ -1,9 +1,8 @@
 ﻿namespace FYPilot.Application.Interfaces;
 
 /// <summary>
-/// Provides centralized authorization information for one project.
-/// Every shared project page should use this service before loading
-/// or modifying project data.
+/// Provides centralized authorization information
+/// for one project.
 /// </summary>
 public interface IProjectAccessService
 {
@@ -15,7 +14,8 @@ public interface IProjectAccessService
 }
 
 /// <summary>
-/// Represents the validated relationship between a user and a project.
+/// Represents the validated relationship between
+/// a user and a project.
 /// </summary>
 public sealed record ProjectAccessResult(
     int ProjectId,
@@ -25,4 +25,8 @@ public sealed record ProjectAccessResult(
     string AccessRole,
     bool IsOwner,
     bool IsCollaborator,
-    bool IsSupervisor);
+    bool IsSupervisor,
+    bool IsArchived,
+    bool IsProjectDeleted,
+    bool CanView,
+    bool CanEdit);

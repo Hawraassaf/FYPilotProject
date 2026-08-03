@@ -4,6 +4,7 @@ using FYPilot.Application.Interfaces;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
 using FYPilot.Web.Services.Notifications;
+using FYPilot.Web.Services.Projects;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -16,6 +17,7 @@ public class MyProjectsModel(
     ApplicationDbContext db,
     IProjectAccessService projectAccessService,
     IActiveProjectService activeProjectService,
+    IProjectLifecycleService projectLifecycleService,
     INotificationService notificationService,
     ILogger<MyProjectsModel> logger) : PageModel
 {
@@ -85,9 +87,11 @@ public class MyProjectsModel(
         var pendingInvitationEntities =
             await db.ProjectInvitations
                 .AsNoTracking()
-                .Where(invitation =>
-                    invitation.Status == "pending" &&
-                    invitation.ExpiresAt > now &&
+              .Where(invitation =>
+                invitation.Status == "pending" &&
+                invitation.ExpiresAt > now &&
+                invitation.Project != null &&
+                !invitation.Project.IsDeleted &&
                     (
                         invitation.InvitedUserId ==
                             userId.Value ||
@@ -151,12 +155,14 @@ public class MyProjectsModel(
                         invitation.ExpiresAt))
             .ToList();
         var projects = await db.Projects
-            .AsNoTracking()
-            .Where(project =>
-                project.Members.Any(member =>
-                    member.UserId == userId.Value &&
-                    member.Status == "active"))
-            .Include(project => project.ProjectIdea)
+     .AsNoTracking()
+     .Where(project =>
+         !project.IsDeleted &&
+         project.Members.Any(member =>
+             member.UserId == userId.Value &&
+             member.Status == "active" &&
+             !member.IsArchived))
+             .Include(project => project.ProjectIdea)
             .Include(project => project.Members
                 .Where(member =>
                     member.Status == "active"))
@@ -463,10 +469,12 @@ public class MyProjectsModel(
                 "student",
                 cancellationToken);
 
-        if (access == null)
+        if (access?.CanEdit != true)
         {
             TempData["Error"] =
-                "You do not have access to that project.";
+                access?.IsArchived == true
+                    ? "Restore this project before continuing your work."
+                    : "You do not have access to that project.";
 
             return RedirectToPage();
         }
@@ -513,7 +521,92 @@ public class MyProjectsModel(
                     destination.ProjectId
             });
     }
+    public async Task<IActionResult>
+    OnPostArchiveAsync(
+        int projectId,
+        CancellationToken cancellationToken)
+    {
+        var userId = CurrentUserId();
 
+        if (userId == null)
+        {
+            return RedirectToPage(
+                "/Account/Login");
+        }
+
+        var result =
+            await projectLifecycleService.ArchiveAsync(
+                projectId,
+                userId.Value,
+                cancellationToken);
+
+        TempData[
+            result.Succeeded
+                ? "Success"
+                : "Error"] =
+            result.Message;
+
+        return RedirectToPage();
+    }
+    public async Task<IActionResult>
+    OnGetRemovalPreviewAsync(
+        int projectId,
+        CancellationToken cancellationToken)
+    {
+        var userId = CurrentUserId();
+
+        if (userId == null)
+        {
+            return new JsonResult(
+                new
+                {
+                    succeeded = false,
+                    message =
+                        "Your session has expired."
+                })
+            {
+                StatusCode = StatusCodes.Status401Unauthorized
+            };
+        }
+
+        var preview =
+            await projectLifecycleService
+                .GetRemovalPreviewAsync(
+                    projectId,
+                    userId.Value,
+                    cancellationToken);
+
+        return new JsonResult(preview);
+    }
+    public async Task<IActionResult>
+    OnPostRemoveAsync(
+        int projectId,
+        int? newOwnerUserId,
+        CancellationToken cancellationToken)
+    {
+        var userId = CurrentUserId();
+
+        if (userId == null)
+        {
+            return RedirectToPage(
+                "/Account/Login");
+        }
+
+        var result =
+            await projectLifecycleService.RemoveAsync(
+                projectId,
+                userId.Value,
+                newOwnerUserId,
+                cancellationToken);
+
+        TempData[
+            result.Succeeded
+                ? "Success"
+                : "Error"] =
+            result.Message;
+
+        return RedirectToPage();
+    }
     public async Task<IActionResult>
         OnPostRenameProjectAsync(
             int projectId,
@@ -546,17 +639,16 @@ public class MyProjectsModel(
                 "student",
                 cancellationToken);
 
-        if (access == null ||
-            (!access.IsOwner &&
-             !access.IsCollaborator))
+        if (access?.CanEdit != true)
         {
             TempData["Error"] =
-                "You do not have permission "
-                + "to rename that project.";
+                access?.IsArchived == true
+                    ? "Restore this project before renaming it."
+                    : "You do not have permission "
+                      + "to rename that project.";
 
             return RedirectToPage();
         }
-
         await using var transaction =
             await db.Database.BeginTransactionAsync(
                 IsolationLevel.Serializable,
@@ -565,9 +657,11 @@ public class MyProjectsModel(
         try
         {
             var project = await db.Projects
-                .FirstOrDefaultAsync(
-                    item => item.Id == projectId,
-                    cancellationToken);
+    .FirstOrDefaultAsync(
+        item =>
+            item.Id == projectId &&
+            !item.IsDeleted,
+        cancellationToken);
 
             var currentUser = await db.Users
                 .AsNoTracking()
@@ -751,13 +845,14 @@ public class MyProjectsModel(
 
             var project = invitation.Project;
 
-            if (project == null)
+            if (project == null ||
+    project.IsDeleted)
             {
                 await transaction.RollbackAsync(
                     cancellationToken);
 
                 TempData["Error"] =
-                    "The invited project could not be found.";
+                    "The invited project is no longer available.";
 
                 return RedirectToPage();
             }
@@ -845,15 +940,18 @@ public class MyProjectsModel(
             if (existingMembership == null)
             {
                 db.ProjectMembers.Add(
-                    new ProjectMember
-                    {
-                        ProjectId = project.Id,
-                        UserId = userId.Value,
-                        Role = "collaborator",
-                        Status = "active",
-                        JoinedAt = now,
-                        LeftAt = null
-                    });
+                  new ProjectMember
+                  {
+                      ProjectId = project.Id,
+                      UserId = userId.Value,
+                      Role = "collaborator",
+                      Status = "active",
+                      JoinedAt = now,
+                      LeftAt = null,
+                      IsArchived = false,
+                      ArchivedAtUtc = null,
+                      RemovedAtUtc = null
+                  });
             }
             else
             {
@@ -867,6 +965,14 @@ public class MyProjectsModel(
                     now;
 
                 existingMembership.LeftAt =
+                    null;
+                existingMembership.IsArchived =
+                   false;
+
+                existingMembership.ArchivedAtUtc =
+                    null;
+
+                existingMembership.RemovedAtUtc =
                     null;
             }
 
@@ -952,7 +1058,11 @@ public class MyProjectsModel(
             return RedirectToPage(
                 "/Account/Login");
         }
+        SuccessMessage =
+    TempData["Success"] as string;
 
+        ErrorMessage =
+            TempData["Error"] as string;
         await using var transaction =
             await db.Database.BeginTransactionAsync(
                 IsolationLevel.Serializable,

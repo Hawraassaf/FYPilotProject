@@ -166,7 +166,20 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
               .HasDefaultValue("unassigned");
             e.Property(p => p.MaximumMembers)
                 .HasDefaultValue(3);
+            e.Property(project => project.IsDeleted)
+               .HasDefaultValue(false);
 
+            e.HasOne(project => project.DeletedByUser)
+                .WithMany()
+                .HasForeignKey(project =>
+                    project.DeletedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            e.HasIndex(project => new
+            {
+                project.IsDeleted,
+                project.StudentId
+            });
             e.HasOne(p => p.Student)
                 .WithMany(u => u.Projects)
                 .HasForeignKey(p => p.StudentId)
@@ -194,7 +207,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             e.Property(member => member.Status)
                 .HasMaxLength(30)
                 .HasDefaultValue("active");
-
+            e.Property(member => member.IsArchived)
+                .HasDefaultValue(false);
             e.HasOne(member => member.Project)
                 .WithMany(project => project.Members)
                 .HasForeignKey(member => member.ProjectId)
@@ -214,6 +228,12 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             e.HasIndex(member => new
             {
                 member.UserId,
+                member.Status,
+                member.IsArchived
+            });
+            e.HasIndex(member => new
+            {
+                member.ProjectId,
                 member.Status
             });
         });

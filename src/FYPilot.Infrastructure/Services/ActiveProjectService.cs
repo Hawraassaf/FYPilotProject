@@ -63,7 +63,7 @@ public sealed class ActiveProjectService(
                 "student",
                 cancellationToken);
 
-        if (access == null)
+        if (access?.CanEdit != true)
         {
             return null;
         }
@@ -126,7 +126,7 @@ public sealed class ActiveProjectService(
                 "student",
                 cancellationToken);
 
-        if (access == null)
+        if (access?.CanEdit != true)
         {
             return false;
         }
@@ -192,7 +192,7 @@ public sealed class ActiveProjectService(
                 "student",
                 cancellationToken);
 
-        if (access == null)
+        if (access?.CanEdit != true)
         {
             ClearUserProjectContext(user);
 
