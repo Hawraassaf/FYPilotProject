@@ -12,6 +12,7 @@ using FYPilot.Web.Services.Meetings;
 using FYPilot.Web.Services.Notifications;
 using FYPilot.Web.Services.Projects;
 using FYPilot.Web.Services.Supervisors;
+using FYPilot.Web.Services.EmailVerification;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -207,7 +208,9 @@ builder.Services.Configure<SmtpSettings>(
 builder.Services.AddScoped<
     IEmailSender,
     SmtpEmailSender>();
-
+builder.Services.AddScoped<
+    IEmailVerificationService,
+    EmailVerificationService>();
 // ── Notifications + Supervisor Services ───────────────────────────────────────
 builder.Services.AddScoped<
     INotificationService,
