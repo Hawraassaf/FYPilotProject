@@ -1,9 +1,12 @@
 using FYPilot.Application.Interfaces;
 using FYPilot.Infrastructure.Data;
 using FYPilot.Infrastructure.Services;
+using FYPilot.Infrastructure.Services.Finalizers;
+using FYPilot.Web.Endpoints;
 using FYPilot.Web.Configuration;
 using FYPilot.Web.Hubs;
 using FYPilot.Web.Middleware;
+using FYPilot.Web.Services.AiAgentJobs;
 using FYPilot.Web.Services.GoogleCalendar;
 using FYPilot.Web.Services.Meetings;
 using FYPilot.Web.Services.Notifications;
@@ -141,7 +144,24 @@ builder.Services.AddSingleton<
     IAiJobsPythonClient,
     AiJobsPythonClient>();
 
-builder.Services.AddHttpClient(); 
+// One IAiAgentJobFinalizer per agent, keyed by AgentName -- resolved by
+// AiAgentJobCoordinator via GetRequiredKeyedService<IAiAgentJobFinalizer>(job.AgentName).
+builder.Services.AddKeyedScoped<
+    IAiAgentJobFinalizer,
+    IdeaComparisonJobFinalizer>("IdeaComparisonAgent");
+
+// In-process broadcast pub/sub for live job events (per-subscriber
+// channels -- see AiAgentJobEventBus) shared between AiAgentJobCoordinator
+// (publisher) and the SSE endpoint (subscriber).
+builder.Services.AddSingleton<
+    IAiAgentJobEventBus,
+    AiAgentJobEventBus>();
+
+// Drives every AiAgentJob from "Python's worker finished" through
+// "persisted and marked complete" independently of any connected browser.
+builder.Services.AddHostedService<AiAgentJobCoordinator>();
+
+builder.Services.AddHttpClient();
 
 // ── Documentation Generator Service ───────────────────────────────────────────
 builder.Services.AddScoped<
@@ -245,6 +265,10 @@ app.MapHub<ProjectDiscussionHub>(
 
 // ── Endpoints ─────────────────────────────────────────────────────────────────
 app.MapHealthChecks("/healthz");
+
+// Centralized AI Agent Loading System -- shared browser-facing surface
+// (current/snapshot/events/result/cancel) reused by every wired agent.
+app.MapAiAgentJobEndpoints();
 
 app.MapRazorPages();
 

@@ -1,705 +1,1812 @@
 @page
 @model FYPilot.Web.Pages.Student.MarketDemandModel
 @using System.Text.Json
+
 @{
-    ViewData["Title"] = "Market Demand Intelligence";
-    ViewData["Subtitle"] = "Evidence-backed current demand analysis for your project ideas";
+    ViewData["Title"] = "Market Demand Analysis";
+    ViewData["Subtitle"] = "Evidence-backed validation for your official project idea";
 
     var analysis = Model.Analysis;
-    var demandTone = analysis == null ? "neutral" : analysis.DemandScore >= 75 ? "good" : analysis.DemandScore >= 55 ? "warn" : "bad";
-    var confidenceTone = analysis == null ? "neutral" : analysis.ConfidenceScore >= 75 ? "good" : analysis.ConfidenceScore >= 50 ? "warn" : "bad";
+    var sourceCount = analysis?.Sources.Count ?? 0;
+
+    var decisionClass = "neutral";
+    var decisionLabel = "Not analyzed";
+    var decisionTitle = "Run your first market analysis";
+    var decisionDescription =
+        "Validate the problem, market fit, competition, and evidence quality before committing to implementation.";
+
+    var demandLabel = "No score";
+    var demandClass = "neutral";
+
+    var confidenceLabel = "No evidence";
+    var confidenceClass = "neutral";
+
+    var competitionLabel = "Not measured";
+    var competitionClass = "neutral";
+
+    var coverageLabel = "No sources";
+    var coverageClass = "neutral";
+
+    var weakestFactor = string.Empty;
+    var weakestScore = 0;
+
+    if (analysis != null)
+    {
+        demandLabel =
+            analysis.DemandScore >= 75 ? "High demand" :
+            analysis.DemandScore >= 55 ? "Moderate demand" :
+            "Low demand";
+
+        demandClass =
+            analysis.DemandScore >= 75 ? "success" :
+            analysis.DemandScore >= 55 ? "warning" :
+            "danger";
+
+        confidenceLabel =
+            analysis.ConfidenceScore >= 75 ? "Strong confidence" :
+            analysis.ConfidenceScore >= 50 ? "Moderate confidence" :
+            "Low confidence";
+
+        confidenceClass =
+            analysis.ConfidenceScore >= 75 ? "success" :
+            analysis.ConfidenceScore >= 50 ? "warning" :
+            "danger";
+
+        competitionLabel =
+            analysis.CompetitionOpportunityScore >= 75 ? "Strong opportunity" :
+            analysis.CompetitionOpportunityScore >= 55 ? "Moderate opportunity" :
+            "Crowded space";
+
+        competitionClass =
+            analysis.CompetitionOpportunityScore >= 75 ? "success" :
+            analysis.CompetitionOpportunityScore >= 55 ? "warning" :
+            "danger";
+
+        coverageLabel =
+            sourceCount >= 6 && analysis.ConfidenceScore >= 70 ? "Strong coverage" :
+            sourceCount >= 3 ? "Moderate coverage" :
+            sourceCount > 0 ? "Limited coverage" :
+            "No sources";
+
+        coverageClass =
+            sourceCount >= 6 && analysis.ConfidenceScore >= 70 ? "success" :
+            sourceCount >= 3 ? "warning" :
+            "danger";
+
+        if (analysis.DemandScore >= 75 &&
+            analysis.ConfidenceScore >= 65 &&
+            sourceCount >= 3)
+        {
+            decisionClass = "success";
+            decisionLabel = "Recommended";
+            decisionTitle = "Strong opportunity worth pursuing";
+            decisionDescription =
+                "The idea shows strong market demand with enough evidence to continue. " +
+                "Proceed while validating the identified risks and differentiators.";
+        }
+        else if (analysis.DemandScore >= 70)
+        {
+            decisionClass = "warning";
+            decisionLabel = "Validate first";
+            decisionTitle = "Promising idea with evidence gaps";
+            decisionDescription =
+                $"Demand is strong at {analysis.DemandScore}/100, but confidence is " +
+                $"{analysis.ConfidenceScore}/100 with {sourceCount} source(s). " +
+                "Strengthen the evidence before treating the result as final.";
+        }
+        else if (analysis.DemandScore >= 55)
+        {
+            decisionClass = "warning";
+            decisionLabel = "Refine";
+            decisionTitle = "Moderate opportunity that needs sharper positioning";
+            decisionDescription =
+                "The idea has a usable market signal, but the scope, differentiation, " +
+                "or supporting evidence should be improved before full development.";
+        }
+        else
+        {
+            decisionClass = "danger";
+            decisionLabel = "Reconsider";
+            decisionTitle = "Weak market signal";
+            decisionDescription =
+                "The current evidence does not strongly support this direction. " +
+                "Revisit the problem, target users, or value proposition.";
+        }
+
+        var factors = new Dictionary<string, int>
+        {
+            ["Problem evidence"] = analysis.ProblemEvidenceScore,
+            ["Market fit"] = analysis.MarketFitScore,
+            ["University value"] = analysis.UniversityValueScore,
+            ["Competition opportunity"] = analysis.CompetitionOpportunityScore,
+            ["Technology momentum"] = analysis.TechnologyMomentumScore
+        };
+
+        var weakest = factors.OrderBy(item => item.Value).First();
+        weakestFactor = weakest.Key;
+        weakestScore = weakest.Value;
+    }
 }
 
 <style>
     :root {
-        --md-ink: #102a43;
-        --md-text: #334e68;
-        --md-muted: #6b7c93;
-        --md-primary: #28385E;
-        --md-primary-dark: #172F59;
-        --md-bg: #f4f7fb;
-        --md-card: #fff;
-        --md-border: #dfe8f3;
-        --md-good: #118a66;
-        --md-warn: #c98105;
-        --md-bad: #c84444;
-        --md-shadow: 0 14px 36px rgba(27, 54, 93, .07);
+        --market-navy-950: #111b32;
+        --market-navy-900: #17233f;
+        --market-navy-800: #22345a;
+        --market-navy-700: #2d4773;
+        --market-blue: #4f7cff;
+        --market-cyan: #39b9c7;
+        --market-green: #159a73;
+        --market-amber: #c98212;
+        --market-red: #c94d5a;
+        --market-ink: #102a43;
+        --market-text: #41566f;
+        --market-muted: #72849a;
+        --market-bg: #f3f6fb;
+        --market-card: #ffffff;
+        --market-border: #dde6f1;
+        --market-shadow: 0 18px 45px rgba(30, 54, 93, .08);
     }
 
-    .md-page {
-        background: var(--md-bg);
-        border-radius: 24px;
-        padding: 10px 22px 22px;
+    .market-page {
         min-height: calc(100vh - 80px);
+        padding: 6px 18px 28px;
+        border-radius: 24px;
+        background:
+            radial-gradient(circle at 100% 0, rgba(79, 124, 255, .06), transparent 27%),
+            var(--market-bg);
+        color: var(--market-text);
     }
 
-    .md-hero {
+    .market-page * {
+        box-sizing: border-box;
+    }
+
+    .market-back {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        margin: 0 0 10px 2px;
+        color: var(--market-navy-700);
+        font-size: .86rem;
+        font-weight: 800;
+        text-decoration: none;
+    }
+
+    .market-back:hover {
+        color: var(--market-navy-950);
+    }
+
+    .market-alert {
+        border: 0;
+        border-radius: 14px;
+        box-shadow: var(--market-shadow);
+    }
+
+    .market-hero {
         position: relative;
         overflow: hidden;
-        padding: 22px 26px;
-        border-radius: 22px;
-        color: #fff;
-        background: linear-gradient(125deg, #17233F 0%, #28385E 58%, #405577 100%);
-        box-shadow: var(--md-shadow);
         margin-bottom: 16px;
+        border-radius: 26px;
+        color: #fff;
+        background:
+            linear-gradient(120deg,
+                var(--market-navy-950) 0%,
+                var(--market-navy-900) 42%,
+                var(--market-navy-700) 100%);
+        box-shadow: 0 22px 55px rgba(23, 35, 63, .22);
     }
 
-        .md-hero::after {
-            content: "";
-            position: absolute;
-            width: 230px;
-            height: 230px;
-            right: -65px;
-            top: -120px;
-            border-radius: 50%;
-            background: rgba(255,255,255,.09);
-        }
+    .market-hero::before,
+    .market-hero::after {
+        content: "";
+        position: absolute;
+        border-radius: 50%;
+        pointer-events: none;
+    }
 
-    .md-kicker {
+    .market-hero::before {
+        width: 340px;
+        height: 340px;
+        right: -135px;
+        top: -180px;
+        background: rgba(255, 255, 255, .08);
+    }
+
+    .market-hero::after {
+        width: 220px;
+        height: 220px;
+        right: 170px;
+        bottom: -175px;
+        background: rgba(57, 185, 199, .13);
+    }
+
+    .market-hero-main {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: minmax(0, 1.45fr) minmax(270px, .55fr);
+        gap: 30px;
+        align-items: center;
+        padding: 30px 32px 24px;
+    }
+
+    .market-eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        margin-bottom: 9px;
+        color: #bfcbe1;
         font-size: .72rem;
         font-weight: 900;
-        letter-spacing: .12em;
+        letter-spacing: .14em;
         text-transform: uppercase;
-        color: #D5DEE8;
-        margin-bottom: 6px;
     }
 
-    .md-hero h1 {
-        margin: 0 0 7px;
+    .market-hero h1 {
+        max-width: 760px;
+        margin: 0 0 10px;
+        font-size: clamp(1.8rem, 3vw, 2.55rem);
         font-weight: 900;
-        font-size: clamp(1.65rem, 3vw, 2.35rem);
+        line-height: 1.08;
     }
 
-    .md-hero p {
+    .market-hero-description {
         max-width: 760px;
         margin: 0;
-        color: rgba(255,255,255,.78);
+        color: rgba(255, 255, 255, .76);
+        font-size: .96rem;
+        line-height: 1.65;
     }
 
-    .md-back-link {
-        margin-top: 0;
-        margin-bottom: .45rem;
-        line-height: 1.2;
-    }
-
-    .md-card,
-    .md-toolbar,
-    .md-why {
-        background: var(--md-card);
-        border: 1px solid var(--md-border);
-        border-radius: 18px;
-        box-shadow: var(--md-shadow);
-    }
-
-    .md-why {
-        padding: 18px;
-        margin-bottom: 16px;
-    }
-
-    .md-why-head {
+    .market-hero-tags {
         display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 18px;
+    }
+
+    .market-hero-tag {
+        display: inline-flex;
         align-items: center;
-        gap: 12px;
-        margin-bottom: 14px;
+        gap: 7px;
+        padding: 8px 11px;
+        border: 1px solid rgba(255, 255, 255, .12);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, .075);
+        color: rgba(255, 255, 255, .88);
+        font-size: .77rem;
+        font-weight: 750;
+        backdrop-filter: blur(5px);
     }
 
-    .md-icon-box {
-        width: 42px;
-        height: 42px;
-        border-radius: 13px;
+    .market-score-panel {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 220px;
+        padding: 20px;
+        border: 1px solid rgba(255, 255, 255, .13);
+        border-radius: 22px;
+        background: rgba(255, 255, 255, .075);
+        backdrop-filter: blur(8px);
+    }
+
+    .market-score-ring {
+        --score: 0;
+        position: relative;
         display: grid;
+        width: 142px;
+        height: 142px;
         place-items: center;
-        color: var(--md-primary);
-        background: #EEF2F6;
-        flex: 0 0 auto;
+        border-radius: 50%;
+        background:
+            conic-gradient(
+                #5eead4 calc(var(--score) * 1%),
+                rgba(255, 255, 255, .13) 0);
     }
 
-    .md-why-grid {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 10px;
+    .market-score-ring::before {
+        content: "";
+        position: absolute;
+        inset: 12px;
+        border-radius: 50%;
+        background: var(--market-navy-900);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .08);
     }
 
-    .md-why-item {
-        background: #f8fafd;
-        border: 1px solid #e7edf5;
-        border-radius: 14px;
-        padding: 13px;
+    .market-score-value {
+        position: relative;
+        z-index: 1;
+        text-align: center;
     }
 
-        .md-why-item strong {
-            display: block;
-            color: var(--md-ink);
-            margin-bottom: 3px;
-        }
-
-        .md-why-item span {
-            color: var(--md-muted);
-            font-size: .86rem;
-        }
-
-    .md-toolbar {
-        padding: 14px;
-        margin-bottom: 16px;
-    }
-
-    .md-toolbar-grid {
-        display: grid;
-        grid-template-columns: minmax(280px, 1.6fr) minmax(140px, .55fr) auto;
-        gap: 10px;
-        align-items: end;
-    }
-
-    .md-field label {
+    .market-score-value strong {
         display: block;
-        margin-bottom: 6px;
-        color: var(--md-ink);
-        font-size: .74rem;
+        color: #fff;
+        font-size: 2.2rem;
+        font-weight: 900;
+        line-height: 1;
+    }
+
+    .market-score-value span {
+        color: #bfcbe1;
+        font-size: .72rem;
+        font-weight: 800;
+    }
+
+    .market-score-label {
+        margin-top: 13px;
+        color: #fff;
+        font-size: .92rem;
         font-weight: 850;
     }
 
-    .md-control {
-        min-height: 44px;
-        border: 1px solid var(--md-border);
-        border-radius: 12px;
-        background: #fbfcfe;
-        font-weight: 650;
+    .market-score-sublabel {
+        margin-top: 2px;
+        color: #bfcbe1;
+        font-size: .74rem;
     }
 
-    .md-btn {
+    .market-controls {
+        position: relative;
+        z-index: 2;
+        padding: 0 18px 18px;
+    }
+
+    .market-controls-inner {
+        display: grid;
+        grid-template-columns: minmax(260px, 1.5fr) minmax(150px, .45fr) auto;
+        gap: 10px;
+        align-items: end;
+        padding: 14px;
+        border: 1px solid rgba(255, 255, 255, .11);
+        border-radius: 17px;
+        background: rgba(8, 16, 33, .22);
+        backdrop-filter: blur(7px);
+    }
+
+    .market-field label {
+        display: block;
+        margin: 0 0 6px;
+        color: #c7d3e6;
+        font-size: .72rem;
+        font-weight: 850;
+    }
+
+    .market-readonly,
+    .market-select {
+        min-height: 44px;
+        border: 1px solid rgba(255, 255, 255, .12);
+        border-radius: 12px;
+        color: #fff;
+        background: rgba(255, 255, 255, .09);
+    }
+
+    .market-readonly {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 10px 12px;
+        font-size: .88rem;
+        font-weight: 750;
+    }
+
+    .market-select {
+        color-scheme: dark;
+        font-size: .88rem;
+        font-weight: 750;
+    }
+
+    .market-select:focus {
+        border-color: rgba(94, 234, 212, .68);
+        box-shadow: 0 0 0 .2rem rgba(94, 234, 212, .13);
+    }
+
+    .market-action {
         min-height: 44px;
         border: 0;
         border-radius: 12px;
-        padding: 0 17px;
+        padding: 0 18px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
         gap: 8px;
-        color: #fff;
-        font-weight: 850;
-        background: linear-gradient(135deg, var(--md-primary), #516C8D);
-        box-shadow: 0 10px 20px rgba(40,56,94,.18);
+        color: var(--market-navy-950);
+        background: linear-gradient(135deg, #5eead4, #8fe8f1);
+        box-shadow: 0 12px 28px rgba(57, 185, 199, .2);
+        font-size: .84rem;
+        font-weight: 900;
+        transition: transform .16s ease, opacity .16s ease;
     }
 
-        .md-btn:hover {
-            color: #fff;
-            transform: translateY(-1px);
-        }
-
-    .md-project {
-        padding: 4px 2px 14px;
+    .market-action:hover {
+        transform: translateY(-1px);
     }
 
-    .md-selected-kicker {
-        color: var(--md-primary);
+    .market-action:disabled {
+        cursor: wait;
+        opacity: .72;
+        transform: none;
     }
 
-    .md-project h2 {
-        color: var(--md-ink);
-        margin: 0 0 4px;
+    .market-card {
+        border: 1px solid var(--market-border);
+        border-radius: 20px;
+        background: var(--market-card);
+        box-shadow: var(--market-shadow);
+    }
+
+    .market-result-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+        padding: 2px 4px 14px;
+    }
+
+    .market-result-head h2 {
+        margin: 0 0 5px;
+        color: var(--market-ink);
+        font-size: 1.45rem;
         font-weight: 900;
     }
 
-    .md-project p {
-        color: var(--md-muted);
+    .market-result-head p {
+        max-width: 900px;
         margin: 0;
+        color: var(--market-muted);
+        line-height: 1.55;
     }
 
-    .md-kpis {
+    .market-result-date {
+        flex: 0 0 auto;
+        align-self: flex-end;
+        color: var(--market-muted);
+        font-size: .76rem;
+        font-weight: 750;
+        text-align: right;
+    }
+
+    .market-verdict {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 12px;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        gap: 15px;
+        align-items: center;
+        padding: 18px 19px;
         margin-bottom: 14px;
+        border-left: 5px solid var(--market-navy-700);
     }
 
-    .md-kpi {
-        padding: 16px;
-        min-height: 128px;
+    .market-verdict.success {
+        border-left-color: var(--market-green);
+        background: linear-gradient(90deg, rgba(21, 154, 115, .08), #fff 31%);
     }
 
-    .md-kpi-label {
-        font-size: .69rem;
-        letter-spacing: .09em;
-        text-transform: uppercase;
+    .market-verdict.warning {
+        border-left-color: var(--market-amber);
+        background: linear-gradient(90deg, rgba(201, 130, 18, .09), #fff 31%);
+    }
+
+    .market-verdict.danger {
+        border-left-color: var(--market-red);
+        background: linear-gradient(90deg, rgba(201, 77, 90, .08), #fff 31%);
+    }
+
+    .market-verdict.neutral {
+        background: linear-gradient(90deg, rgba(45, 71, 115, .07), #fff 31%);
+    }
+
+    .market-verdict-icon {
+        display: grid;
+        width: 48px;
+        height: 48px;
+        place-items: center;
+        border-radius: 15px;
+        color: var(--market-navy-700);
+        background: #eef3fa;
+        font-size: 1.1rem;
+    }
+
+    .market-verdict h3 {
+        margin: 0 0 4px;
+        color: var(--market-ink);
+        font-size: 1.05rem;
         font-weight: 900;
-        color: var(--md-muted);
     }
 
-    .md-kpi-value {
-        color: var(--md-ink);
-        font-size: 1.8rem;
-        font-weight: 900;
-        margin: 10px 0 9px;
-        line-height: 1;
+    .market-verdict p {
+        max-width: 960px;
+        margin: 0;
+        color: var(--market-text);
+        line-height: 1.55;
     }
 
-        .md-kpi-value small {
-            font-size: .72rem;
-            color: var(--md-muted);
-        }
-
-    .md-pill {
+    .market-verdict-badge,
+    .market-mini-badge {
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        padding: 6px 9px;
         border-radius: 999px;
-        font-size: .72rem;
         font-weight: 850;
+        white-space: nowrap;
     }
 
-        .md-pill.good {
-            color: var(--md-good);
-            background: #e7f7f1;
-        }
-
-        .md-pill.warn {
-            color: var(--md-warn);
-            background: #fff4d7;
-        }
-
-        .md-pill.bad {
-            color: var(--md-bad);
-            background: #fff0f0;
-        }
-
-        .md-pill.neutral {
-            color: #50657d;
-            background: #edf2f7;
-        }
-
-    .md-card {
-        padding: 18px;
+    .market-verdict-badge {
+        padding: 8px 11px;
+        font-size: .74rem;
     }
 
-    .md-card-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: 12px;
+    .market-mini-badge {
+        padding: 5px 8px;
+        font-size: .68rem;
+    }
+
+    .market-verdict-badge.success,
+    .market-mini-badge.success {
+        color: #087253;
+        background: #e3f5ee;
+    }
+
+    .market-verdict-badge.warning,
+    .market-mini-badge.warning {
+        color: #945a00;
+        background: #fff1d7;
+    }
+
+    .market-verdict-badge.danger,
+    .market-mini-badge.danger {
+        color: #a23643;
+        background: #fdebed;
+    }
+
+    .market-verdict-badge.neutral,
+    .market-mini-badge.neutral {
+        color: #4b6381;
+        background: #edf2f8;
+    }
+
+    .market-dashboard {
+        display: grid;
+        grid-template-columns: minmax(0, 1.55fr) minmax(310px, .65fr);
+        gap: 14px;
         margin-bottom: 14px;
     }
 
-        .md-card-head h3 {
-            margin: 0 0 3px;
-            color: var(--md-ink);
-            font-weight: 900;
-        }
+    .market-main-card,
+    .market-side-card,
+    .market-section {
+        padding: 20px;
+    }
 
-        .md-card-head p {
-            margin: 0;
-            color: var(--md-muted);
-            font-size: .86rem;
-        }
+    .market-card-title {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 16px;
+    }
 
-    .md-two {
+    .market-card-title h3 {
+        margin: 0 0 3px;
+        color: var(--market-ink);
+        font-size: 1.05rem;
+        font-weight: 900;
+    }
+
+    .market-card-title p {
+        margin: 0;
+        color: var(--market-muted);
+        font-size: .82rem;
+    }
+
+    .market-fit-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+    }
+
+    .market-insight-panel {
+        padding: 16px;
+        border: 1px solid #e3ebf5;
+        border-radius: 16px;
+        background: #f8fafd;
+    }
+
+    .market-insight-panel.primary {
+        grid-column: 1 / -1;
+        border-color: #d5e1f2;
+        background:
+            linear-gradient(135deg, rgba(79, 124, 255, .08), rgba(57, 185, 199, .04)),
+            #fbfcff;
+    }
+
+    .market-insight-label {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-bottom: 8px;
+        color: var(--market-navy-700);
+        font-size: .72rem;
+        font-weight: 900;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+    }
+
+    .market-insight-panel h4 {
+        margin: 0 0 7px;
+        color: var(--market-ink);
+        font-size: .96rem;
+        font-weight: 900;
+    }
+
+    .market-insight-panel p {
+        margin: 0;
+        color: var(--market-text);
+        line-height: 1.65;
+    }
+
+    .market-metrics {
+        display: grid;
+        gap: 11px;
+    }
+
+    .market-metric {
+        padding: 14px;
+        border: 1px solid #e3ebf5;
+        border-radius: 15px;
+        background: #f9fbfe;
+    }
+
+    .market-metric-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 9px;
+    }
+
+    .market-metric-name {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--market-ink);
+        font-size: .82rem;
+        font-weight: 850;
+    }
+
+    .market-metric-icon {
+        display: grid;
+        width: 32px;
+        height: 32px;
+        place-items: center;
+        border-radius: 10px;
+        color: var(--market-navy-700);
+        background: #eaf0f8;
+    }
+
+    .market-metric-value {
+        color: var(--market-ink);
+        font-size: 1.22rem;
+        font-weight: 900;
+    }
+
+    .market-metric-value small {
+        color: var(--market-muted);
+        font-size: .64rem;
+    }
+
+    .market-progress {
+        height: 7px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #e6edf5;
+    }
+
+    .market-progress span {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+    }
+
+    .market-progress .success {
+        background: linear-gradient(90deg, #159a73, #39b9c7);
+    }
+
+    .market-progress .warning {
+        background: linear-gradient(90deg, #c98212, #e8a43b);
+    }
+
+    .market-progress .danger {
+        background: linear-gradient(90deg, #c94d5a, #df7580);
+    }
+
+    .market-progress .neutral {
+        background: #8293a8;
+    }
+
+    .market-metric-foot {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-top: 8px;
+        color: var(--market-muted);
+        font-size: .72rem;
+    }
+
+    .market-warning {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        padding: 11px 12px;
+        margin-top: 11px;
+        border: 1px solid #edd4a3;
+        border-radius: 13px;
+        color: #77500c;
+        background: #fff9ec;
+        font-size: .78rem;
+        line-height: 1.5;
+    }
+
+    .market-section {
+        margin-bottom: 14px;
+    }
+
+    .market-chart-wrap {
+        position: relative;
+        min-height: 300px;
+    }
+
+    .market-chart-note {
+        display: flex;
+        align-items: flex-start;
+        gap: 9px;
+        padding: 11px 12px;
+        margin-top: 10px;
+        border-radius: 13px;
+        color: var(--market-text);
+        background: #eef3fa;
+        font-size: .8rem;
+        line-height: 1.5;
+    }
+
+    .market-chart-note strong {
+        color: var(--market-ink);
+    }
+
+    .market-two-column {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 14px;
         margin-bottom: 14px;
     }
 
-    .md-prose {
-        color: var(--md-text);
-        line-height: 1.65;
-        margin: 0;
-    }
-
-    .md-list {
+    .market-list {
         display: grid;
-        gap: 8px;
+        gap: 9px;
         margin: 0;
         padding: 0;
         list-style: none;
     }
 
-        .md-list li {
-            display: flex;
-            gap: 9px;
-            padding: 10px 11px;
-            border-radius: 11px;
-            background: #f8fafd;
-            border: 1px solid #e7edf5;
-            color: var(--md-text);
-        }
+    .market-list li {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 11px 12px;
+        border: 1px solid #e2eaf4;
+        border-radius: 13px;
+        color: var(--market-text);
+        background: #f8fafd;
+        line-height: 1.48;
+    }
 
-        .md-list i {
-            color: var(--md-good);
-            margin-top: 2px;
-        }
+    .market-list li i {
+        margin-top: 2px;
+        color: var(--market-green);
+    }
 
-        .md-list.risk i {
-            color: var(--md-warn);
-        }
+    .market-list.risk li i {
+        color: var(--market-amber);
+    }
 
-    .md-details {
-        margin-bottom: 10px;
+    .market-details {
+        padding: 0;
+        margin-bottom: 12px;
         overflow: hidden;
     }
 
-        .md-details summary {
-            list-style: none;
-            cursor: pointer;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 10px;
-            color: var(--md-ink);
-            font-weight: 900;
-        }
+    .market-details summary {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 17px 19px;
+        color: var(--market-ink);
+        cursor: pointer;
+        list-style: none;
+        font-weight: 900;
+    }
 
-            .md-details summary::-webkit-details-marker {
-                display: none;
-            }
+    .market-details summary::-webkit-details-marker {
+        display: none;
+    }
 
-        .md-details[open] summary {
-            margin-bottom: 14px;
-        }
+    .market-summary-title {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+    }
 
-    .md-detail-grid {
+    .market-summary-title i {
+        color: var(--market-navy-700);
+    }
+
+    .market-details[open] summary {
+        border-bottom: 1px solid var(--market-border);
+    }
+
+    .market-details-body {
+        padding: 16px 18px 18px;
+    }
+
+    .market-grid {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0,1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 10px;
     }
 
-    .md-detail-item {
-        padding: 12px;
-        border-radius: 12px;
-        background: #f8fafd;
-        border: 1px solid #e7edf5;
-    }
-
-        .md-detail-item h4 {
-            color: var(--md-ink);
-            font-size: .9rem;
-            font-weight: 900;
-            margin: 0 0 5px;
-        }
-
-        .md-detail-item p {
-            color: var(--md-muted);
-            font-size: .84rem;
-            margin: 0;
-        }
-
-    .md-source-link {
-        display: inline-flex;
-        gap: 5px;
-        margin-top: 8px;
-        color: var(--md-primary);
-        text-decoration: none;
-        font-size: .8rem;
-        font-weight: 850;
-    }
-
-    .md-empty {
-        text-align: center;
-        padding: 46px 20px;
-    }
-
-        .md-empty i {
-            font-size: 2rem;
-            color: var(--md-primary);
-        }
-
-        .md-empty h2 {
-            color: var(--md-ink);
-            font-weight: 900;
-            margin: 12px 0 6px;
-        }
-
-        .md-empty p {
-            color: var(--md-muted);
-            max-width: 650px;
-            margin: 0 auto 18px;
-        }
-
-    .md-alert {
-        border: 0;
+    .market-item {
+        padding: 14px;
+        border: 1px solid #e3ebf5;
         border-radius: 14px;
-        box-shadow: var(--md-shadow);
+        background: #f8fafd;
+    }
+
+    .market-item-top {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 7px;
+    }
+
+    .market-item h4 {
+        margin: 0;
+        color: var(--market-ink);
+        font-size: .9rem;
+        font-weight: 900;
+        line-height: 1.4;
+    }
+
+    .market-item p {
+        margin: 0;
+        color: var(--market-muted);
+        font-size: .81rem;
+        line-height: 1.55;
+    }
+
+    .market-source-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 12px;
+        margin-top: 9px;
+        color: var(--market-muted);
+        font-size: .72rem;
+        font-weight: 700;
+    }
+
+    .market-source-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        margin-top: 10px;
+        color: var(--market-navy-700);
+        font-size: .78rem;
+        font-weight: 900;
+        text-decoration: none;
+    }
+
+    .market-source-link:hover {
+        color: var(--market-navy-950);
+        text-decoration: underline;
+    }
+
+    .market-steps {
+        display: grid;
+        gap: 9px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        counter-reset: next-step;
+    }
+
+    .market-steps li {
+        counter-increment: next-step;
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr);
+        gap: 10px;
+        align-items: center;
+        padding: 11px 12px;
+        border: 1px solid #e3ebf5;
+        border-radius: 13px;
+        color: var(--market-text);
+        background: #f8fafd;
+    }
+
+    .market-steps li::before {
+        content: counter(next-step);
+        display: grid;
+        width: 31px;
+        height: 31px;
+        place-items: center;
+        border-radius: 10px;
+        color: #fff;
+        background: linear-gradient(135deg, var(--market-navy-700), var(--market-blue));
+        font-size: .76rem;
+        font-weight: 900;
+    }
+
+    .market-empty {
+        padding: 52px 22px;
+        text-align: center;
+    }
+
+    .market-empty-icon {
+        display: grid;
+        width: 58px;
+        height: 58px;
+        place-items: center;
+        margin: 0 auto;
+        border-radius: 18px;
+        color: var(--market-navy-700);
+        background: #eaf0f8;
+        font-size: 1.4rem;
+    }
+
+    .market-empty h2 {
+        margin: 14px 0 7px;
+        color: var(--market-ink);
+        font-weight: 900;
+    }
+
+    .market-empty p {
+        max-width: 650px;
+        margin: 0 auto 18px;
+        color: var(--market-muted);
+    }
+
+    .market-empty-inline {
+        padding: 15px;
+        border: 1px dashed #cdd8e6;
+        border-radius: 12px;
+        color: var(--market-muted);
+        background: #f8fafd;
+        text-align: center;
+        font-size: .82rem;
     }
 
     @@media (max-width: 1180px) {
-        .md-toolbar-grid {
+        .market-hero-main,
+        .market-dashboard {
+            grid-template-columns: 1fr;
+        }
+
+        .market-score-panel {
+            min-height: auto;
+        }
+
+        .market-controls-inner {
             grid-template-columns: 1fr 1fr;
         }
 
-        .md-why-grid {
-            grid-template-columns: repeat(2, 1fr);
+        .market-controls-inner .market-action {
+            grid-column: 1 / -1;
         }
     }
 
     @@media (max-width: 760px) {
-        .md-page {
-            padding: 8px 12px 12px;
+        .market-page {
+            padding: 5px 10px 20px;
             border-radius: 16px;
         }
 
-        .md-toolbar-grid,
-        .md-kpis,
-        .md-two,
-        .md-why-grid,
-        .md-detail-grid {
+        .market-hero {
+            border-radius: 20px;
+        }
+
+        .market-hero-main {
+            padding: 22px 18px 18px;
+        }
+
+        .market-controls {
+            padding: 0 12px 12px;
+        }
+
+        .market-controls-inner,
+        .market-fit-grid,
+        .market-two-column,
+        .market-grid {
             grid-template-columns: 1fr;
+        }
+
+        .market-controls-inner .market-action {
+            grid-column: auto;
+        }
+
+        .market-result-head,
+        .market-verdict {
+            align-items: flex-start;
+            flex-direction: column;
+        }
+
+        .market-verdict {
+            display: flex;
+        }
+
+        .market-result-date {
+            text-align: left;
+        }
+
+        .market-chart-wrap {
+            min-height: 340px;
         }
     }
 </style>
 
-<div class="md-page">
+<div class="market-page">
     @if (!string.IsNullOrWhiteSpace(Model.SuccessMessage))
     {
-        <div class="alert alert-success md-alert">
-            <i class="bi bi-check-circle me-2"></i>@Model.SuccessMessage
+        <div class="alert alert-success market-alert" role="status">
+            <i class="bi bi-check-circle me-2"></i>
+            @Model.SuccessMessage
         </div>
     }
+
     @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
     {
-        <div class="alert alert-danger md-alert">
-            <i class="bi bi-exclamation-triangle me-2"></i>@Model.ErrorMessage
+        <div class="alert alert-danger market-alert" role="alert">
+            <i class="bi bi-exclamation-triangle me-2"></i>
+            @Model.ErrorMessage
         </div>
     }
 
-    @if (Model.LatestReview != null)
-    {
-        var (badgeClass, badgeLabel) = Model.DescribeReview(Model.LatestReview);
-        <div class="mb-2">
-            <span class="badge @badgeClass" title="@Model.LatestReview.DecisionReason">
-                <i class="bi bi-shield-check"></i> @badgeLabel
-            </span>
-        </div>
-    }
-
-    <a href="/Student/IdeaGenerator?projectId=@Model.ProjectId" class="md-back-link text-decoration-none d-inline-flex align-items-center gap-1" style="color:var(--md-primary,#28385E); font-weight:750; font-size:.85rem;">
+    <a asp-page="/Student/IdeaGenerator"
+       asp-route-projectId="@Model.ProjectId"
+       class="market-back">
         <i class="bi bi-arrow-left"></i>
         Back to Idea Generator
     </a>
 
-    <section class="md-hero">
-        <div class="position-relative" style="z-index:1">
-            <div class="md-kicker">Current market intelligence</div>
-            <h1>Market Demand Validation</h1>
-            <p>
-                Measure the current need for your idea with a source-backed evidence
-                score. For a quick regional comparison (Lebanon / MENA / Global) per
-                idea, use <strong>Market Insight</strong> inside the Idea Generator
-                instead.
-            </p>
-        </div>
-    </section>
-
-    <section class="md-why">
-        <div class="md-why-head">
-            <div class="md-icon-box"><i class="bi bi-compass"></i></div>
+    <section class="market-hero">
+        <div class="market-hero-main">
             <div>
-                <h2 class="h5 mb-1 fw-bold">Why do we need to know market demand?</h2>
-                <p class="text-muted mb-0 small">It turns a project idea into a defensible product and research decision.</p>
+                <div class="market-eyebrow">
+                    <i class="bi bi-graph-up-arrow"></i>
+                    FYPilot Market Intelligence
+                </div>
+
+                <h1>Market Demand Analysis</h1>
+
+                <p class="market-hero-description">
+                    Measure whether your official project idea solves a real problem,
+                    fits the selected market, stands out from competitors, and has
+                    enough evidence to defend.
+                </p>
+
+                <div class="market-hero-tags">
+                    <span class="market-hero-tag">
+                        <i class="bi bi-geo-alt"></i>
+                        @(analysis?.CountryContext ?? Model.CountryContext)
+                    </span>
+
+                    <span class="market-hero-tag">
+                        <i class="bi bi-shield-check"></i>
+                        Source-backed analysis
+                    </span>
+
+                    @if (Model.LatestReview != null)
+                    {
+                        var (_, reviewLabel) = Model.DescribeReview(Model.LatestReview);
+
+                        <span class="market-hero-tag"
+                              title="@Model.LatestReview.DecisionReason">
+                            <i class="bi bi-patch-check"></i>
+                            @reviewLabel
+                        </span>
+                    }
+                </div>
+            </div>
+
+            <div class="market-score-panel">
+                <div class="market-score-ring"
+                     style="--score:@(analysis?.DemandScore ?? 0);"
+                     aria-label="Demand score @(analysis?.DemandScore ?? 0) out of 100">
+                    <div class="market-score-value">
+                        <strong>@(analysis?.DemandScore ?? 0)</strong>
+                        <span>out of 100</span>
+                    </div>
+                </div>
+
+                <div class="market-score-label">@demandLabel</div>
+                <div class="market-score-sublabel">
+                    @(analysis == null
+                        ? "Run the analysis to calculate demand"
+                        : $"Last analyzed {analysis.AnalyzedAt.ToUniversalTime():dd MMM yyyy}")
+                </div>
             </div>
         </div>
-        <div class="md-why-grid">
-            <div class="md-why-item"><strong>Prove the problem</strong><span>Show that target users face a real, documented need.</span></div>
-            <div class="md-why-item"><strong>Choose the right scope</strong><span>Prioritize features that match adoption and sector priorities.</span></div>
-            <div class="md-why-item"><strong>Reduce project risk</strong><span>Detect weak demand, crowded competition, or evidence gaps early.</span></div>
-            <div class="md-why-item"><strong>Defend your decisions</strong><span>Use sources and transparent scoring in the defense.</span></div>
-        </div>
+
+        @if (Model.UserIdeas.Any())
+        {
+            <div class="market-controls">
+                <form method="post"
+                      asp-page-handler="Analyze"
+                      id="marketAnalysisForm">
+                    @Html.AntiForgeryToken()
+
+                    <input type="hidden" name="projectId" value="@Model.ProjectId" />
+                    <input type="hidden" asp-for="IdeaId" />
+
+                    <div class="market-controls-inner">
+                        <div class="market-field">
+                            <label>Official project idea</label>
+                            <div class="market-readonly">
+                                <i class="bi bi-lightbulb"></i>
+                                <span>@Model.UserIdeas.First().Title</span>
+                            </div>
+                        </div>
+
+                        <div class="market-field">
+                            <label asp-for="CountryContext">Market scope</label>
+                            <select asp-for="CountryContext"
+                                    class="form-select market-select"
+                                    aria-label="Market scope">
+                                <option value="Lebanon">Lebanon</option>
+                                <option value="MENA">MENA</option>
+                                <option value="Global">Global</option>
+                            </select>
+                        </div>
+
+                        <button type="submit"
+                                class="market-action"
+                                id="analyzeButton">
+                            <i class="bi bi-stars" id="analyzeButtonIcon"></i>
+                            <span id="analyzeButtonText">
+                                @(analysis == null ? "Analyze market" : "Re-analyze market")
+                            </span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        }
     </section>
 
     @if (!Model.UserIdeas.Any())
     {
-        <section class="md-card md-empty">
-            <i class="bi bi-lightbulb"></i>
-            <h2>No official project idea selected</h2>
-            <p>Select an idea for this active project, then return here to validate its market demand.</p>
-            <a asp-page="/Student/IdeaGenerator" class="md-btn text-decoration-none" asp-route-projectId="@Model.ProjectId">Open Idea Generator</a>
+        <section class="market-card market-empty">
+            <div class="market-empty-icon">
+                <i class="bi bi-lightbulb"></i>
+            </div>
+
+            <h2>No official idea selected</h2>
+
+            <p>
+                Select the official idea for the active project, then return here
+                to validate its market demand.
+            </p>
+
+            <a asp-page="/Student/IdeaGenerator"
+               asp-route-projectId="@Model.ProjectId"
+               class="market-action text-decoration-none">
+                Open Idea Generator
+            </a>
+        </section>
+    }
+    else if (analysis == null)
+    {
+        <section class="market-card market-empty">
+            <div class="market-empty-icon">
+                <i class="bi bi-bar-chart-line"></i>
+            </div>
+
+            <h2>Your market dashboard is ready</h2>
+
+            <p>
+                Choose the market scope and run the analysis to generate demand,
+                confidence, competition, evidence, risks, recommendations, and sources.
+            </p>
         </section>
     }
     else
     {
-        <section class="md-toolbar">
-            <form method="post" asp-page-handler="Analyze">
-                @Html.AntiForgeryToken()
-                <input type="hidden"
-                       name="projectId"
-                       value="@Model.ProjectId" />
-                <div class="md-toolbar-grid">
-                    <div class="md-field">
-                        <label>Project idea</label>
-                        <select asp-for="IdeaId" class="form-select md-control">
-                            @foreach (var item in Model.UserIdeas)
-                            {
-                                <option value="@item.Id">@item.Title</option>
-                            }
-                        </select>
-                    </div>
-                    <div class="md-field">
-                        <label>Market scope</label>
-                        <select asp-for="CountryContext" class="form-select md-control">
-                            <option value="Lebanon">Lebanon</option>
-                            <option value="MENA">MENA</option>
-                            <option value="Global">Global</option>
-                        </select>
-                    </div>
-                    <button type="submit" class="md-btn">
-                        <i class="bi bi-search"></i>
-                        @(analysis == null ? "Analyze" : "Refresh")
-                    </button>
-                </div>
-            </form>
-        </section>
-
         @if (Model.Idea != null)
         {
-            <section class="md-project">
-                <div class="md-kicker md-selected-kicker mb-1">Selected idea</div>
-                <h2 class="h4">@Model.Idea.Title</h2>
-                <p>@Model.Idea.ProblemStatement</p>
+            <section class="market-result-head">
+                <div>
+                    <div class="market-eyebrow"
+                         style="color:var(--market-navy-700); margin-bottom:4px;">
+                        Analysis result
+                    </div>
+
+                    <h2>@Model.Idea.Title</h2>
+                    <p>@Model.Idea.ProblemStatement</p>
+                </div>
+
+                <div class="market-result-date">
+                    Last analyzed<br />
+                    @analysis.AnalyzedAt.ToUniversalTime().ToString("dd MMM yyyy, HH:mm 'UTC'")
+                </div>
             </section>
         }
 
-        @if (analysis == null)
-        {
-            <section class="md-card md-empty">
-                <i class="bi bi-graph-up-arrow"></i>
-                <h2>Ready for market validation</h2>
-                <p>
-                    The analysis will use live sources and calculate a current
-                    evidence score for this idea.
-                </p>
-            </section>
-        }
-        else
-        {
-            <section class="md-kpis">
-                <article class="md-card md-kpi">
-                    <div class="md-kpi-label">Current demand</div>
-                    <div class="md-kpi-value">@analysis.DemandScore<small>/100</small></div>
-                    <span class="md-pill @demandTone"><i class="bi bi-speedometer2"></i>@analysis.MarketDemand</span>
-                </article>
-                <article class="md-card md-kpi">
-                    <div class="md-kpi-label">Evidence confidence</div>
-                    <div class="md-kpi-value">@analysis.ConfidenceScore<small>/100</small></div>
-                    <span class="md-pill @confidenceTone"><i class="bi bi-shield-check"></i>@analysis.ConfidenceLevel</span>
-                </article>
-                <article class="md-card md-kpi">
-                    <div class="md-kpi-label">Real sources</div>
-                    <div class="md-kpi-value">@analysis.Sources.Count<small> sources</small></div>
-                    <span class="md-pill @(analysis.GroundedInLiveData ? "good" : "warn")"><i class="bi bi-globe2"></i>@(analysis.GroundedInLiveData ? "Grounded" : "Not grounded")</span>
-                </article>
-            </section>
+        <section class="market-card market-verdict @decisionClass">
+            <div class="market-verdict-icon">
+                <i class="bi @(decisionClass == "success"
+                    ? "bi-check2-circle"
+                    : decisionClass == "danger"
+                        ? "bi-x-circle"
+                        : "bi-exclamation-circle")"></i>
+            </div>
 
-            <section class="md-two">
-                <article class="md-card">
-                    <div class="md-card-head"><div><h3 class="h5">Market fit</h3><p>How well the idea matches the selected scope.</p></div></div>
-                    <p class="md-prose">@analysis.LebaneseMarketFit</p>
-                </article>
-                <article class="md-card">
-                    <div class="md-card-head"><div><h3 class="h5">Recommendation</h3><p>The strongest next decision for this idea.</p></div></div>
-                    <p class="md-prose">@analysis.Recommendation</p>
-                </article>
-            </section>
+            <div>
+                <h3>@decisionTitle</h3>
+                <p>@decisionDescription</p>
+            </div>
 
-            <section class="md-two">
-                <article class="md-card">
-                    <div class="md-card-head"><div><h3 class="h5">Problem evidence</h3><p>Why the target problem is real.</p></div></div>
-                    <ul class="md-list">
-                        @foreach (var item in Model.ProblemEvidence.Take(5))
+            <span class="market-verdict-badge @decisionClass">
+                @decisionLabel
+            </span>
+        </section>
+
+        <section class="market-dashboard">
+            <article class="market-card market-main-card">
+                <div class="market-card-title">
+                    <div>
+                        <h3>Market opportunity overview</h3>
+                        <p>The most important explanation of the current result.</p>
+                    </div>
+
+                    <span class="market-mini-badge @demandClass">
+                        @analysis.MarketFitScore/100 market fit
+                    </span>
+                </div>
+
+                <div class="market-fit-grid">
+                    <div class="market-insight-panel primary">
+                        <div class="market-insight-label">
+                            <i class="bi bi-geo-alt"></i>
+                            @analysis.CountryContext market fit
+                        </div>
+
+                        <h4>How this idea fits the selected market</h4>
+                        <p>@analysis.LebaneseMarketFit</p>
+                    </div>
+
+                    <div class="market-insight-panel">
+                        <div class="market-insight-label">
+                            <i class="bi bi-mortarboard"></i>
+                            Academic value
+                        </div>
+
+                        <h4>Why it is defensible as an FYP</h4>
+                        <p>@analysis.UniversityValue</p>
+                    </div>
+
+                    <div class="market-insight-panel">
+                        <div class="market-insight-label">
+                            <i class="bi bi-compass"></i>
+                            Recommended direction
+                        </div>
+
+                        <h4>What the student should do next</h4>
+                        <p>@analysis.Recommendation</p>
+                    </div>
+                </div>
+            </article>
+
+            <aside class="market-card market-side-card">
+                <div class="market-card-title">
+                    <div>
+                        <h3>Decision signals</h3>
+                        <p>Scores that affect confidence in the result.</p>
+                    </div>
+                </div>
+
+                <div class="market-metrics">
+                    <div class="market-metric">
+                        <div class="market-metric-top">
+                            <div class="market-metric-name">
+                                <span class="market-metric-icon">
+                                    <i class="bi bi-shield-check"></i>
+                                </span>
+                                Evidence confidence
+                            </div>
+
+                            <div class="market-metric-value">
+                                @analysis.ConfidenceScore<small>/100</small>
+                            </div>
+                        </div>
+
+                        <div class="market-progress">
+                            <span class="@confidenceClass"
+                                  style="width:@analysis.ConfidenceScore%"></span>
+                        </div>
+
+                        <div class="market-metric-foot">
+                            <span>@confidenceLabel</span>
+                            <span>@analysis.ConfidenceLevel</span>
+                        </div>
+                    </div>
+
+                    <div class="market-metric">
+                        <div class="market-metric-top">
+                            <div class="market-metric-name">
+                                <span class="market-metric-icon">
+                                    <i class="bi bi-globe2"></i>
+                                </span>
+                                Evidence coverage
+                            </div>
+
+                            <div class="market-metric-value">
+                                @sourceCount<small> sources</small>
+                            </div>
+                        </div>
+
+                        <div class="market-progress">
+                            <span class="@coverageClass"
+                                  style="width:@Math.Min(sourceCount * 15, 100)%"></span>
+                        </div>
+
+                        <div class="market-metric-foot">
+                            <span>@coverageLabel</span>
+                            <span>@(analysis.GroundedInLiveData ? "Live search used" : "No live search")</span>
+                        </div>
+                    </div>
+
+                    <div class="market-metric">
+                        <div class="market-metric-top">
+                            <div class="market-metric-name">
+                                <span class="market-metric-icon">
+                                    <i class="bi bi-bullseye"></i>
+                                </span>
+                                Competition opportunity
+                            </div>
+
+                            <div class="market-metric-value">
+                                @analysis.CompetitionOpportunityScore<small>/100</small>
+                            </div>
+                        </div>
+
+                        <div class="market-progress">
+                            <span class="@competitionClass"
+                                  style="width:@analysis.CompetitionOpportunityScore%"></span>
+                        </div>
+
+                        <div class="market-metric-foot">
+                            <span>@competitionLabel</span>
+                            <span>Higher is better</span>
+                        </div>
+                    </div>
+                </div>
+
+                @if (analysis.ConfidenceScore < 50 || sourceCount < 3)
+                {
+                    <div class="market-warning">
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                        <span>
+                            Treat this result as preliminary. Add stronger local,
+                            academic, government, or industry evidence before using
+                            it as a final defense claim.
+                        </span>
+                    </div>
+                }
+            </aside>
+        </section>
+
+        <section class="market-card market-section">
+            <div class="market-card-title">
+                <div>
+                    <h3>Market score breakdown</h3>
+                    <p>Five weighted signals used to explain the overall result.</p>
+                </div>
+
+                <span class="market-mini-badge @(weakestScore >= 70 ? "success" : "warning")">
+                    Focus: @weakestFactor
+                </span>
+            </div>
+
+            <div class="market-chart-wrap">
+                <canvas id="breakdownChart"
+                        role="img"
+                        aria-label="Horizontal market score breakdown chart"></canvas>
+            </div>
+
+            <div class="market-chart-note">
+                <i class="bi bi-lightbulb-fill"></i>
+                <div>
+                    <strong>Priority improvement:</strong>
+                    @weakestFactor is the lowest factor at @weakestScore/100.
+                    Improve this area first to make the final recommendation more convincing.
+                </div>
+            </div>
+        </section>
+
+        <section class="market-two-column">
+            <article class="market-card market-section" style="margin-bottom:0;">
+                <div class="market-card-title">
+                    <div>
+                        <h3>Problem evidence</h3>
+                        <p>Signals that support the existence of the target problem.</p>
+                    </div>
+
+                    <span class="market-mini-badge neutral">
+                        @Model.ProblemEvidence.Count items
+                    </span>
+                </div>
+
+                @if (Model.ProblemEvidence.Any())
+                {
+                    <ul class="market-list">
+                        @foreach (var item in Model.ProblemEvidence.Take(6))
                         {
-                            <li><i class="bi bi-check-circle-fill"></i><span>@item</span></li>
+                            <li>
+                                <i class="bi bi-check-circle-fill"></i>
+                                <span>@item</span>
+                            </li>
                         }
                     </ul>
-                </article>
-                <article class="md-card">
-                    <div class="md-card-head"><div><h3 class="h5">Main risks</h3><p>Adoption, evidence, and competition concerns.</p></div></div>
-                    <ul class="md-list risk">
-                        @foreach (var item in Model.Risks.Take(5))
+                }
+                else
+                {
+                    <div class="market-empty-inline">
+                        No problem-evidence statements were returned.
+                    </div>
+                }
+            </article>
+
+            <article class="market-card market-section" style="margin-bottom:0;">
+                <div class="market-card-title">
+                    <div>
+                        <h3>Main risks</h3>
+                        <p>Adoption, evidence, safety, and competition concerns.</p>
+                    </div>
+
+                    <span class="market-mini-badge warning">
+                        @Model.Risks.Count items
+                    </span>
+                </div>
+
+                @if (Model.Risks.Any())
+                {
+                    <ul class="market-list risk">
+                        @foreach (var item in Model.Risks.Take(6))
                         {
-                            <li><i class="bi bi-exclamation-triangle-fill"></i><span>@item</span></li>
+                            <li>
+                                <i class="bi bi-exclamation-triangle-fill"></i>
+                                <span>@item</span>
+                            </li>
                         }
                     </ul>
-                </article>
-            </section>
+                }
+                else
+                {
+                    <div class="market-empty-inline">
+                        No risks were returned.
+                    </div>
+                }
+            </article>
+        </section>
 
-            <details class="md-card md-details" open>
-                <summary><span><i class="bi bi-bar-chart me-2"></i>Score breakdown</span><span class="md-pill neutral">5 factors</span></summary>
-                <div style="min-height:300px"><canvas id="breakdownChart"></canvas></div>
-            </details>
+        @if (analysis.SimilarSolutions.Any())
+        {
+            <details class="market-card market-details" open>
+                <summary>
+                    <span class="market-summary-title">
+                        <i class="bi bi-diagram-3"></i>
+                        Similar solutions
+                    </span>
 
-            @if (analysis.SimilarSolutions.Any())
-            {
-                <details class="md-card md-details">
-                    <summary><span><i class="bi bi-compass me-2"></i>Similar solutions</span><span class="md-pill neutral">Research detail</span></summary>
-                    <div class="md-detail-grid">
+                    <span class="market-mini-badge neutral">
+                        @analysis.SimilarSolutions.Count solutions
+                    </span>
+                </summary>
+
+                <div class="market-details-body">
+                    <div class="market-grid">
                         @foreach (var solution in analysis.SimilarSolutions)
                         {
-                            <div class="md-detail-item">
-                                <h4>@solution.Name <span class="md-pill neutral">@solution.Similarity similarity</span></h4>
+                            var similarityClass =
+                                solution.Similarity == "high"
+                                    ? "warning"
+                                    : solution.Similarity == "low"
+                                        ? "success"
+                                        : "neutral";
+
+                            <article class="market-item">
+                                <div class="market-item-top">
+                                    <h4>@solution.Name</h4>
+
+                                    <span class="market-mini-badge @similarityClass">
+                                        @solution.Similarity similarity
+                                    </span>
+                                </div>
+
                                 <p>@solution.Description</p>
-                            </div>
+                            </article>
                         }
                     </div>
-                </details>
-            }
-
-            <details class="md-card md-details">
-                <summary><span><i class="bi bi-journal-check me-2"></i>Next steps</span><span class="md-pill neutral">Action plan</span></summary>
-                <ul class="md-list">
-                    @foreach (var item in Model.NextSteps)
-                    {
-                        <li><i class="bi bi-arrow-right-circle-fill"></i><span>@item</span></li>
-                    }
-                </ul>
-            </details>
-
-            <details class="md-card md-details">
-                <summary><span><i class="bi bi-globe2 me-2"></i>Real research sources</span><span class="md-pill @(analysis.GroundedInLiveData ? "good" : "warn")">@analysis.Sources.Count sources</span></summary>
-                <div class="md-detail-grid">
-                    @foreach (var source in analysis.Sources.OrderByDescending(item => item.IsVerified).ThenByDescending(item => item.RelevanceScore))
-                    {
-                        <div class="md-detail-item">
-                            <div class="d-flex justify-content-between gap-2">
-                                <h4>@source.Title</h4>
-                                <span class="md-pill @(source.IsVerified ? "good" : "neutral")">@(source.IsVerified ? "Recognized" : source.SourceType)</span>
-                            </div>
-                            <p>@source.Relevance</p>
-                            <a class="md-source-link" href="@source.Url" target="_blank" rel="noopener noreferrer">Open source <i class="bi bi-box-arrow-up-right"></i></a>
-                        </div>
-                    }
                 </div>
             </details>
         }
+
+        <details class="market-card market-details" open>
+            <summary>
+                <span class="market-summary-title">
+                    <i class="bi bi-list-check"></i>
+                    Next-step action plan
+                </span>
+
+                <span class="market-mini-badge neutral">
+                    @Model.NextSteps.Count actions
+                </span>
+            </summary>
+
+            <div class="market-details-body">
+                @if (Model.NextSteps.Any())
+                {
+                    <ol class="market-steps">
+                        @foreach (var item in Model.NextSteps)
+                        {
+                            <li><span>@item</span></li>
+                        }
+                    </ol>
+                }
+                else
+                {
+                    <div class="market-empty-inline">
+                        No next steps were returned.
+                    </div>
+                }
+            </div>
+        </details>
+
+        <details class="market-card market-details">
+            <summary>
+                <span class="market-summary-title">
+                    <i class="bi bi-journals"></i>
+                    Research sources
+                </span>
+
+                <span class="market-mini-badge @coverageClass">
+                    @sourceCount sources
+                </span>
+            </summary>
+
+            <div class="market-details-body">
+                @if (analysis.Sources.Any())
+                {
+                    <div class="market-grid">
+                        @foreach (var source in analysis.Sources
+                            .OrderByDescending(item => item.IsVerified)
+                            .ThenByDescending(item => item.RelevanceScore))
+                        {
+                            <article class="market-item">
+                                <div class="market-item-top">
+                                    <h4>@source.Title</h4>
+
+                                    <span class="market-mini-badge @(source.IsVerified ? "success" : "neutral")">
+                                        @(source.IsVerified ? "Recognized" : source.SourceType)
+                                    </span>
+                                </div>
+
+                                <p>@source.Relevance</p>
+
+                                <div class="market-source-meta">
+                                    @if (!string.IsNullOrWhiteSpace(source.Publisher))
+                                    {
+                                        <span>
+                                            <i class="bi bi-building"></i>
+                                            @source.Publisher
+                                        </span>
+                                    }
+
+                                    <span>
+                                        <i class="bi bi-bullseye"></i>
+                                        @source.RelevanceScore/100 relevance
+                                    </span>
+                                </div>
+
+                                <a class="market-source-link"
+                                   href="@source.Url"
+                                   target="_blank"
+                                   rel="noopener noreferrer">
+                                    Open source
+                                    <i class="bi bi-box-arrow-up-right"></i>
+                                </a>
+                            </article>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="market-empty-inline">
+                        No usable research sources were saved.
+                    </div>
+                }
+            </div>
+        </details>
     }
 </div>
 
 @section Scripts {
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+
     <script>
         (() => {
-        const breakdown = @Html.Raw(Model.BreakdownJson);
-        const breakdownCanvas = document.getElementById("breakdownChart");
-        if (breakdownCanvas && typeof Chart !== "undefined") {
-        new Chart(breakdownCanvas, {
-        type: "bar",
-        data: {
-        labels: breakdown.map(item => item.label),
-        datasets: [{
-        label: "Score",
-        data: breakdown.map(item => item.value),
-        backgroundColor: ["#28385E", "#118a66", "#704eaa", "#d08a13", "#28a4bd"],
-        borderRadius: 8
-        }]
-        },
-        options: {
-        indexAxis: "y",
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: {
-        x: { beginAtZero: true, max: 100 },
-        y: { grid: { display: false } }
-        }
-        }
-        });
-        }
+            const form = document.getElementById("marketAnalysisForm");
+            const button = document.getElementById("analyzeButton");
+            const buttonText = document.getElementById("analyzeButtonText");
+            const buttonIcon = document.getElementById("analyzeButtonIcon");
+
+            if (form && button && buttonText && buttonIcon) {
+                form.addEventListener("submit", () => {
+                    button.disabled = true;
+                    buttonText.textContent = "Analyzing market...";
+                    buttonIcon.className = "bi bi-arrow-repeat";
+                });
+            }
+
+            const breakdown = @Html.Raw(Model.BreakdownJson);
+            const canvas = document.getElementById("breakdownChart");
+
+            if (!canvas ||
+                typeof Chart === "undefined" ||
+                !Array.isArray(breakdown)) {
+                return;
+            }
+
+            const threshold = 70;
+
+            const thresholdPlugin = {
+                id: "themeThreshold",
+                beforeDatasetsDraw(chart) {
+                    const xScale = chart.scales.x;
+                    const area = chart.chartArea;
+
+                    if (!xScale || !area) {
+                        return;
+                    }
+
+                    const x = xScale.getPixelForValue(threshold);
+                    const context = chart.ctx;
+
+                    context.save();
+                    context.beginPath();
+                    context.setLineDash([6, 5]);
+                    context.strokeStyle = "#8d9db1";
+                    context.lineWidth = 1;
+                    context.moveTo(x, area.top);
+                    context.lineTo(x, area.bottom);
+                    context.stroke();
+                    context.setLineDash([]);
+                    context.fillStyle = "#72849a";
+                    context.font = "700 11px system-ui, -apple-system, sans-serif";
+                    context.fillText("Target 70", x + 5, area.top + 11);
+                    context.restore();
+                }
+            };
+
+            const valuePlugin = {
+                id: "themeValueLabels",
+                afterDatasetsDraw(chart) {
+                    const context = chart.ctx;
+                    const meta = chart.getDatasetMeta(0);
+                    const values = chart.data.datasets[0].data;
+
+                    context.save();
+                    context.fillStyle = "#102a43";
+                    context.font = "800 12px system-ui, -apple-system, sans-serif";
+                    context.textBaseline = "middle";
+
+                    meta.data.forEach((bar, index) => {
+                        const value = values[index];
+                        const x = Math.min(
+                            bar.x + 8,
+                            chart.chartArea.right - 23);
+
+                        context.fillText(
+                            value,
+                            x,
+                            bar.y);
+                    });
+
+                    context.restore();
+                }
+            };
+
+            new Chart(canvas, {
+                type: "bar",
+                data: {
+                    labels: breakdown.map(item => item.label),
+                    datasets: [{
+                        data: breakdown.map(item => item.value),
+                        backgroundColor: breakdown.map(item =>
+                            item.value >= 75
+                                ? "#159a73"
+                                : item.value >= 55
+                                    ? "#c98212"
+                                    : "#c94d5a"),
+                        borderRadius: 8,
+                        borderSkipped: false,
+                        barThickness: 30
+                    }]
+                },
+                plugins: [
+                    thresholdPlugin,
+                    valuePlugin
+                ],
+                options: {
+                    indexAxis: "y",
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: {
+                        duration: 550
+                    },
+                    layout: {
+                        padding: {
+                            right: 34
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label(context) {
+                                    return ` Score: ${context.raw}/100`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            max: 100,
+                            ticks: {
+                                stepSize: 10,
+                                color: "#72849a",
+                                font: {
+                                    size: 11
+                                }
+                            },
+                            grid: {
+                                color: "rgba(114, 132, 154, .14)"
+                            },
+                            border: {
+                                display: false
+                            }
+                        },
+                        y: {
+                            ticks: {
+                                color: "#41566f",
+                                font: {
+                                    size: 12,
+                                    weight: "600"
+                                }
+                            },
+                            grid: {
+                                display: false
+                            },
+                            border: {
+                                display: false
+                            }
+                        }
+                    }
+                }
+            });
         })();
     </script>
 }

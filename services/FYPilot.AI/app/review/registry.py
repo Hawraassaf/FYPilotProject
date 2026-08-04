@@ -444,6 +444,27 @@ SE DOCUMENTATION-SPECIFIC REVIEW CRITERIA (in addition to the standard criteria 
   to a real functional or non-functional requirement id actually present in this
   candidate. Flag a reference to a requirement id that does not exist as category
   "contradiction".
+- Domain contamination: flag (category "project_alignment", severity "critical")
+  any functionalRequirements, useCases, systemModules, databaseEntities, or
+  uiScreens entry describing a feature, actor, or workflow from a DIFFERENT
+  problem domain than the one confirmed in the trusted project context and
+  project text (e.g. inventory/stock management, retail point-of-sale, or an
+  unrelated administrative reporting feature appearing in a project that is not
+  about that domain) -- even a well-written, internally consistent item does not
+  belong in this project's documentation if it belongs to a different domain.
+- Semantic traceability: flag (category "contradiction", severity "high") any
+  traceabilityMatrix row whose linked useCaseIds/moduleIds/entityIds/screenIds/
+  apiIds/testCaseIds reference items that are structurally valid (the ids exist)
+  but describe a DIFFERENT feature or capability than the row's own
+  requirementId -- an id existing is not sufficient; the linked item must
+  actually implement or support that specific requirement.
+- Architecture/AI report consistency: flag (category "contradiction", severity
+  "high") any contradiction between the architecture section (aiService/
+  explanation) and aiTechnicalReport (taskType/modelOrApproach/
+  trainingVsInference) about whether the AI/NLP approach is confirmed or
+  unresolved, or about which approach (local model, retrieval, external LLM
+  API) is actually being used -- these two sections must describe the SAME AI
+  approach consistently.
 - Technology alignment: flag (category "project_alignment") any systemModule,
   apiIntegrationPoint, or architecture field (frontend/backend/database/aiService)
   that names a technology NOT listed in the trusted project context's
@@ -453,6 +474,13 @@ SE DOCUMENTATION-SPECIFIC REVIEW CRITERIA (in addition to the standard criteria 
 - UI screens vs. modules: flag (category "quality") any uiScreens entry whose name
   describes a backend/development concept (e.g. ends in "Module", "Service",
   "Repository", "Engine", "Middleware") rather than a real user-facing screen.
+- Role-appropriate authorization: flag (category "contradiction", severity
+  "high") any uiScreens entry whose authorizedRoles grants an end-user-facing
+  role (e.g. the primary confirmed user type in the trusted project context,
+  such as a patient/student/customer) access to a screen whose name or purpose
+  is clearly administrative, operational, or configuration-only (e.g. analytics/
+  reporting dashboards, system configuration, user and role management) -- an
+  end-user role must never be authorized for administrator-only screens.
 - Measurable NFRs: flag (category "missing_mandatory_content") any
   nonFunctionalRequirements entry with an empty measurableTarget or
   verificationMethod.
@@ -1282,14 +1310,20 @@ AGENT_REGISTRY: dict[str, AgentReviewConfig] = {
         allow_unreviewed_output=True,
         known_risky_claims=_SEDOC_KNOWN_RISKY_CLAIMS,
         mandatory_fields=["projectTitle", "projectOverview", "problemStatement"],
-        # Higher than Roadmap/Mentor Chat's 90s: the Writer stage here makes up
-        # to 7 sequential LLM calls (requirements, use cases, modules +
-        # architecture, database, UI + API, testing + security, and -- only for
-        # AI-flavored projects -- the AI technical report) before the Reviewer
-        # even runs once, and each individual section now retries once on
-        # failure (content-depth batch) rather than aborting the whole
-        # document, so the worst case is up to ~14 provider round-trips.
-        max_total_seconds=340.0,
+        # Raised 180s -> 340s -> 960s. The Writer stage here makes up to 7
+        # sequential LLM calls (requirements, use cases, modules +
+        # architecture, database, UI + API, testing + security, and -- only
+        # for AI-flavored projects -- the AI technical report) before the
+        # Reviewer even runs once, on the "se_documentation" DeepInfra tier
+        # (see llm_provider.py) where a single ~6500-token section was
+        # measured live at 121s. 960s is coordinated with (not independent
+        # of) SEDocumentationOrchestratorAgent._SECTIONS_TIME_BUDGET_SECONDS
+        # and .NET's dedicated 1020s HttpClient timeout for this endpoint
+        # (AiServiceClient.cs) -- the router computes ONE shared deadline
+        # from this value and passes it into both this pipeline and the
+        # Writer callable, so they can never disagree about how much time is
+        # left. Do not change this value without also checking those two.
+        max_total_seconds=960.0,
         extra_rubric=_SEDOC_EXTRA_RUBRIC,
     ),
     "ProjectIdeaAgent": AgentReviewConfig(
@@ -1310,7 +1344,14 @@ AGENT_REGISTRY: dict[str, AgentReviewConfig] = {
         max_structural_repairs=1,
         max_semantic_rewrites=1,
         url_mode="no_urls_allowed",
-        allow_unreviewed_output=True,
+        # False (unlike SE Documentation, which sets this True to cover a
+        # 7-call/960s generation budget where a Reviewer timeout is a real
+        # risk). DNA's single-call, 90s budget doesn't share that risk
+        # profile, and this agent's rubric explicitly checks for
+        # skill-rating contradictions -- unreviewed output could show a
+        # contradictory analysis undetected, so it should never be shown
+        # without at least one successful semantic review.
+        allow_unreviewed_output=False,
         known_risky_claims=_DNA_KNOWN_RISKY_CLAIMS,
         mandatory_fields=["projectDNAType", "summary"],
         max_total_seconds=90.0,

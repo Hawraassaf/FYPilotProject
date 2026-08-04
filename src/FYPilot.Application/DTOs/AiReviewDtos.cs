@@ -82,5 +82,15 @@ public record AiQualityPassportDto(
     string? ReviewerModel = null,
     List<string>? FirewallInputFlags = null,
     List<string>? FirewallOutputFlags = null,
-    List<AttemptRecordDto>? AttemptHistory = null
+    List<AttemptRecordDto>? AttemptHistory = null,
+    // Additive: app/review/models.py PipelineResult grew these three fields
+    // (displayable/outputOrigin/outputReviewLevel) to give consumers an
+    // unambiguous "should I render this" signal and a human-readable
+    // provenance label, on top of the pre-existing Usable/Status pair.
+    // Optional with safe defaults so every other existing caller of this DTO
+    // (Mentor Chat, Roadmap, Idea Comparison) keeps deserializing exactly as
+    // before if the Python response predates these fields.
+    bool Displayable = false,
+    string? OutputOrigin = null,
+    string? OutputReviewLevel = null
 );

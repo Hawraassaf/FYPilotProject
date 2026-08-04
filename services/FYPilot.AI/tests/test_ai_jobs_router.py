@@ -10,8 +10,10 @@ Run from services/FYPilot.AI:
 """
 
 import asyncio
+import json
 import os
 import sys
+import threading
 import unittest
 
 _SERVICE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -158,15 +160,48 @@ class AiJobsRouterTests(unittest.IsolatedAsyncioTestCase):
             ai_jobs.get_job_snapshot("does-not-exist")
         self.assertEqual(ctx.exception.status_code, 404)
 
-    async def test_get_job_result_is_404_until_done_then_returns_the_result(self):
+    async def test_get_job_result_is_pending_202_until_done_then_returns_the_result(self):
+        """
+        Stale-test fix (not a race): get_job_result's "not ready yet" case
+        was changed from raising a 404 HTTPException to returning a 202
+        JSONResponse (see the "not a missing resource" comment right above
+        that return in ai_jobs.py, committed in 258ba68) -- this test still
+        asserted the old 404 contract. Made genuinely deterministic with a
+        controllable worker instead of relying on asyncio scheduling
+        timing: a threading.Event (not asyncio.Event) is required here
+        because the worker body runs on a REAL thread via
+        asyncio.to_thread, not as a coroutine.
+        """
+        worker_started = threading.Event()
+        worker_may_finish = threading.Event()
+
+        def controllable_worker(request: _FakeRequest, reporter: ProgressReporter):
+            worker_started.set()
+            if not worker_may_finish.wait(timeout=5):
+                raise AssertionError("test never released the worker")
+            return {"echo": request.value}
+
+        ai_jobs.register_agent_job("ControllableAgent", _FakeRequest, controllable_worker)
+        from app.jobs import plans
+        plans.AGENT_STAGE_PLANS["ControllableAgent"] = [("prepare", "Preparing")]
+
         body = ai_jobs.StartJobRequest(jobId="job-1", request={"value": "x"})
-        await ai_jobs.start_job("FakeAgent", body)
+        await ai_jobs.start_job("ControllableAgent", body)
         record = self.manager.get_job("job-1")
 
-        with self.assertRaises(HTTPException) as ctx:
-            ai_jobs.get_job_result("job-1")
-        self.assertEqual(ctx.exception.status_code, 404)
+        # Block on the real OS thread's event, not the event loop, so this
+        # deterministically waits for the worker to actually start running
+        # rather than relying on it happening to still be scheduled.
+        started_in_time = await asyncio.to_thread(worker_started.wait, 5)
+        self.assertTrue(started_in_time, "worker never signaled it started")
 
+        pending_response = ai_jobs.get_job_result("job-1")
+        self.assertEqual(pending_response.status_code, 202)
+        pending_payload = json.loads(pending_response.body)
+        self.assertEqual(pending_payload["jobId"], "job-1")
+        self.assertIn(pending_payload["status"], ("queued", "running"))
+
+        worker_may_finish.set()
         await record.active_task
 
         result = ai_jobs.get_job_result("job-1")

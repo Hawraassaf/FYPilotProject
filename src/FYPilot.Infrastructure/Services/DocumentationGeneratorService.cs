@@ -10,6 +10,21 @@ namespace FYPilot.Infrastructure.Services;
 
 public class DocumentationGeneratorService : IDocumentationGeneratorService
 {
+    // Source values that mean "not real AI output" -- checked as a substring
+    // so a future renamed marker (e.g. "static-template-v2") is still caught
+    // without needing a code change. Real provider names (deepinfra, groq,
+    // gemini, ollama, ...) never contain either word.
+    private static readonly string[] FallbackSourceMarkers = ["fallback", "template"];
+
+    // The 6 core sections a real generation must actually produce -- must
+    // match app/routers/se_documentation.py's _CORE_SECTION_KEYS exactly
+    // (same string contract via SectionProvenance's keys). Any core section
+    // using deterministic fallback content is rejected outright; see
+    // HasCoreSectionFallback. Not configurable/tiered by design -- the
+    // pre-presentation policy is deliberately all-or-nothing.
+    private static readonly string[] CoreSectionKeys =
+        ["requirements", "useCases", "modulesArchitecture", "database", "uiApi", "testingSecurity"];
+
     private readonly ApplicationDbContext _db;
     private readonly IAiServiceClient _aiService;
     private readonly ILogger<DocumentationGeneratorService> _logger;
@@ -24,21 +39,130 @@ public class DocumentationGeneratorService : IDocumentationGeneratorService
         _logger = logger;
     }
 
-    public async Task<GeneratedDocumentationDto> GenerateAsync(GenerateDocumentationRequest request)
+    /// <summary>
+    /// Generates SE documentation via the AI service and, only if the result
+    /// passes <see cref="IsRealAiOutput"/>, persists it in a transaction and
+    /// returns a success result. Any failure -- network, non-success HTTP
+    /// response, deserialization, or a non-usable/non-displayable review --
+    /// is logged with full detail (never silently swallowed) and returns a
+    /// typed failure result. Nothing is ever written to the database on
+    /// failure, so any previously persisted valid document for this idea is
+    /// left exactly as it was.
+    /// </summary>
+    public async Task<SeDocumentationGenerationResult> GenerateAsync(GenerateDocumentationRequest request)
     {
-        var aiResponse = await TryGenerateWithAiAsync(request);
-        var aiDocumentation = aiResponse?.Documentation;
+        var correlationId = Guid.NewGuid();
 
-        var documentation = aiDocumentation != null
-            ? BuildEntityFromAiDocumentation(request, aiDocumentation)
-            : BuildEntityFromFallback(request);
+        AiSeDocumentationServiceResponse? aiResponse;
 
-        _db.ProjectDocumentations.Add(documentation);
-
-        var review = aiResponse?.Review;
-
-        if (review != null)
+        try
         {
+            var aiRequest = await BuildAiRequestAsync(request);
+            aiResponse = await _aiService.GenerateSeDocumentationAsync(aiRequest);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(
+                ex,
+                "SE documentation generation failed: AI service returned a non-success response. " +
+                "CorrelationId={CorrelationId} ProjectIdeaId={ProjectIdeaId} Stage=ai_call",
+                correlationId,
+                request.ProjectIdeaId);
+
+            return SeDocumentationGenerationResult.Failure(
+                SeDocumentationErrorCode.NonSuccessResponse,
+                BuildUserFacingFailureMessage(correlationId));
+        }
+        catch (TaskCanceledException ex)
+        {
+            _logger.LogError(
+                ex,
+                "SE documentation generation failed: AI service call timed out or was canceled. " +
+                "CorrelationId={CorrelationId} ProjectIdeaId={ProjectIdeaId} Stage=ai_call",
+                correlationId,
+                request.ProjectIdeaId);
+
+            return SeDocumentationGenerationResult.Failure(
+                SeDocumentationErrorCode.Timeout,
+                BuildUserFacingFailureMessage(correlationId));
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("could not be deserialized", StringComparison.OrdinalIgnoreCase))
+        {
+            // AiServiceClient wraps JsonException as InvalidOperationException
+            // with this message -- see AiServiceClient.PostAsync.
+            _logger.LogError(
+                ex,
+                "SE documentation generation failed: AI service response could not be deserialized. " +
+                "CorrelationId={CorrelationId} ProjectIdeaId={ProjectIdeaId} Stage=deserialization",
+                correlationId,
+                request.ProjectIdeaId);
+
+            return SeDocumentationGenerationResult.Failure(
+                SeDocumentationErrorCode.DeserializationFailure,
+                BuildUserFacingFailureMessage(correlationId));
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(
+                ex,
+                "SE documentation generation failed: AI service response JSON was invalid. " +
+                "CorrelationId={CorrelationId} ProjectIdeaId={ProjectIdeaId} Stage=deserialization",
+                correlationId,
+                request.ProjectIdeaId);
+
+            return SeDocumentationGenerationResult.Failure(
+                SeDocumentationErrorCode.DeserializationFailure,
+                BuildUserFacingFailureMessage(correlationId));
+        }
+        catch (Exception ex)
+        {
+            // Last resort only -- still logged loudly at Error with full
+            // exception detail and a correlation id, never swallowed. This
+            // must never be reached by a known failure mode; if it is, that
+            // is itself a bug to investigate from the logs.
+            _logger.LogError(
+                ex,
+                "SE documentation generation failed with an unexpected error. " +
+                "CorrelationId={CorrelationId} ProjectIdeaId={ProjectIdeaId} Stage=unexpected",
+                correlationId,
+                request.ProjectIdeaId);
+
+            return SeDocumentationGenerationResult.Failure(
+                SeDocumentationErrorCode.UnexpectedError,
+                BuildUserFacingFailureMessage(correlationId));
+        }
+
+        if (!IsRealAiOutput(aiResponse, out var rejectReason, out var errorCode))
+        {
+            _logger.LogWarning(
+                "SE documentation generation did not produce usable AI output and was rejected -- " +
+                "no document was saved. CorrelationId={CorrelationId} ProjectIdeaId={ProjectIdeaId} " +
+                "Reason={Reason} LlmUsed={LlmUsed} ReviewStatus={ReviewStatus} ReviewUsable={ReviewUsable} " +
+                "Source={Source}",
+                correlationId,
+                request.ProjectIdeaId,
+                rejectReason,
+                aiResponse?.LlmUsed,
+                aiResponse?.Review?.Status,
+                aiResponse?.Review?.Usable,
+                aiResponse?.Source);
+
+            return SeDocumentationGenerationResult.Failure(
+                errorCode,
+                BuildUserFacingFailureMessage(correlationId, errorCode, rejectReason),
+                reviewStatus: aiResponse?.Review?.Status,
+                warning: aiResponse?.Review?.Warning);
+        }
+
+        var review = aiResponse!.Review!;
+        var documentation = BuildEntityFromAiDocumentation(request, aiResponse.Documentation!);
+
+        await using var transaction = await _db.Database.BeginTransactionAsync();
+
+        try
+        {
+            _db.ProjectDocumentations.Add(documentation);
+
             _db.AiOutputReviews.Add(new AiOutputReview
             {
                 ReviewRunId = Guid.TryParse(review.ReviewRunId, out var reviewRunId)
@@ -54,7 +178,7 @@ public class DocumentationGeneratorService : IDocumentationGeneratorService
                 Attempts = review.Attempts,
                 QualityScore = review.QualityScore,
                 DecisionReason = review.DecisionReason,
-                GeneratorProvider = aiResponse!.Provider,
+                GeneratorProvider = aiResponse.Provider,
                 GeneratorModel = aiResponse.ModelUsed,
                 ReviewerProvider = review.ReviewerProvider,
                 ReviewerModel = review.ReviewerModel,
@@ -68,29 +192,196 @@ public class DocumentationGeneratorService : IDocumentationGeneratorService
                 CreatedAt = DateTime.UtcNow,
                 CompletedAt = DateTime.UtcNow
             });
+
+            await _db.SaveChangesAsync();
+            await transaction.CommitAsync();
         }
-
-        await _db.SaveChangesAsync();
-
-        return ToDto(documentation);
-    }
-
-    private async Task<AiSeDocumentationServiceResponse?> TryGenerateWithAiAsync(GenerateDocumentationRequest request)
-    {
-        try
+        catch (DbUpdateException ex)
         {
-            var aiRequest = await BuildAiRequestAsync(request);
-            return await _aiService.GenerateSeDocumentationAsync(aiRequest);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
+            await transaction.RollbackAsync();
+
+            _logger.LogError(
                 ex,
-                "AI SE documentation generation failed for project idea {ProjectIdeaId}. Falling back to deterministic generation.",
+                "SE documentation generation succeeded but persistence failed; rolled back. " +
+                "CorrelationId={CorrelationId} ProjectIdeaId={ProjectIdeaId} Stage=persistence",
+                correlationId,
                 request.ProjectIdeaId);
 
-            return null;
+            return SeDocumentationGenerationResult.Failure(
+                SeDocumentationErrorCode.PersistenceFailure,
+                BuildUserFacingFailureMessage(correlationId));
         }
+
+        _logger.LogInformation(
+            "SE documentation generated and persisted. CorrelationId={CorrelationId} ProjectIdeaId={ProjectIdeaId} " +
+            "Provider={Provider} Model={Model} ReviewStatus={ReviewStatus}",
+            correlationId,
+            request.ProjectIdeaId,
+            aiResponse.Provider,
+            aiResponse.ModelUsed,
+            review.Status);
+
+        return SeDocumentationGenerationResult.Success(
+            ToDto(documentation),
+            usedLlm: aiResponse.LlmUsed,
+            source: aiResponse.Source,
+            provider: aiResponse.Provider,
+            model: aiResponse.ModelUsed,
+            reviewStatus: review.Status,
+            outputOrigin: review.OutputOrigin,
+            outputReviewLevel: review.OutputReviewLevel,
+            warning: string.IsNullOrWhiteSpace(review.Warning) ? null : review.Warning);
+    }
+
+    /// <summary>
+    /// The single acceptance gate for persisting a generation result. A
+    /// result must have reached a real provider, carry parsed documentation,
+    /// and be marked usable+displayable by the review pipeline; a status of
+    /// "review_unavailable" (structural validation passed, semantic review
+    /// couldn't run) is still accepted here as long as usable/displayable are
+    /// both true -- only the pipeline itself decides that, this gate does not
+    /// second-guess it based on status alone.
+    /// </summary>
+    private static bool IsRealAiOutput(
+        AiSeDocumentationServiceResponse? response,
+        out string reason,
+        out SeDocumentationErrorCode errorCode)
+    {
+        if (response is null)
+        {
+            reason = "AI service returned an empty response body.";
+            errorCode = SeDocumentationErrorCode.InvalidResponse;
+            return false;
+        }
+
+        if (!response.LlmUsed)
+        {
+            reason = "llmUsed=false -- no real provider produced this output.";
+            errorCode = SeDocumentationErrorCode.ProviderUnavailable;
+            return false;
+        }
+
+        if (response.Documentation is null)
+        {
+            reason = "documentation field was null despite llmUsed=true.";
+            errorCode = SeDocumentationErrorCode.InvalidResponse;
+            return false;
+        }
+
+        if (response.Review is null)
+        {
+            reason = "review field was null despite llmUsed=true.";
+            errorCode = SeDocumentationErrorCode.InvalidResponse;
+            return false;
+        }
+
+        if (!response.Review.Usable || !response.Review.Displayable)
+        {
+            reason = $"review.usable={response.Review.Usable}, review.displayable={response.Review.Displayable} -- " +
+                     $"status={response.Review.Status}.";
+            errorCode = SeDocumentationErrorCode.ReviewRejected;
+            return false;
+        }
+
+        if (IsFallbackSource(response.Source))
+        {
+            reason = $"source '{response.Source}' is a fallback marker, not a real provider.";
+            errorCode = SeDocumentationErrorCode.ProviderUnavailable;
+            return false;
+        }
+
+        // Strict pre-presentation policy (stabilization task Step C):
+        // independently recomputed from the typed per-section provenance,
+        // not merely trusted from response.CoreSectionFallback or from
+        // llmUsed/source alone -- a real provider response (llmUsed=true,
+        // a non-fallback top-level source) must still be rejected if ANY
+        // core section actually fell back to deterministic content.
+        if (HasCoreSectionFallback(response.Documentation, out var fallbackSections) ||
+            response.CoreSectionFallback)
+        {
+            reason = fallbackSections.Count > 0
+                ? $"core section(s) used deterministic fallback content: {string.Join(", ", fallbackSections)}."
+                : "the AI service reported coreSectionFallback=true.";
+            errorCode = SeDocumentationErrorCode.CoreSectionFallback;
+            return false;
+        }
+
+        reason = "";
+        errorCode = SeDocumentationErrorCode.None;
+        return true;
+    }
+
+    /// <summary>
+    /// True when any of the 6 core sections used deterministic fallback
+    /// content, or when the AI technical report is applicable but itself
+    /// used fallback content (a document must never describe its AI
+    /// technical report as confirmed/complete when it is actually generic
+    /// fallback text). Never partial acceptance/tiering -- any one core
+    /// fallback section rejects the whole candidate.
+    /// </summary>
+    private static bool HasCoreSectionFallback(
+        AiSeDocumentationDto? documentation,
+        out List<string> fallbackCoreSections)
+    {
+        fallbackCoreSections = [];
+
+        var provenance = documentation?.SectionProvenance;
+        if (provenance is null)
+        {
+            return false;
+        }
+
+        foreach (var key in CoreSectionKeys)
+        {
+            if (provenance.TryGetValue(key, out var origin) &&
+                string.Equals(origin, "fallback", StringComparison.OrdinalIgnoreCase))
+            {
+                fallbackCoreSections.Add(key);
+            }
+        }
+
+        if (documentation!.AiTechnicalReportApplicable &&
+            provenance.TryGetValue("aiReport", out var aiOrigin) &&
+            string.Equals(aiOrigin, "fallback", StringComparison.OrdinalIgnoreCase))
+        {
+            fallbackCoreSections.Add("aiReport");
+        }
+
+        return fallbackCoreSections.Count > 0;
+    }
+
+    private static bool IsFallbackSource(string? source)
+    {
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return false;
+        }
+
+        foreach (var marker in FallbackSourceMarkers)
+        {
+            if (source.Contains(marker, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string BuildUserFacingFailureMessage(
+        Guid correlationId,
+        SeDocumentationErrorCode errorCode = SeDocumentationErrorCode.None,
+        string? detail = null)
+    {
+        var reasonSentence = errorCode == SeDocumentationErrorCode.CoreSectionFallback
+            ? "Part of the generated documentation used generic fallback content instead of a real " +
+              "AI-generated section, so the new version was not accepted" +
+              (string.IsNullOrWhiteSpace(detail) ? ". " : $" ({detail}). ")
+            : "The AI service could not generate the documentation. ";
+
+        return reasonSentence +
+            "No fallback document was saved. Your previous documentation remains unchanged. Please try again. " +
+            $"(Reference: {correlationId})";
     }
 
     private async Task<AiSeDocumentationRequest> BuildAiRequestAsync(GenerateDocumentationRequest request)
@@ -357,38 +648,6 @@ public class DocumentationGeneratorService : IDocumentationGeneratorService
         };
     }
 
-    private static ProjectDocumentation BuildEntityFromFallback(GenerateDocumentationRequest request)
-    {
-        var functionalRequirements = GenerateFunctionalRequirements(request);
-        var nonFunctionalRequirements = GenerateNonFunctionalRequirements(request);
-        var useCases = GenerateUseCases(request);
-        var edgeCases = GenerateEdgeCases(request);
-        var databaseDesign = GenerateDatabaseDesign(request);
-        var uiDesign = GenerateUiDesign(request);
-        var diagramDescriptions = GenerateDiagramDescriptions(request);
-        var aiTechnicalReport = GenerateAiTechnicalReport(request);
-
-        return new ProjectDocumentation
-        {
-            UserId = request.UserId,
-            ProjectIdeaId = request.ProjectIdeaId,
-            Title = $"{request.ProjectTitle} - Software Engineering Specification",
-
-            FunctionalRequirementsJson = JsonSerializer.Serialize(functionalRequirements),
-            NonFunctionalRequirementsJson = JsonSerializer.Serialize(nonFunctionalRequirements),
-            UseCasesJson = JsonSerializer.Serialize(useCases),
-            EdgeCasesJson = JsonSerializer.Serialize(edgeCases),
-            DatabaseDesignJson = JsonSerializer.Serialize(databaseDesign),
-            UiDesignJson = JsonSerializer.Serialize(uiDesign),
-            DiagramDescriptionsJson = JsonSerializer.Serialize(diagramDescriptions),
-            AiTechnicalReportJson = JsonSerializer.Serialize(aiTechnicalReport),
-
-            SupervisorStatus = "Draft",
-            SupervisorComment = string.Empty,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-    }
     public async Task<GeneratedDocumentationDto?>
     GetLatestForIdeaAsync(
         int projectIdeaId,
@@ -455,167 +714,6 @@ public class DocumentationGeneratorService : IDocumentationGeneratorService
         documentation.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
-    }
-
-    private static List<string> GenerateFunctionalRequirements(GenerateDocumentationRequest request)
-    {
-        return new List<string>
-        {
-            $"FR1: The system shall allow users to access the {request.ProjectTitle} platform securely.",
-            $"FR2: The system shall allow users to create, view, update, and manage core {request.Domain} records.",
-            "FR3: The system shall provide role-based access according to user type.",
-            "FR4: The system shall validate user input before saving data.",
-            "FR5: The system shall display dashboards and summaries for important project information.",
-            "FR6: The system shall allow users to search, filter, and view relevant records.",
-            "FR7: The system shall generate reports that summarize system activity and outcomes.",
-            request.ContainsAi
-                ? "FR8: The system shall send relevant data to an AI module and display explainable AI results."
-                : "FR8: The system shall provide structured decision-support based on stored project data."
-        };
-    }
-
-    private static List<string> GenerateNonFunctionalRequirements(GenerateDocumentationRequest request)
-    {
-        return new List<string>
-        {
-            "NFR1: The system should provide a clear and user-friendly interface.",
-            "NFR2: The system should protect sensitive data using authentication and role-based authorization.",
-            "NFR3: The system should store data reliably in a relational database.",
-            "NFR4: The system should respond to common user actions within an acceptable time.",
-            "NFR5: The system should be maintainable using layered architecture.",
-            "NFR6: The system should allow future extension without major redesign.",
-            "NFR7: The system should handle invalid input and service failures gracefully.",
-            request.ContainsAi
-                ? "NFR8: AI predictions should be explainable and presented as recommendations, not absolute decisions."
-                : "NFR8: Reports should be clear, consistent, and easy to review by supervisors."
-        };
-    }
-
-    private static List<string> GenerateUseCases(GenerateDocumentationRequest request)
-    {
-        return new List<string>
-        {
-            "UC1: User Login — The user logs in and is redirected based on their role.",
-            $"UC2: Manage {request.Domain} Data — The user creates and manages records related to the project domain.",
-            "UC3: View Dashboard — The user views key summaries, statistics, and alerts.",
-            "UC4: Generate Report — The user generates structured project documentation.",
-            "UC5: Supervisor Review — The supervisor reviews generated documentation and provides feedback.",
-            request.ContainsAi
-                ? "UC6: Run AI Analysis — The system analyzes project data and returns explainable AI results."
-                : "UC6: Export/View Specification — The user reviews the generated software engineering specification."
-        };
-    }
-
-    private static List<string> GenerateEdgeCases(GenerateDocumentationRequest request)
-    {
-        return new List<string>
-        {
-            "EC1: User submits an empty form — The system displays validation messages.",
-            "EC2: Unauthorized user tries to access restricted page — The system blocks access.",
-            "EC3: Database connection fails — The system shows a friendly error message.",
-            "EC4: Required project information is missing — The system asks the user to complete missing fields.",
-            "EC5: Supervisor rejects the documentation — The system marks it as Needs Revision.",
-            request.ContainsAi
-                ? "EC6: AI service is unavailable — The system falls back to normal report generation and warns the user."
-                : "EC6: Report content is incomplete — The system allows regeneration or manual editing."
-        };
-    }
-
-    private static List<string> GenerateDatabaseDesign(GenerateDocumentationRequest request)
-    {
-        return new List<string>
-        {
-            "User: stores login, role, and identity information.",
-            "ProjectIdea: stores selected project title, description, domain, and owner.",
-            "ProjectDocumentation: stores generated software engineering documentation sections.",
-            "SupervisorFeedback: stores supervisor comments and review status.",
-            "ReportSection: optional future table for storing each report section separately.",
-            request.ContainsAi
-                ? "AiAnalysisResult: stores AI scores, explanations, and risk outputs."
-                : "SystemReport: stores generated summaries and review information."
-        };
-    }
-
-    private static List<string> GenerateUiDesign(GenerateDocumentationRequest request)
-    {
-        return new List<string>
-        {
-            "Dashboard page with summary cards and navigation sidebar.",
-            "Project details page showing title, description, domain, and technology stack.",
-            "Documentation generator page with Generate button and section cards.",
-            "Generated report page with tabs for requirements, use cases, database design, UI design, and AI report.",
-            "Supervisor review page with status dropdown and comment box.",
-            "System test page for verifying database and AI service connectivity."
-        };
-    }
-
-    private static string GenerateDiagramDescriptions(GenerateDocumentationRequest request)
-    {
-        return $"""
-        Use Case Diagram:
-        Actors: Student/User, Supervisor, Admin, System, {(request.ContainsAi ? "AI Service" : "Report Generator")}.
-        Main use cases: Login, Manage Project, Generate Documentation, Review Report, View Dashboard.
-
-        Class Diagram:
-        Main classes: User, ProjectIdea, ProjectDocumentation, SupervisorFeedback, ReportSection.
-
-        Activity Diagram:
-        User selects project idea → clicks Generate Documentation → system creates sections → user reviews → supervisor reviews → status updated.
-
-        Data Flow Diagram:
-        User input flows into the web application, then to application services, then to the database. {(request.ContainsAi ? "AI-related data may also be sent to the Python AI service for analysis." : "Reports are generated from project data and stored in PostgreSQL.")}
-        """;
-    }
-
-    private static string GenerateAiTechnicalReport(GenerateDocumentationRequest request)
-    {
-        if (!request.ContainsAi)
-        {
-            return "This project does not require a dedicated AI technical report. The system can still include analytics and structured reporting.";
-        }
-
-        return $"""
-        AI Technical Report for {request.ProjectTitle}
-
-        Problem Type:
-        The AI component is expected to support prediction, recommendation, classification, or intelligent decision support.
-
-        Possible Input Features:
-        - User profile data
-        - Project/domain-specific records
-        - Historical examples
-        - Scores, categories, or behavioral indicators
-
-        Possible Output:
-        - Prediction score
-        - Risk level
-        - Recommendation
-        - Classification result
-        - Explanation or suggested action
-
-        Suggested Models:
-        - Logistic Regression for simple classification
-        - Decision Tree for explainable rules
-        - Random Forest for stronger prediction
-        - TF-IDF and cosine similarity for text-based matching
-
-        Evaluation Metrics:
-        - Accuracy
-        - Precision
-        - Recall
-        - F1-score
-        - Confusion matrix
-
-        Risks:
-        - Dataset may be small or unavailable
-        - Model predictions may be biased
-        - Output should be treated as recommendation, not absolute truth
-
-        Ethical Notes:
-        - Avoid using sensitive personal data unless necessary
-        - Explain AI outputs clearly
-        - Allow human review before final decisions
-        """;
     }
 
     private static GeneratedDocumentationDto ToDto(ProjectDocumentation documentation)

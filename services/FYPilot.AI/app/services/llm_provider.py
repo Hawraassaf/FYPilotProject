@@ -1980,13 +1980,15 @@ _DEEPINFRA_TIER_DEFAULTS: dict[str, str] = {
 # already-generated ideas doesn't need the highest-accuracy tier.
 _DEEPINFRA_TIER_DEFAULTS["comparison"] = _DEEPINFRA_TIER_DEFAULTS["light"]
 
-# Project Roadmap gets its OWN tier (same DeepInfra model as "high", since
-# it needs the same accuracy) so its Ollama fallback leg (see
-# _OLLAMA_TIER_TIMING below) can use a longer, roadmap-specific timeout
-# without changing the shared "high" tier's timing for SE Documentation/
-# Idea Generator, which don't need it and shouldn't wait longer just
-# because roadmap generation does.
-_DEEPINFRA_TIER_DEFAULTS["roadmap"] = _DEEPINFRA_TIER_DEFAULTS["high"]
+# Project Roadmap gets its OWN tier -- originally the same DeepInfra model as
+# "high" so its Ollama fallback leg (see _OLLAMA_TIER_TIMING below) could use
+# a longer, roadmap-specific timeout without changing the shared "high"
+# tier's timing for Idea Generator. Switched off "high" (anthropic/claude-
+# opus-4-8, expensive) to "standard"'s model (cheap, same cost-driven move
+# already made for SE Documentation) -- Idea Generator is the only agent
+# still intentionally on "high". The roadmap-specific timing tuning below is
+# unaffected: only the model changed, not the timeout/retry values.
+_DEEPINFRA_TIER_DEFAULTS["roadmap"] = _DEEPINFRA_TIER_DEFAULTS["standard"]
 
 # Idea Comparison's job-based Reviewer stage only (app/jobs/workers/
 # idea_comparison_worker.py) -- kept separate from "comparison" above, which
@@ -1999,6 +2001,14 @@ _DEEPINFRA_TIER_DEFAULTS["roadmap"] = _DEEPINFRA_TIER_DEFAULTS["high"]
 # consistently than switching families) at roughly 2.25x the parameters,
 # priced well below the "standard" 70B tier.
 _DEEPINFRA_TIER_DEFAULTS["comparison_review"] = "google/gemma-3-27b-it"
+
+# SE Documentation gets its OWN tier (same DeepInfra model as "standard",
+# unchanged from the earlier cost-driven move off "high") purely so its
+# DeepInfra per-call timeout (see _DEEPINFRA_TIER_TIMING below) can be sized
+# for its actual ~6500-token structured JSON sections (measured live at 121s)
+# without changing "standard"'s 60s default for every other agent sharing
+# that tier (market needs, project DNA, market footprint).
+_DEEPINFRA_TIER_DEFAULTS["se_documentation"] = _DEEPINFRA_TIER_DEFAULTS["standard"]
 
 # Per-tier timing overrides for the DeepInfra leg of the chain. Absent here
 # (every tier except "comparison") means "use DeepInfraProvider's own
@@ -2037,6 +2047,16 @@ _DEEPINFRA_TIER_TIMING: dict[str, dict[str, float | int]] = {
     # max_retries=0 so a genuine timeout fails fast into the Groq fallback
     # leg rather than the SDK's own retry-with-backoff eating further time.
     "roadmap": {"timeout_seconds": None, "max_retries": 0},  # resolved by _deepinfra_timing_for_tier
+    # Configurable via SE_DOCUMENTATION_DEEPINFRA_TIMEOUT_SECONDS (default
+    # 180s). Measured live: a ~6500-token structured JSON section (the size
+    # SE Documentation's writer sections actually request) took 121s on
+    # meta-llama/Llama-3.3-70B-Instruct-Turbo -- the previous 60s default
+    # (shared with "standard") was cutting every section off before it could
+    # finish, forcing a wasteful cascade to Groq on every single section.
+    # max_retries=0 for the same reason as "roadmap": a genuine timeout
+    # should fail fast into the Groq leg once, not have the SDK silently
+    # retry (and re-pay for) the same slow call 2 more times first.
+    "se_documentation": {"timeout_seconds": None, "max_retries": 0},  # resolved by _deepinfra_timing_for_tier
 }
 
 # Same rationale as _DEEPINFRA_TIER_TIMING, for the Groq fallback leg.
@@ -2088,6 +2108,7 @@ def _deepinfra_model_for_tier(tier: str) -> str:
 
 
 _DEFAULT_ROADMAP_DEEPINFRA_TIMEOUT_SECONDS = 120.0
+_DEFAULT_SE_DOCUMENTATION_DEEPINFRA_TIMEOUT_SECONDS = 180.0
 
 
 def _deepinfra_timing_for_tier(tier: str) -> dict[str, float | int]:
@@ -2096,6 +2117,14 @@ def _deepinfra_timing_for_tier(tier: str) -> dict[str, float | int]:
     if tier == "roadmap":
         timing["timeout_seconds"] = float(
             os.getenv("ROADMAP_DEEPINFRA_TIMEOUT_SECONDS", str(_DEFAULT_ROADMAP_DEEPINFRA_TIMEOUT_SECONDS)),
+        )
+
+    if tier == "se_documentation":
+        timing["timeout_seconds"] = float(
+            os.getenv(
+                "SE_DOCUMENTATION_DEEPINFRA_TIMEOUT_SECONDS",
+                str(_DEFAULT_SE_DOCUMENTATION_DEEPINFRA_TIMEOUT_SECONDS),
+            ),
         )
 
     return timing

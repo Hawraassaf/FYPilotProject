@@ -191,6 +191,58 @@
             border-color: #efcccc;
         }
 
+        .doc-alert-info {
+            color: #1c4f8c;
+            background: #eaf2fd;
+            border-color: #cfe1f7;
+        }
+
+        .doc-provenance-panel {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 1rem;
+            margin-top: .8rem;
+            padding: .72rem .9rem;
+            background: #fff;
+            border: 1px solid var(--doc-line);
+            border-radius: var(--doc-radius-md);
+            box-shadow: 0 8px 24px rgba(23, 32, 51, .035);
+            font-size: .78rem;
+        }
+
+        .doc-provenance-item {
+            display: flex;
+            flex-direction: column;
+            gap: .15rem;
+            min-width: 0;
+        }
+
+            .doc-provenance-item span {
+                color: var(--doc-muted);
+                font-size: .68rem;
+                text-transform: uppercase;
+                letter-spacing: .03em;
+            }
+
+            .doc-provenance-item strong {
+                color: var(--doc-ink, #172033);
+                font-weight: 600;
+                overflow-wrap: anywhere;
+            }
+
+        .doc-provenance-warning {
+            display: flex;
+            align-items: center;
+            gap: .5rem;
+            color: #8a5b12;
+            background: #fff6e6;
+            border: 1px solid #f4dfad;
+            border-radius: var(--doc-radius-sm, 8px);
+            padding: .4rem .6rem;
+            flex-basis: 100%;
+        }
+
         .doc-review-bar {
             display: flex;
             align-items: center;
@@ -1418,6 +1470,14 @@
             <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
             <span>@Model.ErrorMessage</span>
         </div>
+
+        @if (Model.PreviousDocumentPreserved)
+        {
+            <div class="doc-alert doc-alert-info no-print" role="status">
+                <i class="bi bi-shield-check" aria-hidden="true"></i>
+                <span>Your previously generated documentation below was not changed and is still valid.</span>
+            </div>
+        }
     }
 
     @if (Model.LatestReview != null)
@@ -1436,6 +1496,103 @@
                 @badgeLabel
             </span>
         </div>
+    }
+
+    @if (Model.Provenance != null)
+    {
+        var provenance = Model.Provenance;
+
+        <section class="doc-provenance-panel no-print" aria-label="Generation provenance">
+            <div class="doc-provenance-item">
+                <span>Source</span>
+                <strong>@(provenance.Source ?? "Unknown")</strong>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(provenance.Model))
+            {
+                <div class="doc-provenance-item">
+                    <span>Model</span>
+                    <strong>@provenance.Model</strong>
+                </div>
+            }
+
+            <div class="doc-provenance-item">
+                <span>Output origin</span>
+                <strong>@provenance.OutputOriginLabel</strong>
+            </div>
+
+            <div class="doc-provenance-item">
+                <span>Review</span>
+                <strong>@provenance.ReviewLevelLabel</strong>
+            </div>
+
+            @if (provenance.GeneratedAt.HasValue)
+            {
+                <div class="doc-provenance-item">
+                    <span>Generated</span>
+                    <strong>@provenance.GeneratedAt.Value.ToString("u")</strong>
+                </div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(provenance.Warning))
+            {
+                <div class="doc-provenance-warning">
+                    <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+                    <span>@provenance.Warning</span>
+                </div>
+            }
+        </section>
+    }
+
+    @if (Model.QualityPanel != null)
+    {
+        var quality = Model.QualityPanel;
+
+        <section class="doc-provenance-panel no-print" aria-label="Quality and review summary">
+            <div class="doc-provenance-item">
+                <span>Quality score</span>
+                <strong>
+                    @(quality.OverallScore.HasValue ? $"{quality.OverallScore}/100" : "Not available")
+                    @if (!quality.SemanticReviewCompleted || quality.ImportantWarningCount > 0)
+                    {
+                        <span class="badge bg-warning text-dark" style="margin-left:.35rem;">Limited confidence</span>
+                    }
+                </strong>
+            </div>
+
+            <div class="doc-provenance-item">
+                <span>Review status</span>
+                <strong>@quality.ReviewStatusLabel</strong>
+            </div>
+
+            <div class="doc-provenance-item">
+                <span>Output review level</span>
+                <strong>@quality.OutputReviewLevelLabel</strong>
+            </div>
+
+            <div class="doc-provenance-item">
+                <span>Semantic review completed</span>
+                <strong>@(quality.SemanticReviewCompleted ? "Yes" : "No")</strong>
+            </div>
+
+            <div class="doc-provenance-item">
+                <span>Provenance</span>
+                <strong>@quality.ProvenanceSummary</strong>
+            </div>
+
+            <div class="doc-provenance-item">
+                <span>Important warnings</span>
+                <strong>@quality.ImportantWarningCount</strong>
+            </div>
+
+            @if (quality.LastGeneratedAt.HasValue)
+            {
+                <div class="doc-provenance-item">
+                    <span>Last successful generation</span>
+                    <strong>@quality.LastGeneratedAt.Value.ToString("u")</strong>
+                </div>
+            }
+        </section>
     }
 
     <div asp-validation-summary="ModelOnly" class="text-danger mt-2 no-print"></div>
