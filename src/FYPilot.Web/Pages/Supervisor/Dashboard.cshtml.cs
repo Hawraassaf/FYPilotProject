@@ -38,9 +38,9 @@ public class DashboardModel(
         var projects = await db.Projects
             .AsNoTracking()
             .Include(project => project.Student)
+            .Include(project => project.DeletedByUser)
             .Include(project => project.ProjectIdea)
-            .Include(project => project.Members
-                .Where(member => member.Status == "active"))
+            .Include(project => project.Members)
                 .ThenInclude(member => member.User)
             .Where(project =>
                 assignedProjectIds.Contains(project.Id))
@@ -82,16 +82,41 @@ public class DashboardModel(
                     project.Id,
                     out var evaluation);
 
-                var members = project.Members
+                var activeMemberships = project.Members
                     .Where(member =>
-                        member.Status == "active" &&
+                        NormalizeMembershipStatus(member.Status) == "active" &&
                         member.User != null)
+                    .ToList();
+
+                var archivedMemberships = activeMemberships
+                    .Where(member => member.IsArchived)
+                    .OrderBy(member => member.ArchivedAtUtc)
+                    .ToList();
+
+                var removedMemberships = project.Members
+                    .Where(member =>
+                        NormalizeMembershipStatus(member.Status) == "removed" &&
+                        member.User != null)
+                    .OrderByDescending(member => member.RemovedAtUtc)
+                    .ToList();
+
+                var ownerMembership = activeMemberships
+                    .FirstOrDefault(member =>
+                        member.UserId == project.StudentId);
+
+                var members = activeMemberships
                     .Select(member => new MemberSummary(
                         member.UserId,
                         member.User!.FullName))
                     .ToList();
 
-                if (members.All(member =>
+                /*
+                 * Keep legacy projects readable when their owner row is
+                 * temporarily missing, but never present a removed owner
+                 * as an active member of a soft-deleted project.
+                 */
+                if (!project.IsDeleted &&
+                    members.All(member =>
                         member.UserId != project.StudentId))
                 {
                     members.Add(new MemberSummary(
@@ -111,11 +136,24 @@ public class DashboardModel(
                         ? evaluation.CreatedAt
                         : evaluation.UpdatedAt;
 
+                var lifecycleActivityAt = project.Members
+                    .SelectMany(member => new[]
+                    {
+                        member.ArchivedAtUtc,
+                        member.RemovedAtUtc
+                    })
+                    .Append(project.DeletedAtUtc)
+                    .Where(value => value.HasValue)
+                    .Select(value => value!.Value)
+                    .DefaultIfEmpty(DateTime.MinValue)
+                    .Max();
+
                 var lastActivityAt = new[]
                 {
                     project.UpdatedAt,
                     idea?.CreatedAt ?? DateTime.MinValue,
-                    evaluationUpdatedAt
+                    evaluationUpdatedAt,
+                    lifecycleActivityAt
                 }.Max();
 
                 return new ProjectDashboardItem
@@ -126,10 +164,29 @@ public class DashboardModel(
                     ProjectTitle = SafeProjectTitle(project.Title),
                     IdeaTitle = idea?.Title
                         ?? "No official idea selected yet",
-                    MemberNames = string.Join(
-                        ", ",
-                        distinctMembers.Select(member => member.FullName)),
+                    MemberNames = distinctMembers.Count == 0
+                        ? "No active members"
+                        : string.Join(
+                            ", ",
+                            distinctMembers.Select(member => member.FullName)),
                     MemberCount = distinctMembers.Count,
+                    IsDeleted = project.IsDeleted,
+                    DeletedAtUtc = project.DeletedAtUtc,
+                    DeletedByName = project.DeletedByUser?.FullName
+                        ?? project.Student?.FullName
+                        ?? "A project member",
+                    OwnerIsArchived = ownerMembership?.IsArchived == true,
+                    OwnerArchivedAtUtc = ownerMembership?.ArchivedAtUtc,
+                    ArchivedMemberCount = archivedMemberships.Count,
+                    ArchivedMemberNames = string.Join(
+                        ", ",
+                        archivedMemberships
+                            .Select(member => member.User!.FullName)),
+                    RemovedMemberCount = removedMemberships.Count,
+                    RemovedMemberNames = string.Join(
+                        ", ",
+                        removedMemberships
+                            .Select(member => member.User!.FullName)),
                     Domain = idea == null
                         ? "Awaiting official idea"
                         : string.IsNullOrWhiteSpace(idea.Domain)
@@ -159,6 +216,17 @@ public class DashboardModel(
             return;
         }
 
+        var activeProjectIds = projects
+            .Where(project => !project.IsDeleted)
+            .Select(project => project.Id)
+            .ToList();
+
+        if (activeProjectIds.Count == 0)
+        {
+            UpcomingMeetings = [];
+            return;
+        }
+
         var now = DateTime.UtcNow;
 
         var meetings = await db.Meetings
@@ -166,7 +234,7 @@ public class DashboardModel(
             .Where(meeting =>
                 meeting.SupervisorId == supervisorId &&
                 meeting.ProjectId.HasValue &&
-                projectIds.Contains(meeting.ProjectId.Value) &&
+                activeProjectIds.Contains(meeting.ProjectId.Value) &&
                 meeting.Status == "scheduled" &&
                 meeting.ScheduledAt
                     .AddMinutes(meeting.DurationMinutes) >= now)
@@ -216,6 +284,14 @@ public class DashboardModel(
             "Unable to identify the logged-in supervisor.");
     }
 
+    private static string NormalizeMembershipStatus(
+        string? status)
+    {
+        return string.IsNullOrWhiteSpace(status)
+            ? string.Empty
+            : status.Trim().ToLowerInvariant();
+    }
+
     private static string NormalizeStatus(string? status)
     {
         var normalized = string.IsNullOrWhiteSpace(status)
@@ -258,6 +334,24 @@ public class DashboardModel(
         public string MemberNames { get; set; } = "";
 
         public int MemberCount { get; set; }
+
+        public bool IsDeleted { get; set; }
+
+        public DateTime? DeletedAtUtc { get; set; }
+
+        public string DeletedByName { get; set; } = "";
+
+        public bool OwnerIsArchived { get; set; }
+
+        public DateTime? OwnerArchivedAtUtc { get; set; }
+
+        public int ArchivedMemberCount { get; set; }
+
+        public string ArchivedMemberNames { get; set; } = "";
+
+        public int RemovedMemberCount { get; set; }
+
+        public string RemovedMemberNames { get; set; } = "";
 
         public string Domain { get; set; } = "";
 

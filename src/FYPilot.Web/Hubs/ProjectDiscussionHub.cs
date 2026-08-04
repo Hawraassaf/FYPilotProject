@@ -52,7 +52,7 @@ public class ProjectDiscussionHub(
         int? replyToMessageId = null)
     {
         var (userId, _) =
-            await EnsureProjectAccessAsync(
+            await EnsureProjectWriteAccessAsync(
                 projectId,
                 "You no longer have access to this project.");
 
@@ -239,7 +239,7 @@ public class ProjectDiscussionHub(
         string? content)
     {
         var (userId, _) =
-            await EnsureProjectAccessAsync(
+            await EnsureProjectWriteAccessAsync(
                 projectId,
                 "You no longer have access to this project.");
 
@@ -349,7 +349,7 @@ public class ProjectDiscussionHub(
         int messageId)
     {
         var (userId, access) =
-            await EnsureProjectAccessAsync(
+            await EnsureProjectWriteAccessAsync(
                 projectId,
                 "You no longer have access to this project.");
 
@@ -429,7 +429,7 @@ public class ProjectDiscussionHub(
         int projectId)
     {
         var (userId, _) =
-            await EnsureProjectAccessAsync(
+            await EnsureProjectWriteAccessAsync(
                 projectId,
                 "You no longer have access to this project.");
 
@@ -455,7 +455,7 @@ public class ProjectDiscussionHub(
         int projectId)
     {
         var (userId, _) =
-            await EnsureProjectAccessAsync(
+            await EnsureProjectWriteAccessAsync(
                 projectId,
                 "You no longer have access to this project.");
 
@@ -512,7 +512,7 @@ public class ProjectDiscussionHub(
                 "student",
                 Context.ConnectionAborted);
 
-        if (access == null)
+        if (access?.CanView != true)
         {
             throw new HubException(
                 accessErrorMessage);
@@ -521,6 +521,25 @@ public class ProjectDiscussionHub(
         return (
             userId.Value,
             access);
+    }
+
+    private async Task<(int UserId, ProjectAccessResult Access)>
+        EnsureProjectWriteAccessAsync(
+            int projectId,
+            string accessErrorMessage)
+    {
+        var result =
+            await EnsureProjectAccessAsync(
+                projectId,
+                accessErrorMessage);
+
+        if (!result.Access.CanEdit)
+        {
+            throw new HubException(
+                "Restore this project before making changes.");
+        }
+
+        return result;
     }
 
     private async Task NotifyOtherProjectMembersAsync(

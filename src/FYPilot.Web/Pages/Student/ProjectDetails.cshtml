@@ -25,6 +25,20 @@
         </div>
     }
 
+    @if (Model.IsReadOnly && Model.ProjectAccess?.IsArchived == true)
+    {
+        <div class="alert alert-warning pd-alert pd-readonly-alert">
+            <i class="bi bi-archive me-2"></i>
+            <div>
+                <strong>Archived workspace — read-only access</strong>
+                <span>
+                    You can review this project and its saved information,
+                    but you must restore it before selecting an idea or making changes.
+                </span>
+            </div>
+        </div>
+    }
+
     @if (Model.Idea == null)
     {
         <section class="pd-empty">
@@ -39,15 +53,30 @@
             </p>
 
             <div class="pd-empty-actions">
-                <a href="/Student/IdeaComparison" class="btn pd-primary-btn">
+                <a asp-page="/Student/IdeaComparison"
+                   asp-route-projectId="@Model.ProjectId"
+                   class="btn pd-primary-btn">
                     <i class="bi bi-check2-circle me-1"></i>
-                    Choose an Idea
+                    Review Ideas
                 </a>
 
-                <a href="/Student/IdeaGenerator" class="btn pd-light-btn">
-                    <i class="bi bi-stars me-1"></i>
-                    Generate Ideas
-                </a>
+                @if (Model.ProjectAccess?.CanEdit == true)
+                {
+                    <a asp-page="/Student/IdeaGenerator"
+                       asp-route-projectId="@Model.ProjectId"
+                       class="btn pd-light-btn">
+                        <i class="bi bi-stars me-1"></i>
+                        Generate Ideas
+                    </a>
+                }
+                else
+                {
+                    <a asp-page="/Student/ArchivedProjects"
+                       class="btn pd-light-btn">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>
+                        Restore Project
+                    </a>
+                }
             </div>
         </section>
     }
@@ -121,7 +150,7 @@
                         Project Details
                     </span>
 
-                    @if (idea.IsSelected)
+                    @if (Model.IsOfficialProjectIdea)
                     {
                         <span class="pd-selected-badge">
                             <i class="bi bi-check-circle-fill"></i>
@@ -318,43 +347,68 @@
                         <h2>Continue From This Idea</h2>
                     </div>
 
-                    @if (!idea.IsSelected)
+                    @if (!Model.IsOfficialProjectIdea &&
+                         Model.ProjectAccess?.CanEdit == true)
                     {
-                        <form method="post" asp-page-handler="Select" class="pd-select-form">
+                        <form method="post"
+                              asp-page="/Student/IdeaGenerator"
+                              asp-page-handler="Select"
+                              class="pd-select-form">
                             @Html.AntiForgeryToken()
-                            <input type="hidden" name="ideaId" value="@idea.Id" />
+                            <input type="hidden"
+                                   name="projectId"
+                                   value="@Model.ProjectId" />
+                            <input type="hidden"
+                                   name="ideaId"
+                                   value="@idea.Id" />
 
-                            <button type="submit" class="btn pd-primary-btn w-100">
+                            <button type="submit"
+                                    class="btn pd-primary-btn w-100">
                                 <i class="bi bi-check2-circle me-1"></i>
                                 Select This Idea
                             </button>
                         </form>
                     }
+                    else if (!Model.IsOfficialProjectIdea)
+                    {
+                        <div class="pd-readonly-action">
+                            <i class="bi bi-lock"></i>
+                            <span>Restore the project to select this idea.</span>
+                        </div>
+                    }
 
                     <div class="pd-action-list">
-                        <a href="/Student/IdeaComparison">
+                        <a asp-page="/Student/IdeaComparison"
+                           asp-route-projectId="@Model.ProjectId">
                             <i class="bi bi-columns-gap"></i>
                             <span>Compare Ideas</span>
                         </a>
 
-                        @if (idea.IsSelected)
+                        @if (Model.IsOfficialProjectIdea)
                         {
-                            <a href="/Student/ProjectDNA?ideaId=@idea.Id">
+                            <a asp-page="/Student/ProjectDNA"
+                               asp-route-projectId="@Model.ProjectId"
+                               asp-route-ideaId="@idea.Id">
                                 <i class="bi bi-fingerprint"></i>
                                 <span>Project DNA</span>
                             </a>
 
-                            <a href="/Student/Roadmap?ideaId=@idea.Id">
+                            <a asp-page="/Student/Roadmap"
+                               asp-route-projectId="@Model.ProjectId"
+                               asp-route-ideaId="@idea.Id">
                                 <i class="bi bi-map"></i>
                                 <span>Roadmap</span>
                             </a>
 
-                            <a href="/Student/MentorChat?ideaId=@idea.Id">
+                            <a asp-page="/Student/MentorChat"
+                               asp-route-projectId="@Model.ProjectId"
+                               asp-route-ideaId="@idea.Id">
                                 <i class="bi bi-chat-dots"></i>
                                 <span>Mentor Chat</span>
                             </a>
 
-                            <a href="/Student/Feedback">
+                            <a asp-page="/Student/Feedback"
+                               asp-route-projectId="@Model.ProjectId">
                                 <i class="bi bi-chat-square-text"></i>
                                 <span>Supervisor Feedback</span>
                             </a>
@@ -416,6 +470,41 @@
             border-radius: 16px;
             border: 0;
             box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+        }
+
+        .pd-readonly-alert {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.2rem;
+            background: #FFF7E6;
+            color: #7C4A03;
+            border: 1px solid #F4D59A;
+        }
+
+            .pd-readonly-alert div {
+                display: grid;
+                gap: 0.18rem;
+            }
+
+            .pd-readonly-alert strong {
+                color: #6B3F02;
+            }
+
+            .pd-readonly-alert span {
+                line-height: 1.55;
+            }
+
+        .pd-readonly-action {
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            padding: 0.78rem 0.9rem;
+            border-radius: 13px;
+            background: #F7F8FA;
+            border: 1px solid #E5E7EB;
+            color: #64748B;
+            font-size: 0.86rem;
+            font-weight: 700;
         }
 
         .pd-empty {

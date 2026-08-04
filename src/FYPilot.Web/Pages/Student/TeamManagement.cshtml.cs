@@ -65,6 +65,13 @@ public class TeamManagementModel(
     public bool IsOwner =>
         ProjectAccess?.IsOwner == true;
 
+    public bool CanManageTeam =>
+        IsOwner &&
+        ProjectAccess?.CanEdit == true;
+
+    public bool IsReadOnly =>
+        ProjectAccess?.CanEdit != true;
+
     public int ActiveMembersCount =>
         ActiveMembers.Count;
 
@@ -93,7 +100,7 @@ public class TeamManagementModel(
         MaximumMembers == 1;
 
     public bool CanInvite =>
-        IsOwner &&
+        CanManageTeam &&
         !IsIndividualProject &&
         AvailablePositions > 0;
 
@@ -157,7 +164,7 @@ public class TeamManagementModel(
                 "student",
                 cancellationToken);
 
-        if (ProjectAccess == null)
+        if (ProjectAccess?.CanView != true)
         {
             TempData["Error"] =
                 "You do not have access to that project.";
@@ -228,8 +235,25 @@ public class TeamManagementModel(
                 "student",
                 cancellationToken);
 
-        if (access == null ||
-            !access.IsOwner)
+        if (access?.CanView != true)
+        {
+            TempData["Error"] =
+                "You do not have access to that project.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        if (!access.CanEdit)
+        {
+            TempData["Error"] =
+                "Restore this project before changing "
+                + "the team size.";
+
+            return RedirectToTeamPage();
+        }
+
+        if (!access.IsOwner)
         {
             TempData["Error"] =
                 "Only the project owner can change "
@@ -447,8 +471,25 @@ public class TeamManagementModel(
                 "student",
                 cancellationToken);
 
-        if (access == null ||
-            !access.IsOwner)
+        if (access?.CanView != true)
+        {
+            TempData["Error"] =
+                "You do not have access to that project.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        if (!access.CanEdit)
+        {
+            TempData["Error"] =
+                "Restore this project before inviting "
+                + "collaborators.";
+
+            return RedirectToTeamPage();
+        }
+
+        if (!access.IsOwner)
         {
             TempData["Error"] =
                 "Only the project owner can "
@@ -811,8 +852,25 @@ public class TeamManagementModel(
                 "student",
                 cancellationToken);
 
-        if (access == null ||
-            !access.IsOwner)
+        if (access?.CanView != true)
+        {
+            TempData["Error"] =
+                "You do not have access to that project.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        if (!access.CanEdit)
+        {
+            TempData["Error"] =
+                "Restore this project before removing "
+                + "a collaborator.";
+
+            return RedirectToTeamPage();
+        }
+
+        if (!access.IsOwner)
         {
             TempData["Error"] =
                 "Only the project owner can remove "
@@ -1053,8 +1111,25 @@ public class TeamManagementModel(
                 "student",
                 cancellationToken);
 
-        if (access == null ||
-            !access.IsOwner)
+        if (access?.CanView != true)
+        {
+            TempData["Error"] =
+                "You do not have access to that project.";
+
+            return RedirectToPage(
+                "/Student/MyProjects");
+        }
+
+        if (!access.CanEdit)
+        {
+            TempData["Error"] =
+                "Restore this project before cancelling "
+                + "an invitation.";
+
+            return RedirectToTeamPage();
+        }
+
+        if (!access.IsOwner)
         {
             TempData["Error"] =
                 "Only the project owner can cancel "
@@ -1481,7 +1556,9 @@ public class TeamManagementModel(
                 invitation.InvitedUser)
             .AsSplitQuery()
             .FirstOrDefaultAsync(
-                item => item.Id == ProjectId,
+                item =>
+                    item.Id == ProjectId &&
+                    !item.IsDeleted,
                 cancellationToken);
 
         if (project == null)
@@ -1564,6 +1641,8 @@ public class TeamManagementModel(
                     member.ProjectId == ProjectId &&
                     member.UserId == userId &&
                     member.Status == "active" &&
+                    !member.IsArchived &&
+                    member.RemovedAtUtc == null &&
                     member.Role == "owner",
                 cancellationToken);
     }

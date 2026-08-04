@@ -3,7 +3,7 @@
 @{
     ViewData["Title"] = "Project Directory";
     ViewData["Subtitle"] =
-        "Review every project, owner, collaborator, and assigned supervisor";
+        "Review active and historical projects, memberships, and supervision";
 }
 
 <section class="apd-page">
@@ -17,18 +17,17 @@
 
             <p>
                 Review every project created in FYPilot. Open a
-                project row to see its official idea, owner,
-                collaborators, and supervisor assignment.
+                project row to see its official idea, current team,
+                lifecycle history, and supervisor assignment.
             </p>
         </div>
 
         <div class="apd-hero-summary">
-            <span>Platform projects</span>
-            <strong>@Model.Stats.TotalProjects</strong>
+            <span>Active workspaces</span>
+            <strong>@Model.Stats.ActiveProjects</strong>
             <small>
-                @Model.Stats.WithAssignedSupervisor supervised
-                · @Model.Stats.WithoutAssignedSupervisor without
-                an active supervisor
+                @Model.Stats.TotalProjects total records
+                · @Model.Stats.SoftDeletedProjects soft-deleted
             </small>
         </div>
     </header>
@@ -43,7 +42,7 @@
             <div>
                 <span>Total Projects</span>
                 <strong>@Model.Stats.TotalProjects</strong>
-                <small>All project workspaces</small>
+                <small>Active and historical records</small>
             </div>
         </article>
 
@@ -82,6 +81,54 @@
                 <small>Active supervisor assignments</small>
             </div>
         </article>
+
+        <article>
+            <div class="apd-stat-icon">
+                <i class="bi bi-archive"></i>
+            </div>
+
+            <div>
+                <span>Personal Archives</span>
+                <strong>@Model.Stats.ArchivedMemberships</strong>
+                <small>Active members with read-only workspaces</small>
+            </div>
+        </article>
+
+        <article>
+            <div class="apd-stat-icon">
+                <i class="bi bi-person-x"></i>
+            </div>
+
+            <div>
+                <span>Removed Memberships</span>
+                <strong>@Model.Stats.RemovedMemberships</strong>
+                <small>Former access retained as history</small>
+            </div>
+        </article>
+
+        <article>
+            <div class="apd-stat-icon">
+                <i class="bi bi-trash3"></i>
+            </div>
+
+            <div>
+                <span>Soft Deleted</span>
+                <strong>@Model.Stats.SoftDeletedProjects</strong>
+                <small>Preserved projects outside active work</small>
+            </div>
+        </article>
+
+        <article>
+            <div class="apd-stat-icon">
+                <i class="bi bi-arrow-left-right"></i>
+            </div>
+
+            <div>
+                <span>Ownership Transfers</span>
+                <strong>@Model.Stats.OwnershipTransferProjects</strong>
+                <small>Projects with retained transfer history</small>
+            </div>
+        </article>
     </section>
 
     <section class="apd-directory">
@@ -91,7 +138,7 @@
                     Project directory
                 </span>
 
-                <h2>Ownership and team structure</h2>
+                <h2>Ownership, team, and lifecycle structure</h2>
 
                 <p>
                     Projects are numbered in creation order.
@@ -135,6 +182,35 @@
                             @status.Label
                         </option>
                     }
+                </select>
+
+                <i class="bi bi-chevron-down"></i>
+            </label>
+
+            <label class="apd-filter">
+                <span class="visually-hidden">
+                    Filter by lifecycle state
+                </span>
+
+                <select id="apdLifecycleFilter">
+                    <option value="all">
+                        All lifecycle states
+                    </option>
+                    <option value="active">
+                        Active workspaces
+                    </option>
+                    <option value="archived">
+                        Personal archives present
+                    </option>
+                    <option value="removed">
+                        Removed membership history
+                    </option>
+                    <option value="transferred">
+                        Ownership transferred
+                    </option>
+                    <option value="soft_deleted">
+                        Soft-deleted projects
+                    </option>
                 </select>
 
                 <i class="bi bi-chevron-down"></i>
@@ -199,9 +275,13 @@
                     var detailsId =
                         $"apd-project-details-{project.ProjectId}";
 
-                    <article class="apd-project-card"
+                    <article class="apd-project-card
+                        @(project.IsDeleted
+                                 ? "is-soft-deleted"
+                                 : "")"
                              data-project-card
                              data-status="@project.Status"
+                             data-lifecycle="@project.LifecycleFilterValue"
                              data-supervisor-status="@supervisorFilter"
                              data-search="@project.SearchText">
 
@@ -231,10 +311,31 @@
                             </span>
 
                             <span class="apd-project-summary">
-                                <span class="apd-status
-                                    @project.StatusCssClass">
-                                    @project.StatusLabel
-                                </span>
+                                @if (project.IsDeleted)
+                                {
+                                    <span class="apd-lifecycle-badge
+                                        is-deleted">
+                                        <i class="bi bi-trash3"></i>
+                                        Soft Deleted
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="apd-status
+                                        @project.StatusCssClass">
+                                        @project.StatusLabel
+                                    </span>
+                                }
+
+                                @if (!project.IsDeleted &&
+                                     project.ArchivedMembers.Any())
+                                {
+                                    <span class="apd-lifecycle-badge
+                                        is-archived">
+                                        <i class="bi bi-archive"></i>
+                                        @project.ArchivedMembers.Count archived
+                                    </span>
+                                }
 
                                 <span>
                                     <i class="bi bi-people"></i>
@@ -252,6 +353,77 @@
                              id="@detailsId"
                              data-project-details
                              hidden>
+
+                            @if (project.IsDeleted ||
+                                 project.ArchivedMembers.Any() ||
+                                 project.RemovedMembers.Any() ||
+                                 project.HasOwnershipTransfer)
+                            {
+                                <section class="apd-lifecycle-notice
+                                    @(project.IsDeleted
+                                             ? "is-deleted"
+                                             : "")">
+                                    <div class="apd-lifecycle-notice-icon">
+                                        <i class="bi
+                                            @(project.IsDeleted
+                                               ? "bi-shield-lock"
+                                               : "bi-clock-history")">
+                                        </i>
+                                    </div>
+
+                                    <div>
+                                        <strong>
+                                            @(project.IsDeleted
+                                                ? "Read-only historical project"
+                                                : "Lifecycle oversight")
+                                        </strong>
+
+                                        @if (project.IsDeleted)
+                                        {
+                                            <p>
+                                                Soft-deleted by
+                                                <b>@project.DeletedByName</b>
+                                                @(project.DeletedAtUtc.HasValue
+                                                    ? $"on {project.DeletedAtUtc.Value.ToLocalTime():dd MMM yyyy, h:mm tt}"
+                                                    : ""). All project records remain preserved.
+                                            </p>
+                                        }
+                                        else
+                                        {
+                                            <p>
+                                                The shared project remains active.
+                                                Personal archives are read-only only
+                                                for the members who archived them.
+                                            </p>
+                                        }
+                                    </div>
+
+                                    <div class="apd-lifecycle-notice-tags">
+                                        @if (project.ArchivedMembers.Any())
+                                        {
+                                            <span class="is-archived">
+                                                @project.ArchivedMembers.Count
+                                                archived
+                                            </span>
+                                        }
+
+                                        @if (project.RemovedMembers.Any())
+                                        {
+                                            <span class="is-removed">
+                                                @project.RemovedMembers.Count
+                                                removed
+                                            </span>
+                                        }
+
+                                        @if (project.HasOwnershipTransfer)
+                                        {
+                                            <span class="is-transfer">
+                                                Ownership changed
+                                            </span>
+                                        }
+                                    </div>
+                                </section>
+                            }
 
                             <section class="apd-idea">
                                 <div>
@@ -309,6 +481,29 @@
                                             </span>
                                         </div>
                                     </div>
+
+                                    @if (project.OwnerIsArchived)
+                                    {
+                                        <div class="apd-member-state
+                                            is-archived">
+                                            <i class="bi bi-archive"></i>
+                                            Owner workspace archived
+                                            @(project.OwnerArchivedAtUtc.HasValue
+                                                ? $"· {project.OwnerArchivedAtUtc.Value.ToLocalTime():dd MMM yyyy}"
+                                                : "")
+                                        </div>
+                                    }
+                                    else if (!project.OwnerMembershipIsActive)
+                                    {
+                                        <div class="apd-member-state
+                                            is-removed">
+                                            <i class="bi bi-person-x"></i>
+                                            Owner membership is no longer active
+                                            @(project.OwnerRemovedAtUtc.HasValue
+                                                ? $"· {project.OwnerRemovedAtUtc.Value.ToLocalTime():dd MMM yyyy}"
+                                                : "")
+                                        </div>
+                                    }
                                 </section>
 
                                 <section class="apd-person-panel">
@@ -358,6 +553,15 @@
                                                         <small>
                                                             @member.Email
                                                         </small>
+
+                                                        @if (member.IsArchived)
+                                                        {
+                                                            <em class="apd-inline-state
+                                                                is-archived">
+                                                                <i class="bi bi-archive"></i>
+                                                                Personal workspace archived
+                                                            </em>
+                                                        }
                                                     </div>
                                                 </div>
                                             }
@@ -378,12 +582,22 @@
                                             </small>
                                         </div>
 
-                                        <a asp-page="/Admin/SupervisorAssignments"
-                                           class="apd-manage-link"
-                                           title="Manage supervisor assignment">
-                                            <i class="bi bi-person-gear"></i>
-                                            <span>Manage</span>
-                                        </a>
+                                        @if (!project.IsDeleted)
+                                        {
+                                            <a asp-page="/Admin/SupervisorAssignments"
+                                               class="apd-manage-link"
+                                               title="Manage supervisor assignment">
+                                                <i class="bi bi-person-gear"></i>
+                                                <span>Manage</span>
+                                            </a>
+                                        }
+                                        else
+                                        {
+                                            <span class="apd-readonly-label">
+                                                <i class="bi bi-lock"></i>
+                                                Read-only
+                                            </span>
+                                        }
                                     </header>
 
                                     <div class="apd-supervisor-state">
@@ -391,12 +605,12 @@
                                             @project.SupervisorStatusCssClass">
                                             <i class="bi
                                                 @(project.HasActiveSupervisor
-                                                   ? "bi-check-circle"
-                                                   : project.SupervisorStatus
-                                                       is "pending_admin"
-                                                       or "requested"
-                                                       ? "bi-hourglass-split"
-                                                       : "bi-dash-circle")">
+                                                  ? "bi-check-circle"
+                                                  : project.SupervisorStatus
+                                                      is "pending_admin"
+                                                      or "requested"
+                                                      ? "bi-hourglass-split"
+                                                      : "bi-dash-circle")">
                                             </i>
 
                                             @project.SupervisorStatusLabel
@@ -417,6 +631,152 @@
                                     </div>
                                 </section>
                             </div>
+
+                            @if (project.ArchivedMembers.Any() ||
+                                 project.RemovedMembers.Any())
+                            {
+                                <div class="apd-lifecycle-grid">
+                                    <section class="apd-lifecycle-panel">
+                                        <header>
+                                            <span>
+                                                <i class="bi bi-archive"></i>
+                                            </span>
+
+                                            <div>
+                                                <small>Personal archives</small>
+                                                <strong>
+                                                    @project.ArchivedMembers.Count
+                                                    active membership@(project.ArchivedMembers.Count == 1 ? "" : "s")
+                                                </strong>
+                                            </div>
+                                        </header>
+
+                                        @if (!project.ArchivedMembers.Any())
+                                        {
+                                            <p class="apd-lifecycle-empty">
+                                                No active member has archived this project.
+                                            </p>
+                                        }
+                                        else
+                                        {
+                                            <div class="apd-lifecycle-members">
+                                                @foreach (var member
+                                                    in project.ArchivedMembers)
+                                                {
+                                                    <div>
+                                                        <span class="apd-mini-avatar">
+                                                            @member.Initials
+                                                        </span>
+
+                                                        <p>
+                                                            <strong>@member.FullName</strong>
+                                                            <small>
+                                                                @member.RoleLabel
+                                                                @(member.ArchivedAtUtc.HasValue
+                                                                    ? $"· archived {member.ArchivedAtUtc.Value.ToLocalTime():dd MMM yyyy}"
+                                                                    : "· archived")
+                                                            </small>
+                                                        </p>
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+                                    </section>
+
+                                    <section class="apd-lifecycle-panel">
+                                        <header>
+                                            <span>
+                                                <i class="bi bi-person-x"></i>
+                                            </span>
+
+                                            <div>
+                                                <small>Removed membership history</small>
+                                                <strong>
+                                                    @project.RemovedMembers.Count
+                                                    former member@(project.RemovedMembers.Count == 1 ? "" : "s")
+                                                </strong>
+                                            </div>
+                                        </header>
+
+                                        @if (!project.RemovedMembers.Any())
+                                        {
+                                            <p class="apd-lifecycle-empty">
+                                                No removed membership history.
+                                            </p>
+                                        }
+                                        else
+                                        {
+                                            <div class="apd-lifecycle-members">
+                                                @foreach (var member
+                                                    in project.RemovedMembers)
+                                                {
+                                                    <div>
+                                                        <span class="apd-mini-avatar">
+                                                            @member.Initials
+                                                        </span>
+
+                                                        <p>
+                                                            <strong>@member.FullName</strong>
+                                                            <small>
+                                                                Access removed
+                                                                @(member.RemovedAtUtc.HasValue
+                                                                    ? $"· {member.RemovedAtUtc.Value.ToLocalTime():dd MMM yyyy}"
+                                                                    : "")
+                                                            </small>
+                                                        </p>
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+                                    </section>
+                                </div>
+                            }
+
+                            @if (project.LifecycleActivities.Any())
+                            {
+                                <section class="apd-history">
+                                    <header>
+                                        <div>
+                                            <span class="apd-panel-icon">
+                                                <i class="bi bi-clock-history"></i>
+                                            </span>
+
+                                            <div>
+                                                <small>Lifecycle history</small>
+                                                <strong>
+                                                    Archive, restore, removal, and ownership events
+                                                </strong>
+                                            </div>
+                                        </div>
+
+                                        <span>
+                                            Latest @project.LifecycleActivities.Count
+                                        </span>
+                                    </header>
+
+                                    <div class="apd-history-list">
+                                        @foreach (var activity
+                                            in project.LifecycleActivities)
+                                        {
+                                            <article>
+                                                <span class="apd-history-icon
+                                                    @activity.CssClass">
+                                                    <i class="bi @activity.IconCssClass"></i>
+                                                </span>
+
+                                                <div>
+                                                    <strong>@activity.Label</strong>
+                                                    <p>@activity.Description</p>
+                                                </div>
+
+                                                <time datetime="@activity.CreatedAtUtc.ToString("O")">
+                                                    @activity.CreatedAtUtc.ToLocalTime().ToString("dd MMM yyyy, h:mm tt")
+                                                </time>
+                                            </article>
+                                        }
+                                    </div>
+                                </section>
+                            }
                         </div>
                     </article>
                 }
@@ -634,7 +994,7 @@
 
         .apd-toolbar {
             display: grid;
-            grid-template-columns: minmax(280px,1.6fr) repeat(2,minmax(175px,.55fr));
+            grid-template-columns: minmax(260px,1.45fr) repeat(3,minmax(155px,.55fr));
             gap: .62rem;
             margin-top: .8rem;
         }
@@ -805,6 +1165,7 @@
         }
 
         .apd-status,
+        .apd-lifecycle-badge,
         .apd-supervisor-badge {
             display: inline-flex;
             align-items: center;
@@ -1134,6 +1495,355 @@
                 font-size: .66rem;
             }
 
+
+        .apd-project-card.is-soft-deleted {
+            border-color: #D9DEE7;
+            background: #FAFBFC;
+        }
+
+            .apd-project-card.is-soft-deleted
+            .apd-project-toggle {
+                background: #F8F9FB;
+            }
+
+            .apd-project-card.is-soft-deleted
+            .apd-project-number {
+                background: linear-gradient(145deg,#596579,#7A8699);
+            }
+
+        .apd-lifecycle-badge.is-archived,
+        .apd-inline-state.is-archived,
+        .apd-member-state.is-archived,
+        .apd-lifecycle-notice-tags .is-archived {
+            color: #76540A;
+            background: #FFF5D9;
+        }
+
+        .apd-lifecycle-badge.is-deleted,
+        .apd-lifecycle-notice-tags .is-deleted {
+            color: #8C3842;
+            background: #FBEAEC;
+        }
+
+        .apd-member-state.is-removed,
+        .apd-lifecycle-notice-tags .is-removed {
+            color: #7A4650;
+            background: #F8ECEE;
+        }
+
+        .apd-lifecycle-notice-tags .is-transfer {
+            color: #365B82;
+            background: #EAF2FA;
+        }
+
+        .apd-lifecycle-notice {
+            display: grid;
+            grid-template-columns: auto minmax(0,1fr) auto;
+            gap: .7rem;
+            align-items: center;
+            margin-top: .72rem;
+            padding: .68rem .72rem;
+            color: #32445E;
+            background: #F2F6FA;
+            border: 1px solid #D9E4EF;
+            border-radius: 12px;
+        }
+
+            .apd-lifecycle-notice.is-deleted {
+                color: #5F3C43;
+                background: #FBF4F5;
+                border-color: #E9D7DA;
+            }
+
+        .apd-lifecycle-notice-icon {
+            width: 36px;
+            height: 36px;
+            display: grid;
+            place-items: center;
+            color: var(--apd-navy);
+            background: #FFFFFF;
+            border: 1px solid rgba(81,108,141,.18);
+            border-radius: 10px;
+        }
+
+        .apd-lifecycle-notice strong,
+        .apd-lifecycle-notice p {
+            display: block;
+        }
+
+        .apd-lifecycle-notice strong {
+            font-size: .67rem;
+            font-weight: 900;
+        }
+
+        .apd-lifecycle-notice p {
+            margin: .14rem 0 0;
+            color: var(--apd-muted);
+            font-size: .58rem;
+            line-height: 1.45;
+        }
+
+        .apd-lifecycle-notice-tags {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: .28rem;
+        }
+
+            .apd-lifecycle-notice-tags span {
+                padding: .28rem .45rem;
+                border-radius: 999px;
+                font-size: .54rem;
+                font-weight: 850;
+                white-space: nowrap;
+            }
+
+        .apd-member-state,
+        .apd-inline-state,
+        .apd-readonly-label {
+            width: fit-content;
+            display: inline-flex;
+            align-items: center;
+            gap: .28rem;
+            border-radius: 999px;
+            font-size: .53rem;
+            font-weight: 800;
+        }
+
+        .apd-member-state {
+            margin-top: .52rem;
+            padding: .3rem .46rem;
+        }
+
+        .apd-inline-state {
+            margin-top: .24rem;
+            padding: .22rem .38rem;
+            font-style: normal;
+        }
+
+        .apd-readonly-label {
+            padding: .34rem .46rem;
+            color: #667085;
+            background: #EEF1F5;
+        }
+
+        .apd-lifecycle-grid {
+            display: grid;
+            grid-template-columns: repeat(2,minmax(0,1fr));
+            gap: .62rem;
+            margin-top: .62rem;
+        }
+
+        .apd-lifecycle-panel,
+        .apd-history {
+            padding: .68rem;
+            background: #FFFFFF;
+            border: 1px solid #E1E7EF;
+            border-radius: 12px;
+        }
+
+            .apd-lifecycle-panel > header {
+                display: grid;
+                grid-template-columns: auto minmax(0,1fr);
+                gap: .52rem;
+                align-items: center;
+            }
+
+                .apd-lifecycle-panel > header > span,
+                .apd-mini-avatar {
+                    display: grid;
+                    place-items: center;
+                    color: var(--apd-navy);
+                    background: #EEF2F6;
+                }
+
+                .apd-lifecycle-panel > header > span {
+                    width: 34px;
+                    height: 34px;
+                    border-radius: 10px;
+                }
+
+            .apd-lifecycle-panel header small,
+            .apd-lifecycle-panel header strong {
+                display: block;
+            }
+
+            .apd-lifecycle-panel header small {
+                color: #8A96A8;
+                font-size: .52rem;
+                font-weight: 800;
+                letter-spacing: .04em;
+                text-transform: uppercase;
+            }
+
+            .apd-lifecycle-panel header strong {
+                margin-top: .08rem;
+                font-size: .64rem;
+            }
+
+        .apd-lifecycle-members {
+            display: grid;
+            gap: .38rem;
+            margin-top: .55rem;
+        }
+
+            .apd-lifecycle-members > div {
+                display: grid;
+                grid-template-columns: auto minmax(0,1fr);
+                gap: .45rem;
+                align-items: center;
+                padding: .42rem;
+                background: #F8FAFC;
+                border-radius: 9px;
+            }
+
+        .apd-mini-avatar {
+            width: 29px;
+            height: 29px;
+            border-radius: 8px;
+            font-size: .55rem;
+            font-weight: 900;
+        }
+
+        .apd-lifecycle-members p,
+        .apd-lifecycle-members strong,
+        .apd-lifecycle-members small {
+            display: block;
+            margin: 0;
+        }
+
+        .apd-lifecycle-members strong {
+            font-size: .59rem;
+        }
+
+        .apd-lifecycle-members small,
+        .apd-lifecycle-empty {
+            color: var(--apd-muted);
+            font-size: .53rem;
+        }
+
+        .apd-lifecycle-empty {
+            margin: .55rem 0 0;
+            padding: .44rem;
+            background: #F8FAFC;
+            border-radius: 8px;
+        }
+
+        .apd-history {
+            margin-top: .62rem;
+        }
+
+            .apd-history > header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: .7rem;
+            }
+
+                .apd-history > header > div {
+                    display: grid;
+                    grid-template-columns: auto minmax(0,1fr);
+                    gap: .5rem;
+                    align-items: center;
+                }
+
+                .apd-history > header small,
+                .apd-history > header strong {
+                    display: block;
+                }
+
+                .apd-history > header small {
+                    color: #8A96A8;
+                    font-size: .52rem;
+                    font-weight: 800;
+                    letter-spacing: .04em;
+                    text-transform: uppercase;
+                }
+
+                .apd-history > header strong {
+                    margin-top: .08rem;
+                    font-size: .64rem;
+                }
+
+                .apd-history > header > span {
+                    color: var(--apd-muted);
+                    font-size: .54rem;
+                    white-space: nowrap;
+                }
+
+        .apd-history-list {
+            display: grid;
+            gap: .38rem;
+            margin-top: .58rem;
+        }
+
+            .apd-history-list article {
+                display: grid;
+                grid-template-columns: auto minmax(0,1fr) auto;
+                gap: .5rem;
+                align-items: center;
+                padding: .46rem;
+                background: #F8FAFC;
+                border-radius: 9px;
+            }
+
+            .apd-history-list strong,
+            .apd-history-list p {
+                display: block;
+                margin: 0;
+            }
+
+            .apd-history-list strong {
+                font-size: .58rem;
+            }
+
+            .apd-history-list p {
+                margin-top: .08rem;
+                color: var(--apd-muted);
+                font-size: .53rem;
+                line-height: 1.4;
+            }
+
+            .apd-history-list time {
+                color: #8793A5;
+                font-size: .51rem;
+                white-space: nowrap;
+            }
+
+        .apd-history-icon {
+            width: 31px;
+            height: 31px;
+            display: grid;
+            place-items: center;
+            border-radius: 9px;
+        }
+
+            .apd-history-icon.is-archived {
+                color: #76540A;
+                background: #FFF1C7;
+            }
+
+            .apd-history-icon.is-restored {
+                color: #087154;
+                background: #E4F5EE;
+            }
+
+            .apd-history-icon.is-removed,
+            .apd-history-icon.is-deleted {
+                color: #8C3842;
+                background: #F8E7EA;
+            }
+
+            .apd-history-icon.is-transfer {
+                color: #365B82;
+                background: #E5EFF8;
+            }
+
+            .apd-history-icon.is-neutral {
+                color: #64748B;
+                background: #EEF1F5;
+            }
+
         @@keyframes apdReveal {
             from {
                 opacity: 0;
@@ -1159,7 +1869,8 @@
                 grid-column: 1 / -1;
             }
 
-            .apd-people-grid {
+            .apd-people-grid,
+            .apd-lifecycle-grid {
                 grid-template-columns: 1fr;
             }
         }
@@ -1215,6 +1926,23 @@
                 height: 30px;
                 padding: 0;
             }
+
+            .apd-lifecycle-notice,
+            .apd-history-list article {
+                grid-template-columns: 1fr;
+            }
+
+            .apd-lifecycle-notice-icon {
+                display: none;
+            }
+
+            .apd-lifecycle-notice-tags {
+                justify-content: flex-start;
+            }
+
+            .apd-history-list time {
+                white-space: normal;
+            }
         }
     </style>
 }
@@ -1237,6 +1965,10 @@
             const statusFilter =
                 document.getElementById(
                     "apdStatusFilter");
+
+            const lifecycleFilter =
+                document.getElementById(
+                    "apdLifecycleFilter");
 
             const supervisorFilter =
                 document.getElementById(
@@ -1317,6 +2049,9 @@
                 const selectedStatus =
                     statusFilter?.value ?? "all";
 
+                const selectedLifecycle =
+                    lifecycleFilter?.value ?? "all";
+
                 const selectedSupervisor =
                     supervisorFilter?.value ?? "all";
 
@@ -1336,6 +2071,16 @@
                         card.dataset.status ===
                             selectedStatus;
 
+                    const lifecycleStates =
+                        (card.dataset.lifecycle ?? "")
+                            .split(" ")
+                            .filter(Boolean);
+
+                    const matchesLifecycle =
+                        selectedLifecycle === "all" ||
+                        lifecycleStates.includes(
+                            selectedLifecycle);
+
                     const matchesSupervisor =
                         selectedSupervisor === "all" ||
                         card.dataset
@@ -1345,6 +2090,7 @@
                     const visible =
                         matchesSearch &&
                         matchesStatus &&
+                        matchesLifecycle &&
                         matchesSupervisor;
 
                     card.hidden = !visible;
@@ -1381,6 +2127,10 @@
                 applyFilters);
 
             statusFilter?.addEventListener(
+                "change",
+                applyFilters);
+
+            lifecycleFilter?.addEventListener(
                 "change",
                 applyFilters);
 

@@ -5,10 +5,14 @@ using Microsoft.EntityFrameworkCore;
 namespace FYPilot.Infrastructure.Services;
 
 /// <summary>
-/// Saves and restores the student's active project context.
+/// Saves and restores the student's current project context.
 ///
 /// The service never trusts the stored project ID without checking
-/// the student's current active membership.
+/// whether the student can still view the project.
+///
+/// An archived membership remains viewable, but read-only.
+/// Write authorization remains controlled by ProjectAccessService
+/// and ArchivedProjectWriteFilter.
 /// </summary>
 public sealed class ActiveProjectService(
     ApplicationDbContext db,
@@ -26,22 +30,22 @@ public sealed class ActiveProjectService(
      * ChangePassword, or SkillAssessment.
      */
     private static readonly HashSet<string>
-     AllowedProjectPages =
-     new(StringComparer.OrdinalIgnoreCase)
-     {
-        "/Student/Dashboard",
-        "/Student/IdeaGenerator",
-        "/Student/IdeaComparison",
-        "/Student/MarketDemand",
-        "/Student/ProjectDNA",
-        "/Student/Roadmap",
-        "/Student/DocumentationGenerator",
-        "/Student/MentorChat",
-        "/Student/DefenseSimulator",
-        "/Student/Feedback",
-        "/Student/TeamManagement",
-        "/Student/ProjectWorkspace"
-     };
+        AllowedProjectPages =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                "/Student/Dashboard",
+                "/Student/IdeaGenerator",
+                "/Student/IdeaComparison",
+                "/Student/MarketDemand",
+                "/Student/ProjectDNA",
+                "/Student/Roadmap",
+                "/Student/DocumentationGenerator",
+                "/Student/MentorChat",
+                "/Student/DefenseSimulator",
+                "/Student/Feedback",
+                "/Student/TeamManagement",
+                "/Student/ProjectWorkspace"
+            };
 
     public bool IsAllowedProjectPage(
         string? pageName)
@@ -56,22 +60,31 @@ public sealed class ActiveProjectService(
             string? requestedPage = null,
             CancellationToken cancellationToken = default)
     {
-        var access = await projectAccessService
-            .GetAccessAsync(
-                projectId,
-                userId,
-                "student",
-                cancellationToken);
+        var access =
+            await projectAccessService
+                .GetAccessAsync(
+                    projectId,
+                    userId,
+                    "student",
+                    cancellationToken);
 
-        if (access?.CanEdit != true)
+        /*
+         * An archived member may enter the project as a
+         * read-only viewing context.
+         *
+         * CanEdit is intentionally not required here.
+         */
+        if (access?.CanView != true)
         {
             return null;
         }
 
-        var user = await db.Users
-            .FirstOrDefaultAsync(
-                item => item.Id == userId,
-                cancellationToken);
+        var user =
+            await db.Users
+                .FirstOrDefaultAsync(
+                    item =>
+                        item.Id == userId,
+                    cancellationToken);
 
         if (user == null)
         {
@@ -79,14 +92,17 @@ public sealed class ActiveProjectService(
         }
 
         var isSameProject =
-            user.LastActiveProjectId == projectId;
+            user.LastActiveProjectId ==
+            projectId;
 
         var approvedRequestedPage =
-            GetCanonicalPage(requestedPage);
+            GetCanonicalPage(
+                requestedPage);
 
         var approvedPreviousPage =
             isSameProject
-                ? GetCanonicalPage(user.LastProjectPage)
+                ? GetCanonicalPage(
+                    user.LastProjectPage)
                 : null;
 
         var destinationPage =
@@ -94,15 +110,23 @@ public sealed class ActiveProjectService(
             ?? approvedPreviousPage
             ?? DefaultProjectPage;
 
-        user.LastActiveProjectId = projectId;
-        user.LastProjectPage = destinationPage;
-        user.LastProjectVisitedAtUtc = DateTime.UtcNow;
+        user.LastActiveProjectId =
+            projectId;
 
-        await db.SaveChangesAsync(cancellationToken);
+        user.LastProjectPage =
+            destinationPage;
+
+        user.LastProjectVisitedAtUtc =
+            DateTime.UtcNow;
+
+        await db.SaveChangesAsync(
+            cancellationToken);
 
         return new ActiveProjectDestination(
-            ProjectId: projectId,
-            PageName: destinationPage);
+            ProjectId:
+                projectId,
+            PageName:
+                destinationPage);
     }
 
     public async Task<bool> RememberPageAsync(
@@ -112,40 +136,54 @@ public sealed class ActiveProjectService(
         CancellationToken cancellationToken = default)
     {
         var approvedPage =
-            GetCanonicalPage(pageName);
+            GetCanonicalPage(
+                pageName);
 
         if (approvedPage == null)
         {
             return false;
         }
 
-        var access = await projectAccessService
-            .GetAccessAsync(
-                projectId,
-                userId,
-                "student",
-                cancellationToken);
+        var access =
+            await projectAccessService
+                .GetAccessAsync(
+                    projectId,
+                    userId,
+                    "student",
+                    cancellationToken);
 
-        if (access?.CanEdit != true)
+        /*
+         * Remember navigation for both editable projects
+         * and archived read-only projects.
+         */
+        if (access?.CanView != true)
         {
             return false;
         }
 
-        var user = await db.Users
-            .FirstOrDefaultAsync(
-                item => item.Id == userId,
-                cancellationToken);
+        var user =
+            await db.Users
+                .FirstOrDefaultAsync(
+                    item =>
+                        item.Id == userId,
+                    cancellationToken);
 
         if (user == null)
         {
             return false;
         }
 
-        user.LastActiveProjectId = projectId;
-        user.LastProjectPage = approvedPage;
-        user.LastProjectVisitedAtUtc = DateTime.UtcNow;
+        user.LastActiveProjectId =
+            projectId;
 
-        await db.SaveChangesAsync(cancellationToken);
+        user.LastProjectPage =
+            approvedPage;
+
+        user.LastProjectVisitedAtUtc =
+            DateTime.UtcNow;
+
+        await db.SaveChangesAsync(
+            cancellationToken);
 
         return true;
     }
@@ -167,10 +205,12 @@ public sealed class ActiveProjectService(
             int userId,
             CancellationToken cancellationToken = default)
     {
-        var user = await db.Users
-            .FirstOrDefaultAsync(
-                item => item.Id == userId,
-                cancellationToken);
+        var user =
+            await db.Users
+                .FirstOrDefaultAsync(
+                    item =>
+                        item.Id == userId,
+                    cancellationToken);
 
         if (user == null ||
             !user.LastActiveProjectId.HasValue)
@@ -182,19 +222,24 @@ public sealed class ActiveProjectService(
             user.LastActiveProjectId.Value;
 
         /*
-         * The stored project ID is not trusted.
-         * Membership is checked again on every resume.
+         * The stored project ID is never trusted.
+         * Verify that the student can still view the project.
+         *
+         * Archived memberships remain valid read-only contexts.
+         * Removed memberships and deleted projects return no access.
          */
-        var access = await projectAccessService
-            .GetAccessAsync(
-                projectId,
-                userId,
-                "student",
-                cancellationToken);
+        var access =
+            await projectAccessService
+                .GetAccessAsync(
+                    projectId,
+                    userId,
+                    "student",
+                    cancellationToken);
 
-        if (access?.CanEdit != true)
+        if (access?.CanView != true)
         {
-            ClearUserProjectContext(user);
+            ClearUserProjectContext(
+                user);
 
             await db.SaveChangesAsync(
                 cancellationToken);
@@ -203,7 +248,8 @@ public sealed class ActiveProjectService(
         }
 
         var destinationPage =
-            GetCanonicalPage(user.LastProjectPage)
+            GetCanonicalPage(
+                user.LastProjectPage)
             ?? DefaultProjectPage;
 
         /*
@@ -225,25 +271,30 @@ public sealed class ActiveProjectService(
         }
 
         return new ActiveProjectDestination(
-            ProjectId: projectId,
-            PageName: destinationPage);
+            ProjectId:
+                projectId,
+            PageName:
+                destinationPage);
     }
 
     public async Task ClearActiveProjectAsync(
         int userId,
         CancellationToken cancellationToken = default)
     {
-        var user = await db.Users
-            .FirstOrDefaultAsync(
-                item => item.Id == userId,
-                cancellationToken);
+        var user =
+            await db.Users
+                .FirstOrDefaultAsync(
+                    item =>
+                        item.Id == userId,
+                    cancellationToken);
 
         if (user == null)
         {
             return;
         }
 
-        ClearUserProjectContext(user);
+        ClearUserProjectContext(
+            user);
 
         await db.SaveChangesAsync(
             cancellationToken);
@@ -252,15 +303,21 @@ public sealed class ActiveProjectService(
     private static void ClearUserProjectContext(
         FYPilot.Domain.Entities.User user)
     {
-        user.LastActiveProjectId = null;
-        user.LastProjectPage = null;
-        user.LastProjectVisitedAtUtc = null;
+        user.LastActiveProjectId =
+            null;
+
+        user.LastProjectPage =
+            null;
+
+        user.LastProjectVisitedAtUtc =
+            null;
     }
 
     private static string? GetCanonicalPage(
         string? pageName)
     {
-        if (string.IsNullOrWhiteSpace(pageName))
+        if (string.IsNullOrWhiteSpace(
+                pageName))
         {
             return null;
         }

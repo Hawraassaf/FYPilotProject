@@ -7,24 +7,37 @@
     ViewData["Title"] = "Supervisor Dashboard";
     ViewData["Subtitle"] = "Review assigned projects, guide teams, and manage project meetings.";
 
-    var totalProjects = Model.AllProjects.Count;
+    var activeProjects = Model.AllProjects
+        .Where(project => !project.IsDeleted)
+        .ToList();
 
-    var pendingProjects = Model.AllProjects.Count(
+    var totalProjects = activeProjects.Count;
+
+    var softDeletedProjects = Model.AllProjects.Count(
+        project => project.IsDeleted);
+
+    var archivedMemberships = Model.AllProjects.Sum(
+        project => project.ArchivedMemberCount);
+
+    var removedMemberships = Model.AllProjects.Sum(
+        project => project.RemovedMemberCount);
+
+    var pendingProjects = activeProjects.Count(
         project => NormalizeStatus(project.Status) == "pending");
 
-    var revisionProjects = Model.AllProjects.Count(
+    var revisionProjects = activeProjects.Count(
         project => NormalizeStatus(project.Status) == "needs_revision");
 
-    var approvedProjects = Model.AllProjects.Count(
+    var approvedProjects = activeProjects.Count(
         project => NormalizeStatus(project.Status) == "approved");
 
-    var rejectedProjects = Model.AllProjects.Count(
+    var rejectedProjects = activeProjects.Count(
         project => NormalizeStatus(project.Status) == "rejected");
 
     var actionNeeded = pendingProjects + revisionProjects;
     var atRiskProjects = revisionProjects + rejectedProjects;
 
-    var priorityProjects = Model.AllProjects
+    var priorityProjects = activeProjects
         .Where(project =>
             NormalizeStatus(project.Status) == "pending" ||
             NormalizeStatus(project.Status) == "needs_revision")
@@ -35,7 +48,8 @@
         .ToList();
 
     var projectRows = Model.AllProjects
-        .OrderByDescending(project =>
+        .OrderByDescending(project => project.IsDeleted)
+        .ThenByDescending(project =>
             NormalizeStatus(project.Status) == "rejected")
         .ThenByDescending(project =>
             NormalizeStatus(project.Status) == "needs_revision")
@@ -124,7 +138,7 @@
                 <div>
                     <small>Active Projects</small>
                     <strong>@totalProjects</strong>
-                    <span>Under your supervision</span>
+                    <span>Currently active assignments</span>
                 </div>
 
                 <i class="bi bi-chevron-right sd-stat-arrow"></i>
@@ -158,6 +172,50 @@
                 <i class="bi bi-chevron-right sd-stat-arrow"></i>
             </article>
         </section>
+
+        @if (softDeletedProjects > 0 ||
+             archivedMemberships > 0 ||
+             removedMemberships > 0)
+        {
+            <section class="sd-lifecycle-summary"
+                     aria-label="Project lifecycle visibility summary">
+                <div>
+                    <i class="bi bi-eye"></i>
+                    <span>Lifecycle oversight</span>
+                </div>
+
+                <p>
+                    Personal archive and removal actions remain visible
+                    to you without changing the project for other members.
+                </p>
+
+                <div class="sd-lifecycle-counts">
+                    @if (archivedMemberships > 0)
+                    {
+                        <span>
+                            <strong>@archivedMemberships</strong>
+                            archived member workspace@(archivedMemberships == 1 ? "" : "s")
+                        </span>
+                    }
+
+                    @if (removedMemberships > 0)
+                    {
+                        <span>
+                            <strong>@removedMemberships</strong>
+                            removed membership@(removedMemberships == 1 ? "" : "s")
+                        </span>
+                    }
+
+                    @if (softDeletedProjects > 0)
+                    {
+                        <span class="danger">
+                            <strong>@softDeletedProjects</strong>
+                            soft-deleted project@(softDeletedProjects == 1 ? "" : "s")
+                        </span>
+                    }
+                </div>
+            </section>
+        }
 
         <section class="sd-grid-top">
 
@@ -212,6 +270,19 @@
                                         <span>@ValueOrDash(project.Domain)</span>
                                         <span>@ValueOrDash(project.DifficultyLevel)</span>
                                     </div>
+
+                                    @{
+                                        var lifecycleNotice =
+                                            LifecycleNotice(project);
+                                    }
+
+                                    @if (!string.IsNullOrWhiteSpace(lifecycleNotice))
+                                    {
+                                        <small class="sd-lifecycle-inline">
+                                            <i class="bi bi-archive"></i>
+                                            @lifecycleNotice
+                                        </small>
+                                    }
                                 </div>
 
                                 <i class="bi bi-chevron-right sd-card-arrow"></i>
@@ -289,40 +360,99 @@
                     <div class="sd-student-list">
                         @foreach (var project in projectRows)
                         {
-                            var projectStatus = ProjectStatus(project.Status);
+                            var projectStatus = project.IsDeleted
+                                ? (
+                                    Label: "Soft Deleted",
+                                    ClassName: "sd-status deleted",
+                                    Icon: "bi bi-archive-fill")
+                                : ProjectStatus(project.Status);
 
-                            <a href="/Supervisor/IdeaReview?projectId=@project.ProjectId&ideaId=@project.IdeaId"
-                               class="sd-student-row">
+                            var lifecycleNotice =
+                                LifecycleNotice(project);
 
-                                <div class="sd-avatar small">
-                                    @Initials(project.ProjectTitle)
-                                </div>
+                            @if (project.IsDeleted)
+                            {
+                                <div class="sd-student-row is-readonly"
+                                     aria-label="Soft-deleted project retained for supervision visibility">
 
-                                <div class="sd-student-info">
-                                    <strong>@project.ProjectTitle</strong>
-                                    <small>
-                                        @project.MemberCount
-                                        @(project.MemberCount == 1 ? "member" : "members")
-                                        · @project.MemberNames
-                                    </small>
-                                </div>
-
-                                <div class="sd-student-status">
-                                    <span class="@projectStatus.ClassName">
-                                        @projectStatus.Label
-                                    </span>
-                                </div>
-
-                                <div class="sd-next-action">
-                                    <i class="@projectStatus.Icon"></i>
-                                    <div>
-                                        <strong>@NextActionLabel(project.Status)</strong>
-                                        <small>@TimeAgo(project.LastActivityAt)</small>
+                                    <div class="sd-avatar small muted">
+                                        @Initials(project.ProjectTitle)
                                     </div>
-                                </div>
 
-                                <i class="bi bi-chevron-right sd-card-arrow"></i>
-                            </a>
+                                    <div class="sd-student-info">
+                                        <strong>@project.ProjectTitle</strong>
+                                        <small>
+                                            @project.MemberCount
+                                            @(project.MemberCount == 1 ? "active member" : "active members")
+                                            · @project.MemberNames
+                                        </small>
+
+                                        <small class="sd-lifecycle-inline deleted">
+                                            <i class="bi bi-lock"></i>
+                                            @lifecycleNotice
+                                        </small>
+                                    </div>
+
+                                    <div class="sd-student-status">
+                                        <span class="@projectStatus.ClassName">
+                                            @projectStatus.Label
+                                        </span>
+                                    </div>
+
+                                    <div class="sd-next-action">
+                                        <i class="@projectStatus.Icon"></i>
+                                        <div>
+                                            <strong>Read-only oversight</strong>
+                                            <small>@TimeAgo(project.LastActivityAt)</small>
+                                        </div>
+                                    </div>
+
+                                    <i class="bi bi-lock sd-card-arrow"></i>
+                                </div>
+                            }
+                            else
+                            {
+                                <a href="/Supervisor/IdeaReview?projectId=@project.ProjectId&ideaId=@project.IdeaId"
+                                   class="sd-student-row">
+
+                                    <div class="sd-avatar small">
+                                        @Initials(project.ProjectTitle)
+                                    </div>
+
+                                    <div class="sd-student-info">
+                                        <strong>@project.ProjectTitle</strong>
+                                        <small>
+                                            @project.MemberCount
+                                            @(project.MemberCount == 1 ? "member" : "members")
+                                            · @project.MemberNames
+                                        </small>
+
+                                        @if (!string.IsNullOrWhiteSpace(lifecycleNotice))
+                                        {
+                                            <small class="sd-lifecycle-inline">
+                                                <i class="bi bi-info-circle"></i>
+                                                @lifecycleNotice
+                                            </small>
+                                        }
+                                    </div>
+
+                                    <div class="sd-student-status">
+                                        <span class="@projectStatus.ClassName">
+                                            @projectStatus.Label
+                                        </span>
+                                    </div>
+
+                                    <div class="sd-next-action">
+                                        <i class="@projectStatus.Icon"></i>
+                                        <div>
+                                            <strong>@NextActionLabel(project.Status)</strong>
+                                            <small>@TimeAgo(project.LastActivityAt)</small>
+                                        </div>
+                                    </div>
+
+                                    <i class="bi bi-chevron-right sd-card-arrow"></i>
+                                </a>
+                            }
                         }
                     </div>
                 }
@@ -1058,6 +1188,101 @@
                 display: none;
             }
         }
+
+        .sd-lifecycle-summary {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 1rem;
+            margin: 1rem 0 1.25rem;
+            padding: 1rem 1.1rem;
+            border: 1px solid #dce4f2;
+            border-radius: 18px;
+            background: #f8fafc;
+        }
+
+            .sd-lifecycle-summary > div:first-child {
+                display: inline-flex;
+                align-items: center;
+                gap: .55rem;
+                color: #28385e;
+                font-weight: 800;
+                white-space: nowrap;
+            }
+
+            .sd-lifecycle-summary p {
+                margin: 0;
+                color: #64748b;
+                font-size: .9rem;
+                line-height: 1.55;
+            }
+
+        .sd-lifecycle-counts {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: .5rem;
+        }
+
+            .sd-lifecycle-counts span {
+                display: inline-flex;
+                align-items: center;
+                gap: .35rem;
+                padding: .42rem .68rem;
+                border: 1px solid #dbe3ef;
+                border-radius: 999px;
+                background: #fff;
+                color: #475569;
+                font-size: .78rem;
+            }
+
+                .sd-lifecycle-counts span.danger {
+                    border-color: #fecaca;
+                    background: #fff7f7;
+                    color: #b91c1c;
+                }
+
+        .sd-lifecycle-inline {
+            display: inline-flex;
+            align-items: flex-start;
+            gap: .4rem;
+            margin-top: .5rem;
+            color: #7c5d18;
+            font-size: .76rem;
+            line-height: 1.45;
+        }
+
+            .sd-lifecycle-inline.deleted {
+                color: #991b1b;
+            }
+
+        .sd-student-row.is-readonly {
+            cursor: default;
+            background: #fafafa;
+            border-color: #e5e7eb;
+            opacity: .92;
+        }
+
+        .sd-avatar.muted {
+            filter: grayscale(1);
+            opacity: .72;
+        }
+
+        .sd-status.deleted {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        @@media (max-width: 900px) {
+            .sd-lifecycle-summary {
+                grid-template-columns: 1fr;
+            }
+
+            .sd-lifecycle-counts {
+                justify-content: flex-start;
+            }
+        }
+
     </style>
 }
 
@@ -1125,6 +1350,47 @@
             "awaiting_idea" => "Awaiting official idea",
             _ => "Progress check"
         };
+    }
+
+    private static string LifecycleNotice(
+        FYPilot.Web.Pages.Supervisor.DashboardModel.ProjectDashboardItem project)
+    {
+        if (project.IsDeleted)
+        {
+            var deletedWhen = project.DeletedAtUtc.HasValue
+                ? project.DeletedAtUtc.Value
+                    .ToLocalTime()
+                    .ToString("dd MMM yyyy, hh:mm tt")
+                : "an unknown time";
+
+            return $"Soft-deleted by {project.DeletedByName} on {deletedWhen}. "
+                   + "The record is preserved and normal project actions are disabled.";
+        }
+
+        if (project.OwnerIsArchived)
+        {
+            var archivedWhen = project.OwnerArchivedAtUtc.HasValue
+                ? project.OwnerArchivedAtUtc.Value
+                    .ToLocalTime()
+                    .ToString("dd MMM yyyy, hh:mm tt")
+                : "an unknown time";
+
+            return $"The project owner archived this project from their workspace on {archivedWhen}. "
+                   + "Other active members can continue working.";
+        }
+
+        if (project.ArchivedMemberCount > 0)
+        {
+            return $"Archived workspace: {project.ArchivedMemberNames}. "
+                   + "This does not archive the shared project.";
+        }
+
+        if (project.RemovedMemberCount > 0)
+        {
+            return $"Removed membership history: {project.RemovedMemberNames}.";
+        }
+
+        return string.Empty;
     }
 
     private static string Initials(string? name)

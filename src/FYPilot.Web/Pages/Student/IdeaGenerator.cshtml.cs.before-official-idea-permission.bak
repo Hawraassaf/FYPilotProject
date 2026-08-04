@@ -667,8 +667,8 @@ public class IdeaGeneratorModel(
         }
 
         /*
-         * Any active project member may select or replace
-         * the official shared project idea.
+         * The official shared project idea is selected
+         * by the project owner.
          */
         var access =
             await projectAccessService.GetAccessAsync(
@@ -677,7 +677,7 @@ public class IdeaGeneratorModel(
                 "student",
                 cancellationToken);
 
-        if (access?.CanView != true)
+        if (access == null)
         {
             TempData["Error"] =
                 "You do not have access to that project.";
@@ -686,10 +686,10 @@ public class IdeaGeneratorModel(
                 "/Student/MyProjects");
         }
 
-        if (!access.CanEdit)
+        if (!access.IsOwner)
         {
             TempData["Error"] =
-                "Restore this project before selecting "
+                "Only the project owner can select "
                 + "the official project idea.";
 
             return RedirectToGenerator(ideaId);
@@ -714,6 +714,7 @@ public class IdeaGeneratorModel(
      .FirstOrDefaultAsync(
          item =>
              item.Id == ideaId &&
+             item.UserId == userId &&
              item.GeneratedForProjectId ==
                  ProjectId,
          cancellationToken);
@@ -724,8 +725,9 @@ public class IdeaGeneratorModel(
                     cancellationToken);
 
                 TempData["Error"] =
-                    "The selected idea was not found "
-                    + "inside this project.";
+    "The selected idea was not found in "
+    + "this project or does not belong "
+    + "to your account.";
 
                 return RedirectToGenerator();
             }
@@ -872,7 +874,7 @@ public class IdeaGeneratorModel(
             var actorName =
                 User.FindFirst(
                     ClaimTypes.Name)?.Value
-                ?? "A project member";
+                ?? "The project owner";
 
             var replacingIdea =
                 previousIdeaId.HasValue;

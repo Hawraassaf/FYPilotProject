@@ -32,9 +32,11 @@
             <h1>@Model.ProjectTitle</h1>
 
             <p>
-                @(Model.IsOwner
-                    ? "Manage the project capacity and invite registered students."
-                    : "View the owner and active project collaborators.")
+                @(Model.IsReadOnly
+                    ? "Review project members and invitations in read-only mode."
+                    : Model.IsOwner
+                        ? "Manage the project capacity and invite registered students."
+                        : "View the owner and active project collaborators.")
             </p>
         </div>
 
@@ -143,7 +145,7 @@
                                     </small>
                                 </div>
 
-                                @if (Model.IsOwner &&
+                                @if (Model.CanManageTeam &&
                                      !string.Equals(
                                          member.Role,
                                          "Owner",
@@ -240,25 +242,35 @@
                                             @invitation.ExpiresAt.ToLocalTime().ToString("MMM d")
                                         </small>
 
-                                        <form method="post"
-                                              asp-page-handler="CancelInvitation">
+                                        @if (Model.CanManageTeam)
+                                        {
+                                            <form method="post"
+                                                  asp-page-handler="CancelInvitation">
 
-                                            @Html.AntiForgeryToken()
+                                                @Html.AntiForgeryToken()
 
-                                            <input type="hidden"
-                                                   name="projectId"
-                                                   value="@Model.ProjectId" />
+                                                <input type="hidden"
+                                                       name="projectId"
+                                                       value="@Model.ProjectId" />
 
-                                            <input type="hidden"
-                                                   name="invitationId"
-                                                   value="@invitation.Id" />
+                                                <input type="hidden"
+                                                       name="invitationId"
+                                                       value="@invitation.Id" />
 
-                                            <button type="submit"
-                                                    class="btn btn-sm
-                                                btn-outline-danger">
-                                                Cancel
-                                            </button>
-                                        </form>
+                                                <button type="submit"
+                                                        class="btn btn-sm
+                                                    btn-outline-danger">
+                                                    Cancel
+                                                </button>
+                                            </form>
+                                        }
+                                        else
+                                        {
+                                            <span class="team-readonly-label">
+                                                <i class="bi bi-lock-fill"></i>
+                                                Read only
+                                            </span>
+                                        }
                                     </div>
                                 </article>
                             }
@@ -269,7 +281,7 @@
         </div>
 
         <div class="col-xl-5">
-            @if (Model.IsOwner)
+            @if (Model.CanManageTeam)
             {
                 <section class="team-card">
                     <header class="team-card-header">
@@ -443,6 +455,33 @@
                             </button>
                         </form>
                     }
+                </section>
+            }
+            else if (Model.IsReadOnly)
+            {
+                <section class="team-card">
+                    <header class="team-card-header">
+                        <div>
+                            <h2>
+                                <i class="bi bi-lock-fill"></i>
+                                Archived Project
+                            </h2>
+
+                            <p>
+                                Team information remains available
+                                in read-only mode.
+                            </p>
+                        </div>
+                    </header>
+
+                    <div class="team-info">
+                        <i class="bi bi-archive"></i>
+
+                        <p>
+                            Restore this project from Archived Projects
+                            before changing capacity, invitations, or members.
+                        </p>
+                    </div>
                 </section>
             }
             else
@@ -1073,6 +1112,20 @@
                 .capacity-preview .capacity-total strong {
                     color: #FFFFFF;
                 }
+
+        .team-readonly-label {
+            display: inline-flex;
+            align-items: center;
+            gap: .28rem;
+            padding: .3rem .5rem;
+            border: 1px solid #d7dee8;
+            border-radius: 999px;
+            color: #66758a;
+            background: #f5f7fa;
+            font-size: .55rem;
+            font-weight: 800;
+            white-space: nowrap;
+        }
 
         .invitation-actions .btn-outline-danger {
             min-height: 34px;

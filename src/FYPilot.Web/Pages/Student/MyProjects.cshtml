@@ -71,25 +71,41 @@
             </div>
         </div>
 
-        <form method="post"
-              asp-page-handler="CreateProject"
-              class="create-project-form">
+        <div class="projects-hero-actions">
+            <form method="post"
+                  asp-page-handler="CreateProject"
+                  class="create-project-form">
 
-            <button type="submit"
-                    class="create-project-button">
+                <button type="submit"
+                        class="create-project-button">
 
-                <span class="create-button-icon">
-                    <i class="bi bi-plus-lg"></i>
+                    <span class="create-button-icon">
+                        <i class="bi bi-plus-lg"></i>
+                    </span>
+
+                    <span>
+                        <strong>Create New Project</strong>
+                        <small>
+                            Start with an untitled project
+                        </small>
+                    </span>
+                </button>
+            </form>
+
+            <a asp-page="/Student/ArchivedProjects"
+               class="open-archive-button">
+                <span class="open-archive-icon">
+                    <i class="bi bi-archive-fill"></i>
                 </span>
 
                 <span>
-                    <strong>Create New Project</strong>
+                    <strong>Archived Projects</strong>
                     <small>
-                        Start with an untitled project
+                        View or restore your archived work
                     </small>
                 </span>
-            </button>
-        </form>
+            </a>
+        </div>
 
         <div class="hero-orb hero-orb-one"></div>
         <div class="hero-orb hero-orb-two"></div>
@@ -428,8 +444,8 @@
                 {
                     <article class="project-card
                         @(project.IsActiveProject
-                                 ? "active-project-card"
-                                 : "")"
+                                                ? "active-project-card"
+                                                : "")"
                              data-project-card
                              data-project-id="@project.Id"
                              data-project-title="@project.Title"
@@ -441,13 +457,6 @@
                              data-created="@project.CreatedSortValue"
                              data-team="@project.ActiveMembersCount"
                              draggable="true">
-                             data-name="@project.Title.ToLowerInvariant()"
-                             data-idea="@project.SelectedIdeaTitle.ToLowerInvariant()"
-                             data-domain="@project.Domain.ToLowerInvariant()"
-                             data-role="@project.Role"
-                             data-status="@project.Status"
-                             data-created="@project.CreatedSortValue"
-                             data-team="@project.ActiveMembersCount">
 
                         @if (project.IsActiveProject)
                         {
@@ -516,13 +525,13 @@
                         <div class="project-badges">
                             <span class="role-badge
                                 @(project.Role == "owner"
-                                              ? "owner-badge"
-                                              : "collaborator-badge")">
+                                                    ? "owner-badge"
+                                                    : "collaborator-badge")">
 
                                 <i class="bi
                                 @(project.Role == "owner"
-                                                   ? "bi-crown-fill"
-                                                   : "bi-people-fill")"></i>
+                                                            ? "bi-crown-fill"
+                                                            : "bi-people-fill")"></i>
 
                                 @project.RoleLabel
                             </span>
@@ -532,8 +541,8 @@
 
                                 <i class="bi
                                 @(project.Status == "active"
-                                                   ? "bi-circle-fill"
-                                                   : "bi-clock")"></i>
+                                                            ? "bi-circle-fill"
+                                                            : "bi-clock")"></i>
 
                                 @project.StatusLabel
                             </span>
@@ -541,14 +550,14 @@
 
                         <div class="selected-idea-panel
                             @(project.HasSelectedIdea
-                                     ? "idea-selected"
-                                     : "idea-missing")">
+                                        ? "idea-selected"
+                                        : "idea-missing")">
 
                             <div class="selected-idea-icon">
                                 <i class="bi
                                 @(project.HasSelectedIdea
-                                                   ? "bi-lightbulb-fill"
-                                                   : "bi-lightbulb")"></i>
+                                                            ? "bi-lightbulb-fill"
+                                                            : "bi-lightbulb")"></i>
                             </div>
 
                             <div>
@@ -696,8 +705,8 @@
 
                                     <i class="bi
                                     @(project.IsActiveProject
-                                                       ? "bi-arrow-right"
-                                                       : "bi-box-arrow-up-right")"></i>
+                                                                ? "bi-arrow-right"
+                                                                : "bi-box-arrow-up-right")"></i>
                                 </button>
                             </form>
 
@@ -707,8 +716,8 @@
 
                                 <i class="bi
                                 @(project.Role == "owner"
-                                                      ? "bi-person-plus"
-                                                      : "bi-people")"></i>
+                                                               ? "bi-person-plus"
+                                                               : "bi-people")"></i>
 
                                 <span>
                                     @project.TeamActionText
@@ -2558,9 +2567,9 @@
             }
         }
         /* =========================================================
-                   MY PROJECTS — COMPACT THEME HERO ONLY
-                   Keeps every section below the hero unchanged.
-                   ========================================================= */
+                                           MY PROJECTS — COMPACT THEME HERO ONLY
+                                           Keeps every section below the hero unchanged.
+                                           ========================================================= */
 
         .projects-hero {
             min-height: 0;
@@ -2640,6 +2649,66 @@
             font-size: .57rem;
         }
 
+        .projects-hero-actions {
+            position: relative;
+            z-index: 3;
+            display: grid;
+            gap: .55rem;
+            min-width: 220px;
+        }
+
+        .open-archive-button {
+            min-width: 220px;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: .65rem;
+            align-items: center;
+            padding: .68rem .78rem;
+            border: 1px solid rgba(255, 255, 255, .20);
+            border-radius: 14px;
+            color: #fff;
+            background: rgba(255, 255, 255, .08);
+            backdrop-filter: blur(10px);
+            text-align: left;
+            text-decoration: none;
+            transition: .18s ease;
+        }
+
+            .open-archive-button:hover {
+                transform: translateY(-1px);
+                border-color: rgba(255, 255, 255, .34);
+                color: #fff;
+                background: rgba(255, 255, 255, .14);
+            }
+
+        .open-archive-icon {
+            width: 39px;
+            height: 39px;
+            display: grid;
+            place-items: center;
+            border-radius: 11px;
+            color: #28385E;
+            background: rgba(255, 255, 255, .94);
+            font-size: .92rem;
+        }
+
+        .open-archive-button strong,
+        .open-archive-button small {
+            display: block;
+        }
+
+        .open-archive-button strong {
+            color: #fff;
+            font-size: .73rem;
+        }
+
+        .open-archive-button small {
+            margin-top: .12rem;
+            color: rgba(255, 255, 255, .67);
+            font-size: .57rem;
+            font-weight: 600;
+        }
+
         /* Remove the decorative bright-blue circles. */
         .projects-hero .hero-orb {
             display: none !important;
@@ -2651,7 +2720,9 @@
                 padding: 1rem;
             }
 
-            .create-project-button {
+            .projects-hero-actions,
+            .create-project-button,
+            .open-archive-button {
                 width: 100%;
             }
         }
@@ -2665,6 +2736,7 @@
                     font-size: clamp(1.5rem, 7vw, 2rem);
                 }
         }
+
         .project-card-menu {
             display: flex;
             flex: 0 0 auto;
@@ -3360,6 +3432,9 @@
                     radio.value =
                         String(candidate.userId);
                     radio.required = true;
+                    radio.setAttribute(
+                        "form",
+                        "removeProjectForm");
 
                     const copy =
                         document.createElement(
@@ -3704,8 +3779,9 @@
 
                     if (ownerSelectionVisible) {
                         const selectedOwner =
-                            removeForm.querySelector(
-                                "input[name='newOwnerUserId']:checked");
+                            document.querySelector(
+                                "input[name='newOwnerUserId']" +
+                                "[form='removeProjectForm']:checked");
 
                         if (!selectedOwner) {
                             event.preventDefault();

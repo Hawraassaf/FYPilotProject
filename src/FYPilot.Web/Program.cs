@@ -2,17 +2,18 @@ using FYPilot.Application.Interfaces;
 using FYPilot.Infrastructure.Data;
 using FYPilot.Infrastructure.Services;
 using FYPilot.Infrastructure.Services.Finalizers;
-using FYPilot.Web.Endpoints;
 using FYPilot.Web.Configuration;
+using FYPilot.Web.Endpoints;
 using FYPilot.Web.Hubs;
 using FYPilot.Web.Middleware;
 using FYPilot.Web.Services.AiAgentJobs;
 using FYPilot.Web.Services.GoogleCalendar;
 using FYPilot.Web.Services.Meetings;
 using FYPilot.Web.Services.Notifications;
-using FYPilot.Web.Services.Supervisors;
 using FYPilot.Web.Services.Projects;
+using FYPilot.Web.Services.Supervisors;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -130,7 +131,8 @@ builder.Services.AddAuthorization(options =>
                 "true");
         });
 });
-
+builder.Services.AddScoped<
+    ArchivedProjectWriteFilter>();
 // ── AI Services ───────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<
     IAiServiceClient,
@@ -180,7 +182,12 @@ builder.Services.AddSession(options =>
 });
 
 // ── Razor Pages + SignalR ─────────────────────────────────────────────────────
-builder.Services.AddRazorPages();
+builder.Services.AddRazorPages(options =>
+{
+    options.Conventions.ConfigureFilter(
+        new ServiceFilterAttribute(
+            typeof(ArchivedProjectWriteFilter)));
+});
 builder.Services.AddSignalR();
 builder.Services.AddAntiforgery();
 builder.Services.AddHealthChecks();

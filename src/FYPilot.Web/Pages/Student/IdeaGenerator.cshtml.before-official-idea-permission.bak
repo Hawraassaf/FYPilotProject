@@ -881,7 +881,7 @@
                                                 Selected
                                             </span>
                                         }
-                                        else if (Model.ProjectAccess?.CanEdit == true)
+                                        else if (Model.ProjectAccess?.IsOwner == true)
                                         {
                                             <button type="submit"
                                                     class="btn idea2-primary-btn ms-auto">
