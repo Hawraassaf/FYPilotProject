@@ -1242,16 +1242,16 @@
 
                             <li><span class="side-nav-label">AI Planning</span></li>
                             <li>@Html.Raw(NavLink("/Student/IdeaGenerator", "lightbulb", "Idea Generator", "idea-generator", activeProjectId))</li>
-                            <li>@Html.Raw(NavLink("/Student/MarketDemand", "graph-up-arrow", "Market Demand", "market-demand", activeProjectId))</li>
                             <li>@Html.Raw(NavLink("/Student/IdeaComparison", "columns-gap", "Idea Comparison", "idea-comparison", activeProjectId))</li>
+                             <li>@Html.Raw(NavLink("/Student/MarketDemand", "graph-up-arrow", "Market Demand", "market-demand", activeProjectId))</li>
                             <li>@Html.Raw(NavLink("/Student/ProjectDNA", "diagram-3", "Project DNA", "project-dna", activeProjectId))</li>
                             <li>@Html.Raw(NavLink("/Student/Roadmap", "map", "Roadmap", "roadmap", activeProjectId))</li>
                             <li>@Html.Raw(NavLink("/Student/DocumentationGenerator", "journal-code", "SE Documentation", "se-documentation", activeProjectId))</li>
 
                             <li><span class="side-nav-label">Project Support</span></li>
                             <li>@Html.Raw(NavLink("/Student/MentorChat", "chat-dots", "Mentor Chat", "mentor-chat", activeProjectId))</li>
-                            <li>@Html.Raw(NavLink("/Student/DefenseSimulator", "shield-check", "Defense Simulator", "defense-simulator", activeProjectId))</li>
                             <li>@Html.Raw(NavLink("/Student/Feedback", "chat-square-text", "Supervisor Feedback", "supervisor-feedback", activeProjectId))</li>
+                            <li>@Html.Raw(NavLink("/Student/DefenseSimulator", "shield-check", "Defense Simulator", "defense-simulator", activeProjectId))</li>
                         }
 
                         @if (role == "supervisor")
