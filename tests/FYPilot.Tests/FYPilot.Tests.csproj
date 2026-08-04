@@ -10,6 +10,7 @@
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="Moq" Version="4.20.72" />
     <PackageReference Include="xunit" Version="2.9.3" />
@@ -25,6 +26,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\FYPilot.Web\FYPilot.Web.csproj" />
     <ProjectReference Include="..\..\src\FYPilot.Infrastructure\FYPilot.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\FYPilot.Application\FYPilot.Application.csproj" />
     <ProjectReference Include="..\..\src\FYPilot.Domain\FYPilot.Domain.csproj" />

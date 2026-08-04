@@ -1,3 +1,4 @@
+using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -10,6 +11,15 @@ public class ProjectsModel(
     ApplicationDbContext db)
     : PageModel
 {
+    private static readonly string[] LifecycleActionTypes =
+    [
+        "project_archived",
+        "project_restored",
+        "member_removed",
+        "project_removed",
+        "ownership_transferred"
+    ];
+
     public List<ProjectDirectoryRow> Projects
     { get; private set; } = [];
 
@@ -30,11 +40,16 @@ public class ProjectsModel(
          * The displayed number is intentionally separate
          * from the database ID, so database ID gaps are not
          * shown to the administrator.
+         *
+         * Do not filter IsDeleted here. Administrators need
+         * oversight of both active and soft-deleted projects.
          */
         var entities = await db.Projects
             .AsNoTracking()
             .Include(project =>
                 project.Student)
+            .Include(project =>
+                project.DeletedByUser)
             .Include(project =>
                 project.ProjectIdea)
             .Include(project =>
@@ -48,6 +63,42 @@ public class ProjectsModel(
             .AsSplitQuery()
             .ToListAsync(
                 cancellationToken);
+
+        var projectIds = entities
+            .Select(project => project.Id)
+            .ToList();
+
+        /*
+         * Lifecycle activities are loaded separately so the
+         * project query does not pull every historical activity.
+         * These records preserve archive, restore, removal, and
+         * ownership-transfer history for administrator review.
+         */
+        List<ProjectActivity> lifecycleActivities =
+            projectIds.Count == 0
+                ? []
+                : await db.ProjectActivities
+                    .AsNoTracking()
+                    .Where(activity =>
+                        projectIds.Contains(activity.ProjectId) &&
+                        LifecycleActionTypes.Contains(
+                            activity.ActionType))
+                    .OrderByDescending(activity =>
+                        activity.CreatedAtUtc)
+                    .ThenByDescending(activity =>
+                        activity.Id)
+                    .ToListAsync(
+                        cancellationToken);
+
+        var lifecycleActivitiesByProject =
+            lifecycleActivities
+                .GroupBy(activity => activity.ProjectId)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group
+                        .Take(10)
+                        .Select(BuildLifecycleActivityRow)
+                        .ToList());
 
         var supervisorIds = entities
             .Where(project =>
@@ -76,41 +127,80 @@ public class ProjectsModel(
         Projects = entities
             .Select((project, index) =>
             {
-                var collaborators = project.Members
+                /*
+                 * Membership status is independent from personal
+                 * archive state:
+                 * - Status active + IsArchived true: still a member,
+                 *   but their own workspace is read-only.
+                 * - Status removed: former member retained as history.
+                 */
+                var memberships = project.Members
+                    .Where(member => member.User != null)
+                    .GroupBy(member => member.UserId)
+                    .Select(group => group
+                        .OrderByDescending(member => member.JoinedAt)
+                        .ThenByDescending(member => member.Id)
+                        .First())
+                    .ToList();
+
+                var activeMemberships = memberships
                     .Where(member =>
-                        member.UserId !=
-                            project.StudentId &&
-                        string.Equals(
-                            member.Status,
-                            "active",
-                            StringComparison.OrdinalIgnoreCase) &&
-                        member.User != null)
-                    .GroupBy(member =>
-                        member.UserId)
-                    .Select(group =>
-                    {
-                        var member = group.First();
+                        IsActiveMembership(member.Status))
+                    .ToList();
 
-                        return new ProjectMemberRow
-                        {
-                            UserId = member.UserId,
+                var activeOwnerMembership =
+                    activeMemberships.FirstOrDefault(member =>
+                        member.UserId == project.StudentId);
 
-                            FullName =
-                                SafeText(
-                                    member.User?.FullName,
-                                    "Collaborator"),
+                var removedOwnerMembership =
+                    memberships.FirstOrDefault(member =>
+                        member.UserId == project.StudentId &&
+                        IsRemovedMembership(member));
 
-                            Email =
-                                member.User?.Email ?? "",
-
-                            Initials =
-                                Initials(
-                                    member.User?.FullName)
-                        };
-                    })
+                var collaborators = activeMemberships
+                    .Where(member =>
+                        member.UserId != project.StudentId)
+                    .Select(BuildMemberRow)
                     .OrderBy(member =>
                         member.FullName)
                     .ToList();
+
+                var archivedMembers = activeMemberships
+                    .Where(member => member.IsArchived)
+                    .Select(BuildMemberRow)
+                    .OrderBy(member =>
+                        member.ArchivedAtUtc ?? DateTime.MaxValue)
+                    .ThenBy(member =>
+                        member.FullName)
+                    .ToList();
+
+                var removedMembers = memberships
+                    .Where(IsRemovedMembership)
+                    .Select(BuildMemberRow)
+                    .OrderByDescending(member =>
+                        member.RemovedAtUtc ?? DateTime.MinValue)
+                    .ThenBy(member =>
+                        member.FullName)
+                    .ToList();
+
+                List<ProjectLifecycleActivityRow> projectLifecycleActivities =
+                    lifecycleActivitiesByProject.TryGetValue(
+                        project.Id,
+                        out var activityRows)
+                        ? activityRows
+                        : [];
+
+                var hasOwnershipTransfer =
+                    projectLifecycleActivities.Any(activity =>
+                        activity.ActionType ==
+                            "ownership_transferred");
+
+                var lifecycleFilters =
+                    BuildLifecycleFilters(
+                        project.IsDeleted,
+                        archivedMembers.Count > 0,
+                        removedMembers.Count > 0,
+                        hasOwnershipTransfer);
 
                 var status =
                     NormalizeProjectStatus(
@@ -132,6 +222,7 @@ public class ProjectsModel(
                 }
 
                 var hasActiveSupervisor =
+                    !project.IsDeleted &&
                     supervisorStatus == "active" &&
                     supervisor != null;
 
@@ -157,12 +248,21 @@ public class ProjectsModel(
                         ? SafeText(
                             supervisor!.FullName,
                             "Assigned supervisor")
-                        : SupervisorPlaceholder(
-                            supervisorStatus);
+                        : project.IsDeleted
+                            ? "Assignment preserved as history"
+                            : SupervisorPlaceholder(
+                                supervisorStatus);
 
                 var supervisorEmail =
                     hasActiveSupervisor
                         ? supervisor!.Email ?? ""
+                        : "";
+
+                var deletedByName =
+                    project.IsDeleted
+                        ? SafeText(
+                            project.DeletedByUser?.FullName,
+                            ownerName)
                         : "";
 
                 var searchParts =
@@ -178,17 +278,41 @@ public class ProjectsModel(
                         supervisorEmail,
                         DisplayStatus(status),
                         DisplaySupervisorStatus(
-                            supervisorStatus)
+                            supervisorStatus),
+                        project.IsDeleted
+                            ? "soft deleted read only historical"
+                            : "active workspace",
+                        deletedByName,
+                        hasOwnershipTransfer
+                            ? "ownership transferred"
+                            : ""
                     };
 
-                foreach (var collaborator
-                    in collaborators)
+                foreach (var member in collaborators)
                 {
-                    searchParts.Add(
-                        collaborator.FullName);
+                    searchParts.Add(member.FullName);
+                    searchParts.Add(member.Email);
+                }
 
-                    searchParts.Add(
-                        collaborator.Email);
+                foreach (var member in archivedMembers)
+                {
+                    searchParts.Add(member.FullName);
+                    searchParts.Add(member.Email);
+                    searchParts.Add("archived workspace");
+                }
+
+                foreach (var member in removedMembers)
+                {
+                    searchParts.Add(member.FullName);
+                    searchParts.Add(member.Email);
+                    searchParts.Add("removed member");
+                }
+
+                foreach (var activity
+                    in projectLifecycleActivities)
+                {
+                    searchParts.Add(activity.Label);
+                    searchParts.Add(activity.Description);
                 }
 
                 return new ProjectDirectoryRow
@@ -218,6 +342,21 @@ public class ProjectsModel(
                     StatusCssClass =
                         StatusCss(status),
 
+                    IsDeleted =
+                        project.IsDeleted,
+
+                    DeletedAtUtc =
+                        project.DeletedAtUtc,
+
+                    DeletedByName =
+                        deletedByName,
+
+                    LifecycleFilterValue =
+                        string.Join(" ", lifecycleFilters),
+
+                    HasOwnershipTransfer =
+                        hasOwnershipTransfer,
+
                     OwnerName =
                         ownerName,
 
@@ -227,11 +366,29 @@ public class ProjectsModel(
                     OwnerInitials =
                         Initials(ownerName),
 
+                    OwnerMembershipIsActive =
+                        activeOwnerMembership != null,
+
+                    OwnerIsArchived =
+                        activeOwnerMembership?.IsArchived == true,
+
+                    OwnerArchivedAtUtc =
+                        activeOwnerMembership?.ArchivedAtUtc,
+
+                    OwnerRemovedAtUtc =
+                        removedOwnerMembership?.RemovedAtUtc,
+
                     Collaborators =
                         collaborators,
 
+                    ArchivedMembers =
+                        archivedMembers,
+
+                    RemovedMembers =
+                        removedMembers,
+
                     ActiveMemberCount =
-                        collaborators.Count + 1,
+                        activeMemberships.Count,
 
                     MaximumMembers =
                         Math.Max(
@@ -268,6 +425,9 @@ public class ProjectsModel(
                     HasActiveSupervisor =
                         hasActiveSupervisor,
 
+                    LifecycleActivities =
+                        projectLifecycleActivities,
+
                     SearchText =
                         string.Join(
                             " ",
@@ -299,22 +459,178 @@ public class ProjectsModel(
             TotalProjects =
                 Projects.Count,
 
+            ActiveProjects =
+                Projects.Count(project =>
+                    !project.IsDeleted),
+
             WithSelectedIdea =
                 Projects.Count(project =>
+                    !project.IsDeleted &&
                     project.HasSelectedIdea),
 
             CollaborativeProjects =
                 Projects.Count(project =>
+                    !project.IsDeleted &&
                     project.Collaborators.Count > 0),
 
             WithAssignedSupervisor =
                 Projects.Count(project =>
+                    !project.IsDeleted &&
                     project.HasActiveSupervisor),
 
             WithoutAssignedSupervisor =
                 Projects.Count(project =>
-                    !project.HasActiveSupervisor)
+                    !project.IsDeleted &&
+                    !project.HasActiveSupervisor),
+
+            ArchivedMemberships =
+                Projects
+                    .Where(project =>
+                        !project.IsDeleted)
+                    .Sum(project =>
+                        project.ArchivedMembers.Count),
+
+            RemovedMemberships =
+                Projects.Sum(project =>
+                    project.RemovedMembers.Count),
+
+            SoftDeletedProjects =
+                Projects.Count(project =>
+                    project.IsDeleted),
+
+            OwnershipTransferProjects =
+                Projects.Count(project =>
+                    project.HasOwnershipTransfer)
         };
+    }
+
+    private static ProjectMemberRow BuildMemberRow(
+        ProjectMember member)
+    {
+        var role =
+            NormalizeMembershipRole(member.Role);
+
+        return new ProjectMemberRow
+        {
+            UserId =
+                member.UserId,
+
+            FullName =
+                SafeText(
+                    member.User?.FullName,
+                    role == "owner"
+                        ? "Project owner"
+                        : "Collaborator"),
+
+            Email =
+                member.User?.Email ?? "",
+
+            Initials =
+                Initials(
+                    member.User?.FullName),
+
+            Role =
+                role,
+
+            RoleLabel =
+                DisplayMembershipRole(role),
+
+            Status =
+                NormalizeMembershipStatus(
+                    member.Status),
+
+            IsArchived =
+                member.IsArchived,
+
+            ArchivedAtUtc =
+                member.ArchivedAtUtc,
+
+            RemovedAtUtc =
+                member.RemovedAtUtc
+                    ?? member.LeftAt
+        };
+    }
+
+    private static ProjectLifecycleActivityRow
+        BuildLifecycleActivityRow(
+            ProjectActivity activity)
+    {
+        var actionType =
+            NormalizeLifecycleAction(
+                activity.ActionType);
+
+        return new ProjectLifecycleActivityRow
+        {
+            ActionType =
+                actionType,
+
+            Label =
+                DisplayLifecycleAction(actionType),
+
+            Description =
+                SafeText(
+                    activity.Description,
+                    "Project lifecycle updated."),
+
+            CreatedAtUtc =
+                activity.CreatedAtUtc,
+
+            CssClass =
+                LifecycleActivityCss(actionType),
+
+            IconCssClass =
+                LifecycleActivityIcon(actionType)
+        };
+    }
+
+    private static List<string> BuildLifecycleFilters(
+        bool isDeleted,
+        bool hasArchivedMembers,
+        bool hasRemovedMembers,
+        bool hasOwnershipTransfer)
+    {
+        var filters = new List<string>
+        {
+            isDeleted
+                ? "soft_deleted"
+                : "active"
+        };
+
+        if (hasArchivedMembers)
+        {
+            filters.Add("archived");
+        }
+
+        if (hasRemovedMembers)
+        {
+            filters.Add("removed");
+        }
+
+        if (hasOwnershipTransfer)
+        {
+            filters.Add("transferred");
+        }
+
+        return filters;
+    }
+
+    private static bool IsActiveMembership(
+        string? status)
+    {
+        return string.Equals(
+            NormalizeMembershipStatus(status),
+            "active",
+            StringComparison.Ordinal);
+    }
+
+    private static bool IsRemovedMembership(
+        ProjectMember member)
+    {
+        return member.RemovedAtUtc.HasValue ||
+               string.Equals(
+                   NormalizeMembershipStatus(member.Status),
+                   "removed",
+                   StringComparison.Ordinal);
     }
 
     private static string NormalizeProjectStatus(
@@ -349,6 +665,40 @@ public class ProjectsModel(
         };
     }
 
+    private static string NormalizeMembershipRole(
+        string? role)
+    {
+        var value = SafeText(
+                role,
+                "collaborator")
+            .ToLowerInvariant()
+            .Replace(" ", "_");
+
+        return value == "owner"
+            ? "owner"
+            : "collaborator";
+    }
+
+    private static string NormalizeMembershipStatus(
+        string? status)
+    {
+        return SafeText(
+                status,
+                "removed")
+            .ToLowerInvariant()
+            .Replace(" ", "_");
+    }
+
+    private static string NormalizeLifecycleAction(
+        string? actionType)
+    {
+        return SafeText(
+                actionType,
+                "lifecycle_updated")
+            .ToLowerInvariant()
+            .Replace(" ", "_");
+    }
+
     private static string DisplayStatus(
         string status)
     {
@@ -375,6 +725,62 @@ public class ProjectsModel(
             "planning" => "is-planning",
             "archived" => "is-archived",
             _ => "is-draft"
+        };
+    }
+
+    private static string DisplayMembershipRole(
+        string role)
+    {
+        return role == "owner"
+            ? "Owner"
+            : "Collaborator";
+    }
+
+    private static string DisplayLifecycleAction(
+        string actionType)
+    {
+        return actionType switch
+        {
+            "project_archived" =>
+                "Workspace archived",
+            "project_restored" =>
+                "Workspace restored",
+            "member_removed" =>
+                "Member removed project",
+            "project_removed" =>
+                "Project soft-deleted",
+            "ownership_transferred" =>
+                "Ownership transferred",
+            _ =>
+                "Lifecycle updated"
+        };
+    }
+
+    private static string LifecycleActivityCss(
+        string actionType)
+    {
+        return actionType switch
+        {
+            "project_archived" => "is-archived",
+            "project_restored" => "is-restored",
+            "member_removed" => "is-removed",
+            "project_removed" => "is-deleted",
+            "ownership_transferred" => "is-transfer",
+            _ => "is-neutral"
+        };
+    }
+
+    private static string LifecycleActivityIcon(
+        string actionType)
+    {
+        return actionType switch
+        {
+            "project_archived" => "bi-archive",
+            "project_restored" => "bi-arrow-counterclockwise",
+            "member_removed" => "bi-person-x",
+            "project_removed" => "bi-trash3",
+            "ownership_transferred" => "bi-arrow-left-right",
+            _ => "bi-clock-history"
         };
     }
 
@@ -484,6 +890,8 @@ public class ProjectsModel(
     {
         public int TotalProjects { get; set; }
 
+        public int ActiveProjects { get; set; }
+
         public int WithSelectedIdea { get; set; }
 
         public int CollaborativeProjects { get; set; }
@@ -491,6 +899,14 @@ public class ProjectsModel(
         public int WithAssignedSupervisor { get; set; }
 
         public int WithoutAssignedSupervisor { get; set; }
+
+        public int ArchivedMemberships { get; set; }
+
+        public int RemovedMemberships { get; set; }
+
+        public int SoftDeletedProjects { get; set; }
+
+        public int OwnershipTransferProjects { get; set; }
     }
 
     public sealed class ProjectStatusOption
@@ -516,13 +932,37 @@ public class ProjectsModel(
 
         public string StatusCssClass { get; set; } = "";
 
+        public bool IsDeleted { get; set; }
+
+        public DateTime? DeletedAtUtc { get; set; }
+
+        public string DeletedByName { get; set; } = "";
+
+        public string LifecycleFilterValue { get; set; } = "";
+
+        public bool HasOwnershipTransfer { get; set; }
+
         public string OwnerName { get; set; } = "";
 
         public string OwnerEmail { get; set; } = "";
 
         public string OwnerInitials { get; set; } = "";
 
+        public bool OwnerMembershipIsActive { get; set; }
+
+        public bool OwnerIsArchived { get; set; }
+
+        public DateTime? OwnerArchivedAtUtc { get; set; }
+
+        public DateTime? OwnerRemovedAtUtc { get; set; }
+
         public List<ProjectMemberRow> Collaborators
+        { get; set; } = [];
+
+        public List<ProjectMemberRow> ArchivedMembers
+        { get; set; } = [];
+
+        public List<ProjectMemberRow> RemovedMembers
         { get; set; } = [];
 
         public int ActiveMemberCount { get; set; }
@@ -554,6 +994,10 @@ public class ProjectsModel(
         public bool HasActiveSupervisor
         { get; set; }
 
+        public List<ProjectLifecycleActivityRow>
+            LifecycleActivities
+        { get; set; } = [];
+
         public string SearchText
         { get; set; } = "";
     }
@@ -567,5 +1011,32 @@ public class ProjectsModel(
         public string Email { get; set; } = "";
 
         public string Initials { get; set; } = "";
+
+        public string Role { get; set; } = "";
+
+        public string RoleLabel { get; set; } = "";
+
+        public string Status { get; set; } = "";
+
+        public bool IsArchived { get; set; }
+
+        public DateTime? ArchivedAtUtc { get; set; }
+
+        public DateTime? RemovedAtUtc { get; set; }
+    }
+
+    public sealed class ProjectLifecycleActivityRow
+    {
+        public string ActionType { get; set; } = "";
+
+        public string Label { get; set; } = "";
+
+        public string Description { get; set; } = "";
+
+        public DateTime CreatedAtUtc { get; set; }
+
+        public string CssClass { get; set; } = "";
+
+        public string IconCssClass { get; set; } = "";
     }
 }

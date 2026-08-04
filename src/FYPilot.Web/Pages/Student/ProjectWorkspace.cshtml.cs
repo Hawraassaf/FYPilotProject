@@ -61,6 +61,9 @@ public class ProjectWorkspaceModel(
     public bool IsOwner =>
         ProjectAccess?.IsOwner == true;
 
+    public bool IsReadOnly =>
+        ProjectAccess?.CanEdit != true;
+
     public string ProjectTitle { get; private set; } =
         "Untitled Project";
 
@@ -215,11 +218,22 @@ public class ProjectWorkspaceModel(
                 "student",
                 cancellationToken);
 
-        if (access == null)
+        if (access?.CanView != true)
         {
             return new JsonResult(
                 Failure(
                     "You no longer have access to this project."))
+            {
+                StatusCode =
+                    StatusCodes.Status403Forbidden
+            };
+        }
+
+        if (!access.CanEdit)
+        {
+            return new JsonResult(
+                Failure(
+                    "Restore this project before making changes."))
             {
                 StatusCode =
                     StatusCodes.Status403Forbidden
@@ -669,7 +683,7 @@ public class ProjectWorkspaceModel(
                 "student",
                 cancellationToken);
 
-        if (access == null)
+        if (access?.CanView != true)
         {
             return Forbid();
         }
@@ -756,7 +770,7 @@ public class ProjectWorkspaceModel(
                 "student",
                 cancellationToken);
 
-        if (ProjectAccess == null)
+        if (ProjectAccess?.CanView != true)
         {
             return false;
         }
@@ -924,9 +938,11 @@ public class ProjectWorkspaceModel(
                         message.CreatedAtUtc,
                         message.IsEdited,
                         message.IsDeleted,
+                        ProjectAccess.CanEdit &&
                         !message.IsDeleted &&
                         message.UserId ==
                             userId,
+                        ProjectAccess.CanEdit &&
                         !message.IsDeleted &&
                         (
                             message.UserId ==

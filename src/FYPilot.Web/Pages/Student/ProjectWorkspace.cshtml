@@ -10,7 +10,8 @@
      id="projectWorkspace"
      data-project-id="@Model.ProjectId"
      data-current-user-id="@Model.CurrentUserId"
-     data-is-owner="@Model.IsOwner.ToString().ToLowerInvariant()">
+     data-is-owner="@Model.IsOwner.ToString().ToLowerInvariant()"
+     data-is-read-only="@Model.IsReadOnly.ToString().ToLowerInvariant()">
 
     <header class="pw-hero">
         <div class="pw-hero-main">
@@ -144,10 +145,20 @@
                         Team Discussion
                     </h2>
 
-                    <p>
-                        Reply, edit, share files and collaborate
-                        instantly with active project members.
-                    </p>
+                    @if (Model.IsReadOnly)
+                    {
+                        <p>
+                            Review the project discussion and download shared files.
+                            Restore the project to send or change messages.
+                        </p>
+                    }
+                    else
+                    {
+                        <p>
+                            Reply, edit, share files and collaborate
+                            instantly with active project members.
+                        </p>
+                    }
                 </div>
 
                 <div class="pw-connection-status"
@@ -180,11 +191,11 @@
                 {
                     <article class="pw-message
                         @(message.UserId == Model.CurrentUserId
-                                      ? "is-own"
-                                      : "")
+                                           ? "is-own"
+                                           : "")
                         @(message.IsDeleted
-                                      ? "is-deleted"
-                                      : "")"
+                                           ? "is-deleted"
+                                           : "")"
                              data-message-id="@message.Id"
                              data-user-id="@message.UserId">
 
@@ -218,7 +229,8 @@
                                     }
                                 </div>
 
-                                @if (!message.IsDeleted)
+                                @if (!Model.IsReadOnly &&
+                                     !message.IsDeleted)
                                 {
                                     <div class="pw-message-actions">
                                         <button type="button"
@@ -282,8 +294,8 @@
                                             <span>
                                                 <i class="bi
                                                 @(attachment.IsImage
-                                                          ? "bi-image"
-                                                          : "bi-file-earmark")"></i>
+                                                             ? "bi-image"
+                                                             : "bi-file-earmark")"></i>
                                             </span>
 
                                             <div>
@@ -316,87 +328,117 @@
                 <b id="typingText">Someone is typing</b>
             </div>
 
-            <section class="pw-compose-area">
-                <div class="pw-compose-context"
-                     id="composeContext"
-                     hidden>
+            @if (Model.IsReadOnly)
+            {
+                <section class="pw-readonly-compose"
+                         role="status"
+                         aria-label="Read-only project discussion">
+
+                    <span class="pw-readonly-compose-icon">
+                        <i class="bi bi-lock-fill"></i>
+                    </span>
+
                     <div>
-                        <i id="composeContextIcon"
-                           class="bi bi-reply"></i>
+                        <strong>Discussion is read only</strong>
 
-                        <span>
-                            <strong id="composeContextTitle"></strong>
-                            <small id="composeContextText"></small>
-                        </span>
+                        <p>
+                            You can review messages and download attachments.
+                            Restore this project from Archived Projects to reply,
+                            edit, delete, or upload files.
+                        </p>
                     </div>
 
-                    <button type="button"
-                            id="clearComposeContext"
-                            aria-label="Cancel">
-                        <i class="bi bi-x-lg"></i>
-                    </button>
-                </div>
+                    <a asp-page="/Student/ArchivedProjects"
+                       class="pw-readonly-compose-link">
+                        <i class="bi bi-archive"></i>
+                        Open Archive
+                    </a>
+                </section>
+            }
+            else
+            {
+                <section class="pw-compose-area">
+                    <div class="pw-compose-context"
+                         id="composeContext"
+                         hidden>
+                        <div>
+                            <i id="composeContextIcon"
+                               class="bi bi-reply"></i>
 
-                <div class="pw-selected-files"
-                     id="selectedFiles"
-                     hidden>
-                </div>
+                            <span>
+                                <strong id="composeContextTitle"></strong>
+                                <small id="composeContextText"></small>
+                            </span>
+                        </div>
 
-                <form method="post"
-                      id="workspaceComposer"
-                      class="pw-composer"
-                      enctype="multipart/form-data">
-
-                    @Html.AntiForgeryToken()
-
-                    <input type="hidden"
-                           name="projectId"
-                           value="@Model.ProjectId" />
-
-                    <input type="hidden"
-                           name="replyToMessageId"
-                           id="replyToMessageId" />
-
-                    <input type="file"
-                           id="workspaceFileInput"
-                           name="files"
-                           multiple
-                           accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.png,.jpg,.jpeg,.webp,.zip"
-                           hidden />
-
-                    <button type="button"
-                            id="attachmentButton"
-                            class="pw-attach-button"
-                            title="Attach files"
-                            aria-label="Attach files">
-                        <i class="bi bi-plus-lg"></i>
-                    </button>
-
-                    <div class="pw-textarea-wrap">
-                        <textarea name="content"
-                                  id="workspaceInput"
-                                  maxlength="1000"
-                                  rows="1"
-                                  placeholder="Message your project team…"></textarea>
-
-                        <span id="workspaceCharacterCount">
-                            0 / 1000
-                        </span>
+                        <button type="button"
+                                id="clearComposeContext"
+                                aria-label="Cancel">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
                     </div>
 
-                    <button type="submit"
-                            id="workspaceSendButton"
-                            class="pw-send-button"
-                            aria-label="Send message">
-                        <i class="bi bi-arrow-up"></i>
-                    </button>
-                </form>
+                    <div class="pw-selected-files"
+                         id="selectedFiles"
+                         hidden>
+                    </div>
 
-                <p class="pw-compose-note">
-                    Up to 5 files, 10 MB each. PDF, Office,
-                    CSV, text, images and ZIP are supported.
-                </p>
-            </section>
+                    <form method="post"
+                          id="workspaceComposer"
+                          class="pw-composer"
+                          enctype="multipart/form-data">
+
+                        @Html.AntiForgeryToken()
+
+                        <input type="hidden"
+                               name="projectId"
+                               value="@Model.ProjectId" />
+
+                        <input type="hidden"
+                               name="replyToMessageId"
+                               id="replyToMessageId" />
+
+                        <input type="file"
+                               id="workspaceFileInput"
+                               name="files"
+                               multiple
+                               accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.png,.jpg,.jpeg,.webp,.zip"
+                               hidden />
+
+                        <button type="button"
+                                id="attachmentButton"
+                                class="pw-attach-button"
+                                title="Attach files"
+                                aria-label="Attach files">
+                            <i class="bi bi-plus-lg"></i>
+                        </button>
+
+                        <div class="pw-textarea-wrap">
+                            <textarea name="content"
+                                      id="workspaceInput"
+                                      maxlength="1000"
+                                      rows="1"
+                                      placeholder="Message your project team…"></textarea>
+
+                            <span id="workspaceCharacterCount">
+                                0 / 1000
+                            </span>
+                        </div>
+
+                        <button type="submit"
+                                id="workspaceSendButton"
+                                class="pw-send-button"
+                                aria-label="Send message">
+                            <i class="bi bi-arrow-up"></i>
+                        </button>
+                    </form>
+
+                    <p class="pw-compose-note">
+                        Up to 5 files, 10 MB each. PDF, Office,
+                        CSV, text, images and ZIP are supported.
+                    </p>
+                </section>
+            }
         </main>
     </div>
 </div>
@@ -1184,6 +1226,66 @@
             font-size: .52rem;
         }
 
+        .pw-readonly-compose {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: .75rem;
+            padding: .85rem .9rem;
+            border-top: 1px solid #e2e8f1;
+            color: #5f4b16;
+            background: linear-gradient(135deg, #fffaf0, #fff6d9);
+        }
+
+        .pw-readonly-compose-icon {
+            width: 40px;
+            height: 40px;
+            display: grid;
+            place-items: center;
+            border-radius: 11px;
+            color: #fff;
+            background: linear-gradient(135deg, #8b6d1f, #b18b2d);
+        }
+
+        .pw-readonly-compose strong,
+        .pw-readonly-compose p {
+            display: block;
+        }
+
+        .pw-readonly-compose strong {
+            font-size: .7rem;
+            font-weight: 850;
+        }
+
+        .pw-readonly-compose p {
+            margin: .16rem 0 0;
+            color: #806a2d;
+            font-size: .6rem;
+            line-height: 1.45;
+        }
+
+        .pw-readonly-compose-link {
+            min-height: 38px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .35rem;
+            padding: 0 .72rem;
+            border: 1px solid #d4c27c;
+            border-radius: 9px;
+            color: #654f12;
+            background: #fff;
+            font-size: .6rem;
+            font-weight: 800;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+            .pw-readonly-compose-link:hover {
+                color: #4f3d0e;
+                background: #fffdf7;
+            }
+
         @@media (max-width: 991px) {
             .pw-shell {
                 grid-template-columns: 1fr;
@@ -1268,10 +1370,19 @@
             .pw-compose-note {
                 padding-left: .65rem;
             }
+
+            .pw-readonly-compose {
+                grid-template-columns: auto minmax(0, 1fr);
+            }
+
+            .pw-readonly-compose-link {
+                grid-column: 1 / -1;
+                width: 100%;
+            }
         }
         /* =========================================================
-           FYPILOT THEME COLOR + CLEAN CHAT INPUT
-           ========================================================= */
+                   FYPILOT THEME COLOR + CLEAN CHAT INPUT
+                   ========================================================= */
 
         .pw-page {
             --pw-blue: #28385E;
@@ -1338,6 +1449,9 @@
 
         const isOwner =
         root.dataset.isOwner === "true";
+
+        const isReadOnly =
+        root.dataset.isReadOnly === "true";
 
         const messages =
         document.getElementById(
@@ -1723,6 +1837,7 @@
         actions.className =
         "pw-message-actions";
 
+        if (!isReadOnly) {
         actions.appendChild(
         createActionButton(
         "reply",
@@ -1748,6 +1863,11 @@
         header.append(
         metadata,
         actions);
+        }
+        else {
+        header.appendChild(
+        metadata);
+        }
 
         body.appendChild(
         header);
@@ -2375,6 +2495,10 @@
         messages?.addEventListener(
         "click",
         async event => {
+        if (isReadOnly) {
+        return;
+        }
+
         const button =
         event.target.closest(
         "[data-action]");

@@ -854,6 +854,84 @@
             line-height: 1.45;
         }
 
+        /* =========================================================
+           ARCHIVED PROJECT — READ-ONLY BANNER
+           ========================================================= */
+
+        .archived-project-readonly-banner {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: .75rem;
+            margin-bottom: 1rem;
+            padding: .78rem .9rem;
+            border: 1px solid #d7c992;
+            border-radius: 13px;
+            color: #654f12;
+            background: linear-gradient(135deg, #fffaf0, #fff6d9);
+            box-shadow: 0 8px 22px rgba(101, 79, 18, .08);
+        }
+
+        .archived-project-readonly-icon {
+            width: 38px;
+            height: 38px;
+            display: grid;
+            place-items: center;
+            border-radius: 11px;
+            color: #ffffff;
+            background: linear-gradient(135deg, #8b6d1f, #b18b2d);
+        }
+
+        .archived-project-readonly-copy strong,
+        .archived-project-readonly-copy span {
+            display: block;
+        }
+
+        .archived-project-readonly-copy strong {
+            font-size: .72rem;
+            font-weight: 850;
+        }
+
+        .archived-project-readonly-copy span {
+            margin-top: .16rem;
+            color: #806a2d;
+            font-size: .62rem;
+            line-height: 1.45;
+        }
+
+        .archived-project-readonly-link {
+            min-height: 36px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .35rem;
+            padding: 0 .7rem;
+            border: 1px solid #d4c27c;
+            border-radius: 9px;
+            color: #654f12;
+            background: #ffffff;
+            font-size: .61rem;
+            font-weight: 800;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+
+        .archived-project-readonly-link:hover {
+            color: #4f3d0e;
+            background: #fffdf7;
+        }
+
+        @@media (max-width: 640px) {
+            .archived-project-readonly-banner {
+                grid-template-columns: auto minmax(0, 1fr);
+            }
+
+            .archived-project-readonly-link {
+                grid-column: 1 / -1;
+                width: 100%;
+            }
+        }
+
     </style>
 
     @RenderSection("Head", required: false)
@@ -882,6 +960,8 @@
         string? topbarProfileHref = null;
         int? currentUserIdForOnboarding = null;
         int? activeProjectId = null;
+        int? archivedProjectContextId = null;
+        var isArchivedProjectContext = false;
 
         var studentProjectSwitcherItems =
             new List<(
@@ -949,6 +1029,33 @@
                             .GetActiveProjectIdAsync(
                                 navUserId);
 
+                    var requestedProjectIdValue =
+                        Context.Request.Query["projectId"]
+                            .FirstOrDefault();
+
+                    if (int.TryParse(
+                            requestedProjectIdValue,
+                            out var requestedProjectId) &&
+                        requestedProjectId > 0)
+                    {
+                        archivedProjectContextId =
+                            requestedProjectId;
+
+                        isArchivedProjectContext =
+                            await Db.ProjectMembers
+                                .AsNoTracking()
+                                .AnyAsync(member =>
+                                    member.ProjectId ==
+                                        requestedProjectId &&
+                                    member.UserId ==
+                                        navUserId &&
+                                    member.Status ==
+                                        "active" &&
+                                    member.IsArchived &&
+                                    member.Project != null &&
+                                    !member.Project.IsDeleted);
+                    }
+
                     /*
                      * Load only projects where the logged-in
                      * student still has an active membership.
@@ -959,9 +1066,11 @@
                         await Db.Projects
                             .AsNoTracking()
                             .Where(project =>
+                                !project.IsDeleted &&
                                 project.Members.Any(member =>
                                     member.UserId == navUserId &&
-                                    member.Status == "active"))
+                                    member.Status == "active" &&
+                                    !member.IsArchived))
                             .Select(project => new
                             {
                                 project.Id,
@@ -1133,16 +1242,16 @@
 
                             <li><span class="side-nav-label">AI Planning</span></li>
                             <li>@Html.Raw(NavLink("/Student/IdeaGenerator", "lightbulb", "Idea Generator", "idea-generator", activeProjectId))</li>
-                            <li>@Html.Raw(NavLink("/Student/MarketDemand", "graph-up-arrow", "Market Demand", "market-demand", activeProjectId))</li>
                             <li>@Html.Raw(NavLink("/Student/IdeaComparison", "columns-gap", "Idea Comparison", "idea-comparison", activeProjectId))</li>
+                             <li>@Html.Raw(NavLink("/Student/MarketDemand", "graph-up-arrow", "Market Demand", "market-demand", activeProjectId))</li>
                             <li>@Html.Raw(NavLink("/Student/ProjectDNA", "diagram-3", "Project DNA", "project-dna", activeProjectId))</li>
                             <li>@Html.Raw(NavLink("/Student/Roadmap", "map", "Roadmap", "roadmap", activeProjectId))</li>
                             <li>@Html.Raw(NavLink("/Student/DocumentationGenerator", "journal-code", "SE Documentation", "se-documentation", activeProjectId))</li>
 
                             <li><span class="side-nav-label">Project Support</span></li>
                             <li>@Html.Raw(NavLink("/Student/MentorChat", "chat-dots", "Mentor Chat", "mentor-chat", activeProjectId))</li>
-                            <li>@Html.Raw(NavLink("/Student/DefenseSimulator", "shield-check", "Defense Simulator", "defense-simulator", activeProjectId))</li>
                             <li>@Html.Raw(NavLink("/Student/Feedback", "chat-square-text", "Supervisor Feedback", "supervisor-feedback", activeProjectId))</li>
+                            <li>@Html.Raw(NavLink("/Student/DefenseSimulator", "shield-check", "Defense Simulator", "defense-simulator", activeProjectId))</li>
                         }
 
                         @if (role == "supervisor")
@@ -1552,6 +1661,37 @@
                 </header>
                 <main class="app-content flex-grow-1 overflow-auto">
                     <partial name="_FlashMessages" />
+
+                    @if (role == "student" &&
+                         isArchivedProjectContext &&
+                         archivedProjectContextId.HasValue)
+                    {
+                        <section class="archived-project-readonly-banner"
+                                 role="status"
+                                 aria-label="Archived project read-only notice">
+
+                            <div class="archived-project-readonly-icon">
+                                <i class="bi bi-lock-fill"></i>
+                            </div>
+
+                            <div class="archived-project-readonly-copy">
+                                <strong>
+                                    Archived Project — Read Only
+                                </strong>
+
+                                <span>
+                                    You can review this project, but changes are disabled
+                                    until you restore it from Archived Projects.
+                                </span>
+                            </div>
+
+                            <a asp-page="/Student/ArchivedProjects"
+                               class="archived-project-readonly-link">
+                                <i class="bi bi-archive"></i>
+                                Open Archive
+                            </a>
+                        </section>
+                    }
 
                     @RenderBody()
                 </main>

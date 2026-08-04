@@ -6,7 +6,6 @@ using FYPilot.Application.Interfaces;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
 using FYPilot.Infrastructure.Services.Finalizers;
-using FYPilot.Web.Services.Notifications;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -21,7 +20,6 @@ public class IdeaComparisonModel(
     IActiveProjectService activeProjectService,
     IAiAgentJobService jobService,
     IAiJobsPythonClient pythonClient,
-    INotificationService notificationService,
     ILogger<IdeaComparisonModel> logger
 ) : PageModel
 {
@@ -235,106 +233,44 @@ public class IdeaComparisonModel(
             userId,
             cancellationToken);
 
-        /*
-         * Reconnect to the latest active comparison job for this
-         * user and project.
-         *
-         * This is intentionally not limited to the current default
-         * checkbox selection. A student may have started a comparison
-         * using older ideas, moved to another page, logged out, or
-         * refreshed before it completed. The durable job must remain
-         * discoverable when they return.
-         */
-        var activeJob =
-            await jobService.FindActiveJobAsync(
-                userId,
-                ProjectId,
-                AgentName,
-                cancellationToken);
+        await LoadLatestReviewAsync();
 
-        if (activeJob != null)
+        // §3(b): scoped strictly to the page's current default selection --
+        // an active job for a DIFFERENT idea selection is never surfaced
+        // here (it would be a different RequestHash and simply not match).
+        if (LatestBatchIdeaIds.Count > 0)
         {
-            ActiveJobId =
-                activeJob.JobId;
-        }
-
-        /*
-         * First prefer the exact job supplied by the completion
-         * redirect. It must belong to this user, this project, and
-         * this agent.
-         */
-        AiAgentJob? completedJob =
-            null;
-
-        if (completedJobId.HasValue)
-        {
-            var requestedJob =
-                await jobService.GetAuthorizedJobAsync(
-                    completedJobId.Value,
-                    userId,
-                    cancellationToken);
-
-            if (requestedJob != null &&
-                requestedJob.ProjectId == ProjectId &&
-                string.Equals(
-                    requestedJob.AgentName,
-                    AgentName,
-                    StringComparison.Ordinal) &&
-                requestedJob.Status ==
-                    AiAgentJobStatus.Completed)
+            var defaultHash = ComputeRequestHash(LatestBatchIdeaIds);
+            var activeJob = await jobService.FindActiveJobAsync(userId, ProjectId, AgentName, cancellationToken);
+            if (activeJob is not null && activeJob.RequestHash == defaultHash)
             {
-                completedJob =
-                    requestedJob;
+                ActiveJobId = activeJob.JobId;
             }
         }
 
-        /*
-         * A normal navigation, refresh, browser restart, or new login
-         * no longer contains completedJobId in the URL.
-         *
-         * AiAgentJob.ResultJson is the durable database copy of the
-         * finished AI response, so load the latest completed comparison
-         * for this exact user and project directly from the database.
-         *
-         * There is deliberately no 24-hour cutoff here. The latest saved
-         * comparison remains available until a newer comparison replaces
-         * it as the latest result.
-         */
-        completedJob ??=
-            await db.AiAgentJobs
-                .AsNoTracking()
-                .Where(job =>
-                    job.UserId == userId &&
-                    job.ProjectId == ProjectId &&
-                    job.AgentName == AgentName &&
-                    job.Status ==
-                        AiAgentJobStatus.Completed &&
-                    job.ResultJson != null &&
-                    job.ResultJson != "")
-                .OrderByDescending(job =>
-                    job.CompletedAtUtc)
-                .ThenByDescending(job =>
-                    job.UpdatedAtUtc)
-                .ThenByDescending(job =>
-                    job.Id)
-                .FirstOrDefaultAsync(
-                    cancellationToken);
-
-        if (completedJob != null)
+        // §3(a): the AI ranking (ComparisonResponse/Comparison) was never
+        // domain-persisted -- reconstruct it from the just-completed job's
+        // ResultJson exactly once, right after the finalize-driven reload
+        // that supplies completedJobId, using the exact same in-memory
+        // merge (ApplyAiComparison) the old synchronous POST handler used.
+        if (completedJobId is { } jobId)
         {
-            var restored =
-                await RestoreComparisonFromJobAsync(
-                    completedJob,
-                    cancellationToken);
-
-            if (restored)
+            var job = await jobService.GetAuthorizedJobAsync(jobId, userId, cancellationToken);
+            if (job is not null && job.AgentName == AgentName && job.Status == AiAgentJobStatus.Completed)
             {
-                await LoadReviewForJobAsync(
-                    completedJob.JobId,
-                    userId,
-                    cancellationToken);
+                ComparisonResponse = IdeaComparisonJobFinalizer.ReconstructComparisonResponse(job.ResultJson);
+                if (ComparisonResponse is not null)
+                {
+                    ApplyAiComparison(ComparisonResponse.Comparison);
+                }
             }
         }
+        /*
+ * When the page is opened normally after navigation or refresh,
+ * completedJobId is no longer present in the URL. Load the latest
+ * completed comparison job for this user and project instead.
+ */
+
 
         return Page();
     }
@@ -505,150 +441,15 @@ public class IdeaComparisonModel(
             .ToList();
     }
 
-    /// <summary>
-    /// Rebuilds the persisted comparison view from the durable
-    /// AiAgentJob.ResultJson value.
-    ///
-    /// The response is never trusted to authorize idea access. Any idea
-    /// referenced by the stored result is loaded only when it still belongs
-    /// to this project, and ApplyAiComparison performs the final authorized
-    /// ID check before merging AI reasoning into the scorecards.
-    /// </summary>
-    private async Task<bool> RestoreComparisonFromJobAsync(
-        AiAgentJob job,
-        CancellationToken cancellationToken)
+    private async Task LoadLatestReviewAsync()
     {
-        var response =
-            IdeaComparisonJobFinalizer
-                .ReconstructComparisonResponse(
-                    job.ResultJson);
+        var userId = UserId();
 
-        if (response == null)
-        {
-            logger.LogWarning(
-                "Completed Idea Comparison job {JobId} "
-                + "contains an unreadable result for project "
-                + "{ProjectId}, user {UserId}.",
-                job.JobId,
-                ProjectId,
-                UserId());
-
-            return false;
-        }
-
-        /*
-         * The normal page query intentionally displays only the newest
-         * twelve ideas. A valid saved comparison may reference an older
-         * project idea that has since fallen outside that window.
-         *
-         * Load only those missing IDs that still belong to this project.
-         * This keeps an older persisted comparison renderable without
-         * weakening project authorization.
-         */
-        var comparedIdeaIds =
-            response.Comparison.Ideas
-                .Select(item =>
-                    item.IdeaId)
-                .Append(
-                    response.Comparison.BestIdeaId)
-                .Where(ideaId =>
-                    ideaId > 0)
-                .Distinct()
-                .ToList();
-
-        var loadedIdeaIds =
-            Ideas
-                .Select(idea =>
-                    idea.Id)
-                .ToHashSet();
-
-        var missingIdeaIds =
-            comparedIdeaIds
-                .Where(ideaId =>
-                    !loadedIdeaIds.Contains(
-                        ideaId))
-                .ToList();
-
-        if (missingIdeaIds.Count > 0)
-        {
-            var selectedIdeaId =
-                CurrentProject?.ProjectIdeaId;
-
-            var missingIdeas =
-                await db.ProjectIdeas
-                    .AsNoTracking()
-                    .Where(idea =>
-                        missingIdeaIds.Contains(
-                            idea.Id) &&
-                        (
-                            idea.GeneratedForProjectId ==
-                                ProjectId ||
-                            (
-                                selectedIdeaId.HasValue &&
-                                idea.Id ==
-                                    selectedIdeaId.Value
-                            )
-                        ))
-                    .OrderByDescending(idea =>
-                        idea.CreatedAt)
-                    .ThenByDescending(idea =>
-                        idea.Id)
-                    .ToListAsync(
-                        cancellationToken);
-
-            if (missingIdeas.Count > 0)
-            {
-                Ideas =
-                    Ideas
-                        .Concat(
-                            missingIdeas)
-                        .GroupBy(idea =>
-                            idea.Id)
-                        .Select(group =>
-                            group.First())
-                        .ToList();
-
-                Scorecards =
-                    BuildScorecards(
-                        Ideas);
-
-                LatestBatchIdeaIds =
-                    ComputeLatestBatchIdeaIds(
-                        Ideas);
-            }
-        }
-
-        ComparisonResponse =
-            response;
-
-        ApplyAiComparison(
-            response.Comparison);
-
-        return true;
-    }
-
-    /// <summary>
-    /// Loads the quality passport belonging to the exact comparison job
-    /// currently displayed. This avoids showing a review from a different
-    /// project or a different comparison run.
-    /// </summary>
-    private async Task LoadReviewForJobAsync(
-        Guid jobId,
-        int userId,
-        CancellationToken cancellationToken)
-    {
-        LatestReview =
-            await db.AiOutputReviews
-                .AsNoTracking()
-                .Where(review =>
-                    review.JobId == jobId &&
-                    review.UserId == userId &&
-                    review.AgentName ==
-                        AgentName)
-                .OrderByDescending(review =>
-                    review.CreatedAt)
-                .FirstOrDefaultAsync(
-                    cancellationToken);
+        LatestReview = await db.AiOutputReviews
+            .AsNoTracking()
+            .Where(r => r.UserId == userId && r.AgentName == "IdeaComparisonAgent")
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync();
     }
 
     public async Task<IActionResult> OnPostSelectAsync(
@@ -668,10 +469,10 @@ public class IdeaComparisonModel(
                 "/Student/MyProjects");
         }
 
-        if (ProjectAccess?.CanEdit != true)
+        if (ProjectAccess?.IsOwner != true)
         {
             TempData["Error"] =
-                "Restore this project before selecting "
+                "Only the project owner can select "
                 + "the official project idea.";
 
             return RedirectToPage(
@@ -831,7 +632,7 @@ public class IdeaComparisonModel(
             var actorName =
                 User.FindFirst(
                     ClaimTypes.Name)?.Value
-                ?? "A project member";
+                ?? "The project owner";
 
             var replacingIdea =
                 previousIdeaId.HasValue;
@@ -861,35 +662,6 @@ public class IdeaComparisonModel(
 
             await transaction.CommitAsync(
                 cancellationToken);
-
-            /*
-             * The project change is already committed. Notification
-             * delivery is intentionally best-effort and must never
-             * roll back a successfully selected official idea.
-             */
-            try
-            {
-                await NotifyProjectObserversAsync(
-                    actorUserId: userId,
-                    actorName: actorName,
-                    projectTitle: project.Title,
-                    ideaId: idea.Id,
-                    ideaTitle: idea.Title,
-                    replacingIdea: replacingIdea,
-                    supervisorId: project.SupervisorId,
-                    supervisorAssignmentStatus:
-                        project.SupervisorAssignmentStatus,
-                    cancellationToken: cancellationToken);
-            }
-            catch (Exception notificationException)
-            {
-                logger.LogWarning(
-                    notificationException,
-                    "The official idea was saved for project "
-                    + "{ProjectId}, but its notifications "
-                    + "could not be prepared.",
-                    ProjectId);
-            }
 
             await activeProjectService
                 .ActivateProjectAsync(
@@ -924,159 +696,6 @@ public class IdeaComparisonModel(
                 {
                     projectId = ProjectId
                 });
-        }
-    }
-
-    private async Task NotifyProjectObserversAsync(
-        int actorUserId,
-        string actorName,
-        string? projectTitle,
-        int ideaId,
-        string? ideaTitle,
-        bool replacingIdea,
-        int? supervisorId,
-        string? supervisorAssignmentStatus,
-        CancellationToken cancellationToken)
-    {
-        var safeActorName =
-            string.IsNullOrWhiteSpace(actorName)
-                ? "A project member"
-                : actorName.Trim();
-
-        var safeProjectTitle =
-            string.IsNullOrWhiteSpace(projectTitle)
-                ? "Untitled Project"
-                : projectTitle.Trim();
-
-        var safeIdeaTitle =
-            string.IsNullOrWhiteSpace(ideaTitle)
-                ? "the selected idea"
-                : ideaTitle.Trim();
-
-        var title = replacingIdea
-            ? "Official project idea changed"
-            : "Official project idea selected";
-
-        var message = replacingIdea
-            ? $"{safeActorName} changed the official idea "
-              + $"for \"{safeProjectTitle}\" to "
-              + $"\"{safeIdeaTitle}\"."
-            : $"{safeActorName} selected "
-              + $"\"{safeIdeaTitle}\" as the official "
-              + $"idea for \"{safeProjectTitle}\".";
-
-        var type = replacingIdea
-            ? "project_idea_replaced"
-            : "project_idea_selected";
-
-        /*
-         * Notify every other active student member. Archived
-         * memberships remain active and read-only, so they still
-         * receive project updates.
-         */
-        var memberRecipientIds =
-            await db.ProjectMembers
-                .AsNoTracking()
-                .Where(member =>
-                    member.ProjectId == ProjectId &&
-                    member.Status == "active" &&
-                    member.UserId != actorUserId)
-                .Select(member => member.UserId)
-                .Distinct()
-                .ToListAsync(cancellationToken);
-
-        foreach (var recipientId in memberRecipientIds)
-        {
-            await TryNotifyAsync(
-                recipientUserId: recipientId,
-                title: title,
-                message: message,
-                type: type,
-                url:
-                    $"/Student/IdeaComparison"
-                    + $"?projectId={ProjectId}",
-                projectId: ProjectId,
-                actorUserId: actorUserId,
-                cancellationToken: cancellationToken);
-        }
-
-        var supervisorIsActive =
-            supervisorId.HasValue &&
-            supervisorId.Value > 0 &&
-            supervisorId.Value != actorUserId &&
-            string.Equals(
-                supervisorAssignmentStatus,
-                "active",
-                StringComparison.OrdinalIgnoreCase);
-
-        if (!supervisorIsActive ||
-            memberRecipientIds.Contains(
-                supervisorId!.Value))
-        {
-            return;
-        }
-
-        await TryNotifyAsync(
-            recipientUserId: supervisorId.Value,
-            title: title,
-            message: message,
-            type: type,
-            url:
-                $"/Supervisor/IdeaReview"
-                + $"?projectId={ProjectId}"
-                + $"&ideaId={ideaId}",
-            projectId: ProjectId,
-            actorUserId: actorUserId,
-            cancellationToken: cancellationToken);
-    }
-
-    private async Task TryNotifyAsync(
-        int recipientUserId,
-        string title,
-        string message,
-        string type,
-        string url,
-        int projectId,
-        int actorUserId,
-        CancellationToken cancellationToken)
-    {
-        if (recipientUserId <= 0 ||
-            recipientUserId == actorUserId)
-        {
-            return;
-        }
-
-        try
-        {
-            await notificationService.NotifyUserAsync(
-                recipientUserId:
-                    recipientUserId,
-                title:
-                    title,
-                message:
-                    message,
-                type:
-                    type,
-                url:
-                    url,
-                sendEmail:
-                    false,
-                projectId:
-                    projectId,
-                actorUserId:
-                    actorUserId,
-                cancellationToken:
-                    cancellationToken);
-        }
-        catch (Exception exception)
-        {
-            logger.LogWarning(
-                exception,
-                "The official idea changed for project "
-                + "{ProjectId}, but notification delivery "
-                + "failed for user {RecipientUserId}.",
-                projectId,
-                recipientUserId);
         }
     }
 
