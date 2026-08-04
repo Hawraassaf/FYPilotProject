@@ -128,9 +128,19 @@ class ReviewPipeline:
         *,
         writer_trusted_parts: dict[str, str],
         writer_untrusted_parts: dict[str, str],
+        deadline: float | None = None,
     ) -> PipelineResult:
+        """
+        ``deadline`` is an absolute time.monotonic() timestamp. When the
+        caller supplies one (SE Documentation's router does, so the SAME
+        deadline also governs its Writer-stage section generation -- see
+        SEDocumentationOrchestratorAgent.generate()), it is used verbatim:
+        this method never recomputes or resets it. When omitted (every other
+        agent, unchanged), a fresh deadline is computed here from
+        self.config.max_total_seconds exactly as before.
+        """
         started_at = time.monotonic()
-        deadline = started_at + self.config.max_total_seconds
+        deadline = deadline if deadline is not None else started_at + self.config.max_total_seconds
         review_run_id = str(uuid.uuid4())
         history: list[AttemptRecord] = []
         state = _PipelineState()
@@ -195,7 +205,7 @@ class ReviewPipeline:
         semantic_rewrites = 0
 
         while True:
-            if self._time_budget_exceeded(started_at):
+            if self._time_budget_exceeded(deadline):
                 return self._timeout_result(state, review_run_id, history, attempt)
 
             if not version_schema_ok:
@@ -721,8 +731,13 @@ class ReviewPipeline:
     # Small utilities
     # ------------------------------------------------------------------
 
-    def _time_budget_exceeded(self, started_at: float) -> bool:
-        return (time.monotonic() - started_at) > self.config.max_total_seconds
+    def _time_budget_exceeded(self, deadline: float) -> bool:
+        # Compares against the single deadline value threaded through this
+        # entire run (see run()'s docstring) -- deliberately NOT
+        # self.config.max_total_seconds re-added to a fresh "now", which
+        # would silently re-derive a different (later) cutoff than the one
+        # actually passed to the Writer/Reviewer/Rewrite stages.
+        return time.monotonic() > deadline
 
     @staticmethod
     def _input_findings_of(guarded: GuardedResult | None) -> list:

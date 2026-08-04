@@ -72,7 +72,7 @@ def test_semantic_rewrite_prompt_contains_full_project_context() -> None:
     assert "Document the selected target application only." in prompt
     assert "Generate software engineering documentation for this project." in prompt
     assert "The target is a medical triage prototype." in prompt
-    assert 'AFFECTED FIELDS TO REVISE (DATA):\n["summary"]' in prompt
+    assert 'AFFECTED FIELDS REPORTED BY THE REVIEWER (DATA):\n["summary"]' in prompt
 
 
 def test_semantic_rewrite_prompt_prevents_host_platform_contamination() -> None:

@@ -31,6 +31,21 @@ def _candidate() -> dict:
     }
 
 
+def _candidate_with_protected_fields() -> dict:
+    """Mirrors the real SEDocumentationDto's protected field names -- unlike
+    _candidate() above (an older simplified fixture that predates those exact
+    names), this one exercises the actual "never LLM-rewritable" guard."""
+    return {
+        **_candidate(),
+        "documentationQualityScore": 82,
+        "qualityAssessment": {"overallScore": 82, "criterionScores": {"completeness": 90}},
+        "mermaidERD": "erDiagram\n  SYMPTOM ||--o{ SUBMISSION : has",
+        "mermaidClassDiagram": "classDiagram\n  class SymptomSubmission",
+        "activityDiagram": "flowchart TD\n  A --> B",
+        "sequenceDiagram": "sequenceDiagram\n  Patient->>System: submit",
+    }
+
+
 def test_nested_database_issue_expands_to_only_known_dependent_sections() -> None:
     candidate = _candidate()
 
@@ -92,6 +107,74 @@ def test_unknown_or_global_issue_allows_complete_object_rewrite() -> None:
 
     assert scope == set(original.keys())
     assert merged == rewritten
+
+
+def test_quality_score_and_mermaid_fields_are_never_in_scope_for_a_matched_issue() -> None:
+    candidate = _candidate_with_protected_fields()
+
+    scope = revision_scope_for(
+        "SEDocumentationAgent",
+        candidate,
+        [_issue("databaseEntities[0].fields")],
+    )
+
+    assert "documentationQualityScore" not in scope
+    assert "qualityAssessment" not in scope
+    assert "mermaidERD" not in scope
+    assert "mermaidClassDiagram" not in scope
+    assert "activityDiagram" not in scope
+    assert "sequenceDiagram" not in scope
+
+
+def test_quality_score_and_mermaid_fields_are_never_in_scope_for_an_unmatched_global_issue() -> None:
+    """The exact gap this guards against: an unknown/global affectedField
+    used to fall back to "every top-level field", which -- for a real
+    candidate -- included documentationQualityScore/qualityAssessment/the
+    four mermaid fields, letting a Rewrite LLM call silently overwrite
+    platform-computed values it was never supposed to touch."""
+    candidate = _candidate_with_protected_fields()
+
+    scope = revision_scope_for(
+        "SEDocumentationAgent",
+        candidate,
+        [_issue("entire document")],
+    )
+
+    assert "documentationQualityScore" not in scope
+    assert "qualityAssessment" not in scope
+    assert "mermaidERD" not in scope
+    assert "mermaidClassDiagram" not in scope
+    assert "activityDiagram" not in scope
+    assert "sequenceDiagram" not in scope
+    # Every other top-level field is still eligible, unchanged from before.
+    assert "projectTitle" in scope
+    assert "functionalRequirements" in scope
+
+
+def test_apply_scoped_rewrite_preserves_protected_fields_even_when_the_llm_hallucinates_new_ones() -> None:
+    original = _candidate_with_protected_fields()
+    rewritten = {
+        **original,
+        "projectTitle": "Corrected complete project",
+        # A rewrite LLM call returns a complete object per its schema -- if
+        # it hallucinates a different score/diagram, that value must never
+        # reach the merged candidate.
+        "documentationQualityScore": 100,
+        "qualityAssessment": {"overallScore": 100, "criterionScores": {}},
+        "mermaidERD": "erDiagram\n  HALLUCINATED ||--o{ ENTITY : has",
+    }
+
+    merged, scope = apply_scoped_rewrite(
+        "SEDocumentationAgent",
+        original,
+        rewritten,
+        [_issue("entire document")],
+    )
+
+    assert merged["documentationQualityScore"] == original["documentationQualityScore"]
+    assert merged["qualityAssessment"] == original["qualityAssessment"]
+    assert merged["mermaidERD"] == original["mermaidERD"]
+    assert merged["projectTitle"] == rewritten["projectTitle"]
 
 
 def test_non_se_agent_keeps_existing_complete_rewrite_behavior() -> None:

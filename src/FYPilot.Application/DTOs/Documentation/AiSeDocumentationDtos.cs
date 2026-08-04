@@ -62,7 +62,14 @@ public record AiSeDocumentationServiceResponse(
     string? OllamaRawPreview,
     DateTime? GeneratedAt,
     string Message,
-    AiQualityPassportDto? Review = null
+    AiQualityPassportDto? Review = null,
+    // Python's own normalized core-fallback signal (see
+    // app/routers/se_documentation.py's _has_core_section_fallback). This is
+    // NOT trusted blindly -- DocumentationGeneratorService independently
+    // recomputes the same decision from Documentation.SectionProvenance
+    // (defense in depth); this field is used only as an additional OR
+    // condition and for audit logging.
+    bool CoreSectionFallback = false
 );
 
 public record AiSeDocumentationDto(

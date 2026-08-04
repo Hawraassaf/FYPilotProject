@@ -73,9 +73,28 @@ _SECTION_ALIASES: dict[str, tuple[str, ...]] = {
     "assumptions": ("assumptions",),
     "expectedoutcomes": ("expectedOutcomes",),
     "expected outcomes": ("expectedOutcomes",),
-    "qualityassessment": ("qualityAssessment", "documentationQualityAssessment"),
-    "quality assessment": ("qualityAssessment", "documentationQualityAssessment"),
 }
+
+
+# These fields are always computed deterministically by the platform (see
+# _SEDOC_EXTRA_RUBRIC's "Do NOT suggest changing documentationQualityScore or
+# qualityAssessment" / "Do NOT critique mermaidERD, mermaidClassDiagram,
+# activityDiagram, or sequenceDiagram" rules) and must never be directly
+# LLM-rewritable -- not via an alias match, not via a literal top-level-key
+# match (mermaidERD etc. are real candidate keys the "direct JSON path" branch
+# below would otherwise match), and not via the "unmatched/global issue falls
+# back to every top-level field" behavior. Removed here unconditionally,
+# after every other rule has run, so no future alias/path-matching change can
+# accidentally reopen this.
+_NEVER_LLM_REWRITABLE_FIELDS: frozenset[str] = frozenset({
+    "documentationQualityScore",
+    "qualityAssessment",
+    "documentationQualityAssessment",
+    "mermaidERD",
+    "mermaidClassDiagram",
+    "activityDiagram",
+    "sequenceDiagram",
+})
 
 
 # Conservative dependency closure. A changed requirement/entity/screen can
@@ -215,12 +234,16 @@ def revision_scope_for(
     if agent_name != "SEDocumentationAgent":
         return all_fields
 
+    # Never rewritable regardless of which branch below is taken -- see
+    # _NEVER_LLM_REWRITABLE_FIELDS's docstring.
+    never_rewritable = _NEVER_LLM_REWRITABLE_FIELDS & all_fields
+
     direct_fields: set[str] = set()
     for issue in blocking_issues:
         direct_fields.update(_roots_from_affected_field(candidate, issue.affectedField))
 
     if not direct_fields:
-        return all_fields
+        return all_fields - never_rewritable
 
     scoped = set(direct_fields)
     for field in list(direct_fields):
@@ -229,7 +252,7 @@ def revision_scope_for(
     # Assumption transparency can be affected by edits in any generated
     # section, but only include it when the DTO actually has the field.
     scoped.update(_match_existing_keys(candidate, ["assumptions", "consistencyWarnings"]))
-    return scoped
+    return scoped - never_rewritable
 
 
 def apply_scoped_rewrite(

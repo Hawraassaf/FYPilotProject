@@ -27,6 +27,16 @@ namespace FYPilot.Infrastructure.Services;
 public class AiServiceClient : IAiServiceClient
 {
     private readonly HttpClient _http;
+    // Dedicated client for SE Documentation only -- its Python-side pipeline
+    // deadline is 960s (see app/review/registry.py's SEDocumentationAgent
+    // entry), so this must stay longer than that so .NET never abandons a
+    // request while Python is still legitimately working on it. Kept
+    // completely separate from _http (600s) so no other agent's timeout
+    // changes: HttpClient.Timeout is a hard per-client ceiling that a
+    // per-request CancellationToken can only shorten, never extend, so
+    // sharing _http here would still cap this call at 600s regardless of
+    // this class's own math.
+    private readonly HttpClient _seDocumentationHttp;
     private readonly string _baseUrl;
     private readonly ILogger<AiServiceClient> _logger;
 
@@ -72,9 +82,25 @@ public class AiServiceClient : IAiServiceClient
             Environment.GetEnvironmentVariable("AI_SERVICE_API_KEY")
             ?? configuration["AiService:InternalApiKey"];
 
+        // 1020s: intentionally longer than SEDocumentationAgent's 960s Python
+        // pipeline deadline (see app/review/registry.py) -- see the field
+        // comment above for why this can't just be a longer CancellationToken
+        // on the shared _http client.
+        _seDocumentationHttp = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(1020)
+        };
+
+        _seDocumentationHttp.DefaultRequestHeaders.Accept.Add(
+            new MediaTypeWithQualityHeaderValue("application/json"));
+
         if (!string.IsNullOrWhiteSpace(internalApiKey))
         {
             _http.DefaultRequestHeaders.TryAddWithoutValidation(
+                "X-Internal-Api-Key",
+                internalApiKey);
+
+            _seDocumentationHttp.DefaultRequestHeaders.TryAddWithoutValidation(
                 "X-Internal-Api-Key",
                 internalApiKey);
         }
@@ -93,15 +119,17 @@ public class AiServiceClient : IAiServiceClient
         object request,
         JsonSerializerOptions? requestOptions = null,
         CancellationToken cancellationToken = default) =>
-        PostAsync<T>(path, request, requestOptions, cancellationToken, extraHeaders: null);
+        PostAsync<T>(path, request, requestOptions, cancellationToken, extraHeaders: null, client: _http);
 
     private async Task<T?> PostAsync<T>(
         string path,
         object request,
         JsonSerializerOptions? requestOptions,
         CancellationToken cancellationToken,
-        IReadOnlyDictionary<string, string>? extraHeaders)
+        IReadOnlyDictionary<string, string>? extraHeaders,
+        HttpClient? client = null)
     {
+        client ??= _http;
         var fullUrl =
             $"{_baseUrl.TrimEnd('/')}/{path.TrimStart('/')}";
 
@@ -127,7 +155,7 @@ public class AiServiceClient : IAiServiceClient
                 }
             }
 
-            using var response = await _http.SendAsync(
+            using var response = await client.SendAsync(
                 httpRequest,
                 cancellationToken);
 
@@ -327,7 +355,10 @@ public class AiServiceClient : IAiServiceClient
         PostAsync<AiSeDocumentationServiceResponse>(
             "/generate-se-documentation",
             request,
-            CamelCaseJsonOpts);
+            CamelCaseJsonOpts,
+            cancellationToken: default,
+            extraHeaders: null,
+            client: _seDocumentationHttp);
 
     // ── Market Insight — Regional Demand Footprint ─────────────────────────────
 

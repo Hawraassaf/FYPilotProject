@@ -206,24 +206,35 @@ class ReviewDecisionEngineTests(unittest.TestCase):
         decision = self.engine.decide(findings, schema_ok=True)
         self.assertFalse(decision.requiresRewrite)
 
-    def test_requires_correction_true_triggers_rewrite_even_if_low_severity(self):
-        issue = self._issue(severity="low", requiresCorrection=True)
+    def test_requires_correction_true_alone_does_not_trigger_rewrite_at_low_severity(self):
+        # Material-only policy: requiresCorrection is necessary but not
+        # sufficient on its own -- severity must also be high/critical AND
+        # the category must be on the material allowlist.
+        issue = self._issue(severity="low", requiresCorrection=True, category="unsupported_claim")
         findings = ReviewerFindings(issues=[issue], qualityScore=90, overallAssessment="ok")
         decision = self.engine.decide(findings, schema_ok=True)
-        self.assertTrue(decision.requiresRewrite)
+        self.assertFalse(decision.requiresRewrite)
 
-    def test_high_severity_triggers_rewrite_even_if_requires_correction_false(self):
-        issue = self._issue(severity="high", requiresCorrection=False, category="quality")
+    def test_high_severity_alone_does_not_trigger_rewrite_without_requires_correction(self):
+        issue = self._issue(severity="high", requiresCorrection=False, category="unsupported_claim")
+        findings = ReviewerFindings(issues=[issue], qualityScore=60, overallAssessment="issues found")
+        decision = self.engine.decide(findings, schema_ok=True)
+        self.assertFalse(decision.requiresRewrite)
+
+    def test_unsupported_claim_category_alone_does_not_block_without_severity_and_correction(self):
+        issue = self._issue(severity="low", requiresCorrection=False, category="unsupported_claim")
+        findings = ReviewerFindings(issues=[issue], qualityScore=70, overallAssessment="claim found")
+        decision = self.engine.decide(findings, schema_ok=True)
+        self.assertFalse(decision.requiresRewrite)
+
+    def test_material_category_with_high_severity_and_requires_correction_blocks(self):
+        # The positive case: only when ALL three conditions hold together
+        # does an issue actually block.
+        issue = self._issue(severity="high", requiresCorrection=True, category="unsupported_claim")
         findings = ReviewerFindings(issues=[issue], qualityScore=60, overallAssessment="issues found")
         decision = self.engine.decide(findings, schema_ok=True)
         self.assertTrue(decision.requiresRewrite)
         self.assertEqual(decision.highestBlockingSeverity, "high")
-
-    def test_unsupported_claim_category_always_blocks(self):
-        issue = self._issue(severity="low", requiresCorrection=False, category="unsupported_claim")
-        findings = ReviewerFindings(issues=[issue], qualityScore=70, overallAssessment="claim found")
-        decision = self.engine.decide(findings, schema_ok=True)
-        self.assertTrue(decision.requiresRewrite)
 
     def test_purely_stylistic_low_severity_issue_does_not_trigger(self):
         issue = self._issue(severity="low", requiresCorrection=False, category="quality")
@@ -494,12 +505,12 @@ class _FakeRewriteAgent:
         self._rewrite_results = list(rewrite_results or [])
         self._fix_results = list(fix_results or [])
 
-    def rewrite(self, candidate, blocking_issues, *, agent_name):
+    def rewrite(self, candidate, blocking_issues, context, *, agent_name):
         if not self._rewrite_results:
             return _fail("rewrite exhausted")
         return self._rewrite_results.pop(0)
 
-    def fix_structure(self, candidate, *, agent_name):
+    def fix_structure(self, candidate, *, agent_name, validation_errors=None, expected_schema=None):
         if not self._fix_results:
             return _fail("fix_structure exhausted")
         return self._fix_results.pop(0)
@@ -548,9 +559,13 @@ class ReviewPipelineTests(unittest.TestCase):
         self.assertEqual(result.attempts, 1)
 
     def test_non_critical_issue_then_clean_rewrite_approves(self):
+        # "non_critical" refers to severity != "critical" (has_critical only
+        # checks for that exact value) -- "high" + a material category is
+        # required for the issue to actually trigger a rewrite under the
+        # material-only blocking policy.
         pipeline = _make_pipeline(
             reviewer_results=[
-                _reviewer_ok(issues=[_issue(severity="medium", requires_correction=True)]),
+                _reviewer_ok(issues=[_issue(severity="high", requires_correction=True, category="contradiction")]),
                 _reviewer_ok(issues=[]),
             ],
             rewrite_results=[_ok({"reply": "Improved answer."})],
@@ -567,8 +582,8 @@ class ReviewPipelineTests(unittest.TestCase):
     def test_non_critical_issue_survives_rewrite_limit_is_unresolved(self):
         pipeline = _make_pipeline(
             reviewer_results=[
-                _reviewer_ok(issues=[_issue(severity="medium", requires_correction=True)]),
-                _reviewer_ok(issues=[_issue(severity="medium", requires_correction=True)]),
+                _reviewer_ok(issues=[_issue(severity="high", requires_correction=True, category="contradiction")]),
+                _reviewer_ok(issues=[_issue(severity="high", requires_correction=True, category="contradiction")]),
             ],
             rewrite_results=[_ok({"reply": "Still imperfect."})],
             config=_config(max_rewrites=1),
@@ -584,8 +599,12 @@ class ReviewPipelineTests(unittest.TestCase):
     def test_critical_issue_survives_rewrite_limit_falls_back_to_earlier_safe_version(self):
         pipeline = _make_pipeline(
             reviewer_results=[
-                _reviewer_ok(issues=[_issue(severity="medium", requires_correction=True)]),  # v1: non-critical
-                _reviewer_ok(issues=[_issue(severity="critical", requires_correction=True)]),  # v2: critical
+                # v1: non-critical but still material -- triggers the one
+                # allowed rewrite. v2: critical AND material -- exhausts the
+                # rewrite budget while still blocking, so the pipeline must
+                # fall back to v1.
+                _reviewer_ok(issues=[_issue(severity="high", requires_correction=True, category="contradiction")]),
+                _reviewer_ok(issues=[_issue(severity="critical", requires_correction=True, category="contradiction")]),
             ],
             rewrite_results=[_ok({"reply": "v2 with a critical problem."})],
             config=_config(max_rewrites=1),
@@ -603,7 +622,7 @@ class ReviewPipelineTests(unittest.TestCase):
     def test_critical_issue_with_no_earlier_safe_version_is_unusable(self):
         pipeline = _make_pipeline(
             reviewer_results=[
-                _reviewer_ok(issues=[_issue(severity="critical", requires_correction=True)]),
+                _reviewer_ok(issues=[_issue(severity="critical", requires_correction=True, category="contradiction")]),
             ],
             rewrite_results=[],
             config=_config(max_rewrites=0),
@@ -617,13 +636,45 @@ class ReviewPipelineTests(unittest.TestCase):
         self.assertFalse(result.usable)
         self.assertEqual(result.output, {})
 
-    def test_reviewer_failure_after_noncritical_finding_returns_last_reviewed_version(self):
-        # Corrected scenario: v1 is reviewed and requires a non-critical
-        # correction -> RewriteAgent produces v2 -> the Reviewer call on v2
-        # fails -> pipeline must return v1, not the unreviewed v2.
+    def test_noncritical_nonmaterial_finding_is_preserved_as_warning_without_rewrite(self):
+        # Type 1 -- a medium/quality finding (requiresCorrection=True) is
+        # neither high/critical severity nor a material category, so under
+        # the material-only blocking policy it never triggers a rewrite: the
+        # Reviewer's second mocked result is deliberately never consumed,
+        # proving the pipeline stops after the FIRST review here.
+        second_review_never_consumed = _fail("must not be called")
         pipeline = _make_pipeline(
             reviewer_results=[
-                _reviewer_ok(issues=[_issue(severity="medium", requires_correction=True)]),
+                _reviewer_ok(issues=[_issue(severity="medium", requires_correction=True, category="quality")]),
+                second_review_never_consumed,
+            ],
+            rewrite_results=[],
+            config=_config(max_rewrites=1),
+        )
+        result = pipeline.run(
+            lambda: _ok({"reply": "v1 reviewed"}),
+            _context(),
+            writer_trusted_parts={}, writer_untrusted_parts={},
+        )
+        self.assertEqual(result.status, "approved_with_minor_warnings")
+        self.assertTrue(result.usable)
+        self.assertEqual(result.attempts, 1)
+        self.assertEqual(result.output["reply"], "v1 reviewed")
+        # The finding is still visible on the audit trail, not silently
+        # dropped, even though it never blocked anything.
+        self.assertEqual(len(result.decision.warningIssues), 1)
+        self.assertEqual(result.reviewerFindings.issues[0].category, "quality")
+
+    def test_reviewer_failure_after_a_material_rewrite_returns_last_reviewed_version(self):
+        # Type 4 -- v1 has a genuinely material, non-critical finding (high
+        # severity + contradiction), which DOES trigger the one allowed
+        # rewrite -> RewriteAgent produces v2 -> the Reviewer call on v2
+        # fails -> pipeline must return v1 (the last successfully reviewed,
+        # non-critical version), not the unreviewed v2, and the later
+        # failure must stay visible via status/warning.
+        pipeline = _make_pipeline(
+            reviewer_results=[
+                _reviewer_ok(issues=[_issue(severity="high", requires_correction=True, category="contradiction")]),
                 _fail("reviewer down"),
             ],
             rewrite_results=[_ok({"reply": "v2 unreviewed"})],
@@ -636,7 +687,9 @@ class ReviewPipelineTests(unittest.TestCase):
         )
         self.assertEqual(result.status, "review_unavailable")
         self.assertTrue(result.usable)
+        self.assertTrue(result.reviewUnavailable)
         self.assertEqual(result.output["reply"], "v1 reviewed")
+        self.assertIn("could not be verified", result.warning)
 
     def test_reviewer_failure_on_first_attempt_default_config_is_unusable(self):
         pipeline = _make_pipeline(reviewer_results=[_fail("reviewer down")], config=_config(allow_unreviewed_output=False))
@@ -979,7 +1032,7 @@ class RoadmapPipelineTests(unittest.TestCase):
         self.assertEqual(result.attempts, 1)
 
     def test_technology_alignment_issue_triggers_one_rewrite(self):
-        issue = _issue(severity="medium", requires_correction=True, category="project_alignment", field_name="weeks[1].tasks")
+        issue = _issue(severity="high", requires_correction=True, category="project_alignment", field_name="weeks[1].tasks")
         pipeline = self._pipeline(
             reviewer_results=[_reviewer_ok(issues=[issue]), _reviewer_ok(issues=[])],
             rewrite_results=[_ok(_roadmap_candidate())],
@@ -1297,9 +1350,18 @@ class SEDocumentationRegistryTests(unittest.TestCase):
 
     def test_registry_entry_matches_spec(self):
         config = get_agent_config("SEDocumentationAgent")
-        self.assertEqual(config.max_rewrites, 1)
+        # Legacy max_rewrites is intentionally unset -- this agent's own
+        # registry entry configures the two independent budgets explicitly.
+        self.assertIsNone(config.max_rewrites)
+        self.assertEqual(config.max_structural_repairs, 1)
+        self.assertEqual(config.max_semantic_rewrites, 1)
+        self.assertEqual(config.review_mode, "blocking")
         self.assertEqual(config.url_mode, "no_urls_allowed")
-        self.assertFalse(config.allow_unreviewed_output)
+        # True (unlike most agents): the Writer stage here makes up to 7
+        # sequential LLM calls before the Reviewer even runs once, so a
+        # Reviewer timeout on this much larger budget is a real risk this
+        # agent explicitly accepts -- see the registry entry's own comment.
+        self.assertTrue(config.allow_unreviewed_output)
         self.assertIn("projectTitle", config.mandatory_fields)
         self.assertIn("projectOverview", config.mandatory_fields)
         self.assertIn("problemStatement", config.mandatory_fields)
@@ -1367,7 +1429,7 @@ class SEDocumentationPipelineTests(unittest.TestCase):
 
     def test_technology_alignment_issue_triggers_one_rewrite(self):
         issue = _issue(
-            severity="medium", requires_correction=True,
+            severity="high", requires_correction=True,
             category="project_alignment", field_name="systemModules[0]",
         )
         pipeline = self._pipeline(
@@ -1596,7 +1658,7 @@ class IdeaGenerationPipelineTests(unittest.TestCase):
 
     def test_technology_alignment_issue_triggers_one_rewrite(self):
         issue = _issue(
-            severity="medium", requires_correction=True,
+            severity="high", requires_correction=True,
             category="project_alignment", field_name="ideas[0].requiredTechnologies",
         )
         pipeline = self._pipeline(
@@ -1676,8 +1738,16 @@ class ProjectDNARegistryTests(unittest.TestCase):
 
     def test_registry_entry_matches_spec(self):
         config = get_agent_config("ProjectDNAAgent")
-        self.assertEqual(config.max_rewrites, 1)
+        # Legacy max_rewrites is intentionally unset -- this agent's own
+        # registry entry configures the two independent budgets explicitly.
+        self.assertIsNone(config.max_rewrites)
+        self.assertEqual(config.max_structural_repairs, 1)
+        self.assertEqual(config.max_semantic_rewrites, 1)
+        self.assertEqual(config.review_mode, "blocking")
         self.assertEqual(config.url_mode, "no_urls_allowed")
+        # False: DNA's single-call, 90s budget doesn't share SE
+        # Documentation's long-timeout risk profile, and its rubric checks
+        # for skill-rating contradictions that must never be shown unreviewed.
         self.assertFalse(config.allow_unreviewed_output)
         self.assertIn("projectDNAType", config.mandatory_fields)
         self.assertIn("summary", config.mandatory_fields)

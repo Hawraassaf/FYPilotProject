@@ -1,5 +1,7 @@
 using System.Reflection;
 using System.Security.Claims;
+using System.Text.Json;
+using FYPilot.Application.DTOs;
 using FYPilot.Application.DTOs.Documentation;
 using FYPilot.Application.Interfaces;
 using FYPilot.Domain.Entities;
@@ -68,16 +70,143 @@ public class DocumentationGeneratorModel : PageModel
 
     public (string CssClass, string Label) DescribeReview(AiOutputReview review) => review.Status switch
     {
-        "approved" => ("bg-success", "Reviewed"),
-        "approved_with_minor_warnings" => ("bg-success", "Reviewed · minor notes"),
+        "approved" => ("bg-success", "Approved"),
+        "approved_with_minor_warnings" => ("bg-success", "Approved with warnings"),
         "unresolved" => ("bg-warning text-dark", "Unresolved · shown as-is"),
         "rejected" => ("bg-danger", "Rejected · showing safe documentation"),
         "firewall_blocked" => ("bg-danger", "Blocked by content firewall"),
-        "review_unavailable" => ("bg-secondary", "Not semantically reviewed"),
+        "review_unavailable" => ("bg-secondary", "Structural validation completed; semantic review unavailable"),
         "provider_unavailable" => ("bg-secondary", "AI service unavailable"),
         "schema_invalid" => ("bg-secondary", "Formatting issue"),
         _ => ("bg-secondary", review.Status),
     };
+
+    /// <summary>
+    /// Which stage actually produced the persisted document's text. Derived
+    /// from AiOutputReview.WasRewritten rather than a dedicated column --
+    /// "structural_repair" as a distinct origin is not currently persisted,
+    /// so a repaired-then-kept candidate reads as "Writer" here. See the
+    /// remaining-risks note in the SE Documentation reliability writeup.
+    /// </summary>
+    public string DescribeOutputOrigin(AiOutputReview review) =>
+        review.WasRewritten ? "Writer, revised after review" : "Writer";
+
+    /// <summary>
+    /// Generation provenance for the currently displayed document -- either
+    /// freshly produced by this request (right after a successful Generate)
+    /// or loaded from the last persisted AiOutputReview for this idea. One
+    /// shape so the Razor page has a single rendering path either way.
+    /// </summary>
+    public sealed record ProvenanceView(
+        string? Source,
+        string? Provider,
+        string? Model,
+        string ReviewLevelLabel,
+        string ReviewLevelCssClass,
+        string OutputOriginLabel,
+        string? Warning,
+        DateTime? GeneratedAt);
+
+    public ProvenanceView? Provenance { get; private set; }
+
+    /// <summary>
+    /// True when the most recent generation attempt failed but a previously
+    /// persisted valid document for this idea is still being shown.
+    /// </summary>
+    public bool PreviousDocumentPreserved { get; private set; }
+
+    /// <summary>
+    /// Compact, presentation-safe quality/review summary for the currently
+    /// displayed document -- built entirely from AiOutputReview's own
+    /// persisted fields (never re-derived transiently), so it reads exactly
+    /// the same right after a fresh Generate and after a plain page reload.
+    /// A document with any core-section fallback content is never persisted
+    /// at all (see the Python/​.NET strict acceptance gate), so this panel
+    /// does not need to separately track that case -- only "semantic review
+    /// completed" and "unresolved findings" can legitimately qualify a
+    /// numeric score here.
+    /// </summary>
+    public sealed record QualityPanelView(
+        int? OverallScore,
+        string ReviewStatusLabel,
+        string ReviewStatusCssClass,
+        string OutputReviewLevelLabel,
+        bool SemanticReviewCompleted,
+        string ProvenanceSummary,
+        int ImportantWarningCount,
+        DateTime? LastGeneratedAt);
+
+    public QualityPanelView? QualityPanel { get; private set; }
+
+    private static string DescribeOutputReviewLevel(string status) => status switch
+    {
+        "approved" => "Fully reviewed, no findings",
+        "approved_with_minor_warnings" => "Fully reviewed, minor warnings only",
+        "unresolved" => "Reviewed -- unresolved findings remain",
+        "rejected" => "Reviewed -- rejected candidate replaced with a safe version",
+        "review_unavailable" => "Structural checks only -- semantic review did not complete",
+        "provider_unavailable" => "Not reviewed -- no AI provider responded",
+        "schema_invalid" => "Not reviewed -- output never became structurally valid",
+        _ => status,
+    };
+
+    private static int CountImportantWarnings(string issuesJson)
+    {
+        try
+        {
+            var issues = JsonSerializer.Deserialize<List<ReviewerIssueDto>>(
+                issuesJson,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            return issues?.Count(issue =>
+                issue.Severity.Equals("high", StringComparison.OrdinalIgnoreCase) ||
+                issue.Severity.Equals("critical", StringComparison.OrdinalIgnoreCase)) ?? 0;
+        }
+        catch (JsonException)
+        {
+            return 0;
+        }
+    }
+
+    private static QualityPanelView BuildQualityPanel(AiOutputReview review, DescribeReviewDelegate describeReview)
+    {
+        var (cssClass, label) = describeReview(review);
+        var providerParts = new[] { review.GeneratorProvider, review.GeneratorModel }
+            .Where(part => !string.IsNullOrWhiteSpace(part));
+
+        return new QualityPanelView(
+            OverallScore: review.QualityScore,
+            ReviewStatusLabel: label,
+            ReviewStatusCssClass: cssClass,
+            OutputReviewLevelLabel: DescribeOutputReviewLevel(review.Status),
+            SemanticReviewCompleted: review.Status != "review_unavailable" && review.Status != "provider_unavailable",
+            ProvenanceSummary: providerParts.Any() ? string.Join(" · ", providerParts) : "Unknown",
+            ImportantWarningCount: CountImportantWarnings(review.IssuesJson),
+            LastGeneratedAt: review.CreatedAt);
+    }
+
+    private delegate (string CssClass, string Label) DescribeReviewDelegate(AiOutputReview review);
+
+    private void SetProvenanceFromLatestReview(DateTime? generatedAt)
+    {
+        if (LatestReview == null)
+        {
+            Provenance = null;
+            return;
+        }
+
+        var (cssClass, label) = DescribeReview(LatestReview);
+
+        Provenance = new ProvenanceView(
+            Source: LatestReview.GeneratorProvider,
+            Provider: LatestReview.GeneratorProvider,
+            Model: LatestReview.GeneratorModel,
+            ReviewLevelLabel: label,
+            ReviewLevelCssClass: cssClass,
+            OutputOriginLabel: DescribeOutputOrigin(LatestReview),
+            Warning: null,
+            GeneratedAt: generatedAt);
+    }
 
     private async Task<IActionResult?> LoadProjectContextAsync(
         int userId,
@@ -163,6 +292,10 @@ public class DocumentationGeneratorModel : PageModel
                 r.AgentName == "SEDocumentationAgent")
             .OrderByDescending(r => r.CreatedAt)
             .FirstOrDefaultAsync();
+
+        QualityPanel = LatestReview != null
+            ? BuildQualityPanel(LatestReview, DescribeReview)
+            : null;
     }
 
     public async Task<IActionResult> OnGetAsync(
@@ -305,17 +438,51 @@ public class DocumentationGeneratorModel : PageModel
             return Page();
         }
 
-        try
+        var result = await _documentationGeneratorService.GenerateAsync(Request);
+
+        if (result.Succeeded && result.Documentation is not null)
         {
-            GeneratedDocumentation = await _documentationGeneratorService.GenerateAsync(Request);
+            GeneratedDocumentation = result.Documentation;
             await LoadLatestReviewAsync(SelectedProjectIdeaId, userId);
 
-            Message = "AI software engineering documentation generated successfully for the selected project idea.";
+            var (cssClass, label) = LatestReview != null
+                ? DescribeReview(LatestReview)
+                : ("bg-success", result.ReviewStatus ?? "Reviewed");
+
+            Provenance = new ProvenanceView(
+                Source: result.Source,
+                Provider: result.Provider,
+                Model: result.Model,
+                ReviewLevelLabel: label,
+                ReviewLevelCssClass: cssClass,
+                OutputOriginLabel: LatestReview != null ? DescribeOutputOrigin(LatestReview) : "Writer",
+                Warning: string.IsNullOrWhiteSpace(result.Warning) ? null : result.Warning,
+                GeneratedAt: result.Documentation.CreatedAt);
+
+            Message = string.IsNullOrWhiteSpace(result.Warning)
+                ? "AI software engineering documentation generated successfully for the selected project idea."
+                : $"AI software engineering documentation generated successfully, with a review note: {result.Warning}";
         }
-        catch (Exception ex)
+        else
         {
-            var detail = ex.InnerException?.Message ?? ex.Message;
-            ErrorMessage = $"Software documentation generation failed. Backend error: {ex.Message} | Detail: {detail}";
+            // No fallback is ever created or persisted -- GenerateAsync only
+            // returns Succeeded=false when nothing usable was produced.
+            // Whatever was already saved for this idea is untouched; reload
+            // it so the page keeps showing real, previously-generated content
+            // instead of going blank.
+            ErrorMessage = result.UserMessage
+                ?? "AI documentation could not be generated. No fallback documentation was saved.";
+
+            GeneratedDocumentation = await _documentationGeneratorService.GetLatestForIdeaAsync(
+                SelectedProjectIdeaId,
+                cancellationToken);
+            await LoadLatestReviewAsync(SelectedProjectIdeaId, userId);
+
+            if (GeneratedDocumentation != null)
+            {
+                PreviousDocumentPreserved = true;
+                SetProvenanceFromLatestReview(GeneratedDocumentation.CreatedAt);
+            }
         }
 
         BuildProjectIdeaOptions();
@@ -411,11 +578,20 @@ public class DocumentationGeneratorModel : PageModel
 
         await LoadLatestReviewAsync(ideaId, userId);
 
+        // Show the last real, persisted document for this idea on a plain
+        // page load too -- not only right after a fresh Generate click.
+        // GetLatestForIdeaAsync only ever returns genuine AI output (see
+        // DocumentationGeneratorService.GenerateAsync), never fallback.
         GeneratedDocumentation =
         await _documentationGeneratorService
         .GetLatestForIdeaAsync(
             ideaId,
             cancellationToken);
+
+        if (GeneratedDocumentation != null)
+        {
+            SetProvenanceFromLatestReview(GeneratedDocumentation.CreatedAt);
+        }
     }
 
     private async Task<ProjectIdea?> GetUserProjectIdeaAsync(

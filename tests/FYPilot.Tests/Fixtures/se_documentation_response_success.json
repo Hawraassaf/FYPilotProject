@@ -1,0 +1,96 @@
+{
+  "documentation": {
+    "projectTitle": "Arabic Medical Symptom Triage Assistant",
+    "projectOverview": "Overview.",
+    "problemStatement": "Problem.",
+    "objectives": ["Objective 1"],
+    "stakeholders": ["Patients"],
+    "scope": { "inScope": ["Triage"], "outOfScope": ["Billing"], "futureWork": [] },
+    "functionalRequirements": [
+      { "id": "FR-01", "title": "Title", "description": "Description", "priority": "High", "source": "Selected idea" }
+    ],
+    "nonFunctionalRequirements": [
+      { "id": "NFR-01", "title": "Title", "description": "Description", "priority": "High", "source": "Software quality" }
+    ],
+    "useCases": [
+      { "id": "UC-01", "title": "Title", "actor": "Patient", "goal": "Goal", "preconditions": [], "mainFlow": ["1. Do it"], "alternativeFlow": [], "postconditions": [], "relatedRequirements": [] }
+    ],
+    "edgeCases": [
+      { "id": "EC-01", "scenario": "Scenario", "expectedHandling": "Handling", "relatedRequirement": "FR-01" }
+    ],
+    "systemModules": [
+      { "id": "MOD-01", "name": "Module", "responsibility": "Responsibility", "inputs": [], "outputs": [], "relatedRequirements": [] }
+    ],
+    "databaseEntities": [
+      { "entityId": "ENT-01", "name": "Entity", "purpose": "Purpose", "importantFields": [], "relationships": [] }
+    ],
+    "entityRelationships": [],
+    "mermaidERD": "erDiagram",
+    "mermaidClassDiagram": "classDiagram",
+    "activityDiagram": "flowchart TD",
+    "sequenceDiagram": "sequenceDiagram",
+    "architecture": {
+      "style": "Layered",
+      "frontend": "Razor Pages",
+      "backend": "FastAPI",
+      "database": "PostgreSQL",
+      "aiService": "FastAPI",
+      "externalServices": [],
+      "explanation": "Explanation."
+    },
+    "apiIntegrationPoints": [],
+    "uiScreens": [],
+    "securityAndPrivacy": [],
+    "testingPlan": [
+      { "id": "TC-01", "title": "Test", "type": "Unit", "steps": ["1. Step"], "expectedResult": "Result", "relatedRequirements": ["FR-01"] }
+    ],
+    "traceabilityMatrix": [],
+    "risksAndLimitations": [],
+    "expectedOutcomes": [],
+    "assumptions": [],
+    "aiTechnicalReport": null,
+    "aiTechnicalReportApplicable": false,
+    "documentationQualityScore": 82,
+    "qualityAssessment": null,
+    "consistencyWarnings": [],
+    "sectionProvenance": {
+      "requirements": "provider",
+      "useCases": "provider",
+      "modulesArchitecture": "provider",
+      "database": "provider",
+      "uiApi": "provider",
+      "testingSecurity": "provider",
+      "aiReport": "provider"
+    }
+  },
+  "agent": "SEDocumentationAgent",
+  "llmUsed": true,
+  "source": "deepinfra",
+  "provider": "deepinfra",
+  "modelUsed": "anthropic/claude-opus-4-8",
+  "ollamaError": null,
+  "ollamaRawPreview": null,
+  "review": {
+    "status": "approved",
+    "usable": true,
+    "displayable": true,
+    "outputOrigin": "writer",
+    "outputReviewLevel": "approved",
+    "reviewUnavailable": false,
+    "warning": "",
+    "qualityScore": 88,
+    "strengths": ["Covers every confirmed feature."],
+    "issues": [],
+    "decisionReason": "No blocking issues found.",
+    "attempts": 1,
+    "reviewerVersion": "review-pipeline-v2",
+    "reviewRunId": "11111111-1111-1111-1111-111111111111",
+    "reviewerProvider": "deepinfra",
+    "reviewerModel": "anthropic/claude-opus-4-8",
+    "firewallInputFlags": [],
+    "firewallOutputFlags": [],
+    "attemptHistory": []
+  },
+  "generatedAt": "2026-08-03T01:00:00Z",
+  "message": "SE documentation generated successfully"
+}

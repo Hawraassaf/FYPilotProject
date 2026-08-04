@@ -266,6 +266,26 @@ class QualityAssessmentDto(BaseModel):
     coverageStatistics: Dict[str, int] = Field(default_factory=dict)
 
 
+# The single source of truth for how each criterion contributes to
+# overallScore -- shared between _compute_quality_assessment (the base,
+# pre-review calculation) and quality_outcome_policy.apply_review_outcome_to_quality
+# (the post-review adjustment, which must recompute overallScore from
+# criterionScores using these SAME weights whenever it caps one). Defining
+# this in exactly one place is what keeps "every numeric cap or penalty in
+# one policy location" true across both functions.
+QUALITY_CRITERION_WEIGHTS: Dict[str, float] = {
+    "completeness": 0.15,
+    "requirementTestability": 0.10,
+    "crossSectionConsistency": 0.15,
+    "traceabilityCoverage": 0.15,
+    "projectSpecificity": 0.10,
+    "diagramValidity": 0.07,
+    "assumptionTransparency": 0.06,
+    "databaseQuality": 0.07,
+    "contentDepth": 0.15,
+}
+
+
 class AiTechnicalReportDto(BaseModel):
     problemDefinition: str = ""
     taskType: str = ""
@@ -285,6 +305,8 @@ class AiTechnicalReportDto(BaseModel):
 
 
 class TestCaseDto(BaseModel):
+    __test__ = False  # not a pytest test class -- silences a collection warning
+
     id: str
     title: str
     type: str
@@ -682,7 +704,16 @@ _SCREEN_TEMPLATES: Dict[str, Dict[str, Any]] = {
 
 class SEDocumentationOrchestratorAgent:
     def __init__(self):
-        self.provider_chain = ProviderChain(tier="high")
+        # Switched from "high" (anthropic/claude-opus-4-8, expensive) to a
+        # dedicated "se_documentation" tier -- same model as "standard"
+        # (meta-llama/Llama-3.3-70B-Instruct-Turbo, kept for cost), but with
+        # its own DeepInfra per-call timeout (180s, see
+        # _DEEPINFRA_TIER_TIMING["se_documentation"] in llm_provider.py) sized
+        # for this agent's actual ~6500-token sections instead of "standard"'s
+        # shared 60s default. Project Roadmap and the Idea Generator still use
+        # "high"; market needs/project DNA/market footprint still use
+        # "standard" unchanged.
+        self.provider_chain = ProviderChain(tier="se_documentation")
         self.last_llm_used = False
         self.last_error: Optional[str] = None
         self.last_raw_llm_response: Optional[str] = None
@@ -696,7 +727,21 @@ class SEDocumentationOrchestratorAgent:
         # the whole document to a 4-FR generic fallback" bug).
         self.section_provenance: Dict[str, str] = {}
 
-    def generate(self, request: SEDocumentationRequest) -> SEDocumentationDto:
+    def generate(
+        self,
+        request: SEDocumentationRequest,
+        *,
+        deadline: Optional[float] = None,
+    ) -> SEDocumentationDto:
+        """
+        ``deadline`` is an absolute time.monotonic() timestamp, not a
+        duration. When supplied (the router computes ONE deadline and passes
+        it here AND into ReviewPipeline.run(), see routers/se_documentation.py)
+        it governs every section call directly -- it is never recomputed or
+        reset partway through. When omitted (e.g. a direct/test caller),
+        falls back to a fresh _SECTIONS_TIME_BUDGET_SECONDS-wide budget
+        starting now, matching the previous behavior exactly.
+        """
         self.last_llm_used = False
         self.last_error = None
         self.last_raw_llm_response = None
@@ -707,7 +752,7 @@ class SEDocumentationOrchestratorAgent:
         facts = build_project_facts(request)
 
         try:
-            llm_sections = self._generate_llm_sections(request, facts)
+            llm_sections = self._generate_llm_sections(request, facts, deadline=deadline)
         except Exception as e:
             self.last_error = str(e)
             llm_sections = {}
@@ -736,12 +781,23 @@ class SEDocumentationOrchestratorAgent:
         facts = build_project_facts(request)
         return self._assemble_documentation(request, facts, {}, used_fallback=True)
 
-    def generate_candidate(self, request: SEDocumentationRequest) -> LLMResult | None:
+    def generate_candidate(
+        self,
+        request: SEDocumentationRequest,
+        *,
+        deadline: Optional[float] = None,
+    ) -> LLMResult | None:
         """
         Writer-stage entry point for ReviewPipeline. Reuses generate() end to
         end (sequential LLM section calls -> deterministic assembly) rather
         than duplicating it, then wraps the result as an LLMResult so it can
         flow through guarded_call like any other LLM stage.
+
+        ``deadline`` should be the SAME absolute deadline passed to
+        ReviewPipeline.run() for this request -- see generate()'s docstring.
+        This is what makes section generation, structural repair, semantic
+        review, and rewrite all share one absolute deadline instead of each
+        stage getting its own fresh budget.
 
         Returns None -- signaling "no real provider output" to guarded_call,
         which the pipeline maps to status="provider_unavailable" -- when
@@ -750,7 +806,7 @@ class SEDocumentationOrchestratorAgent:
         case there is no real candidate to review; the router should use
         build_safe_fallback() directly instead.
         """
-        result = self.generate(request)
+        result = self.generate(request, deadline=deadline)
 
         if not self.last_llm_used:
             return None
@@ -777,22 +833,38 @@ class SEDocumentationOrchestratorAgent:
     # skipped and fall back to detailed deterministic content immediately
     # instead of queuing another slow, likely-doomed network call.
     #
-    # Raised from 180s to 600s after a real measurement showed 180s was too
-    # tight for the "high" tier's claude-opus-4-8: a single section alone
-    # completes in ~7s in the normal case, but if DeepInfra fails validation
-    # for a section and the chain cascades to a rate-limited Groq before
-    # falling to Ollama, that one section's retries can burn most of a
-    # 180s budget, incorrectly starving every later section. This is a
-    # background "Generate Documentation" click, not a live chat -- a few
-    # extra minutes for a genuinely provider-generated document beats a fast
-    # but mostly-generic-fallback one.
-    _SECTIONS_TIME_BUDGET_SECONDS = 600.0
+    # Raised 180s -> 600s -> 960s as real measurements came in: 600s assumed
+    # the "high" tier's claude-opus-4-8 (~7s/section normally, occasional
+    # Groq/Ollama cascades on failure); after moving to the cheaper
+    # "se_documentation" tier (Llama-3.3-70B via DeepInfra), a single
+    # ~6500-token section was measured live at 121s, and up to 7 sections run
+    # sequentially -- 960s gives that real per-section cost enough combined
+    # headroom, matching registry.py's SEDocumentationAgent.max_total_seconds
+    # (the two are coordinated by the router computing ONE shared deadline;
+    # see routers/se_documentation.py). This is a background "Generate
+    # Documentation" click, not a live chat -- several extra minutes for a
+    # genuinely provider-generated document beats a fast but
+    # mostly-generic-fallback one.
+    _SECTIONS_TIME_BUDGET_SECONDS = 960.0
 
-    def _generate_llm_sections(self, request: SEDocumentationRequest, facts: ProjectFacts) -> Dict[str, Any]:
+    def _generate_llm_sections(
+        self,
+        request: SEDocumentationRequest,
+        facts: ProjectFacts,
+        *,
+        deadline: Optional[float] = None,
+    ) -> Dict[str, Any]:
         context = facts_context_text(facts)
 
         sections: Dict[str, Any] = {}
-        self._sections_deadline = time.monotonic() + self._SECTIONS_TIME_BUDGET_SECONDS
+        # Use the externally-supplied absolute deadline verbatim when given
+        # (the normal production path -- see generate()'s docstring) rather
+        # than starting a fresh clock here, which would let section
+        # generation silently run past the same deadline ReviewPipeline is
+        # enforcing for structural repair/review/rewrite.
+        self._sections_deadline = (
+            deadline if deadline is not None else time.monotonic() + self._SECTIONS_TIME_BUDGET_SECONDS
+        )
 
         requirements_prompt = f"""
 Return ONLY valid JSON.
@@ -2815,19 +2887,21 @@ Rules:
         if entities_with_empty_fields:
             database_quality = min(database_quality, 40)
 
-        weights = {
-            "completeness": (completeness, 0.15),
-            "requirementTestability": (testability, 0.10),
-            "crossSectionConsistency": (consistency, 0.15),
-            "traceabilityCoverage": (traceability_coverage, 0.15),
-            "projectSpecificity": (specificity, 0.10),
-            "diagramValidity": (100 if diagrams_ok else 60, 0.07),
-            "assumptionTransparency": (assumption_transparency, 0.06),
-            "databaseQuality": (database_quality, 0.07),
-            "contentDepth": (content_depth, 0.15),
+        criterion_values = {
+            "completeness": completeness,
+            "requirementTestability": testability,
+            "crossSectionConsistency": consistency,
+            "traceabilityCoverage": traceability_coverage,
+            "projectSpecificity": specificity,
+            "diagramValidity": 100 if diagrams_ok else 60,
+            "assumptionTransparency": assumption_transparency,
+            "databaseQuality": database_quality,
+            "contentDepth": content_depth,
         }
 
-        overall = round(sum(score * weight for score, weight in weights.values()))
+        overall = round(sum(
+            criterion_values[name] * weight for name, weight in QUALITY_CRITERION_WEIGHTS.items()
+        ))
         if used_fallback:
             overall = min(overall, 70)
         if untraced_count >= 4:
@@ -2847,7 +2921,7 @@ Rules:
 
         return QualityAssessmentDto(
             overallScore=max(0, min(100, overall)),
-            criterionScores={name: int(score) for name, (score, _weight) in weights.items()},
+            criterionScores={name: int(score) for name, score in criterion_values.items()},
             failedChecks=failed_checks,
             warnings=warnings,
             missingInformation=missing_information,

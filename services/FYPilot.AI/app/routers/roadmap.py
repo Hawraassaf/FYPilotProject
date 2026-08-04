@@ -71,7 +71,12 @@ def _build_review_context(request: ProjectRoadmapRequest) -> ReviewContext:
 def generate_project_roadmap(request: ProjectRoadmapRequest):
     agent = ProjectRoadmapAgent()
     context = _build_review_context(request)
-    pipeline = ReviewPipeline("ProjectRoadmapAgent", tier="high")
+    # Reviewer/Rewrite tier must match the Writer's own tier (see
+    # ReviewPipeline's constructor docstring) -- was "high" while the Writer
+    # (ProjectRoadmapAgent) already used "roadmap"; fixed to "roadmap" so
+    # Reviewer/Rewrite get both the cheap model and Roadmap's own tuned
+    # DeepInfra/Ollama timeouts instead of the generic defaults.
+    pipeline = ReviewPipeline("ProjectRoadmapAgent", tier="roadmap")
 
     result = pipeline.run(
         lambda: agent.generate_candidate(request),
