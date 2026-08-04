@@ -11,6 +11,10 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<SupervisorProfile> SupervisorProfiles { get; set; }
     public DbSet<CompanyProfile> CompanyProfiles { get; set; }
 
+    public DbSet<EmailVerificationCode>
+        EmailVerificationCodes =>
+            Set<EmailVerificationCode>();
+
     // Legacy project management
     public DbSet<Project> Projects { get; set; }
 
@@ -108,6 +112,13 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
                 .HasColumnName("is_main_admin")
                 .HasDefaultValue(false);
 
+            e.Property(user => user.IsEmailVerified)
+                .HasColumnName("is_email_verified")
+                .HasDefaultValue(false);
+
+            e.Property(user => user.EmailVerifiedAtUtc)
+                .HasColumnName("email_verified_at_utc");
+
             /*
              * PostgreSQL partial unique index:
              * at most one row can be marked as the main administrator.
@@ -125,6 +136,51 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
                 .OnDelete(DeleteBehavior.SetNull);
 
             e.HasIndex(user => user.LastActiveProjectId);
+        });
+
+        modelBuilder.Entity<EmailVerificationCode>(entity =>
+        {
+            entity.ToTable("email_verification_codes");
+
+            entity.HasKey(code => code.Id);
+
+            entity.Property(code => code.Id)
+                .HasColumnName("id");
+
+            entity.Property(code => code.UserId)
+                .HasColumnName("user_id");
+
+            entity.Property(code => code.CodeHash)
+                .HasColumnName("code_hash")
+                .HasMaxLength(100)
+                .IsRequired();
+
+            entity.Property(code => code.CreatedAtUtc)
+                .HasColumnName("created_at_utc");
+
+            entity.Property(code => code.SentAtUtc)
+                .HasColumnName("sent_at_utc");
+
+            entity.Property(code => code.ExpiresAtUtc)
+                .HasColumnName("expires_at_utc");
+
+            entity.Property(code => code.UsedAtUtc)
+                .HasColumnName("used_at_utc");
+
+            entity.Property(code => code.FailedAttemptCount)
+                .HasColumnName("failed_attempt_count")
+                .HasDefaultValue(0);
+
+            entity.HasOne(code => code.User)
+                .WithMany(user =>
+                    user.EmailVerificationCodes)
+                .HasForeignKey(code => code.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(code => code.UserId);
+
+            entity.HasIndex(code =>
+                code.ExpiresAtUtc);
         });
 
         modelBuilder.Entity<SupervisorProfile>(entity =>

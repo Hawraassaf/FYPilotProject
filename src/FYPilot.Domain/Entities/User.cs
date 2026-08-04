@@ -36,6 +36,20 @@ public class User
     [Column("is_main_admin")]
     public bool IsMainAdmin { get; set; }
 
+    /// <summary>
+    /// Indicates whether the user proved ownership of the
+    /// registered email address.
+    /// </summary>
+    [Column("is_email_verified")]
+    public bool IsEmailVerified { get; set; }
+
+    /// <summary>
+    /// UTC time when the user's email was successfully verified.
+    /// Null while the account is still unverified.
+    /// </summary>
+    [Column("email_verified_at_utc")]
+    public DateTime? EmailVerifiedAtUtc { get; set; }
+
     public StudentProfile? StudentProfile { get; set; }
 
     public SupervisorProfile? SupervisorProfile { get; set; }
@@ -63,6 +77,14 @@ public class User
     /// Shared project actions performed by this user.
     /// </summary>
     public ICollection<ProjectActivity> ProjectActivities { get; set; } = [];
+
+    /// <summary>
+    /// Temporary email-verification codes issued to this user.
+    /// Only hashes are stored.
+    /// </summary>
+    public ICollection<EmailVerificationCode>
+        EmailVerificationCodes
+    { get; set; } = [];
 
     public bool MustChangePassword { get; set; }
 
