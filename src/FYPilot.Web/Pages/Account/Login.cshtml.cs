@@ -87,6 +87,28 @@ public class LoginModel(
             return Page();
         }
 
+        /*
+         * Defense in depth:
+         * an unverified account must not keep using an authentication
+         * cookie that may have been created before email verification
+         * was introduced or by an earlier registration flow.
+         */
+        if (!currentUser.IsEmailVerified)
+        {
+            await HttpContext.SignOutAsync(
+                CookieAuthenticationDefaults.AuthenticationScheme);
+
+            TempData["Info"] =
+                "Verify your email address before signing in.";
+
+            return RedirectToPage(
+                "/Account/VerifyEmail",
+                new
+                {
+                    userId = currentUser.Id
+                });
+        }
+
         if (currentUser.MustChangePassword)
         {
             return RedirectToPage(
@@ -131,6 +153,23 @@ public class LoginModel(
                 "Invalid email or password.";
 
             return Page();
+        }
+
+        /*
+         * The password is correct, but no authentication cookie may be
+         * created until the owner has verified the registered mailbox.
+         */
+        if (!user.IsEmailVerified)
+        {
+            TempData["Info"] =
+                "Verify your email address before signing in.";
+
+            return RedirectToPage(
+                "/Account/VerifyEmail",
+                new
+                {
+                    userId = user.Id
+                });
         }
 
         var claims = new List<Claim>
