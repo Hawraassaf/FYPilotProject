@@ -69,7 +69,16 @@ public record AiSeDocumentationServiceResponse(
     // recomputes the same decision from Documentation.SectionProvenance
     // (defense in depth); this field is used only as an additional OR
     // condition and for audit logging.
-    bool CoreSectionFallback = false
+    bool CoreSectionFallback = false,
+    // True when Python's Writer stage ran out of its own reserved budget
+    // before every core section could even be ATTEMPTED (distinct from a
+    // normal per-section provider failure) -- see
+    // WriterBudgetExceededError in se_documentation_orchestrator.py.
+    // Documentation is null and Review is null in this case; MissingSections/
+    // CompletedSections name which sections never got a real attempt.
+    bool WriterBudgetExceeded = false,
+    List<string>? MissingSections = null,
+    List<string>? CompletedSections = null
 );
 
 public record AiSeDocumentationDto(

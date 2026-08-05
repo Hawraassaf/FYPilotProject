@@ -8,7 +8,7 @@ namespace FYPilot.Tests.Documentation;
 
 /// <summary>
 /// Verifies AiServiceClient gives SE Documentation its own, longer-lived
-/// HttpClient (1020s) without changing the shared client (600s) every other
+/// HttpClient (1260s) without changing the shared client (600s) every other
 /// agent (Roadmap, Idea Generator, Mentor Chat, etc.) still uses -- see the
 /// class-level comment on AiServiceClient's _seDocumentationHttp field for
 /// why HttpClient.Timeout can't just be a per-request CancellationToken
@@ -16,10 +16,13 @@ namespace FYPilot.Tests.Documentation;
 /// </summary>
 public class AiServiceClientTimeoutTests
 {
-    // Python's coordinated total: SEDocumentationAgent's ReviewPipeline
-    // max_total_seconds (app/review/registry.py) == the orchestrator's own
-    // section budget == 960s.
-    private const int PythonSeDocumentationTotalDeadlineSeconds = 960;
+    // Python's coordinated GLOBAL total: SEDocumentationAgent's
+    // ReviewPipeline max_total_seconds (app/review/registry.py) == 1200s.
+    // The Writer itself is bounded tighter (900s = global - the 300s
+    // semantic-review reserve), but .NET's timeout must exceed the FULL
+    // global deadline, since that's what ReviewPipeline itself enforces
+    // end to end.
+    private const int PythonSeDocumentationTotalDeadlineSeconds = 1200;
 
     private static AiServiceClient NewClient()
     {
@@ -44,12 +47,12 @@ public class AiServiceClientTimeoutTests
     }
 
     [Fact]
-    public void SeDocumentationHttpClient_HasA1020SecondTimeout()
+    public void SeDocumentationHttpClient_HasA1260SecondTimeout()
     {
         var client = NewClient();
         var seDocHttp = GetPrivateHttpClient(client, "_seDocumentationHttp");
 
-        Assert.Equal(TimeSpan.FromSeconds(1020), seDocHttp.Timeout);
+        Assert.Equal(TimeSpan.FromSeconds(1260), seDocHttp.Timeout);
     }
 
     [Fact]

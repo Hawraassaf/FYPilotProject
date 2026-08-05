@@ -1310,20 +1310,29 @@ AGENT_REGISTRY: dict[str, AgentReviewConfig] = {
         allow_unreviewed_output=True,
         known_risky_claims=_SEDOC_KNOWN_RISKY_CLAIMS,
         mandatory_fields=["projectTitle", "projectOverview", "problemStatement"],
-        # Raised 180s -> 340s -> 960s. The Writer stage here makes up to 7
-        # sequential LLM calls (requirements, use cases, modules +
-        # architecture, database, UI + API, testing + security, and -- only
-        # for AI-flavored projects -- the AI technical report) before the
-        # Reviewer even runs once, on the "se_documentation" DeepInfra tier
-        # (see llm_provider.py) where a single ~6500-token section was
-        # measured live at 121s. 960s is coordinated with (not independent
-        # of) SEDocumentationOrchestratorAgent._SECTIONS_TIME_BUDGET_SECONDS
-        # and .NET's dedicated 1020s HttpClient timeout for this endpoint
-        # (AiServiceClient.cs) -- the router computes ONE shared deadline
-        # from this value and passes it into both this pipeline and the
-        # Writer callable, so they can never disagree about how much time is
-        # left. Do not change this value without also checking those two.
-        max_total_seconds=960.0,
+        # Raised 180s -> 340s -> 960s -> 1200s. The Writer stage makes up to
+        # 7 LLM calls (requirements, use cases, modules + architecture,
+        # database, UI + API, testing + security, and -- only for
+        # AI-flavored projects -- the AI technical report) on the
+        # "se_documentation" DeepInfra tier (see llm_provider.py) where a
+        # single ~6500-token section was measured live at 121s. A live
+        # end-to-end run with the single-960s-deadline design measured the
+        # Writer stage ALONE (7 sequential sections, 2 needing a full 180s
+        # DeepInfra timeout before falling back to Groq) taking ~967s --
+        # already past the 960s deadline before the Reviewer was ever
+        # called (confirmed live: status="review_unavailable",
+        # reviewer_provider/reviewer_model both null). The fix: this is now
+        # the GLOBAL deadline (1200s) -- the router splits it into a 900s
+        # Writer deadline (global - a 300s reserve for semantic review/
+        # rewrite/final re-review) enforced by an ordered bounded queue (max
+        # 2 concurrent section calls, see se_documentation_orchestrator.py's
+        # _generate_llm_sections), while THIS value (1200s, unmodified)
+        # still reaches ReviewPipeline directly. Coordinated with (not
+        # independent of) SEDocumentationOrchestratorAgent's
+        # _SECTIONS_TIME_BUDGET_SECONDS (900s) and .NET's dedicated 1260s
+        # HttpClient timeout for this endpoint (AiServiceClient.cs). Do not
+        # change this value without also checking those two.
+        max_total_seconds=1200.0,
         extra_rubric=_SEDOC_EXTRA_RUBRIC,
     ),
     "ProjectIdeaAgent": AgentReviewConfig(

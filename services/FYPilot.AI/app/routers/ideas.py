@@ -12,6 +12,7 @@ without changing the existing ideas payload.
 
 import inspect
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
@@ -25,6 +26,7 @@ from app.agents.project_idea_agent import (
     HistoricalProjectContext,
     ProjectIdeaAgent,
     StudentProfile,
+    WRITER_DEADLINE_EXCEEDED,
 )
 from app.review.context import ReviewContext
 from app.review.pipeline import ReviewPipeline
@@ -34,6 +36,61 @@ from app.review.response import build_review_response
 logger = logging.getLogger("fypilot-ideas")
 
 router = APIRouter(tags=["Idea Generation"])
+
+# Reserved for the semantic Reviewer / one structural repair / one semantic
+# rewrite / final re-review -- the Writer must never consume this. Mirrors
+# Roadmap's identical global_deadline/writer_deadline split (see
+# routers/roadmap.py's _SEMANTIC_REVIEW_RESERVE_SECONDS = 25.0 out of a 90s
+# total budget: registry.py's ProjectRoadmapAgent.max_total_seconds), scaled
+# up for Idea Generation's larger 120s total (registry.py's
+# ProjectIdeaAgent.max_total_seconds) and its own registry docstring noting
+# the Writer stage makes TWO sequential provider calls (a live search, then
+# the structured-JSON generation) before the Reviewer runs once -- versus
+# Roadmap's single call. The Reviewer/Rewrite stages here run on the SAME
+# "high" tier as the Writer (see ReviewPipeline("ProjectIdeaAgent",
+# tier="high") below), so the same underlying reasoning as Roadmap's 25s
+# applies unchanged: this leaves the Reviewer at least one meaningful
+# provider attempt (ProviderChain's shared _MIN_SECONDS_PER_PROVIDER_ATTEMPT
+# floor is 4s) plus headroom for the deterministic parsing/firewall/schema-
+# validation steps around it, while still leaving the Writer the large
+# majority of the 120s budget for its own two-call sequence. Previously
+# there was no writer_deadline at all -- the Writer's own provider chain
+# (DeepInfra/Groq up to ~60s each, Ollama up to ~90s, plus a SEPARATE
+# emergency direct-Ollama leg hardcoded to 600s -- see llm_provider.py's
+# "high" tier timing and ProjectIdeaAgent._call_ollama) could alone exceed
+# the ENTIRE 120s pipeline budget, so a slow-but-successful candidate could
+# arrive only for ReviewPipeline.run's own _time_budget_exceeded check to
+# discard it before the Reviewer ever ran.
+_WRITER_TIME_RESERVE_SECONDS = 30.0
+
+
+# Maps a non-usable PipelineResult.status to a typed Idea Generation fallback
+# reason -- narrowly scoped to this task (Writer deadline propagation only,
+# not a full fallback-provenance taxonomy like Roadmap's
+# app/agents/roadmap/fallback_reason.py): every other non-usable status
+# stays unclassified (None) here, exactly as before this field existed.
+def _classify_fallback(result: Any, agent: ProjectIdeaAgent) -> tuple[str | None, str | None]:
+    """
+    Returns (fallbackReasonCode, fallbackReasonMessage) for a non-usable
+    PipelineResult. Only distinguishes ONE specific, previously-invisible
+    failure mode -- the Writer's own reserved deadline running out before a
+    usable idea batch was produced (agent.last_fallback_reason_code ==
+    WRITER_DEADLINE_EXCEEDED) -- from every other failure category, which
+    stays (None, None) exactly as it did before this field existed. This
+    intentionally does NOT reclassify firewall_blocked/schema_invalid/
+    rejected/review_unavailable the way Roadmap's _classify_fallback does;
+    that broader stabilization is out of scope for this task.
+    """
+    if (
+        result.status == "provider_unavailable"
+        and agent.last_fallback_reason_code == WRITER_DEADLINE_EXCEEDED
+    ):
+        return (
+            WRITER_DEADLINE_EXCEEDED,
+            "AI idea generation ran out of time before a valid response was produced.",
+        )
+
+    return None, None
 
 
 def _admin_context_firewall_text(profile: StudentProfile) -> str:
@@ -559,6 +616,8 @@ def _response_to_dict(
     review: Dict[str, Any] | None = None,
     profile: StudentProfile | None = None,
     admin_context_blocked: bool = False,
+    fallback_reason_code: str | None = None,
+    fallback_reason_message: str | None = None,
 ):
     llm_used = bool(getattr(agent, "last_llm_used", False))
 
@@ -665,7 +724,15 @@ def _response_to_dict(
         ),
 
         "generatedAt": datetime.now(timezone.utc).isoformat(),
-        "message": "Generated 4 project ideas successfully"
+        "message": "Generated 4 project ideas successfully",
+
+        # ---- Additive fields (Idea Generation Writer deadline
+        # propagation). Every field above is unchanged; these two are new
+        # and backward-compatible -- a caller that doesn't read them is
+        # completely unaffected. Both are None except for the one narrowly
+        # scoped case this task classifies (see _classify_fallback).
+        "fallbackReasonCode": fallback_reason_code,
+        "fallbackReasonMessage": fallback_reason_message,
     }
 
 
@@ -689,18 +756,34 @@ def generate_ideas(body: Dict[str, Any]):
         agent = ProjectIdeaAgent()
         context = _build_review_context(profile)
         pipeline = ReviewPipeline("ProjectIdeaAgent", tier="high")
+
+        # ONE absolute monotonic deadline, computed here from the registry's
+        # max_total_seconds (120s) -- passed UNCHANGED to ReviewPipeline
+        # (schema/structural-repair/semantic-review/rewrite/final-review all
+        # measure against this exact value via ReviewPipeline.run's own
+        # deadline threading). The Writer callable gets a SEPARATE, earlier
+        # writer_deadline (global - the review reserve above) so it can
+        # never consume the time set aside for review -- see
+        # _WRITER_TIME_RESERVE_SECONDS's comment for why. Matches Roadmap's
+        # identical pattern in routers/roadmap.py.
+        global_deadline = time.monotonic() + pipeline.config.max_total_seconds
+        writer_deadline = global_deadline - _WRITER_TIME_RESERVE_SECONDS
+
         result = pipeline.run(
-            lambda: agent.generate_candidate(profile),
+            lambda: agent.generate_candidate(profile, deadline=writer_deadline),
             context,
             writer_trusted_parts=context.trusted_text_fields(),
             writer_untrusted_parts=context.untrusted_text_fields(),
+            deadline=global_deadline,
         )
 
-        ideas_payload = (
-            result.output.get("ideas", [])
-            if result.usable
-            else agent.build_safe_fallback(profile)["ideas"]
-        )
+        if result.usable:
+            ideas_payload = result.output.get("ideas", [])
+            fallback_reason_code: str | None = None
+            fallback_reason_message: str | None = None
+        else:
+            ideas_payload = agent.build_safe_fallback(profile)["ideas"]
+            fallback_reason_code, fallback_reason_message = _classify_fallback(result, agent)
 
         return _response_to_dict(
             ideas_payload,
@@ -708,6 +791,8 @@ def generate_ideas(body: Dict[str, Any]):
             review=build_review_response(result),
             profile=profile,
             admin_context_blocked=admin_context_blocked,
+            fallback_reason_code=fallback_reason_code,
+            fallback_reason_message=fallback_reason_message,
         )
 
     except Exception as ex:

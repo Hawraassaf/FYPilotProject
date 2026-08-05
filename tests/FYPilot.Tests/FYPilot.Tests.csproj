@@ -30,6 +30,8 @@
     <ProjectReference Include="..\..\src\FYPilot.Infrastructure\FYPilot.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\FYPilot.Application\FYPilot.Application.csproj" />
     <ProjectReference Include="..\..\src\FYPilot.Domain\FYPilot.Domain.csproj" />
+    <ProjectReference Include="..\..\src\FYPilot.Api\FYPilot.Api.csproj" />
+    <ProjectReference Include="..\..\src\FYPilot.Web\FYPilot.Web.csproj" />
   </ItemGroup>
 
 </Project>

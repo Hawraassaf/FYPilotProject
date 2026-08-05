@@ -2,12 +2,20 @@
 Coordinated SE-Documentation-specific timeout correction (see chat for full
 rationale): DeepInfra per-call timeout for SE Documentation is 180s (a real
 ~6500-token section was measured live at 121s -- the previous 60s "standard"
-tier default was cutting every section off before it could finish); the
-Python-side total deadline (orchestrator section budget + ReviewPipeline's
-max_total_seconds) is 960s, coordinated as ONE absolute deadline computed
-once by the router and threaded through unchanged; the .NET HttpClient
-timeout for this one endpoint is 1020s so .NET never abandons a request
-while Python is still legitimately working on it.
+tier default was cutting every section off before it could finish).
+
+Second correction (bounded-concurrency + reserved-review-budget): a live
+end-to-end run with the ORIGINAL single-960s-deadline design measured the
+Writer stage alone (7 sequential sections) taking ~967s -- already past the
+960s deadline before ReviewPipeline's semantic Reviewer was ever called.
+The fix: Python's global deadline is now 1200s, split into a 900s Writer
+deadline (global - 300s reserved for semantic review/rewrite) enforced by
+an ordered bounded queue (max 2 concurrent section calls -- see
+se_documentation_orchestrator.py's _generate_llm_sections), and the
+original, unmodified 1200s global deadline is what actually reaches
+ReviewPipeline. The .NET HttpClient timeout for this one endpoint is 1260s
+so .NET never abandons a request while Python is still legitimately
+working on it.
 
 Every test here is scoped to SE Documentation only -- see the
 "other agents retain their existing values" tests at the bottom, which
@@ -20,21 +28,37 @@ import time
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from pydantic import BaseModel
 
 from app.agents.se_documentation.project_facts import build_project_facts
 from app.agents.se_documentation.se_documentation_orchestrator import (
     SEDocumentationOrchestratorAgent,
     SEDocumentationRequest,
+    WriterBudgetExceededError,
 )
 from app.review.pipeline import ReviewPipeline
 from app.review.registry import AgentReviewConfig, get_agent_config
+from app.agents.se_documentation.se_documentation_orchestrator import SectionCallResult
 from app.services.llm_provider import (
     DeepInfraProvider,
     ProviderChain,
     _deepinfra_model_for_tier,
     _deepinfra_timing_for_tier,
 )
+
+
+def _ok_result(key: str, launch_order: int) -> SectionCallResult:
+    """Minimal successful SectionCallResult for tests that only care about
+    deadline propagation / queue mechanics, not real section content."""
+    return SectionCallResult(
+        section_key=key, launch_order=launch_order, success=True, data={"ok": True},
+        provider="fake", model="fake-model", provenance="provider",
+        error_code=None, error_message=None,
+        start_time=0.0, end_time=0.1, duration=0.1,
+        configured_timeout=180.0, effective_timeout=180.0,
+        remaining_writer_budget_at_start=900.0,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -97,9 +121,9 @@ def test_se_documentation_provider_chain_uses_se_documentation_tier():
 # ---------------------------------------------------------------------------
 
 
-def test_se_documentation_registry_deadline_is_960_seconds():
+def test_se_documentation_registry_deadline_is_1200_seconds():
     config = get_agent_config("SEDocumentationAgent")
-    assert config.max_total_seconds == 960.0
+    assert config.max_total_seconds == 1200.0
 
 
 class _MinimalSchema(BaseModel):
@@ -167,16 +191,16 @@ def test_pipeline_times_out_once_the_shared_deadline_passes(monkeypatch):
 
 def test_sections_deadline_uses_the_externally_supplied_deadline_verbatim():
     """
-    generate()/generate_candidate() must forward the router's ONE deadline
-    into section generation unchanged -- not recompute a fresh
+    generate()/generate_candidate() must forward the router's WRITER
+    deadline into section generation unchanged -- not recompute a fresh
     now + _SECTIONS_TIME_BUDGET_SECONDS window that could silently extend
-    past what ReviewPipeline itself is enforcing.
+    past what the router itself computed.
     """
     agent = SEDocumentationOrchestratorAgent()
     facts = build_project_facts(SEDocumentationRequest())
-    external_deadline = 12345.0
+    external_deadline = time.monotonic() + 12345.0
 
-    with patch.object(agent, "_call_section_safe", return_value=None) as fake_call:
+    with patch.object(agent, "_call_section_concurrent_safe", return_value=_ok_result("x", 1)) as fake_call:
         agent._generate_llm_sections(
             SEDocumentationRequest(),
             facts,
@@ -187,23 +211,25 @@ def test_sections_deadline_uses_the_externally_supplied_deadline_verbatim():
     assert fake_call.called
 
 
-def test_sections_deadline_is_the_same_object_across_every_section_call(monkeypatch):
+def test_sections_deadline_is_the_same_object_across_every_section_call():
     """
-    Each section call checks time.monotonic() against self._sections_deadline
-    (see _call_section_safe) -- this proves that value never changes across
-    the run, i.e. no stage silently gets a fresh budget.
+    Every section call receives the SAME writer_deadline value as an
+    explicit argument (never re-derived from self.* on a worker thread --
+    see _call_section_concurrent_safe's thread-safety contract) -- this
+    proves that value never changes across the run, i.e. no section
+    silently gets a fresh budget.
     """
     agent = SEDocumentationOrchestratorAgent()
     facts = build_project_facts(SEDocumentationRequest())
-    external_deadline = 500.0
+    external_deadline = time.monotonic() + 500.0
 
     seen_deadlines: list[float] = []
 
-    def fake_call_section_safe(key, prompt, max_tokens):
-        seen_deadlines.append(agent._sections_deadline)
-        return None
+    def fake_call_section_concurrent_safe(key, prompt, max_tokens, writer_deadline, launch_order):
+        seen_deadlines.append(writer_deadline)
+        return _ok_result(key, launch_order)
 
-    with patch.object(agent, "_call_section_safe", side_effect=fake_call_section_safe):
+    with patch.object(agent, "_call_section_concurrent_safe", side_effect=fake_call_section_concurrent_safe):
         agent._generate_llm_sections(
             SEDocumentationRequest(),
             facts,
@@ -214,9 +240,10 @@ def test_sections_deadline_is_the_same_object_across_every_section_call(monkeypa
     assert all(d == external_deadline for d in seen_deadlines)
 
 
-def test_no_external_deadline_falls_back_to_960_second_budget(monkeypatch):
-    """Direct/test callers that don't pass a deadline keep working exactly as
-    before -- a fresh 960s window starting now."""
+def test_no_external_deadline_falls_back_to_900_second_budget(monkeypatch):
+    """Direct/test callers that don't pass a deadline keep working -- a
+    fresh 900s window starting now (matches the real production writer
+    budget: global_deadline 1200s - the 300s semantic-review reserve)."""
     monkeypatch.setattr(
         "app.agents.se_documentation.se_documentation_orchestrator.time.monotonic",
         lambda: 1000.0,
@@ -225,10 +252,10 @@ def test_no_external_deadline_falls_back_to_960_second_budget(monkeypatch):
     agent = SEDocumentationOrchestratorAgent()
     facts = build_project_facts(SEDocumentationRequest())
 
-    with patch.object(agent, "_call_section_safe", return_value=None):
+    with patch.object(agent, "_call_section_concurrent_safe", return_value=_ok_result("x", 1)):
         agent._generate_llm_sections(SEDocumentationRequest(), facts, deadline=None)
 
-    assert agent._sections_deadline == 1000.0 + 960.0
+    assert agent._sections_deadline == 1000.0 + 900.0
 
 
 # ---------------------------------------------------------------------------
@@ -236,26 +263,33 @@ def test_no_external_deadline_falls_back_to_960_second_budget(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_all_sections_timing_out_produces_llm_used_false_not_a_disguised_success():
+def test_all_sections_timing_out_produces_writer_budget_exceeded_not_a_disguised_success():
     """
-    When every section is skipped because the deadline was already spent,
-    generate() must honestly report last_llm_used=False so the .NET
-    acceptance gate (IsRealAiOutput) rejects it -- never assembled/labeled
-    as if a real provider produced it. See
-    DocumentationGeneratorServiceTests.LlmUsedFalse_IsRejected_NoPersistence
-    (tests/FYPilot.Tests) for the .NET-side enforcement of this contract.
+    When the Writer deadline has ALREADY passed before a single section
+    could even be attempted, generate() must raise WriterBudgetExceededError
+    -- never silently assemble and return a full-fallback document as if
+    that were a normal, acceptable outcome. This is a deliberate behavior
+    change from the previous "last_llm_used=False, still returns a
+    document" contract: the stabilization task's explicit requirement is
+    "do not use core deterministic fallback for missing core sections; do
+    not assemble an incomplete document" when the Writer budget is
+    exhausted before every section could be attempted. See
+    DocumentationGeneratorServiceTests (tests/FYPilot.Tests) for the
+    .NET-side WriterBudgetExceeded handling this feeds into.
     """
     agent = SEDocumentationOrchestratorAgent()
     already_expired_deadline = time.monotonic() - 1.0  # in the past
 
-    result = agent.generate(
-        SEDocumentationRequest(),
-        deadline=already_expired_deadline,
-    )
+    with pytest.raises(WriterBudgetExceededError) as exc_info:
+        agent.generate(
+            SEDocumentationRequest(),
+            deadline=already_expired_deadline,
+        )
 
-    assert agent.last_llm_used is False
-    assert all(status == "fallback" for status in agent.section_provenance.values())
-    assert result.projectTitle  # deterministic assembly still runs -- just never claims to be LLM output
+    assert set(exc_info.value.missing_sections) == {
+        "requirements", "useCases", "modulesArchitecture", "database", "uiApi", "testingSecurity",
+    }
+    assert exc_info.value.completed_sections == []
 
 
 # ---------------------------------------------------------------------------

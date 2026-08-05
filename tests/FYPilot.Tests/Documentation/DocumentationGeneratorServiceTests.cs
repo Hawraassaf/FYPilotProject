@@ -489,4 +489,66 @@ public class DocumentationGeneratorServiceTests
         Assert.Equal(SeDocumentationErrorCode.CoreSectionFallback, result.ErrorCode);
         Assert.Equal(0, await db.ProjectDocumentations.CountAsync());
     }
+
+    // ── Stabilization task: bounded-concurrency + reserved-review-budget ──
+
+    private static AiSeDocumentationServiceResponse WriterBudgetExceededResponse(
+        List<string> missingSections, List<string> completedSections) =>
+        new(
+            Documentation: null, "SEDocumentationAgent", LlmUsed: false, Source: "writer-budget-exceeded",
+            Provider: null, ModelUsed: null, OllamaError: null, OllamaRawPreview: null,
+            GeneratedAt: DateTime.UtcNow, Message: "ran out of time", Review: null,
+            CoreSectionFallback: false,
+            WriterBudgetExceeded: true,
+            MissingSections: missingSections,
+            CompletedSections: completedSections);
+
+    // 17. WriterBudgetExceeded is rejected with its own distinct error code
+    // (never bucketed under a generic ProviderUnavailable/CoreSectionFallback).
+    [Fact]
+    public async Task WriterBudgetExceeded_IsRejectedWithItsOwnErrorCode_NoPersistence()
+    {
+        var (aiMock, db, service) = NewSut();
+        var response = WriterBudgetExceededResponse(
+            missingSections: ["testingSecurity", "aiReport"],
+            completedSections: ["requirements", "useCases", "modulesArchitecture", "database", "uiApi"]);
+        aiMock.Setup(x => x.GenerateSeDocumentationAsync(It.IsAny<AiSeDocumentationRequest>())).ReturnsAsync(response);
+
+        var result = await service.GenerateAsync(NewRequest());
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(SeDocumentationErrorCode.WriterBudgetExceeded, result.ErrorCode);
+        Assert.Null(result.Documentation);
+        Assert.Contains("testingSecurity", result.UserMessage);
+        Assert.Equal(0, await db.ProjectDocumentations.CountAsync());
+    }
+
+    // 15 (stabilization task Step E list). The previously accepted document
+    // remains unchanged after a WriterBudgetExceeded regeneration attempt.
+    [Fact]
+    public async Task WriterBudgetExceeded_LeavesPreviousValidDocumentUnchanged()
+    {
+        var (aiMock, db, service) = NewSut();
+        var request = NewRequest();
+
+        var successResponse = ResponseWith(DocumentationWithProvenance(AllCoreSectionsReal()));
+        aiMock.Setup(x => x.GenerateSeDocumentationAsync(It.IsAny<AiSeDocumentationRequest>())).ReturnsAsync(successResponse);
+        var firstResult = await service.GenerateAsync(request);
+        Assert.True(firstResult.Succeeded);
+        var existingId = firstResult.Documentation!.Id;
+
+        var budgetExceededResponse = WriterBudgetExceededResponse(
+            missingSections: ["uiApi", "testingSecurity"],
+            completedSections: ["requirements", "useCases", "modulesArchitecture", "database"]);
+        aiMock.Setup(x => x.GenerateSeDocumentationAsync(It.IsAny<AiSeDocumentationRequest>())).ReturnsAsync(budgetExceededResponse);
+        var secondResult = await service.GenerateAsync(request);
+
+        Assert.False(secondResult.Succeeded);
+        Assert.Equal(SeDocumentationErrorCode.WriterBudgetExceeded, secondResult.ErrorCode);
+        Assert.Equal(1, await db.ProjectDocumentations.CountAsync());
+
+        var preserved = await service.GetLatestForIdeaAsync(request.ProjectIdeaId);
+        Assert.NotNull(preserved);
+        Assert.Equal(existingId, preserved!.Id);
+    }
 }

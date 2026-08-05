@@ -254,6 +254,14 @@ public class DocumentationGeneratorService : IDocumentationGeneratorService
             return false;
         }
 
+        if (response.WriterBudgetExceeded)
+        {
+            reason = $"Writer budget exceeded before {string.Join(", ", response.MissingSections ?? [])} " +
+                     $"could be attempted (completed: {string.Join(", ", response.CompletedSections ?? [])}).";
+            errorCode = SeDocumentationErrorCode.WriterBudgetExceeded;
+            return false;
+        }
+
         if (!response.LlmUsed)
         {
             reason = "llmUsed=false -- no real provider produced this output.";
@@ -373,11 +381,17 @@ public class DocumentationGeneratorService : IDocumentationGeneratorService
         SeDocumentationErrorCode errorCode = SeDocumentationErrorCode.None,
         string? detail = null)
     {
-        var reasonSentence = errorCode == SeDocumentationErrorCode.CoreSectionFallback
-            ? "Part of the generated documentation used generic fallback content instead of a real " +
-              "AI-generated section, so the new version was not accepted" +
-              (string.IsNullOrWhiteSpace(detail) ? ". " : $" ({detail}). ")
-            : "The AI service could not generate the documentation. ";
+        var reasonSentence = errorCode switch
+        {
+            SeDocumentationErrorCode.CoreSectionFallback =>
+                "Part of the generated documentation used generic fallback content instead of a real " +
+                "AI-generated section, so the new version was not accepted" +
+                (string.IsNullOrWhiteSpace(detail) ? ". " : $" ({detail}). "),
+            SeDocumentationErrorCode.WriterBudgetExceeded =>
+                "Documentation generation ran out of time before every section could be generated" +
+                (string.IsNullOrWhiteSpace(detail) ? ". " : $" ({detail}). "),
+            _ => "The AI service could not generate the documentation. ",
+        };
 
         return reasonSentence +
             "No fallback document was saved. Your previous documentation remains unchanged. Please try again. " +

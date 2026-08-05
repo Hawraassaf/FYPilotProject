@@ -138,6 +138,59 @@ public class DocumentationGeneratorModel : PageModel
 
     public QualityPanelView? QualityPanel { get; private set; }
 
+    /// <summary>
+    /// The only two AiOutputReview.Status values ReviewPipeline.run() ever
+    /// emits for a genuinely accepted candidate -- see
+    /// services/FYPilot.AI/app/review/pipeline.py line ~292:
+    /// `status = "approved" if not findings.issues else "approved_with_minor_warnings"`.
+    /// This is the ONLY place in the pipeline a status is assigned for the
+    /// accepted path; every other status ("unresolved", "rejected",
+    /// "firewall_blocked", "review_unavailable", "provider_unavailable",
+    /// "schema_invalid") is a non-accepted outcome, even when it also
+    /// happens to report Usable=true (see IsAcceptedForPrint's docstring
+    /// for why "unresolved" is exactly this trap). Deliberately an
+    /// explicit allowlist, not "anything that isn't rejected" -- an
+    /// unrecognized/future status must fail safely toward manual review,
+    /// never toward silently being treated as accepted.
+    /// </summary>
+    private static readonly HashSet<string> AcceptedReviewStatuses = new(StringComparer.Ordinal)
+    {
+        "approved",
+        "approved_with_minor_warnings",
+    };
+
+    /// <summary>
+    /// Pure, testable check for whether the currently displayed document
+    /// may be described as fully accepted AI output in the print/PDF
+    /// status summary (DocumentationGenerator.cshtml's .doc-print-status
+    /// section, added to fix that panel being silently absent from
+    /// exported PDFs). Not a new review classifier -- every input is one
+    /// of the exact same already-persisted/computed fields the on-screen
+    /// Quality Passport already reads.
+    ///
+    /// All four conditions are required:
+    /// - review.Usable: the single most authoritative "was this really
+    ///   accepted" field on its own is NOT sufficient -- "unresolved"
+    ///   reports Usable=true too (it means "shown as-is", not "rejected"),
+    ///   so Usable alone would wrongly accept a document with known
+    ///   unresolved findings.
+    /// - quality.SemanticReviewCompleted: rules out review_unavailable/
+    ///   provider_unavailable (see BuildQualityPanel).
+    /// - review.Status is an EXPLICIT member of AcceptedReviewStatuses:
+    ///   the actual fix for the contradiction above -- "unresolved" has
+    ///   Usable=true AND SemanticReviewCompleted=true (it completed
+    ///   semantic review; the findings just weren't fully resolved), so
+    ///   without this explicit allowlist check the first two conditions
+    ///   alone would still misclassify it as accepted. Only "approved"/
+    ///   "approved_with_minor_warnings" pass this check.
+    /// </summary>
+    public static bool IsAcceptedForPrint(AiOutputReview? review, QualityPanelView? quality) =>
+        review is not null
+        && quality is not null
+        && review.Usable
+        && quality.SemanticReviewCompleted
+        && AcceptedReviewStatuses.Contains(review.Status);
+
     private static string DescribeOutputReviewLevel(string status) => status switch
     {
         "approved" => "Fully reviewed, no findings",

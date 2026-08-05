@@ -493,8 +493,10 @@ def _reviewer_ok(issues=None, quality=90):
 class _FakeReviewerAgent:
     def __init__(self, results):
         self._results = list(results)
+        self.received_candidates: list = []
 
     def analyze(self, candidate, context, **kwargs):
+        self.received_candidates.append(candidate)
         if not self._results:
             return _fail("reviewer exhausted")
         return self._results.pop(0)
@@ -506,6 +508,15 @@ class _FakeRewriteAgent:
         self._fix_results = list(fix_results or [])
 
     def rewrite(self, candidate, blocking_issues, context, *, agent_name):
+        if not self._rewrite_results:
+            return _fail("rewrite exhausted")
+        return self._rewrite_results.pop(0)
+
+    def rewrite_targeted(self, candidate, closure, blocking_issues, context, *, agent_name, schema_cls, deadline=None):
+        # Shares the same result queue as rewrite() -- callers supply a full
+        # candidate via _ok(_sedoc_candidate()), which is a valid (superset)
+        # stand-in for a real partial response since merge_targeted_rewrite
+        # only reads the keys inside closure.allowed_sections.
         if not self._rewrite_results:
             return _fail("rewrite exhausted")
         return self._rewrite_results.pop(0)
@@ -1404,9 +1415,10 @@ class SEDocumentationPipelineTests(unittest.TestCase):
     """
     Exercises ReviewPipeline end-to-end with the real SE Documentation
     registry config, using fakes for the Reviewer/Rewrite LLM calls (fast,
-    deterministic, no API keys) -- mirrors RoadmapPipelineTests, confirming
-    the generic pipeline handles a third, differently-shaped agent correctly
-    without any pipeline.py changes.
+    deterministic, no API keys). Unlike other agents, SE Documentation's
+    rewrite stage takes its own targeted (payload-minimized) branch in
+    pipeline.py -- see se_documentation_rewrite_scope.py -- so these tests
+    also exercise _FakeRewriteAgent.rewrite_targeted(), not just rewrite().
     """
 
     def _pipeline(self, *, reviewer_results, rewrite_results=None):
@@ -1443,6 +1455,44 @@ class SEDocumentationPipelineTests(unittest.TestCase):
         )
         self.assertIn(result.status, ("approved", "approved_with_minor_warnings"))
         self.assertEqual(result.attempts, 2)
+
+    def test_final_re_review_receives_the_complete_merged_candidate(self):
+        # 11: the targeted rewrite path sends/returns only a SCOPED partial
+        # object, but the Reviewer must still see the full, merged document
+        # on its second (re-review) call -- never the partial rewrite
+        # payload/response shape.
+        issue = _issue(
+            severity="high", requires_correction=True,
+            category="project_alignment", field_name="systemModules[0]",
+        )
+        reviewer = _FakeReviewerAgent([_reviewer_ok(issues=[issue]), _reviewer_ok(issues=[])])
+        pipeline = ReviewPipeline(
+            "SEDocumentationAgent",
+            reviewer_agent=reviewer,
+            rewrite_agent=_FakeRewriteAgent([_ok(_sedoc_candidate())]),
+        )
+
+        original = _sedoc_candidate()
+        result = pipeline.run(
+            lambda: _ok(original),
+            _context(),
+            writer_trusted_parts={}, writer_untrusted_parts={},
+        )
+
+        self.assertIn(result.status, ("approved", "approved_with_minor_warnings"))
+        self.assertEqual(len(reviewer.received_candidates), 2)
+
+        first_review_candidate, second_review_candidate = reviewer.received_candidates
+        # The second (post-rewrite) review call sees the SAME complete
+        # top-level key set the first (pre-rewrite) call saw -- proving the
+        # scoped/partial rewrite response was merged back into a complete
+        # document rather than being forwarded as-is.
+        self.assertEqual(set(first_review_candidate.keys()), set(second_review_candidate.keys()))
+        # And it is a real, non-trivial document (not an empty/near-empty
+        # partial object masquerading as "complete").
+        self.assertIn("systemModules", second_review_candidate)
+        self.assertIn("functionalRequirements", second_review_candidate)
+        self.assertGreater(len(second_review_candidate.keys()), 5)
 
     def test_dangling_reference_after_rewrite_never_shown(self):
         # The rewrite introduces a dangling requirement reference --

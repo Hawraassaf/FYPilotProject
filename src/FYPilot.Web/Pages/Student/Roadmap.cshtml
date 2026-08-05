@@ -9,30 +9,50 @@
     var total = orderedPhases.Count;
     var pct = total > 0 ? (int)Math.Round(done * 100.0 / total) : 0;
     var currentPhase = orderedPhases.FirstOrDefault(p => !p.IsCompleted);
-    var selectedPhase = currentPhase ?? orderedPhases.FirstOrDefault();
 
     var fallbackWeeks = Model.Idea?.ExpectedDurationWeeks
         ?? Math.Max(orderedPhases.Sum(p => Math.Max(1, p.EstimatedWeeks)), 1);
 
+    // Target duration the student actually asked for -- the Gantt's domain
+    // stays fixed to this (never widened) in this containment fix. Phases
+    // that don't fit are classified, not force-fitted -- see
+    // RoadmapModel.ClassifyPhaseTimeline.
     var totalWeeks = Model.WorkloadSummary?.TotalWeeks > 0
         ? Model.WorkloadSummary.TotalWeeks
         : Math.Max(fallbackWeeks, 1);
 
-    var phaseRanges =
-        new System.Collections.Generic.Dictionary<string, (int StartWeek, int EndWeek, int Duration)>();
+    var timeline = FYPilot.Web.Pages.Student.RoadmapModel.ClassifyPhaseTimeline(orderedPhases, totalWeeks);
 
-    var weekCursor = 1;
+    // Rendered in the main Gantt/phase-nav/details -- a PartiallyBeyondTarget
+    // phase still appears here (up to the target boundary, with a "continues
+    // beyond target" badge) but a BeyondTarget or NeedsReview phase does not:
+    // it would otherwise render at/after the last target week, which is
+    // exactly the misleading "every overflow phase shows Week N" behavior
+    // this replaces.
+    var mainTimeline = timeline
+        .Where(t => t.Status is FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.WithinTarget
+            or FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.PartiallyBeyondTarget)
+        .ToList();
 
-    foreach (var phase in orderedPhases)
-    {
-        var key = Convert.ToString(phase.Id) ?? phase.PhaseNumber.ToString();
-        var duration = Math.Max(1, phase.EstimatedWeeks);
-        var startWeek = Math.Min(weekCursor, totalWeeks);
-        var endWeek = Math.Min(totalWeeks, startWeek + duration - 1);
+    // Shown in the "Beyond target duration" section below the Gantt --
+    // includes the overflow portion of a PartiallyBeyondTarget phase too,
+    // per the required display behavior.
+    var overflowTimeline = timeline
+        .Where(t => t.Status is FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.PartiallyBeyondTarget
+            or FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.BeyondTarget
+            or FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.NeedsReview)
+        .ToList();
 
-        phaseRanges[key] = (startWeek, endWeek, Math.Max(1, endWeek - startWeek + 1));
-        weekCursor = endWeek + 1;
-    }
+    var selectedPhase =
+        mainTimeline.Select(t => t.Phase).FirstOrDefault(p => !p.IsCompleted)
+        ?? mainTimeline.Select(t => t.Phase).FirstOrDefault()
+        ?? currentPhase;
+
+    // Estimate only -- targetWeeks + the existing authoritative
+    // RecommendedAdditionalWeeks figure (unchanged capacity-based
+    // computation, see RoadmapModel.ComputeWorkloadSummary). Never a
+    // confirmed scheduled horizon; labeled as an estimate wherever shown.
+    var estimatedTotalWeeks = totalWeeks + (Model.WorkloadSummary?.RecommendedAdditionalWeeks ?? 0);
 
     string FeasibilityLabel(string? value) => value switch
     {
@@ -90,6 +110,43 @@ else
             <div class="roadmap-alert roadmap-alert-warning" role="alert">
                 <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
                 <span>@Model.ErrorMessage</span>
+            </div>
+        }
+
+        @{
+            // Single source of truth for "was this really AI-generated" --
+            // see RoadmapModel.ClassifyRoadmapOutcome. Drives this banner
+            // AND the flash message shown right after generation (Roadmap.
+            // cshtml.cs's OnPostGenerateAsync), so the two can never show
+            // contradictory states (e.g. a green "generated successfully"
+            // toast alongside a red/amber "not AI-generated" banner).
+            var roadmapOutcome = Model.LatestReview != null
+                ? FYPilot.Web.Pages.Student.RoadmapModel.ClassifyRoadmapOutcome(Model.LatestReview)
+                : null;
+        }
+
+        @if (roadmapOutcome != null && roadmapOutcome.IsFallbackDisplayed)
+        {
+            @* ClassifyRoadmapOutcome(AiOutputReview) only ever returns
+               Warning-styled outcomes when IsFallbackDisplayed is true
+               (ReviewUnavailable/ReviewRejected/ProviderFailure/
+               DeterministicFallback) -- Error is only reachable from the
+               response-based overload's InvalidResponse case, which has no
+               persisted AiOutputReview row to reach this banner at all. *@
+            <div class="roadmap-alert roadmap-alert-fallback" role="status" aria-live="polite">
+                <i class="bi bi-cpu" aria-hidden="true"></i>
+                <div>
+                    <strong>@roadmapOutcome.Title &mdash; not AI-generated</strong>
+                    <span>
+                        @roadmapOutcome.Message
+                        Regenerate once the AI service is available.
+                    </span>
+                    <span class="roadmap-fallback-meta">
+                        Attempted provider: @(Model.LatestReview!.GeneratorProvider ?? "none")
+                        &middot; Generated @Model.LatestReview.CreatedAt.ToString("g") UTC
+                        &middot; Review status: @Model.LatestReview.Status
+                    </span>
+                </div>
             </div>
         }
 
@@ -223,8 +280,14 @@ else
                 </div>
 
                 <div class="roadmap-summary-item">
-                    <span>Total duration</span>
-                    <strong>@totalWeeks weeks</strong>
+                    <span>Target duration</span>
+                    <strong>
+                        @totalWeeks weeks
+                        @if (estimatedTotalWeeks > totalWeeks)
+                        {
+                            <span class="roadmap-summary-estimate">~@estimatedTotalWeeks wk est.</span>
+                        }
+                    </strong>
                 </div>
 
                 <div class="roadmap-summary-item">
@@ -268,14 +331,15 @@ else
                             <h2>Project phases</h2>
                         </div>
 
-                        <span class="roadmap-count-badge">@total</span>
+                        <span class="roadmap-count-badge">@mainTimeline.Count</span>
                     </div>
 
                     <div class="roadmap-phase-list" role="tablist" aria-orientation="vertical">
-                        @foreach (var phase in orderedPhases)
+                        @foreach (var entry in mainTimeline)
                         {
+                            var phase = entry.Phase;
                             var phaseKey = Convert.ToString(phase.Id) ?? phase.PhaseNumber.ToString();
-                            var range = phaseRanges[phaseKey];
+                            var duration = entry.WithinTargetEndWeek - entry.DisplayStartWeek + 1;
                             var isSelected = selectedPhase != null &&
                                 Convert.ToString(selectedPhase.Id) == phaseKey;
                             var stateClass = phase.IsCompleted
@@ -304,8 +368,12 @@ else
                                 <span class="roadmap-phase-tab-copy">
                                     <strong>@phase.Name</strong>
                                     <small>
-                                        Week @range.StartWeek@(range.EndWeek > range.StartWeek ? $"–{range.EndWeek}" : "")
-                                        · @range.Duration week(s)
+                                        Week @entry.DisplayStartWeek@(entry.WithinTargetEndWeek > entry.DisplayStartWeek ? $"–{entry.WithinTargetEndWeek}" : "")
+                                        · @duration week(s)
+                                        @if (entry.Status == FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.PartiallyBeyondTarget)
+                                        {
+                                            <span class="roadmap-overflow-badge">continues beyond target</span>
+                                        }
                                     </small>
                                 </span>
 
@@ -341,16 +409,18 @@ else
                                     }
                                 </div>
 
-                                @foreach (var phase in orderedPhases)
+                                @foreach (var entry in mainTimeline)
                                 {
+                                    var phase = entry.Phase;
                                     var phaseKey = Convert.ToString(phase.Id) ?? phase.PhaseNumber.ToString();
-                                    var range = phaseRanges[phaseKey];
+                                    var duration = entry.WithinTargetEndWeek - entry.DisplayStartWeek + 1;
                                     var tasks = FYPilot.Web.Pages.Student.RoadmapModel.ParseTasks(phase.TasksJson);
                                     var stateClass = phase.IsCompleted
                                         ? "is-completed"
                                         : (currentPhase != null && Convert.ToString(currentPhase.Id) == phaseKey
                                             ? "is-current"
                                             : "is-upcoming");
+                                    var isPartial = entry.Status == FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.PartiallyBeyondTarget;
 
                                     <button type="button"
                                             class="roadmap-gantt-label"
@@ -362,11 +432,11 @@ else
 
                                     <div class="roadmap-gantt-track" style="--week-count:@totalWeeks;">
                                         <button type="button"
-                                                class="roadmap-gantt-bar @stateClass"
-                                                style="grid-column:@range.StartWeek / span @range.Duration;"
+                                                class="roadmap-gantt-bar @stateClass @(isPartial ? "is-overflowing" : "")"
+                                                style="grid-column:@entry.DisplayStartWeek / span @duration;"
                                                 data-phase-select="@phaseKey"
-                                                title="@phase.Name: week @range.StartWeek to @range.EndWeek">
-                                            <strong>@range.Duration wk</strong>
+                                                title="@(phase.Name): week @entry.DisplayStartWeek to @entry.WithinTargetEndWeek@(isPartial ? " (continues beyond target duration)" : "")">
+                                            <strong>@duration wk@(isPartial ? "+" : "")</strong>
                                             <span>@tasks.Count task(s)</span>
                                         </button>
                                     </div>
@@ -383,10 +453,10 @@ else
                             </div>
                         </div>
 
-                        @foreach (var phase in orderedPhases)
+                        @foreach (var entry in mainTimeline)
                         {
+                            var phase = entry.Phase;
                             var phaseKey = Convert.ToString(phase.Id) ?? phase.PhaseNumber.ToString();
-                            var range = phaseRanges[phaseKey];
                             var isSelected = selectedPhase != null &&
                                 Convert.ToString(selectedPhase.Id) == phaseKey;
                             var tasks = FYPilot.Web.Pages.Student.RoadmapModel.ParseTasks(phase.TasksJson);
@@ -402,8 +472,12 @@ else
                                         <div class="roadmap-detail-kicker">
                                             Phase @phase.PhaseNumber
                                             <span>
-                                                Week @range.StartWeek@(range.EndWeek > range.StartWeek ? $"–{range.EndWeek}" : "")
+                                                Week @entry.DisplayStartWeek@(entry.WithinTargetEndWeek > entry.DisplayStartWeek ? $"–{entry.WithinTargetEndWeek}" : "")
                                             </span>
+                                            @if (entry.Status == FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.PartiallyBeyondTarget)
+                                            {
+                                                <span class="roadmap-overflow-badge">continues beyond target</span>
+                                            }
                                         </div>
 
                                         <h3>@phase.Name</h3>
@@ -440,7 +514,7 @@ else
                                 <div class="roadmap-phase-facts">
                                     <div>
                                         <span>Duration</span>
-                                        <strong>@range.Duration week(s)</strong>
+                                        <strong>@(entry.WithinTargetEndWeek - entry.DisplayStartWeek + 1) week(s)</strong>
                                     </div>
 
                                     <div>
@@ -728,6 +802,89 @@ else
                 </aside>
             </section>
 
+            @if (overflowTimeline.Any())
+            {
+                <section class="roadmap-overflow-card" aria-labelledby="overflow-title">
+                    <div class="roadmap-panel-heading">
+                        <div>
+                            <span>Beyond target duration</span>
+                            <h2 id="overflow-title">Overflow scope</h2>
+                        </div>
+
+                        <span class="roadmap-count-badge">@overflowTimeline.Count</span>
+                    </div>
+
+                    <p class="roadmap-overflow-intro">
+                        Some work cannot fit within the selected target duration at the current capacity.
+                        These phases are shown as overflow scope rather than being incorrectly placed in the
+                        final target week.
+                    </p>
+
+                    <ol class="roadmap-overflow-list">
+                        @foreach (var entry in overflowTimeline)
+                        {
+                            var phase = entry.Phase;
+                            var phaseHours = FYPilot.Web.Pages.Student.RoadmapModel.ParseTasks(phase.TasksJson)
+                                .Sum(t => t.EstimatedHours ?? 0);
+
+                            string statusLabel = entry.Status switch
+                            {
+                                FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.PartiallyBeyondTarget => "Partially beyond target",
+                                FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.BeyondTarget => "Beyond target",
+                                _ => "Unscheduled / needs review",
+                            };
+
+                            string statusClass = entry.Status switch
+                            {
+                                FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.PartiallyBeyondTarget => "is-partial",
+                                FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.BeyondTarget => "is-beyond",
+                                _ => "is-needs-review",
+                            };
+
+                            <li class="roadmap-overflow-item">
+                                <div class="roadmap-overflow-order">@phase.PhaseNumber</div>
+
+                                <div class="roadmap-overflow-copy">
+                                    <div class="roadmap-overflow-name-line">
+                                        <strong>@phase.Name</strong>
+                                        <span class="roadmap-overflow-status @statusClass">@statusLabel</span>
+                                    </div>
+
+                                    @if (!string.IsNullOrWhiteSpace(phase.Objective))
+                                    {
+                                        <p>@phase.Objective</p>
+                                    }
+
+                                    <div class="roadmap-overflow-meta">
+                                        @if (entry.Status != FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.NeedsReview)
+                                        {
+                                            <span>
+                                                Estimated week @entry.DisplayStartWeek@(entry.DisplayEndWeek > entry.DisplayStartWeek ? $"–{entry.DisplayEndWeek}" : "")
+                                                (@(entry.DisplayEndWeek - entry.DisplayStartWeek + 1) week(s))
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span>No valid duration on record for this phase.</span>
+                                        }
+
+                                        @if (phaseHours > 0)
+                                        {
+                                            <span>@phaseHours h planned</span>
+                                        }
+
+                                        @if (!string.IsNullOrWhiteSpace(phase.ExpectedOutput))
+                                        {
+                                            <span>@phase.ExpectedOutput</span>
+                                        }
+                                    </div>
+                                </div>
+                            </li>
+                        }
+                    </ol>
+                </section>
+            }
+
             @if (Model.DeferredTasks.Any())
             {
                 <section class="roadmap-deferred-card" aria-labelledby="deferred-title">
@@ -998,6 +1155,27 @@ else
             border: 1px solid #f1d69e;
         }
 
+        .roadmap-alert-fallback {
+            align-items: flex-start;
+            color: #7a5411;
+            background: var(--roadmap-warning-soft);
+            border: 1px solid #f1d69e;
+        }
+
+            .roadmap-alert-fallback > div {
+                display: grid;
+                gap: .3rem;
+            }
+
+            .roadmap-alert-fallback strong {
+                color: #6f551e;
+            }
+
+        .roadmap-fallback-meta {
+            color: #8a6a1f;
+            font-size: .74rem;
+        }
+
         .roadmap-command-header,
         .roadmap-start-panel,
         .roadmap-summary-strip,
@@ -1213,6 +1391,15 @@ else
                 overflow: hidden;
                 text-overflow: ellipsis;
             }
+
+        .roadmap-summary-estimate {
+            display: block;
+            overflow: visible;
+            color: #8a5c12;
+            font-size: .66rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
 
         .roadmap-feasibility-pill {
             width: fit-content;
@@ -1998,6 +2185,123 @@ else
             .roadmap-warning-item.is-critical {
                 color: #a83232;
             }
+
+        .roadmap-overflow-badge {
+            display: inline-flex;
+            width: fit-content;
+            padding: .12rem .4rem;
+            color: #8a5c12;
+            background: var(--roadmap-warning-soft);
+            border-radius: 999px;
+            font-size: .6rem;
+            font-weight: 800;
+            text-transform: none;
+            letter-spacing: 0;
+        }
+
+        .roadmap-gantt-bar.is-overflowing {
+            box-shadow: inset 0 0 0 2px var(--roadmap-warning);
+        }
+
+        .roadmap-overflow-card {
+            background: var(--roadmap-surface);
+            border: 1px solid var(--roadmap-border);
+            border-radius: var(--roadmap-radius);
+            box-shadow: 0 8px 24px rgba(31, 47, 77, .045);
+        }
+
+        .roadmap-overflow-intro {
+            margin: 0;
+            padding: .85rem 1.1rem 0;
+            color: var(--roadmap-muted);
+            font-size: .78rem;
+            line-height: 1.6;
+        }
+
+        .roadmap-overflow-list {
+            display: grid;
+            gap: .65rem;
+            margin: 0;
+            padding: 1rem 1.1rem;
+            list-style: none;
+        }
+
+        .roadmap-overflow-item {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: .75rem;
+            padding: .8rem;
+            background: #fffaf0;
+            border: 1px solid #f1dcc0;
+            border-radius: 12px;
+        }
+
+        .roadmap-overflow-order {
+            width: 26px;
+            height: 26px;
+            display: grid;
+            place-items: center;
+            color: var(--roadmap-warning);
+            background: var(--roadmap-warning-soft);
+            border-radius: 8px;
+            font-size: .72rem;
+            font-weight: 800;
+        }
+
+        .roadmap-overflow-copy {
+            min-width: 0;
+            display: grid;
+            gap: .3rem;
+        }
+
+        .roadmap-overflow-name-line {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: .5rem;
+        }
+
+            .roadmap-overflow-name-line strong {
+                font-size: .84rem;
+            }
+
+        .roadmap-overflow-status {
+            padding: .18rem .5rem;
+            border-radius: 999px;
+            font-size: .64rem;
+            font-weight: 800;
+            text-transform: uppercase;
+        }
+
+            .roadmap-overflow-status.is-partial {
+                color: #8a5c12;
+                background: var(--roadmap-warning-soft);
+            }
+
+            .roadmap-overflow-status.is-beyond {
+                color: #a83232;
+                background: var(--roadmap-danger-soft);
+            }
+
+            .roadmap-overflow-status.is-needs-review {
+                color: #5f6b7b;
+                background: #eef1f5;
+            }
+
+        .roadmap-overflow-copy p {
+            margin: 0;
+            color: #6f551e;
+            font-size: .74rem;
+            line-height: 1.5;
+        }
+
+        .roadmap-overflow-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .5rem .8rem;
+            color: #8a6a1f;
+            font-size: .7rem;
+        }
 
         .roadmap-deferred-card {
             overflow: hidden;

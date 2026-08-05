@@ -132,6 +132,11 @@ class _FakeRewriteAgent:
             return _fail("rewrite exhausted")
         return self._rewrite_results.pop(0)
 
+    def rewrite_targeted(self, candidate, closure, blocking_issues, context, *, agent_name, schema_cls, deadline=None):
+        if not self._rewrite_results:
+            return _fail("rewrite exhausted")
+        return self._rewrite_results.pop(0)
+
     def fix_structure(self, candidate, *, agent_name, validation_errors=None, expected_schema=None):
         if not self._fix_results:
             return _fail("fix_structure exhausted")

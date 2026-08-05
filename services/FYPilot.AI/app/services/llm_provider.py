@@ -35,6 +35,7 @@ needs to be re-added later -- see git history for when/why it was dropped.
 This file lets agents switch providers without rewriting every agent.
 """
 
+import inspect
 import json
 import logging
 import os
@@ -156,6 +157,29 @@ def _classify_requests_exception(ex: Exception) -> str:
         return json_reliability.PROVIDER_HTTP_ERROR
 
     return json_reliability.TRANSPORT_FAILURE
+
+
+def _extract_retry_after_seconds(ex: Exception) -> float | None:
+    """
+    Best-effort extraction of a Retry-After value (seconds) from an openai/
+    groq SDK exception's underlying HTTP response, when present. Returns
+    None when unavailable or unparsable -- callers must treat that as "no
+    safe retry-after known" and fall through to the normal cascade-to-next-
+    provider behavior, never inventing a wait time.
+    """
+    response = getattr(ex, "response", None)
+    headers = getattr(response, "headers", None) if response is not None else None
+    if not headers:
+        return None
+
+    raw = headers.get("retry-after") or headers.get("Retry-After")
+    if not raw:
+        return None
+
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return None
 
 
 def _is_client_side_rejection(ex: Exception) -> bool:
@@ -443,6 +467,27 @@ def _used_web_tool(executed_tools: list[dict[str, Any]]) -> bool:
     return False
 
 
+def _accepts_keyword(callable_obj: Any, keyword: str) -> bool:
+    """
+    Compatibility check mirroring app.review.pipeline._accepts_keyword /
+    app.agents.project_idea_agent._accepts_keyword (duplicated here, not
+    imported, to keep this low-level module free of any dependency on
+    either) -- lets an older search-provider test double that doesn't yet
+    accept `writer_budget_seconds`/`deadline` keep working completely
+    unchanged, while a real provider (or an updated fake) gets the deadline
+    threaded through.
+    """
+    try:
+        parameters = inspect.signature(callable_obj).parameters.values()
+    except (TypeError, ValueError):
+        return True
+
+    return any(
+        parameter.name == keyword or parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
+
+
 def _basic_secret_scan_ok(result: "LLMResult") -> bool:
     """
     Universal, context-free backstop applied to EVERY provider response,
@@ -546,6 +591,12 @@ class DeepInfraProvider(BaseProvider):
     # request on a 4xx-style rejection rather than assuming support blindly.
     supports_json_object = True
 
+    # A 429 retry-after is only honored when it leaves at least this much
+    # slack beyond the wait itself -- avoids sleeping right up to the edge
+    # of the remaining Writer budget only to have zero time left to
+    # actually make the retried request.
+    _MIN_RETRY_MARGIN_SECONDS = 5.0
+
     def __init__(
         self,
         model: str | None = None,
@@ -576,13 +627,13 @@ class DeepInfraProvider(BaseProvider):
 
         self.enabled = bool(self.api_key)
 
-    def _client(self):
+    def _client(self, timeout_override: float | None = None):
         from openai import OpenAI
 
         client_kwargs = {
             "api_key": self.api_key,
             "base_url": "https://api.deepinfra.com/v1/openai",
-            "timeout": self.timeout_seconds,
+            "timeout": timeout_override if timeout_override is not None else self.timeout_seconds,
         }
 
         if self.max_retries is not None:
@@ -598,7 +649,21 @@ class DeepInfraProvider(BaseProvider):
         max_tokens: int | None = None,
         reporter: "ProgressReporter | None" = None,
         schema_description: str | None = None,
+        writer_budget_seconds: float | None = None,
     ) -> LLMResult:
+        """
+        `writer_budget_seconds`, when supplied, is a fresh "how much time is
+        actually left" figure computed by the CALLER right before this
+        specific attempt (see ProviderChain._run_cascade's
+        cap_timeout_to_deadline path) -- never stored on self, so this stays
+        safe when the same DeepInfraProvider instance is shared across
+        concurrent calls (e.g. SE Documentation's bounded section queue).
+        The actual HTTP timeout used is min(self.timeout_seconds,
+        writer_budget_seconds) -- this only ever SHORTENS a single attempt
+        when little Writer time remains; it never lengthens or globally
+        changes this provider's configured timeout for any other caller,
+        which never passes this parameter.
+        """
         if not self.enabled:
             return LLMResult(
                 ok=False,
@@ -611,6 +676,11 @@ class DeepInfraProvider(BaseProvider):
                 search_failed=use_search,
                 error_category=json_reliability.TRANSPORT_FAILURE,
             )
+
+        effective_timeout = (
+            self.timeout_seconds if writer_budget_seconds is None
+            else max(0.0, min(self.timeout_seconds, writer_budget_seconds))
+        )
 
         system_message = (
             "You are a precise JSON-only AI engine. "
@@ -644,13 +714,88 @@ class DeepInfraProvider(BaseProvider):
                     # responses aren't silently truncated into invalid JSON.
                     max_tokens=effective_max_tokens,
                     use_json_mode=True,
+                    timeout_override=effective_timeout if writer_budget_seconds is not None else None,
                 )
         except Exception as ex:
             category = _classify_sdk_exception(ex)
+            status_code = getattr(ex, "status_code", None)
             logger.warning(
-                "llm_provider.transport_failure provider=%s model=%s category=%s error=%s",
-                self.name, self.model, category, ex,
+                "llm_provider.transport_failure provider=%s model=%s category=%s status_code=%s error=%s",
+                self.name, self.model, category, status_code, ex,
             )
+
+            # HTTP 429 (rate limited): honor Retry-After with a single retry
+            # of this SAME provider only when it fits inside the remaining
+            # Writer budget -- otherwise this falls straight through to the
+            # normal failure return below, and ProviderChain moves on to the
+            # next provider exactly as it already does for any other
+            # failure. Never a loop -- at most one extra attempt.
+            if (
+                status_code == 429
+                and writer_budget_seconds is not None
+                and self.max_retries == 0  # only when the caller has already opted into single-attempt semantics
+            ):
+                retry_after = _extract_retry_after_seconds(ex)
+                if retry_after is not None and retry_after < (writer_budget_seconds - self._MIN_RETRY_MARGIN_SECONDS):
+                    logger.info(
+                        "llm_provider.rate_limited_retry provider=%s model=%s retry_after=%.1fs remaining_budget=%.1fs",
+                        self.name, self.model, retry_after, writer_budget_seconds,
+                    )
+                    time.sleep(retry_after)
+                    remaining_after_wait = writer_budget_seconds - retry_after
+                    try:
+                        text, finish_reason = self._chat_completion_text(
+                            messages=messages,
+                            temperature=0.2,
+                            max_tokens=effective_max_tokens,
+                            use_json_mode=True,
+                            timeout_override=max(0.0, min(self.timeout_seconds, remaining_after_wait)),
+                        )
+                    except Exception as retry_ex:
+                        retry_category = _classify_sdk_exception(retry_ex)
+                        logger.warning(
+                            "llm_provider.transport_failure provider=%s model=%s category=%s error=%s (after one 429 retry)",
+                            self.name, self.model, retry_category, retry_ex,
+                        )
+                        return LLMResult(
+                            ok=False,
+                            provider=self.name,
+                            model=self.model,
+                            text="",
+                            data=None,
+                            error=str(retry_ex),
+                            search_used=False,
+                            search_failed=use_search,
+                            error_category=retry_category,
+                        )
+                    outcome = json_reliability.parse_json_response(
+                        text,
+                        repair_fn=(
+                            (lambda candidate, error: self._repair_json_with_provider(
+                                candidate, error, schema_description, max_tokens=effective_max_tokens,
+                            ))
+                            if schema_description else None
+                        ),
+                        schema_description=schema_description or "",
+                        finish_reason=finish_reason,
+                    )
+                    _log_json_parse_result(provider=self.name, model=self.model, outcome=outcome)
+                    return LLMResult(
+                        ok=outcome.success,
+                        provider=self.name,
+                        model=self.model,
+                        text=text,
+                        data=outcome.data,
+                        error=None if outcome.success else (outcome.error or "DeepInfra returned invalid JSON."),
+                        search_used=False,
+                        search_failed=use_search,
+                        error_category=None if outcome.success else outcome.category,
+                        parse_diagnostics=_parse_diagnostics(outcome),
+                    )
+
+            # HTTP 402 (payment required) and every other status: fail fast,
+            # never retry the same provider -- the caller's cascade moves to
+            # the next provider on its own.
             return LLMResult(
                 ok=False,
                 provider=self.name,
@@ -696,6 +841,7 @@ class DeepInfraProvider(BaseProvider):
         temperature: float,
         max_tokens: int,
         use_json_mode: bool,
+        timeout_override: float | None = None,
     ) -> tuple[str, str | None]:
         """
         Returns (text, finish_reason). Raises the underlying SDK exception
@@ -706,6 +852,11 @@ class DeepInfraProvider(BaseProvider):
         (never a timeout/connection/5xx, which a retry without the
         parameter would not fix), retries once without it so an
         unsupported model never breaks the whole call.
+
+        `timeout_override` is a plain parameter, never stored on self --
+        _client() builds a fresh SDK client per call already, so this stays
+        safe when this same provider instance is shared across concurrent
+        calls.
         """
         request_kwargs: dict[str, Any] = dict(
             model=self.model, temperature=temperature, max_tokens=max_tokens, messages=messages,
@@ -713,7 +864,7 @@ class DeepInfraProvider(BaseProvider):
 
         if use_json_mode and self.supports_json_object:
             try:
-                response = self._client().chat.completions.create(
+                response = self._client(timeout_override).chat.completions.create(
                     response_format={"type": "json_object"}, **request_kwargs,
                 )
                 choice = response.choices[0]
@@ -722,7 +873,7 @@ class DeepInfraProvider(BaseProvider):
                 if not _is_client_side_rejection(ex):
                     raise
 
-        response = self._client().chat.completions.create(**request_kwargs)
+        response = self._client(timeout_override).chat.completions.create(**request_kwargs)
         choice = response.choices[0]
         return str(choice.message.content or ""), getattr(choice, "finish_reason", None)
 
@@ -930,7 +1081,21 @@ class BraveSearchProvider(BaseProvider):
         cleaned = " ".join(cleaned.split()).strip()
         return cleaned[:BraveSearchProvider._MAX_QUERY_LENGTH]
 
-    def search_web(self, query: str) -> LLMResult:
+    def search_web(
+        self, query: str, *, writer_budget_seconds: float | None = None,
+    ) -> LLMResult:
+        """
+        `writer_budget_seconds`, when supplied, is a fresh "how much time is
+        actually left" figure computed by the CALLER right before this
+        specific attempt (see ProviderChain.search_web's deadline handling)
+        -- same opt-in, never-stored-on-self contract as
+        DeepInfraProvider/GroqProvider.generate_json's identical parameter.
+        The actual HTTP timeout used is min(self.timeout_seconds,
+        writer_budget_seconds) -- this only ever SHORTENS this one attempt
+        when little Writer time remains; it never lengthens or globally
+        changes this provider's configured timeout for any other caller,
+        which never passes this parameter.
+        """
         if not self.enabled:
             reason = (
                 "BRAVE_SEARCH_API_KEY is missing"
@@ -947,6 +1112,11 @@ class BraveSearchProvider(BaseProvider):
                 search_used=False,
                 search_failed=True,
             )
+
+        effective_timeout = (
+            self.timeout_seconds if writer_budget_seconds is None
+            else max(0.0, min(self.timeout_seconds, writer_budget_seconds))
+        )
 
         clean_query = self._clean_query(query)
 
@@ -993,7 +1163,7 @@ class BraveSearchProvider(BaseProvider):
                     "X-Subscription-Token": self.api_key,
                 },
                 json=request_body,
-                timeout=self.timeout_seconds,
+                timeout=effective_timeout,
             )
         except requests.exceptions.Timeout:
             return self._search_error("Brave search request timed out")
@@ -1170,15 +1340,30 @@ class GroqProvider(BaseProvider):
         self.enabled = bool(self.api_key)
         self.endpoint = "https://api.groq.com/openai/v1/chat/completions"
 
-    def _client(self):
+    def _client(
+        self, timeout_override: float | None = None, *, max_retries_override: int | None = None,
+    ):
+        """
+        `max_retries_override`, when supplied, wins over `self.max_retries`
+        for this ONE client -- used by search_web's deadline-aware path to
+        force single-attempt semantics (max_retries=0) once a Writer
+        deadline is involved, so the SDK's own retry-with-backoff can never
+        multiply `timeout_override` past the remaining Writer budget (up to
+        ~3x with the SDK's default max_retries=2 otherwise). None (the
+        default) preserves `self.max_retries`-based behavior exactly for
+        every other caller (generate_json, _repair_json_with_provider, and
+        search_web when no deadline was supplied).
+        """
         from groq import Groq
 
         client_kwargs: dict[str, Any] = {
             "api_key": self.api_key,
-            "timeout": self.timeout_seconds,
+            "timeout": timeout_override if timeout_override is not None else self.timeout_seconds,
         }
 
-        if self.max_retries is not None:
+        if max_retries_override is not None:
+            client_kwargs["max_retries"] = max_retries_override
+        elif self.max_retries is not None:
             client_kwargs["max_retries"] = self.max_retries
 
         return Groq(**client_kwargs)
@@ -1191,6 +1376,7 @@ class GroqProvider(BaseProvider):
         max_tokens: int,
         messages: list[dict[str, str]],
         use_json_mode: bool = False,
+        timeout_override: float | None = None,
     ) -> tuple[str, str | None, list[dict[str, Any]], list[dict[str, str]]]:
         """
         Normal Groq chat request used for structured generation. Returns
@@ -1199,9 +1385,11 @@ class GroqProvider(BaseProvider):
         response_format={"type": "json_object"} first and falls back to a
         plain request on a 4xx-style rejection (see
         _is_client_side_rejection) -- never on a timeout/connection/5xx,
-        which dropping the parameter wouldn't fix anyway.
+        which dropping the parameter wouldn't fix anyway. `timeout_override`
+        is a plain parameter, never stored on self -- safe when this
+        provider instance is shared across concurrent calls.
         """
-        client = self._client()
+        client = self._client(timeout_override)
         request_kwargs: dict[str, Any] = dict(
             model=model, temperature=temperature, max_tokens=max_tokens, messages=messages,
         )
@@ -1257,13 +1445,30 @@ class GroqProvider(BaseProvider):
             logger.warning("llm_provider.provider_repair_failed provider=%s error=%s", self.name, ex)
             return None
 
-    def search_web(self, query: str) -> LLMResult:
+    def search_web(
+        self, query: str, *, writer_budget_seconds: float | None = None,
+    ) -> LLMResult:
         """
         Run a small dedicated Groq Compound Mini web-search request.
 
         Search is separated from the large structured idea-generation prompt.
         This keeps the Compound request small and prevents 413 errors caused by
         combining web search, a long schema, and four complete idea objects.
+
+        `writer_budget_seconds`: see BraveSearchProvider.search_web's
+        identical, opt-in, never-stored-on-self contract -- the actual
+        request timeout used is min(self.timeout_seconds,
+        writer_budget_seconds), only ever shortening this one attempt.
+
+        When `writer_budget_seconds` is supplied, this ALSO forces a
+        single-attempt request (max_retries=0 for this one client),
+        overriding self.max_retries -- otherwise the groq SDK's own
+        retry-with-backoff (default max_retries=2) could re-attempt this
+        same clamped timeout up to 3 times, multiplying the effective
+        request time to roughly 3x the remaining Writer budget instead of
+        bounding it. self.max_retries is completely unaffected, and every
+        other caller of this provider (and this same method when no
+        deadline is involved) keeps today's exact retry behavior.
         """
         if not self.enabled:
             return LLMResult(
@@ -1277,8 +1482,16 @@ class GroqProvider(BaseProvider):
                 search_failed=True,
             )
 
+        effective_timeout = (
+            self.timeout_seconds if writer_budget_seconds is None
+            else max(0.0, min(self.timeout_seconds, writer_budget_seconds))
+        )
+
         try:
-            client = self._client()
+            client = self._client(
+                effective_timeout if writer_budget_seconds is not None else None,
+                max_retries_override=0 if writer_budget_seconds is not None else None,
+            )
 
             response = client.chat.completions.create(
                 model=self.search_model,
@@ -1335,7 +1548,10 @@ class GroqProvider(BaseProvider):
         max_tokens: int | None = None,
         reporter: "ProgressReporter | None" = None,
         schema_description: str | None = None,
+        writer_budget_seconds: float | None = None,
     ) -> LLMResult:
+        # writer_budget_seconds: see DeepInfraProvider.generate_json's
+        # docstring -- same opt-in, never-stored-on-self contract.
         # NOTE: reporter is accepted (for a uniform ProviderChain call
         # signature across every provider) but not yet used for token-level
         # streaming here, unlike DeepInfraProvider/OllamaProvider. Groq's
@@ -1380,6 +1596,10 @@ class GroqProvider(BaseProvider):
             )
 
         effective_max_tokens = max_tokens or 2200
+        effective_timeout = (
+            self.timeout_seconds if writer_budget_seconds is None
+            else max(0.0, min(self.timeout_seconds, writer_budget_seconds))
+        )
 
         try:
             text, finish_reason, executed_tools, sources = self._request(
@@ -1402,6 +1622,7 @@ class GroqProvider(BaseProvider):
                 # inside the JSON body anyway) -- only requested for plain,
                 # non-search generation.
                 use_json_mode=not use_search,
+                timeout_override=effective_timeout if writer_budget_seconds is not None else None,
             )
         except Exception as ex:
             category = _classify_sdk_exception(ex)
@@ -1708,7 +1929,10 @@ class OllamaProvider(BaseProvider):
         max_tokens: int | None = None,
         reporter: "ProgressReporter | None" = None,
         schema_description: str | None = None,
+        writer_budget_seconds: float | None = None,
     ) -> LLMResult:
+        # writer_budget_seconds: see DeepInfraProvider.generate_json's
+        # docstring -- same opt-in, never-stored-on-self contract.
         if not self.enabled:
             return LLMResult(
                 ok=False,
@@ -1735,6 +1959,8 @@ class OllamaProvider(BaseProvider):
 
         started_at = time.monotonic()
         effective_timeout = self.timeout_seconds or 90
+        if writer_budget_seconds is not None:
+            effective_timeout = max(0.0, min(effective_timeout, writer_budget_seconds))
 
         try:
             text = self._generate(
@@ -1742,6 +1968,7 @@ class OllamaProvider(BaseProvider):
                 options=options,
                 extra_body={"format": "json"},
                 reporter=reporter,
+                timeout_override=effective_timeout,
             )
         except Exception as ex:
             elapsed = time.monotonic() - started_at
@@ -1884,6 +2111,7 @@ class OllamaProvider(BaseProvider):
         options: dict[str, Any],
         extra_body: dict[str, Any],
         reporter: "ProgressReporter | None",
+        timeout_override: float | None = None,
     ) -> str:
         """
         Shared request body for generate_json/generate_text. When reporter
@@ -1891,8 +2119,12 @@ class OllamaProvider(BaseProvider):
         ("stream": true) and reports each line as a real chunk; the
         deadline-aware (5, timeout) read timeout is unchanged either way.
         When reporter is None, this is byte-for-byte today's single
-        non-streaming POST.
+        non-streaming POST. `timeout_override` is a plain parameter (never
+        stored on self) -- when omitted, behaves exactly as before
+        (self.timeout_seconds or 90).
         """
+        read_timeout = timeout_override if timeout_override is not None else (self.timeout_seconds or 90)
+
         if reporter is None:
             response = requests.post(
                 f"{self.base_url}/api/generate",
@@ -1903,7 +2135,7 @@ class OllamaProvider(BaseProvider):
                     "options": options,
                     **extra_body,
                 },
-                timeout=(5, self.timeout_seconds or 90),
+                timeout=(5, read_timeout),
             )
             response.raise_for_status()
             return response.json().get("response", "")
@@ -1917,7 +2149,7 @@ class OllamaProvider(BaseProvider):
                 "options": options,
                 **extra_body,
             },
-            timeout=(5, self.timeout_seconds or 90),
+            timeout=(5, read_timeout),
             stream=True,
         )
         response.raise_for_status()
@@ -2068,6 +2300,22 @@ _DEEPINFRA_TIER_TIMING: dict[str, dict[str, float | int]] = {
 # even though the writer's own compare() call never saw a chance to return.
 # Absent here (every tier except "comparison") means "use GroqProvider's own
 # defaults" -- unchanged for every other agent.
+# Groq's org-level tokens-per-minute cap observed live (HTTP 413 "Request
+# too large ... TPM: Limit 12000, Requested 29987") -- callers that can
+# estimate their own request size before calling (see ProviderChain.
+# generate_json's opt-in estimated_prompt_tokens/provider_token_limits, only
+# used today by SE Documentation's targeted rewrite path) use this so a
+# request already known to exceed the limit is never sent to Groq at all,
+# instead of paying for a guaranteed 413. Configurable rather than hardcoded
+# in case Groq's account tier changes; every caller that doesn't pass
+# provider_token_limits is completely unaffected.
+_DEFAULT_GROQ_REQUEST_TOKEN_LIMIT = 12000
+
+
+def groq_request_token_limit() -> int:
+    return int(os.getenv("GROQ_REQUEST_TOKEN_LIMIT", str(_DEFAULT_GROQ_REQUEST_TOKEN_LIMIT)))
+
+
 _GROQ_TIER_TIMING: dict[str, dict[str, float | int]] = {
     "comparison": {"timeout_seconds": 6.0, "max_retries": 0},
     # Same tight fallback budget as "comparison" -- Groq/Ollama always use
@@ -2206,7 +2454,7 @@ class ProviderChain:
             GroqProvider(),
         ]
 
-    def search_web(self, query: str) -> LLMResult:
+    def search_web(self, query: str, *, deadline: float | None = None) -> LLMResult:
         """
         Run direct web search with the first search_providers entry that
         succeeds: Brave first, Groq Compound second, matching the class
@@ -2215,11 +2463,34 @@ class ProviderChain:
         self.providers at all) because the API must report whether real
         source URLs were actually obtained, and because Brave/Groq search
         must stay fully independent of which generation provider is active.
+
+        `deadline`, when supplied, is an absolute time.monotonic()
+        timestamp -- mirrors generate_json's deadline handling: skips
+        starting a search provider once fewer than
+        _MIN_SECONDS_PER_PROVIDER_ATTEMPT remain (the SAME shared floor
+        generate_json's cascade uses), and clamps each provider's own
+        configured timeout to whatever budget is left by forwarding
+        `writer_budget_seconds` into that provider's own search_web call --
+        only when that provider actually accepts the keyword (see
+        _accepts_keyword), so an older search-provider test double without
+        it keeps working unchanged. None (the default) preserves the exact
+        prior unbounded behavior for every existing caller (FypMentorAgent,
+        MarketNeedsAgent, MarketFootprintAgent, etc.) that doesn't pass one.
         """
         errors: list[str] = []
 
         for provider in self.search_providers:
-            result = provider.search_web(query)
+            writer_budget_seconds = deadline - time.monotonic() if deadline is not None else None
+
+            if writer_budget_seconds is not None and writer_budget_seconds < self._MIN_SECONDS_PER_PROVIDER_ATTEMPT:
+                errors.append(f"{provider.name} -> skipped, insufficient deadline time remaining")
+                break
+
+            search_kwargs: dict[str, Any] = {}
+            if deadline is not None and _accepts_keyword(provider.search_web, "writer_budget_seconds"):
+                search_kwargs["writer_budget_seconds"] = writer_budget_seconds
+
+            result = provider.search_web(query, **search_kwargs)
 
             if result.ok and result.search_used and result.sources:
                 return result
@@ -2258,8 +2529,22 @@ class ProviderChain:
         deadline: float | None = None,
         reporter: "ProgressReporter | None" = None,
         schema_description: str | None = None,
+        cap_timeout_to_deadline: bool = False,
+        estimated_prompt_tokens: int | None = None,
+        provider_token_limits: dict[str, int] | None = None,
     ) -> LLMResult:
         """
+        `estimated_prompt_tokens`/`provider_token_limits` are a SEPARATE
+        opt-in pair (both default None, so every existing caller is
+        unaffected): when both are given, any provider named in
+        `provider_token_limits` whose limit is smaller than
+        `estimated_prompt_tokens` is skipped entirely -- recorded as
+        `provider_ineligible_for_payload_size` -- rather than sent a request
+        already known to be rejected for size. Every other provider (not
+        named in the dict) is unaffected and still tried in the usual order.
+        See se_documentation_rewrite_scope.py's targeted rewrite, the only
+        current caller.
+
         `schema_description` is an OPTIONAL, opt-in compact description of
         the expected JSON shape -- when given, a provider whose deterministic
         local JSON repair fails may make ONE additional low-temperature
@@ -2268,16 +2553,33 @@ class ProviderChain:
         json_reliability.py / each provider's generate_json). Omitted
         (None, the default) preserves every existing caller's behavior
         exactly -- no provider-repair-request is ever attempted without it.
+
+        `cap_timeout_to_deadline` is a SEPARATE opt-in from `deadline` --
+        `deadline` alone (the existing, shared behavior used by every other
+        caller) only decides whether to SKIP starting the next fallback
+        provider when too little time remains; it never shortens an
+        individual provider's own configured request timeout. Setting
+        `cap_timeout_to_deadline=True` additionally passes
+        `writer_budget_seconds` (a fresh `deadline - time.monotonic()`,
+        recomputed for EACH provider in the cascade) into that provider's
+        own generate_json call, so effective_timeout = min(configured
+        provider timeout, remaining budget) -- see SE Documentation's
+        bounded section queue, the only current caller of this flag. False
+        (default) leaves every other caller's behavior byte-for-byte
+        unchanged, including callers that already pass `deadline`.
         """
         return self._run_cascade(
-            call=lambda provider: provider.generate_json(
+            call=lambda provider, writer_budget_seconds: provider.generate_json(
                 prompt, use_search=use_search, max_tokens=max_tokens, reporter=reporter,
                 schema_description=schema_description,
+                **({"writer_budget_seconds": writer_budget_seconds} if cap_timeout_to_deadline else {}),
             ),
             is_success=lambda result: result.ok and result.data is not None,
             deadline=deadline,
             reporter=reporter,
             use_search=use_search,
+            estimated_prompt_tokens=estimated_prompt_tokens,
+            provider_token_limits=provider_token_limits,
         )
 
     def generate_text(
@@ -2289,7 +2591,7 @@ class ProviderChain:
         reporter: "ProgressReporter | None" = None,
     ) -> LLMResult:
         return self._run_cascade(
-            call=lambda provider: provider.generate_text(
+            call=lambda provider, writer_budget_seconds: provider.generate_text(
                 prompt, use_search=use_search, reporter=reporter,
             ),
             is_success=lambda result: bool(result.ok and result.text),
@@ -2306,6 +2608,8 @@ class ProviderChain:
         deadline: float | None,
         reporter: "ProgressReporter | None",
         use_search: bool,
+        estimated_prompt_tokens: int | None = None,
+        provider_token_limits: dict[str, int] | None = None,
     ) -> LLMResult:
         """
         Shared sequential-fallback loop for generate_json/generate_text.
@@ -2320,6 +2624,13 @@ class ProviderChain:
         stops any further fallback from starting -- while never aborting a
         call already in flight (the honest-cancellation requirement: an
         already-started attempt is always allowed to finish naturally).
+
+        `call` receives (provider, writer_budget_seconds) -- the second
+        argument is `deadline - time.monotonic()` recomputed fresh for THIS
+        provider (None when `deadline` itself is None), always passed
+        through regardless of cap_timeout_to_deadline; only generate_json's
+        cap_timeout_to_deadline flag decides whether its lambda actually
+        forwards it into the provider call.
         """
         errors: list[str] = []
 
@@ -2328,9 +2639,24 @@ class ProviderChain:
                 errors.append(f"{provider.name} -> skipped, cancelled")
                 break
 
-            if deadline is not None and (
-                deadline - time.monotonic() < self._MIN_SECONDS_PER_PROVIDER_ATTEMPT
+            if (
+                estimated_prompt_tokens is not None
+                and provider_token_limits is not None
+                and provider.name in provider_token_limits
+                and estimated_prompt_tokens > provider_token_limits[provider.name]
             ):
+                errors.append(
+                    f"{provider.name} -> skipped, provider_ineligible_for_payload_size "
+                    f"(estimated {estimated_prompt_tokens} tokens exceeds "
+                    f"{provider_token_limits[provider.name]} limit)"
+                )
+                if reporter is not None:
+                    reporter.provider_failed(provider.name, "provider_ineligible_for_payload_size")
+                continue
+
+            writer_budget_seconds = deadline - time.monotonic() if deadline is not None else None
+
+            if writer_budget_seconds is not None and writer_budget_seconds < self._MIN_SECONDS_PER_PROVIDER_ATTEMPT:
                 errors.append(f"{provider.name} -> skipped, insufficient deadline time remaining")
                 if reporter is not None:
                     reporter.deadline_prevented_fallback(provider.name)
@@ -2342,7 +2668,7 @@ class ProviderChain:
                 else:
                     reporter.fallback_started(provider.name)
 
-            result = call(provider)
+            result = call(provider, writer_budget_seconds)
 
             if is_success(result):
                 if not _basic_secret_scan_ok(result):

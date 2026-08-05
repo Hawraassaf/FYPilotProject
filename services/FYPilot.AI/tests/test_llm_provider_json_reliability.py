@@ -120,7 +120,7 @@ class _ScriptedDeepInfra(DeepInfraProvider):
         self.enabled = True
         self._fake_client = _ScriptedClient(script)
 
-    def _client(self):
+    def _client(self, timeout_override=None):
         return self._fake_client
 
 
@@ -135,7 +135,7 @@ class _ScriptedGroq(GroqProvider):
         self.endpoint = "https://example.com"
         self._fake_client = _ScriptedClient(script)
 
-    def _client(self):
+    def _client(self, timeout_override=None):
         return self._fake_client
 
 
@@ -344,7 +344,7 @@ class OllamaJsonReliabilityTests(unittest.TestCase):
             self._script = list(script)
             self._generate_calls: list[dict] = []
 
-        def _generate(self, *, prompt, options, extra_body, reporter):
+        def _generate(self, *, prompt, options, extra_body, reporter, timeout_override=None):
             self._generate_calls.append({"prompt": prompt, "options": options, "extra_body": extra_body})
             item = self._script.pop(0)
             if isinstance(item, Exception):

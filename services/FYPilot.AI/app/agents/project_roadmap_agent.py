@@ -24,12 +24,13 @@ Design (v3 -- hybrid AI + deterministic planning engine):
 import json
 import logging
 import re
+import time
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
 from app.agents import roadmap_scheduler
-from app.agents.roadmap import project_profile, task_metadata, task_taxonomy
+from app.agents.roadmap import fallback_reason, project_profile, task_metadata, task_taxonomy
 from app.agents.roadmap.lexicon import contains_any
 from app.agents.roadmap.project_profile import ProjectProfile, ProjectProfileInput
 from app.agents.roadmap.task_metadata import InternalTaskProposal
@@ -307,6 +308,25 @@ class ProjectRoadmapAgent:
         # accepted phase plan, for the roadmap.generated log line.
         self.last_generation_source: str | None = None
 
+        # Correlation id for structured logging across one HTTP request --
+        # set by the router (routers/roadmap.py) right after construction,
+        # before generate_candidate()/generate() runs. None means "not set
+        # by a router" (e.g. direct unit-test construction), in which case
+        # log lines below just omit it.
+        self.request_id: str | None = None
+
+        # Typed diagnostics (see app/agents/roadmap/fallback_reason.py) --
+        # populated whenever generate() falls back to the deterministic
+        # roadmap, so the router can report a precise reason instead of the
+        # single generic "provider_unavailable" pipeline status. Survives a
+        # subsequent build_safe_fallback() call (which does not reset these)
+        # so the router can read them AFTER calling build_safe_fallback().
+        self.last_fallback_reason_code: str | None = None
+        self.last_usable_phase_count: int = 0
+        self.last_lifecycle_coverage_passed: bool = True
+        self.last_missing_lifecycle_categories: list[str] = []
+        self.last_blocked_term_tasks_dropped: int = 0
+
         self.blocked_terms = [
             "react",
             "node.js",
@@ -350,13 +370,39 @@ class ProjectRoadmapAgent:
             skill_ratings=request.skillRatings,
         ))
 
-    def generate(self, request: ProjectRoadmapRequest) -> ProjectRoadmapResponse:
+    def generate(
+        self, request: ProjectRoadmapRequest, *, deadline: float | None = None,
+    ) -> ProjectRoadmapResponse:
+        """
+        ``deadline``, when supplied, is an absolute time.monotonic()
+        timestamp -- the Writer's own reserved slice of the ReviewPipeline's
+        total budget (routers/roadmap.py's writer_deadline), strictly
+        earlier than the deadline passed to ReviewPipeline.run() itself, so
+        the Writer can never consume the time reserved for Reviewer/Rewrite.
+        Forwarded to the provider cascade (see _try_generate_phase_plan),
+        which clamps each provider's own configured timeout to whatever
+        Writer budget actually remains and skips starting a fallback
+        provider once too little remains -- see
+        ProviderChain.generate_json's cap_timeout_to_deadline. None (the
+        default) preserves the exact prior unbounded behavior for every
+        caller that doesn't pass one (e.g. build_safe_fallback's own
+        internal use of this class's helpers never needs a deadline, since
+        it makes no LLM calls at all).
+        """
         self.last_llm_used = False
         self.last_error = None
         self.last_raw_llm_response = None
         self.last_provider = None
         self.last_model_used = None
         self.last_generation_source = None
+        # request_id is deliberately NOT reset here -- it is set once by the
+        # router before generate()/generate_candidate() runs, for the whole
+        # request's lifetime (see __init__'s docstring on the field).
+        self.last_fallback_reason_code = None
+        self.last_usable_phase_count = 0
+        self.last_lifecycle_coverage_passed = True
+        self.last_missing_lifecycle_categories = []
+        self.last_blocked_term_tasks_dropped = 0
         # Defensive reset: a stale registry from an earlier request/attempt
         # in this same thread/task context must never be consulted for this
         # one -- see roadmap_scheduler.py's task-metadata bridge docstring.
@@ -366,27 +412,31 @@ class ProjectRoadmapAgent:
         profile = self._build_profile(request, total_weeks)
 
         logger.info(
-            "roadmap.profile idea=%r types=%s risks=%s phases=[%d,%d] weekly_capacity=%d skill_gap=%s",
-            request.ideaTitle[:60], profile.project_types, sorted(profile.risk_flags),
+            "roadmap.profile request_id=%s idea=%r types=%s risks=%s phases=[%d,%d] weekly_capacity=%d skill_gap=%s",
+            self.request_id, request.ideaTitle[:60], profile.project_types, sorted(profile.risk_flags),
             profile.phase_count_min, profile.phase_count_max,
             profile.weekly_team_capacity, profile.skill_gap_level,
         )
 
-        plan = self._try_generate_phase_plan(request, total_weeks, profile)
+        plan = self._try_generate_phase_plan(request, total_weeks, profile, deadline=deadline)
 
         if plan is not None and plan.phases:
             try:
                 response = self._expand_plan_to_weeks(request, plan, total_weeks, profile)
             except Exception:
-                logger.exception("roadmap.expand_plan_failed -- falling back to deterministic roadmap.")
+                logger.exception(
+                    "roadmap.expand_plan_failed request_id=%s -- falling back to deterministic roadmap.",
+                    self.request_id,
+                )
                 self.last_error = "Failed to expand the AI phase plan into a schedule. Used fallback roadmap."
                 self.last_llm_used = False
+                self.last_fallback_reason_code = fallback_reason.UNKNOWN
                 roadmap_scheduler.clear_task_metadata_registry()
             else:
                 self.last_llm_used = True
                 logger.info(
-                    "roadmap.generated source=%s phases=%d weeks=%d totalPlannedHours=%d feasibility=%s",
-                    self.last_generation_source or "original_ai_candidate",
+                    "roadmap.generated request_id=%s source=%s phases=%d weeks=%d totalPlannedHours=%d feasibility=%s",
+                    self.request_id, self.last_generation_source or "original_ai_candidate",
                     len(response.phases), response.totalWeeks,
                     response.planningSummary.totalPlannedHours if response.planningSummary else -1,
                     response.planningSummary.scheduleFeasibility if response.planningSummary else "unknown",
@@ -399,14 +449,18 @@ class ProjectRoadmapAgent:
                 "Used fallback roadmap."
             )
 
+        if self.last_fallback_reason_code is None:
+            self.last_fallback_reason_code = fallback_reason.UNKNOWN
+
         raw = self._fallback_raw_roadmap(request, total_weeks, profile)
         response = self._complete_and_validate(request, raw, total_weeks)
         logger.info(
-            "roadmap.generated source=fallback phases=%d weeks=%d totalPlannedHours=%d feasibility=%s reason=%s",
-            len(response.phases), response.totalWeeks,
+            "roadmap.generated request_id=%s source=fallback phases=%d weeks=%d totalPlannedHours=%d "
+            "feasibility=%s fallback_reason_code=%s reason=%s",
+            self.request_id, len(response.phases), response.totalWeeks,
             response.planningSummary.totalPlannedHours if response.planningSummary else -1,
             response.planningSummary.scheduleFeasibility if response.planningSummary else "unknown",
-            self.last_error,
+            self.last_fallback_reason_code, self.last_error,
         )
         return response
 
@@ -427,20 +481,35 @@ class ProjectRoadmapAgent:
         raw = self._fallback_raw_roadmap(request, total_weeks, profile)
         return self._complete_and_validate(request, raw, total_weeks)
 
-    def generate_candidate(self, request: ProjectRoadmapRequest) -> LLMResult | None:
+    def generate_candidate(
+        self, request: ProjectRoadmapRequest, *, deadline: float | None = None,
+    ) -> LLMResult | None:
         """
         Writer-stage entry point for ReviewPipeline. Reuses generate() end to
         end (LLM phase design -> deterministic capacity-aware scheduling)
         rather than duplicating it, then wraps the result as an LLMResult so
         it can flow through guarded_call like any other LLM stage.
 
+        ``deadline`` (an absolute time.monotonic() timestamp) is forwarded
+        unchanged to generate() -- see its docstring. guarded_call
+        (app/llm_firewall/guard.py) calls this as a zero-arg
+        ``request.call_fn()``, so the router supplies this via a closure
+        (``lambda: agent.generate_candidate(request, deadline=writer_deadline)``,
+        matching SE Documentation's identical pattern in routers/
+        se_documentation.py) rather than a global or mutable-agent-state
+        deadline -- safe under concurrent requests since each request gets
+        its own ProjectRoadmapAgent instance (see routers/roadmap.py).
+
         Returns None -- signaling "no real provider output" to guarded_call,
         which the pipeline maps to status="provider_unavailable" -- when
         generate() itself had to fall back internally (self.last_llm_used is
-        False), since in that case there is no real candidate to review; the
-        router should use build_safe_fallback() directly instead.
+        False), whether that's because every provider failed OR because the
+        Writer deadline was exceeded (self.last_fallback_reason_code
+        distinguishes the two -- see fallback_reason.WRITER_DEADLINE_EXCEEDED).
+        In either case there is no real candidate to review; the router uses
+        build_safe_fallback() directly instead.
         """
-        result = self.generate(request)
+        result = self.generate(request, deadline=deadline)
 
         if not self.last_llm_used:
             return None
@@ -472,23 +541,91 @@ class ProjectRoadmapAgent:
         """
         return max(3000, min(8000, 1500 + profile.phase_count_max * 700))
 
+    def _classify_generation_failure(
+        self,
+        deadline: float | None,
+        error_category: str | None,
+        error_text: str | None,
+        *,
+        default: str = fallback_reason.UNKNOWN,
+    ) -> str:
+        """
+        WRITER_DEADLINE_EXCEEDED takes priority over every other
+        classification whenever the Writer's own reserved deadline has
+        effectively run out by the time a failure is observed -- not only
+        when it has literally passed, but also when the remaining time is
+        below ProviderChain's own _MIN_SECONDS_PER_PROVIDER_ATTEMPT floor
+        (the SAME threshold ProviderChain._run_cascade uses to decide
+        whether it's even worth starting one more attempt): a cascade that
+        skipped every provider for that reason returns a generic "All
+        providers failed" result well BEFORE the deadline timestamp itself
+        is reached, so comparing only against the exact deadline would
+        misclassify that (very common) case as an ordinary provider
+        failure. "We ran out of time" is the more specific and actionable
+        reason even when the provider's own error also looks like an
+        ordinary timeout/transport failure (which it often will, since
+        cap_timeout_to_deadline clamps each attempt's own timeout to
+        whatever Writer budget remains). See app/agents/roadmap/
+        fallback_reason.py's WRITER_DEADLINE_EXCEEDED.
+
+        ``default`` is used instead of fallback_reason.UNKNOWN when
+        error_category/error_text don't classify to anything more specific
+        -- callers with their own reasonable prior (e.g. a bare transport
+        exception with no category defaulted to PROVIDER_UNAVAILABLE before
+        this deadline-awareness existed) pass it to preserve that exact
+        behavior.
+        """
+        if (
+            deadline is not None
+            and (deadline - time.monotonic()) < ProviderChain._MIN_SECONDS_PER_PROVIDER_ATTEMPT
+        ):
+            return fallback_reason.WRITER_DEADLINE_EXCEEDED
+
+        classified = fallback_reason.classify_provider_error(error_category, error_text)
+        return classified if classified != fallback_reason.UNKNOWN else default
+
     def _try_generate_phase_plan(
         self,
         request: ProjectRoadmapRequest,
         total_weeks: int,
         profile: ProjectProfile,
+        *,
+        deadline: float | None = None,
     ) -> Optional[_RoadmapPlan]:
         prompt = self._build_phase_prompt(request, total_weeks, profile)
+
+        # deadline alone only skips starting another fallback provider once
+        # too little time remains (ProviderChain's existing, shared
+        # _MIN_SECONDS_PER_PROVIDER_ATTEMPT check); cap_timeout_to_deadline
+        # additionally shortens EACH provider's own configured request
+        # timeout (up to 120s DeepInfra / 180s Ollama) to whatever Writer
+        # budget is actually left. cap_timeout_to_deadline is only included
+        # at all when a real deadline was supplied -- this keeps the call
+        # shape byte-for-byte identical to before this change for every
+        # caller that never passes one (e.g. test doubles built against the
+        # pre-deadline generate_json signature), rather than relying on a
+        # provider chain implementation to merely ignore an always-False flag.
+        extra_kwargs: dict[str, Any] = {}
+        if deadline is not None:
+            extra_kwargs["cap_timeout_to_deadline"] = True
 
         try:
             result = self.provider_chain.generate_json(
                 prompt, use_search=False,
                 schema_description=_ROADMAP_PHASE_PLAN_SCHEMA_DESCRIPTION,
                 max_tokens=self._estimate_phase_plan_max_tokens(profile),
+                deadline=deadline,
+                **extra_kwargs,
             )
         except Exception as ex:
             self.last_error = f"Roadmap generation failed: {ex}"
-            logger.exception("Roadmap generation failed.")
+            self.last_fallback_reason_code = self._classify_generation_failure(
+                deadline,
+                json_reliability.TIMEOUT if "timeout" in str(ex).lower() else None,
+                str(ex),
+                default=fallback_reason.PROVIDER_UNAVAILABLE,
+            )
+            logger.exception("Roadmap generation failed. request_id=%s", self.request_id)
             return None
 
         self.last_provider = (
@@ -509,10 +646,10 @@ class ProjectRoadmapAgent:
             # (transport=failure) from schema/semantic rejection of an
             # otherwise well-formed candidate.
             logger.info(
-                "roadmap.provider_output provider=%s model=%s transport=%s "
+                "roadmap.provider_output request_id=%s provider=%s model=%s transport=%s "
                 "initial_json_valid=%s repair_method=%s repair_success=%s "
                 "schema_valid=%s semantic_valid=%s",
-                self.last_provider, self.last_model_used,
+                self.request_id, self.last_provider, self.last_model_used,
                 "failure" if is_transport_failure else "success",
                 diagnostics.get("initialJsonValid"), diagnostics.get("repairMethod"),
                 diagnostics.get("repairSuccess"), schema_valid, semantic_valid,
@@ -521,6 +658,9 @@ class ProjectRoadmapAgent:
         if not result.ok or not isinstance(result.data, dict):
             log_provider_output(schema_valid=False, semantic_valid=False)
             self.last_error = result.error or "No provider returned valid roadmap JSON."
+            self.last_fallback_reason_code = self._classify_generation_failure(
+                deadline, result.error_category, result.error,
+            )
             return None
 
         self.last_raw_llm_response = json.dumps(
@@ -533,9 +673,11 @@ class ProjectRoadmapAgent:
         except Exception as ex:
             log_provider_output(schema_valid=False, semantic_valid=False)
             self.last_error = f"Roadmap plan failed validation: {str(ex)}"
+            self.last_fallback_reason_code = fallback_reason.SCHEMA_INVALID
             return None
 
         plan.phases = self._sanitize_phases(plan.phases, profile)
+        self.last_usable_phase_count = len(plan.phases)
 
         if len(plan.phases) < 3:
             log_provider_output(schema_valid=True, semantic_valid=False)
@@ -543,6 +685,7 @@ class ProjectRoadmapAgent:
                 "Roadmap plan contained fewer than 3 usable phases. "
                 "Used fallback roadmap."
             )
+            self.last_fallback_reason_code = fallback_reason.INSUFFICIENT_USABLE_PHASES
             return None
 
         phase_texts = [
@@ -550,6 +693,7 @@ class ProjectRoadmapAgent:
             for phase in plan.phases
         ]
         _covered, missing_mandatory = project_profile.lifecycle_coverage(profile, phase_texts)
+        self.last_missing_lifecycle_categories = list(missing_mandatory)
 
         if missing_mandatory and _lifecycle_gap_is_blocking(missing_mandatory):
             readable = ", ".join(_LIFECYCLE_LABELS.get(c, c) for c in missing_mandatory)
@@ -558,13 +702,26 @@ class ProjectRoadmapAgent:
                 f"Roadmap plan is missing mandatory lifecycle coverage for this "
                 f"project type: {readable}. Used fallback roadmap."
             )
-            logger.info("roadmap.lifecycle_gap_rejected missing=%s", missing_mandatory)
+            self.last_fallback_reason_code = fallback_reason.LIFECYCLE_COVERAGE_FAILED
+            self.last_lifecycle_coverage_passed = False
+            logger.info(
+                "roadmap.lifecycle_gap_rejected request_id=%s missing=%s", self.request_id, missing_mandatory,
+            )
             return None
 
         if missing_mandatory:
-            logger.info("roadmap.lifecycle_gap_tolerated missing=%s", missing_mandatory)
+            self.last_lifecycle_coverage_passed = False
+            logger.info(
+                "roadmap.lifecycle_gap_tolerated request_id=%s missing=%s", self.request_id, missing_mandatory,
+            )
 
         log_provider_output(schema_valid=True, semantic_valid=True)
+        logger.info(
+            "roadmap.gate_result request_id=%s usable_phase_count=%d lifecycle_coverage_passed=%s "
+            "missing_lifecycle_categories=%s blocked_term_tasks_dropped=%d",
+            self.request_id, self.last_usable_phase_count, self.last_lifecycle_coverage_passed,
+            self.last_missing_lifecycle_categories, self.last_blocked_term_tasks_dropped,
+        )
 
         repair_method = diagnostics.get("repairMethod")
         if repair_method == "provider_repair":
@@ -596,13 +753,14 @@ class ProjectRoadmapAgent:
             if not name:
                 continue
 
-            tasks = [
-                task
-                for task in phase.tasks
-                if task.title.strip()
-                and not task_taxonomy.is_vague_task(task.title)
-                and not self._contains_blocked_term(task.title)
-            ]
+            tasks = []
+            for task in phase.tasks:
+                if not task.title.strip() or task_taxonomy.is_vague_task(task.title):
+                    continue
+                if self._contains_blocked_term(task.title):
+                    self.last_blocked_term_tasks_dropped += 1
+                    continue
+                tasks.append(task)
 
             if len(tasks) < 2:
                 continue

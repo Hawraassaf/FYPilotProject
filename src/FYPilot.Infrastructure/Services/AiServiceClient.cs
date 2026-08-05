@@ -6,8 +6,9 @@ using FYPilot.Application.DTOs.Documentation;
 using FYPilot.Application.Interfaces;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-
+using System.Text.RegularExpressions;
 namespace FYPilot.Infrastructure.Services;
+using System.Text.RegularExpressions;
 
 /// <summary>
 /// HTTP client that calls the Python AI / Data Science microservice.
@@ -82,13 +83,15 @@ public class AiServiceClient : IAiServiceClient
             Environment.GetEnvironmentVariable("AI_SERVICE_API_KEY")
             ?? configuration["AiService:InternalApiKey"];
 
-        // 1020s: intentionally longer than SEDocumentationAgent's 960s Python
-        // pipeline deadline (see app/review/registry.py) -- see the field
-        // comment above for why this can't just be a longer CancellationToken
-        // on the shared _http client.
+        // 1260s: intentionally longer than SEDocumentationAgent's 1200s
+        // Python global pipeline deadline (see app/review/registry.py) --
+        // see the field comment above for why this can't just be a longer
+        // CancellationToken on the shared _http client. Raised from 1020s
+        // alongside the Python-side bounded-concurrency + reserved-review-
+        // budget fix (960s -> 1200s global deadline).
         _seDocumentationHttp = new HttpClient
         {
-            Timeout = TimeSpan.FromSeconds(1020)
+            Timeout = TimeSpan.FromSeconds(1260)
         };
 
         _seDocumentationHttp.DefaultRequestHeaders.Accept.Add(
@@ -244,6 +247,134 @@ public class AiServiceClient : IAiServiceClient
             return null;
         }
     }
+    public async Task<IReadOnlySet<string>> GetRegisteredRoutesAsync(
+    CancellationToken cancellationToken = default)
+{
+    var fullUrl =
+        $"{_baseUrl.TrimEnd('/')}/ds/openapi.json";
+
+    try
+    {
+        using var request =
+            new HttpRequestMessage(
+                HttpMethod.Get,
+                fullUrl);
+
+        using var response =
+            await _http.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning(
+                "AI OpenAPI endpoint returned HTTP {StatusCode}.",
+                (int)response.StatusCode);
+
+            throw new HttpRequestException(
+                "The AI service route document could not be retrieved.",
+                inner: null,
+                response.StatusCode);
+        }
+
+        await using var responseStream =
+            await response.Content.ReadAsStreamAsync(
+                cancellationToken);
+
+        using var document =
+            await JsonDocument.ParseAsync(
+                responseStream,
+                cancellationToken:
+                    cancellationToken);
+
+        if (!document.RootElement.TryGetProperty(
+                "paths",
+                out var pathsElement)
+            || pathsElement.ValueKind
+                != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException(
+                "The AI service route document did not contain " +
+                "a valid paths object.");
+        }
+
+        var registeredPaths =
+            pathsElement
+                .EnumerateObject()
+                .Select(property =>
+                    NormalizeRoutePath(property.Name))
+                .Where(path =>
+                    path is not null)
+                .Select(path =>
+                    path!)
+                .ToHashSet(
+                    StringComparer.Ordinal);
+
+        return registeredPaths;
+    }
+    catch (OperationCanceledException)
+        when (cancellationToken.IsCancellationRequested)
+    {
+        throw;
+    }
+    catch (JsonException exception)
+    {
+        _logger.LogError(
+            exception,
+            "The AI OpenAPI document contained invalid JSON.");
+
+        throw new InvalidOperationException(
+            "The AI service returned an invalid route document.",
+            exception);
+    }
+    catch (Exception exception)
+        when (exception is not HttpRequestException
+              and not InvalidOperationException)
+    {
+        _logger.LogError(
+            exception,
+            "Failed to retrieve registered AI routes from {Url}.",
+            fullUrl);
+
+        throw;
+    }
+}
+
+private static string? NormalizeRoutePath(
+    string? path)
+{
+    if (string.IsNullOrWhiteSpace(path))
+    {
+        return null;
+    }
+
+    var normalized =
+        path.Trim();
+
+    if (!normalized.StartsWith(
+            "/",
+            StringComparison.Ordinal))
+    {
+        normalized =
+            "/" + normalized;
+    }
+
+    if (normalized.Length > 1)
+    {
+        normalized =
+            normalized.TrimEnd('/');
+    }
+
+    // Route parameter names are implementation details.
+    // /ai-jobs/{agent} and /ai-jobs/{agent_name} are equivalent.
+    normalized =
+        RouteParameterRegex.Replace(
+            normalized,
+            "{}");
+
+    return normalized;
+}
 
     // ── Skill Analysis ────────────────────────────────────────────────────────
 
@@ -312,7 +443,11 @@ public class AiServiceClient : IAiServiceClient
             deadlineCts.Token,
             headers);
     }
-
+private static readonly Regex RouteParameterRegex =
+    new(
+        @"\{[^/{}]+\}",
+        RegexOptions.Compiled |
+        RegexOptions.CultureInvariant);
     // ── Defense Simulator ─────────────────────────────────────────────────────
 
     public Task<DefenseGenerateQuestionsResponse?> GenerateDefenseQuestionsAsync(

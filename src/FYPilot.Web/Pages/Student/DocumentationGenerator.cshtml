@@ -33,6 +33,36 @@
         edgeCaseCount +
         databaseCount +
         uiCount;
+
+    var quality = Model.QualityPanel;
+    var provenance = Model.Provenance;
+
+    var semanticReviewCompleted =
+        quality?.SemanticReviewCompleted == true;
+
+    var qualityScoreLabel =
+        quality?.OverallScore.HasValue == true
+            ? $"{quality.OverallScore}/100"
+            : "Not available";
+
+    var validationTone =
+        quality == null
+            ? "neutral"
+            : semanticReviewCompleted
+                ? "success"
+                : "warning";
+
+    var validationLabel =
+        quality == null
+            ? "No recorded review"
+            : semanticReviewCompleted
+                ? "Semantic review completed"
+                : "Structural validation only";
+
+    var generatedAt =
+        quality?.LastGeneratedAt ??
+        provenance?.GeneratedAt ??
+        docs?.CreatedAt;
 }
 
 @section Head {
@@ -994,7 +1024,8 @@
         /* ---------- Print cover ---------- */
 
         .doc-print-cover,
-        .doc-print-toc {
+        .doc-print-toc,
+        .doc-print-status {
             display: none;
         }
 
@@ -1354,6 +1385,66 @@
                 font-size: 9pt;
             }
 
+            /* Print/PDF honesty fix: the authoritative review/provenance
+               summary -- must survive print even though the interactive
+               on-screen .doc-passport panel does not (see the explicit
+               ".doc-passport { display: none !important; }" rule further
+               below, and the razor comment at this section's markup).
+               No background color (browsers may disable background
+               printing) -- readable in pure grayscale via the border and
+               bold text alone. break-inside/page-break-inside: avoid so it
+               is never split across a page boundary. */
+            .doc-print-status {
+                display: block !important;
+                margin-bottom: 10mm;
+                padding: 5mm 6mm;
+                border: 2px solid #172033;
+                break-inside: avoid;
+                page-break-inside: avoid;
+            }
+
+                .doc-print-status h2 {
+                    margin: 0 0 3mm;
+                    color: #172033;
+                    font-size: 13pt;
+                }
+
+                .doc-print-status-headline {
+                    margin: 0 0 4mm;
+                    color: #172033;
+                    font-size: 11pt;
+                    font-weight: 800;
+                }
+
+                .doc-print-status-meta {
+                    display: grid;
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                    gap: 2mm 8mm;
+                    margin: 0 0 3mm;
+                }
+
+                    .doc-print-status-meta dt {
+                        color: #41536b;
+                        font-size: 8pt;
+                        font-weight: 700;
+                        text-transform: uppercase;
+                    }
+
+                    .doc-print-status-meta dd {
+                        margin: 0;
+                        color: #172033;
+                        font-size: 10pt;
+                    }
+
+                .doc-print-status-note {
+                    margin: 2mm 0 0;
+                    padding-top: 2mm;
+                    border-top: 1px solid #cfd6df;
+                    color: #172033;
+                    font-size: 9.5pt;
+                    font-style: italic;
+                }
+
             .doc-print-toc {
                 display: block;
                 page-break-after: always;
@@ -1423,36 +1514,724 @@
                 display: none !important;
             }
         }
+
+        /* ================================================================
+           Professional documentation workspace redesign
+           ================================================================ */
+
+        .doc-page {
+            --pro-navy-950: #13203a;
+            --pro-navy-900: #172f59;
+            --pro-navy-800: #28385e;
+            --pro-navy-700: #405577;
+            --pro-blue: #4f78c7;
+            --pro-cyan: #55b8c8;
+            --pro-bg: #f4f7fb;
+            --pro-card: #ffffff;
+            --pro-text: #41536b;
+            --pro-muted: #718198;
+            --pro-line: #dfe7f1;
+            --pro-green: #16866a;
+            --pro-green-soft: #e8f6f1;
+            --pro-amber: #b8750d;
+            --pro-amber-soft: #fff5df;
+            --pro-red: #c44d58;
+            --pro-red-soft: #fdecef;
+            max-width: 1560px;
+            padding-bottom: 1.5rem;
+        }
+
+        .doc-pro-hero {
+            position: relative;
+            overflow: hidden;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 1.5rem;
+            align-items: center;
+            min-height: 164px;
+            padding: 1.45rem 1.65rem;
+            color: #fff;
+            background:
+                radial-gradient(circle at 88% 16%, rgba(255,255,255,.12), transparent 25%),
+                linear-gradient(125deg, var(--pro-navy-950), var(--pro-navy-800) 62%, #5c7493);
+            border: 1px solid rgba(255,255,255,.12);
+            border-radius: 24px;
+            box-shadow: 0 22px 56px rgba(23,47,89,.19);
+        }
+
+        .doc-pro-hero::after {
+            content: "";
+            position: absolute;
+            right: -115px;
+            top: -170px;
+            width: 360px;
+            height: 360px;
+            border: 1px solid rgba(255,255,255,.12);
+            border-radius: 50%;
+            box-shadow:
+                0 0 0 40px rgba(255,255,255,.035),
+                0 0 0 86px rgba(255,255,255,.018);
+            pointer-events: none;
+        }
+
+        .doc-pro-hero-copy,
+        .doc-pro-hero-score {
+            position: relative;
+            z-index: 1;
+        }
+
+        .doc-pro-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: .42rem;
+            margin-bottom: .45rem;
+            color: rgba(255,255,255,.72);
+            font-size: .68rem;
+            font-weight: 900;
+            letter-spacing: .12em;
+            text-transform: uppercase;
+        }
+
+        .doc-pro-hero h1 {
+            margin: 0;
+            color: #fff;
+            font-size: clamp(1.7rem, 3vw, 2.35rem);
+            font-weight: 900;
+            letter-spacing: -.045em;
+            line-height: 1.08;
+        }
+
+        .doc-pro-hero p {
+            max-width: 880px;
+            margin: .52rem 0 0;
+            color: rgba(255,255,255,.76);
+            font-size: .86rem;
+            line-height: 1.62;
+        }
+
+        .doc-pro-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .46rem;
+            margin-top: .8rem;
+        }
+
+        .doc-pro-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: .36rem;
+            padding: .4rem .58rem;
+            color: rgba(255,255,255,.88);
+            background: rgba(255,255,255,.08);
+            border: 1px solid rgba(255,255,255,.12);
+            border-radius: 999px;
+            font-size: .65rem;
+            font-weight: 780;
+            backdrop-filter: blur(4px);
+        }
+
+        .doc-pro-hero-score {
+            min-width: 178px;
+            padding: .95rem 1rem;
+            text-align: center;
+            background: rgba(255,255,255,.09);
+            border: 1px solid rgba(255,255,255,.14);
+            border-radius: 18px;
+            backdrop-filter: blur(8px);
+        }
+
+        .doc-pro-hero-score strong {
+            display: block;
+            color: #fff;
+            font-size: 1.95rem;
+            font-weight: 900;
+            line-height: 1;
+        }
+
+        .doc-pro-hero-score span {
+            display: block;
+            margin-top: .25rem;
+            color: rgba(255,255,255,.63);
+            font-size: .6rem;
+            font-weight: 850;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+        }
+
+        .doc-pro-hero-score small {
+            display: block;
+            margin-top: .48rem;
+            color: rgba(255,255,255,.84);
+            font-size: .65rem;
+            font-weight: 760;
+            line-height: 1.42;
+        }
+
+        .doc-pro-controls {
+            display: grid;
+            grid-template-columns: minmax(230px,.72fr) minmax(0,1.35fr) auto;
+            gap: .78rem;
+            align-items: center;
+            margin-top: .82rem;
+            padding: .8rem;
+            background: #fff;
+            border: 1px solid var(--pro-line);
+            border-radius: 17px;
+            box-shadow: 0 14px 38px rgba(29,52,88,.07);
+        }
+
+        .doc-pro-field label {
+            display: block;
+            margin-bottom: .28rem;
+            color: var(--pro-muted);
+            font-size: .61rem;
+            font-weight: 900;
+            letter-spacing: .06em;
+            text-transform: uppercase;
+        }
+
+        .doc-pro-select {
+            min-height: 42px;
+            color: var(--pro-navy-950);
+            background: #fff;
+            border: 1px solid #cfd9e6;
+            border-radius: 10px;
+            font-size: .76rem;
+            font-weight: 650;
+        }
+
+        .doc-pro-select:focus {
+            border-color: var(--pro-blue);
+            box-shadow: 0 0 0 .2rem rgba(79,120,199,.12);
+        }
+
+        .doc-pro-project {
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            gap: .66rem;
+            padding: .61rem .68rem;
+            background: #f8faff;
+            border: 1px solid #e2e9f3;
+            border-radius: 11px;
+        }
+
+        .doc-pro-project-icon {
+            flex: 0 0 auto;
+            width: 36px;
+            height: 36px;
+            display: grid;
+            place-items: center;
+            color: var(--pro-navy-800);
+            background: #edf3fb;
+            border-radius: 10px;
+        }
+
+        .doc-pro-project h2 {
+            margin: 0;
+            color: var(--pro-navy-950);
+            font-size: .79rem;
+            font-weight: 850;
+            line-height: 1.34;
+            overflow-wrap: anywhere;
+        }
+
+        .doc-pro-project p {
+            margin: .13rem 0 0;
+            color: var(--pro-muted);
+            font-size: .61rem;
+            line-height: 1.38;
+            overflow-wrap: anywhere;
+        }
+
+        .doc-pro-primary,
+        .doc-pro-secondary {
+            min-height: 42px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: .4rem;
+            padding: .55rem .8rem;
+            border-radius: 10px;
+            font-size: .7rem;
+            font-weight: 850;
+            white-space: nowrap;
+        }
+
+        .doc-pro-primary {
+            color: #fff !important;
+            background: linear-gradient(135deg, var(--pro-navy-800), var(--pro-navy-700));
+            border: 0;
+            box-shadow: 0 10px 21px rgba(40,56,94,.15);
+        }
+
+        .doc-pro-primary:hover {
+            background: linear-gradient(135deg, var(--pro-navy-900), var(--pro-navy-700));
+        }
+
+        .doc-pro-primary:disabled {
+            cursor: wait;
+            opacity: .68;
+        }
+
+        .doc-pro-secondary {
+            color: var(--pro-navy-800);
+            background: #fff;
+            border: 1px solid #cfd9e6;
+        }
+
+        .doc-pro-secondary:hover {
+            color: var(--pro-navy-900);
+            background: #edf3fb;
+        }
+
+        .doc-passport {
+            margin-top: .82rem;
+            background: #fff;
+            border: 1px solid var(--pro-line);
+            border-radius: 17px;
+            box-shadow: 0 8px 24px rgba(29,52,88,.045);
+        }
+
+        .doc-passport-main {
+            display: grid;
+            grid-template-columns: minmax(210px,1.15fr) repeat(4,minmax(115px,.55fr));
+            gap: .65rem;
+            align-items: stretch;
+            padding: .8rem;
+        }
+
+        .doc-passport-intro {
+            display: flex;
+            align-items: flex-start;
+            gap: .62rem;
+            padding: .68rem;
+            background: #f8faff;
+            border-radius: 12px;
+        }
+
+        .doc-passport-icon {
+            flex: 0 0 auto;
+            width: 35px;
+            height: 35px;
+            display: grid;
+            place-items: center;
+            color: var(--pro-navy-800);
+            background: #edf3fb;
+            border-radius: 10px;
+        }
+
+        .doc-passport-intro h3 {
+            margin: 0;
+            color: var(--pro-navy-950);
+            font-size: .8rem;
+            font-weight: 900;
+        }
+
+        .doc-passport-intro p {
+            margin: .18rem 0 0;
+            color: var(--pro-muted);
+            font-size: .61rem;
+            line-height: 1.42;
+        }
+
+        .doc-passport-stat {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-width: 0;
+            padding: .66rem;
+            background: #fff;
+            border: 1px solid #e3eaf3;
+            border-radius: 12px;
+        }
+
+        .doc-passport-stat > span {
+            color: var(--pro-muted);
+            font-size: .54rem;
+            font-weight: 900;
+            letter-spacing: .06em;
+            text-transform: uppercase;
+        }
+
+        .doc-passport-stat > strong {
+            margin-top: .2rem;
+            color: var(--pro-navy-950);
+            font-size: .72rem;
+            font-weight: 850;
+            line-height: 1.36;
+            overflow-wrap: anywhere;
+        }
+
+        .doc-passport-stat > strong.score {
+            color: var(--pro-navy-800);
+            font-size: 1.12rem;
+            line-height: 1;
+        }
+
+        .doc-pro-status {
+            display: inline-flex;
+            align-items: center;
+            gap: .32rem;
+            width: fit-content;
+            padding: .32rem .48rem;
+            border-radius: 999px;
+            font-size: .58rem;
+            font-weight: 850;
+            line-height: 1.2;
+        }
+
+        .doc-pro-status.success {
+            color: #176844;
+            background: var(--pro-green-soft);
+        }
+
+        .doc-pro-status.warning {
+            color: #84580e;
+            background: var(--pro-amber-soft);
+        }
+
+        .doc-pro-status.danger {
+            color: #983a43;
+            background: var(--pro-red-soft);
+        }
+
+        .doc-pro-status.neutral {
+            color: #52657b;
+            background: #edf2f7;
+        }
+
+        .doc-passport-note {
+            display: flex;
+            align-items: flex-start;
+            gap: .52rem;
+            margin: 0 .8rem .8rem;
+            padding: .62rem .7rem;
+            color: #785216;
+            background: #fff9ec;
+            border: 1px solid #edd9ac;
+            border-radius: 11px;
+            font-size: .65rem;
+            line-height: 1.48;
+        }
+
+        .doc-passport-details {
+            border-top: 1px solid var(--pro-line);
+        }
+
+        .doc-passport-details summary {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .7rem;
+            padding: .7rem .85rem;
+            color: var(--pro-navy-800);
+            cursor: pointer;
+            list-style: none;
+            font-size: .65rem;
+            font-weight: 850;
+        }
+
+        .doc-passport-details summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .doc-passport-grid {
+            display: grid;
+            grid-template-columns: repeat(4,minmax(0,1fr));
+            gap: .5rem;
+            padding: 0 .8rem .8rem;
+        }
+
+        .doc-passport-detail {
+            padding: .62rem;
+            background: #f8faff;
+            border: 1px solid #e3eaf3;
+            border-radius: 10px;
+        }
+
+        .doc-passport-detail span,
+        .doc-passport-detail strong {
+            display: block;
+        }
+
+        .doc-passport-detail span {
+            color: var(--pro-muted);
+            font-size: .52rem;
+            font-weight: 900;
+            letter-spacing: .05em;
+            text-transform: uppercase;
+        }
+
+        .doc-passport-detail strong {
+            margin-top: .2rem;
+            color: var(--pro-navy-950);
+            font-size: .63rem;
+            line-height: 1.42;
+            overflow-wrap: anywhere;
+        }
+
+        /* Reading workspace: calmer, larger, and document-first. */
+        .doc-reader {
+            grid-template-columns: 265px minmax(0,1fr);
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .doc-reader-sidebar {
+            top: 86px;
+            border-radius: 17px;
+            box-shadow: 0 14px 38px rgba(29,52,88,.07);
+        }
+
+        .doc-reader-sidebar-head {
+            padding: .9rem;
+        }
+
+        .doc-reader-sidebar-head span {
+            font-size: .57rem;
+            color: var(--pro-navy-800);
+        }
+
+        .doc-reader-sidebar-head strong {
+            font-size: .77rem;
+        }
+
+        .doc-chapter-nav {
+            padding: .48rem;
+        }
+
+        .doc-chapter-btn {
+            grid-template-columns: 31px minmax(0,1fr) auto;
+            padding: .52rem;
+            border-radius: 10px;
+        }
+
+        .doc-chapter-btn:hover,
+        .doc-chapter-btn.is-active {
+            color: var(--pro-navy-800);
+            background: #edf3fb;
+            border-color: #d7e2f0;
+        }
+
+        .doc-chapter-btn-number {
+            width: 29px;
+            height: 29px;
+            color: var(--pro-navy-800);
+            border-radius: 8px;
+        }
+
+        .doc-chapter-btn.is-active .doc-chapter-btn-number {
+            background: var(--pro-navy-800);
+        }
+
+        .doc-reader-toolbar {
+            padding: .76rem .85rem;
+            border-radius: 13px;
+        }
+
+        .doc-reader-toolbar-copy h2 {
+            font-size: .87rem;
+        }
+
+        .doc-chapter {
+            border-radius: 20px;
+            box-shadow: 0 16px 42px rgba(29,52,88,.07);
+        }
+
+        .doc-chapter-head {
+            grid-template-columns: auto minmax(0,1fr);
+            padding: 1rem 1.05rem;
+            color: var(--pro-navy-950);
+            background: linear-gradient(135deg,#eef3fa,#f8faff);
+            border-bottom: 1px solid var(--pro-line);
+        }
+
+        .doc-chapter-number {
+            width: 48px;
+            height: 48px;
+            color: #fff;
+            background: linear-gradient(135deg,var(--pro-navy-800),var(--pro-navy-700));
+            box-shadow: 0 9px 20px rgba(40,56,94,.14);
+        }
+
+        .doc-chapter-head h2 {
+            color: var(--pro-navy-950);
+            font-size: 1.14rem;
+        }
+
+        .doc-chapter-head p {
+            color: var(--pro-muted);
+            font-size: .69rem;
+        }
+
+        .doc-simple-box {
+            margin: .9rem;
+            padding: .78rem .82rem;
+            color: #31527e;
+            background: #edf3fb;
+            border-color: #d5e1f0;
+        }
+
+        .doc-simple-box p {
+            font-size: .65rem;
+            line-height: 1.5;
+        }
+
+        .doc-chapter-body {
+            padding: 0 .9rem .9rem;
+        }
+
+        .doc-readable-card {
+            grid-template-columns: 46px minmax(0,1fr);
+            padding: .82rem;
+        }
+
+        .doc-readable-content {
+            color: var(--pro-text);
+            font-size: .74rem;
+            line-height: 1.7;
+        }
+
+        .doc-readable-content::first-line {
+            color: var(--pro-navy-950);
+            font-weight: 800;
+        }
+
+        .doc-code {
+            font-size: .69rem;
+            line-height: 1.66;
+        }
+
+        .doc-empty {
+            min-height: 480px;
+        }
+
+        @@media (max-width: 1240px) {
+            .doc-passport-main {
+                grid-template-columns: repeat(2,minmax(0,1fr));
+            }
+
+            .doc-passport-intro {
+                grid-column: 1 / -1;
+            }
+
+            .doc-pro-controls {
+                grid-template-columns: minmax(230px,.8fr) minmax(0,1.2fr);
+            }
+
+            .doc-pro-controls form {
+                grid-column: 1 / -1;
+            }
+
+            .doc-pro-controls .doc-pro-primary {
+                width: 100%;
+            }
+        }
+
+        @@media (max-width: 980px) {
+            .doc-pro-hero {
+                grid-template-columns: 1fr;
+            }
+
+            .doc-pro-hero-score {
+                min-width: 0;
+                text-align: left;
+            }
+
+            .doc-pro-controls {
+                grid-template-columns: 1fr;
+            }
+
+            .doc-pro-controls form {
+                grid-column: auto;
+            }
+
+            .doc-passport-grid {
+                grid-template-columns: repeat(2,minmax(0,1fr));
+            }
+        }
+
+        @@media (max-width: 760px) {
+            .doc-passport-main {
+                grid-template-columns: 1fr;
+            }
+
+            .doc-passport-intro {
+                grid-column: auto;
+            }
+        }
+
+        @@media (max-width: 560px) {
+            .doc-pro-hero {
+                padding: 1.05rem;
+            }
+
+            .doc-passport-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @@media print {
+            .doc-pro-hero,
+            .doc-pro-controls,
+            .doc-passport {
+                display: none !important;
+            }
+        }
+
     </style>
 }
 
 <section class="doc-page">
 
-    <header class="doc-cover-header no-print">
-        <div class="doc-cover-copy">
-            <div class="doc-cover-kicker">
+    <header class="doc-pro-hero no-print">
+        <div class="doc-pro-hero-copy">
+            <div class="doc-pro-kicker">
                 <i class="bi bi-stars" aria-hidden="true"></i>
                 AI-Guided Documentation
             </div>
 
-            <h1 class="doc-cover-title">Software Documentation Studio</h1>
+            <h1>Software Documentation Studio</h1>
 
-            <p class="doc-cover-subtitle">
-                Read your project documentation one chapter at a time. Each section starts with a simple explanation,
-                then shows the technical details only when you are ready to review them.
+            <p>
+                Review the generated SRS and software design package one chapter
+                at a time. Quality status and technical provenance remain available
+                without distracting from the document itself.
             </p>
+
+            <div class="doc-pro-meta">
+                <span class="doc-pro-chip">
+                    <i class="bi bi-file-earmark-text"></i>
+                    SRS + Software Design
+                </span>
+
+                <span class="doc-pro-chip">
+                    <i class="bi bi-shield-check"></i>
+                    @validationLabel
+                </span>
+
+                @if (generatedAt.HasValue)
+                {
+                    <span class="doc-pro-chip">
+                        <i class="bi bi-clock-history"></i>
+                        Generated @generatedAt.Value.ToString("dd MMM yyyy")
+                    </span>
+                }
+            </div>
         </div>
 
-        <div class="doc-cover-badges">
-            <div class="doc-cover-badge">
-                <span>Document Type</span>
-                <strong>SRS + Software Design</strong>
-            </div>
+        <div class="doc-pro-hero-score">
+            <strong>@qualityScoreLabel</strong>
+            <span>Quality score</span>
 
-            <div class="doc-cover-badge">
-                <span>Safety Layer</span>
-                <strong>Reviewed &amp; Validated</strong>
-            </div>
+            <small>
+                @(semanticReviewCompleted
+                    ? "Semantic quality review completed"
+                    : quality == null
+                        ? "Generate documentation to calculate quality"
+                        : "Limited confidence until semantic review completes")
+            </small>
         </div>
     </header>
 
@@ -1480,145 +2259,189 @@
         }
     }
 
-    @if (Model.LatestReview != null)
+    @if (quality != null || provenance != null || Model.LatestReview != null)
     {
-        var (badgeClass, badgeLabel) = Model.DescribeReview(Model.LatestReview);
+        <section class="doc-passport no-print"
+                 aria-label="Documentation Quality Passport">
+            <div class="doc-passport-main">
+                <div class="doc-passport-intro">
+                    <div class="doc-passport-icon">
+                        <i class="bi bi-patch-check"></i>
+                    </div>
 
-        <div class="doc-review-bar no-print">
-            <div class="doc-review-copy">
-                <i class="bi bi-shield-check" aria-hidden="true"></i>
-                <span>
-                    This documentation includes a Quality Passport and a recorded Review Layer decision.
-                </span>
+                    <div>
+                        <h3>Quality Passport</h3>
+                        <p>
+                            Validation, confidence, provenance, and review status
+                            for the document currently displayed.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="doc-passport-stat">
+                    <span>Quality score</span>
+                    <strong class="score">@qualityScoreLabel</strong>
+                </div>
+
+                <div class="doc-passport-stat">
+                    <span>Validation level</span>
+
+                    <strong>
+                        <span class="doc-pro-status @validationTone">
+                            <i class="bi @(semanticReviewCompleted
+                                ? "bi-check2-circle"
+                                : "bi-exclamation-circle")"></i>
+                            @validationLabel
+                        </span>
+                    </strong>
+                </div>
+
+                <div class="doc-passport-stat">
+                    <span>Important warnings</span>
+                    <strong>@(quality?.ImportantWarningCount ?? 0)</strong>
+                </div>
+
+                <div class="doc-passport-stat">
+                    <span>Output origin</span>
+                    <strong>
+                        @(provenance?.OutputOriginLabel ?? "Not available")
+                    </strong>
+                </div>
             </div>
 
-            <span class="badge @badgeClass" title="@Model.LatestReview.DecisionReason">
-                @badgeLabel
-            </span>
-        </div>
-    }
-
-    @if (Model.Provenance != null)
-    {
-        var provenance = Model.Provenance;
-
-        <section class="doc-provenance-panel no-print" aria-label="Generation provenance">
-            <div class="doc-provenance-item">
-                <span>Source</span>
-                <strong>@(provenance.Source ?? "Unknown")</strong>
-            </div>
-
-            @if (!string.IsNullOrWhiteSpace(provenance.Model))
+            @if (!semanticReviewCompleted && quality != null)
             {
-                <div class="doc-provenance-item">
-                    <span>Model</span>
-                    <strong>@provenance.Model</strong>
+                <div class="doc-passport-note">
+                    <i class="bi bi-exclamation-triangle-fill"></i>
+
+                    <span>
+                        Structural validation completed, but semantic review did
+                        not complete. Treat this document as a draft and review it
+                        with the supervisor before final submission.
+                    </span>
                 </div>
             }
 
-            <div class="doc-provenance-item">
-                <span>Output origin</span>
-                <strong>@provenance.OutputOriginLabel</strong>
-            </div>
+            <details class="doc-passport-details">
+                <summary>
+                    <span>
+                        <i class="bi bi-sliders me-1"></i>
+                        View technical provenance and review details
+                    </span>
 
-            <div class="doc-provenance-item">
-                <span>Review</span>
-                <strong>@provenance.ReviewLevelLabel</strong>
-            </div>
+                    <i class="bi bi-chevron-down"></i>
+                </summary>
 
-            @if (provenance.GeneratedAt.HasValue)
-            {
-                <div class="doc-provenance-item">
-                    <span>Generated</span>
-                    <strong>@provenance.GeneratedAt.Value.ToString("u")</strong>
+                <div class="doc-passport-grid">
+                    <div class="doc-passport-detail">
+                        <span>Review status</span>
+                        <strong>
+                            @(quality?.ReviewStatusLabel ??
+                              provenance?.ReviewLevelLabel ??
+                              "Not available")
+                        </strong>
+                    </div>
+
+                    <div class="doc-passport-detail">
+                        <span>Output review level</span>
+                        <strong>
+                            @(quality?.OutputReviewLevelLabel ??
+                              provenance?.ReviewLevelLabel ??
+                              "Not available")
+                        </strong>
+                    </div>
+
+                    <div class="doc-passport-detail">
+                        <span>Provider</span>
+                        <strong>
+                            @(provenance?.Provider ??
+                              provenance?.Source ??
+                              "Unknown")
+                        </strong>
+                    </div>
+
+                    <div class="doc-passport-detail">
+                        <span>Model</span>
+                        <strong>
+                            @(string.IsNullOrWhiteSpace(provenance?.Model)
+                                ? "Not recorded"
+                                : provenance.Model)
+                        </strong>
+                    </div>
+
+                    <div class="doc-passport-detail">
+                        <span>Provenance</span>
+                        <strong>
+                            @(quality?.ProvenanceSummary ??
+                              provenance?.Source ??
+                              "Unknown")
+                        </strong>
+                    </div>
+
+                    <div class="doc-passport-detail">
+                        <span>Semantic review</span>
+                        <strong>
+                            @(quality == null
+                                ? "Not available"
+                                : quality.SemanticReviewCompleted
+                                    ? "Completed"
+                                    : "Not completed")
+                        </strong>
+                    </div>
+
+                    <div class="doc-passport-detail">
+                        <span>Generated</span>
+                        <strong>
+                            @(generatedAt.HasValue
+                                ? generatedAt.Value.ToString("u")
+                                : "Not available")
+                        </strong>
+                    </div>
+
+                    <div class="doc-passport-detail">
+                        <span>Document state</span>
+                        <strong>@(docs?.SupervisorStatus ?? "Draft")</strong>
+                    </div>
                 </div>
-            }
 
-            @if (!string.IsNullOrWhiteSpace(provenance.Warning))
-            {
-                <div class="doc-provenance-warning">
-                    <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
-                    <span>@provenance.Warning</span>
-                </div>
-            }
-        </section>
-    }
-
-    @if (Model.QualityPanel != null)
-    {
-        var quality = Model.QualityPanel;
-
-        <section class="doc-provenance-panel no-print" aria-label="Quality and review summary">
-            <div class="doc-provenance-item">
-                <span>Quality score</span>
-                <strong>
-                    @(quality.OverallScore.HasValue ? $"{quality.OverallScore}/100" : "Not available")
-                    @if (!quality.SemanticReviewCompleted || quality.ImportantWarningCount > 0)
-                    {
-                        <span class="badge bg-warning text-dark" style="margin-left:.35rem;">Limited confidence</span>
-                    }
-                </strong>
-            </div>
-
-            <div class="doc-provenance-item">
-                <span>Review status</span>
-                <strong>@quality.ReviewStatusLabel</strong>
-            </div>
-
-            <div class="doc-provenance-item">
-                <span>Output review level</span>
-                <strong>@quality.OutputReviewLevelLabel</strong>
-            </div>
-
-            <div class="doc-provenance-item">
-                <span>Semantic review completed</span>
-                <strong>@(quality.SemanticReviewCompleted ? "Yes" : "No")</strong>
-            </div>
-
-            <div class="doc-provenance-item">
-                <span>Provenance</span>
-                <strong>@quality.ProvenanceSummary</strong>
-            </div>
-
-            <div class="doc-provenance-item">
-                <span>Important warnings</span>
-                <strong>@quality.ImportantWarningCount</strong>
-            </div>
-
-            @if (quality.LastGeneratedAt.HasValue)
-            {
-                <div class="doc-provenance-item">
-                    <span>Last successful generation</span>
-                    <strong>@quality.LastGeneratedAt.Value.ToString("u")</strong>
-                </div>
-            }
+                @if (!string.IsNullOrWhiteSpace(provenance?.Warning))
+                {
+                    <div class="doc-passport-note">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <span>@provenance.Warning</span>
+                    </div>
+                }
+            </details>
         </section>
     }
 
     <div asp-validation-summary="ModelOnly" class="text-danger mt-2 no-print"></div>
 
-    <section class="doc-source-bar no-print" aria-label="Documentation source">
-        <div class="doc-source-control">
-            <label asp-for="SelectedProjectIdeaId">Saved Project Idea</label>
+    <section class="doc-pro-controls no-print"
+             aria-label="Documentation project and generation controls">
+        <div class="doc-pro-field">
+            <label asp-for="SelectedProjectIdeaId">Project idea</label>
 
             <select asp-for="SelectedProjectIdeaId"
                     asp-items="Model.ProjectIdeaOptions"
-                    class="form-select doc-source-select"
+                    class="form-select doc-pro-select"
                     onchange="if(this.value){ window.location='?projectId=@Model.ProjectId&amp;projectIdeaId=' + this.value; }">
             </select>
 
-            <span asp-validation-for="SelectedProjectIdeaId" class="text-danger small"></span>
+            <span asp-validation-for="SelectedProjectIdeaId"
+                  class="text-danger small"></span>
         </div>
 
         @if (hasSelectedIdea)
         {
-            <div class="doc-source-project">
-                <div class="doc-source-icon" aria-hidden="true">
+            <div class="doc-pro-project">
+                <div class="doc-pro-project-icon" aria-hidden="true">
                     <i class="bi bi-lightbulb"></i>
                 </div>
 
                 <div class="min-w-0">
                     <h2>@Model.Request.ProjectTitle</h2>
+
                     <p>
                         @(string.IsNullOrWhiteSpace(Model.Request.Domain)
                             ? "Domain not specified"
@@ -1633,31 +2456,39 @@
         }
         else
         {
-            <div class="doc-source-project">
-                <div class="doc-source-icon" aria-hidden="true">
+            <div class="doc-pro-project">
+                <div class="doc-pro-project-icon" aria-hidden="true">
                     <i class="bi bi-arrow-left-right"></i>
                 </div>
 
                 <div>
-                    <h2>No idea selected</h2>
-                    <p>Choose a saved project idea to load its real project context.</p>
+                    <h2>No project idea selected</h2>
+                    <p>Choose the official saved idea for the active project.</p>
                 </div>
             </div>
         }
 
-        <form method="post" asp-page-handler="Generate" id="docGenerateForm">
+        <form method="post"
+              asp-page-handler="Generate"
+              id="docGenerateForm">
             @Html.AntiForgeryToken()
+
             <input type="hidden"
                    name="projectId"
                    value="@Model.ProjectId" />
-            <input type="hidden" asp-for="SelectedProjectIdeaId" />
+
+            <input type="hidden"
+                   asp-for="SelectedProjectIdeaId" />
 
             <button type="submit"
-                    class="btn doc-generate-btn"
+                    class="btn doc-pro-primary"
                     id="docGenerateBtn"
                     disabled="@(!hasSelectedIdea ? "disabled" : null)">
                 <i class="bi bi-stars" aria-hidden="true"></i>
-                @(docs == null ? "Generate Documentation" : "Regenerate Documentation")
+
+                @(docs == null
+                    ? "Generate Documentation"
+                    : "Regenerate Documentation")
             </button>
         </form>
     </section>
@@ -1731,6 +2562,66 @@
                 </div>
 
                 <div class="doc-print-footer">Generated by FYPilot</div>
+            </section>
+
+            @{
+                // Print/PDF honesty fix: the on-screen Quality Passport
+                // (.doc-passport, further below) is deliberately kept out of
+                // print output -- it's interactive (a collapsible <details>
+                // panel) and unsuited to a static page. Print media instead
+                // shows THIS static summary, built from the exact same
+                // already-computed quality/provenance variables the
+                // on-screen passport uses (see this file's top @{ } block).
+                // See DocumentationGeneratorModel.IsAcceptedForPrint's
+                // docstring for why acceptance requires BOTH Usable and
+                // SemanticReviewCompleted, not just one.
+                var reviewAccepted = FYPilot.Web.Pages.Student.DocumentationGeneratorModel.IsAcceptedForPrint(Model.LatestReview, quality);
+            }
+
+            <section class="doc-print-status" aria-label="Document Review and Provenance Status">
+                <h2>Document Review and Provenance Status</h2>
+
+                <p class="doc-print-status-headline">
+                    @(reviewAccepted
+                        ? "Accepted -- this document passed the configured AI quality-review process."
+                        : "Manual review required -- do not treat this document as fully approved.")
+                </p>
+
+                <dl class="doc-print-status-meta">
+                    <div>
+                        <dt>Review status</dt>
+                        <dd>@(quality?.ReviewStatusLabel ?? provenance?.ReviewLevelLabel ?? "Not available")</dd>
+                    </div>
+                    <div>
+                        <dt>Review detail</dt>
+                        <dd>@(quality?.OutputReviewLevelLabel ?? "Not available")</dd>
+                    </div>
+                    <div>
+                        <dt>Output origin</dt>
+                        <dd>@(provenance?.OutputOriginLabel ?? "Not available")</dd>
+                    </div>
+                    <div>
+                        <dt>Important warnings</dt>
+                        <dd>@(quality?.ImportantWarningCount ?? 0)</dd>
+                    </div>
+                    <div>
+                        <dt>Generated</dt>
+                        <dd>@(generatedAt.HasValue ? generatedAt.Value.ToString("u") : "Not available")</dd>
+                    </div>
+                </dl>
+
+                @if (!semanticReviewCompleted && quality != null)
+                {
+                    <p class="doc-print-status-note">
+                        Structural validation completed, but semantic review did not complete.
+                        Treat this document as a draft and review it with the supervisor before final submission.
+                    </p>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(provenance?.Warning))
+                {
+                    <p class="doc-print-status-note">@provenance.Warning</p>
+                }
             </section>
 
             <section class="doc-print-toc">
@@ -2047,9 +2938,9 @@
                                     </button>
                                 </div>
 
-                                <pre class="doc-code" id="extended-code">@(string.IsNullOrWhiteSpace(docs.AiTechnicalReport)
+                                <div class="doc-code" id="extended-code" style="font-family:inherit; color:var(--doc-ink); background:#fff; border-color:var(--doc-line); font-size:.74rem; line-height:1.75;">@(string.IsNullOrWhiteSpace(docs.AiTechnicalReport)
                                     ? "No extended report returned."
-                                    : docs.AiTechnicalReport)</pre>
+                                    : docs.AiTechnicalReport)</div>
                             </div>
                         </div>
 

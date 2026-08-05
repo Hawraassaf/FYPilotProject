@@ -17,6 +17,7 @@ Run from services/FYPilot.AI:
 
 import os
 import sys
+import time
 import unittest
 
 _SERVICE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -185,7 +186,7 @@ class PartialProviderFailureTests(unittest.TestCase):
             ],
         }
 
-        def fake_generate_json(prompt, use_search=False, max_tokens=None):
+        def fake_generate_json(prompt, use_search=False, max_tokens=None, **kwargs):
             if "functionalRequirements" in prompt and "nonFunctionalRequirements" in prompt:
                 return LLMResult(ok=True, provider="fake", model="fake-model", text="", data=good_requirements)
             return LLMResult(ok=False, provider="fake", model="fake-model", text="", data=None, error="simulated failure")
@@ -205,7 +206,7 @@ class PartialProviderFailureTests(unittest.TestCase):
         self.assertIn("Chat Interface", [s["name"] for s in doc["uiScreens"]])
 
     def test_all_sections_failing_is_reported_as_full_fallback(self):
-        def always_fails(prompt, use_search=False, max_tokens=None):
+        def always_fails(prompt, use_search=False, max_tokens=None, **kwargs):
             return LLMResult(ok=False, provider="fake", model="fake-model", text="", data=None, error="simulated failure")
 
         self.agent.provider_chain.generate_json = always_fails
@@ -216,7 +217,7 @@ class PartialProviderFailureTests(unittest.TestCase):
         self.assertLessEqual(doc["documentationQualityScore"], 70)
 
     def test_partial_fallback_warning_names_only_failed_sections(self):
-        def fails_use_cases_only(prompt, use_search=False, max_tokens=None):
+        def fails_use_cases_only(prompt, use_search=False, max_tokens=None, **kwargs):
             if "mainFlow" in prompt:
                 return LLMResult(ok=False, provider="fake", model="fake-model", text="", data=None, error="simulated failure")
             return LLMResult(ok=False, provider="fake", model="fake-model", text="", data=None, error="simulated failure")
@@ -228,7 +229,7 @@ class PartialProviderFailureTests(unittest.TestCase):
             "nonFunctionalRequirements": [{"id": "NFR-01", "title": "Y", "description": "d", "priority": "High", "source": "s", "measurableTarget": "t", "verificationMethod": "v"}],
         }
 
-        def fake_generate_json(prompt, use_search=False, max_tokens=None):
+        def fake_generate_json(prompt, use_search=False, max_tokens=None, **kwargs):
             if "functionalRequirements" in prompt and "nonFunctionalRequirements" in prompt:
                 return LLMResult(ok=True, provider="fake", model="fake-model", text="", data=good_requirements)
             return LLMResult(ok=False, provider="fake", model="fake-model", text="", data=None, error="simulated failure")
@@ -243,64 +244,73 @@ class PartialProviderFailureTests(unittest.TestCase):
 
 class SectionsTimeBudgetTests(unittest.TestCase):
     """
-    Live verification of this batch surfaced a real sustained Groq+Gemini
-    rate-limit outage: retrying every failed section once, with no overall
-    cap, could make a single request take tens of minutes. These tests lock
-    in the fix -- an overall soft time budget after which remaining
-    attempts/retries are skipped in favor of immediate fallback.
+    Live verification surfaced a real sustained Groq+Gemini rate-limit
+    outage: retrying every failed section, with no overall cap, could make a
+    single request take tens of minutes. The current design (bounded
+    ordered queue, see se_documentation_orchestrator.py's
+    _generate_llm_sections) replaced the previous "retry the whole
+    provider-chain attempt once per section" behavior entirely -- the
+    provider chain already tries up to 3 providers (DeepInfra/Groq/Ollama)
+    within ONE section attempt, and an outer per-section retry on top of
+    that was judged wasteful of an already-tight Writer budget. These tests
+    now cover _call_section_concurrent_safe (the per-section worker)
+    directly instead of the removed _call_section_safe.
     """
 
     def setUp(self):
         self.agent = SEDocumentationOrchestratorAgent()
 
-    def test_expired_budget_skips_the_call_entirely(self):
-        self.agent._sections_deadline = 0.0  # already in the past
+    def test_call_with_already_expired_writer_deadline_fails_fast(self):
+        """
+        _call_section_concurrent_safe itself doesn't independently gate
+        whether to attempt a call -- it relies on ProviderChain's own
+        cap_timeout_to_deadline cascade logic (_run_cascade) to refuse an
+        already-doomed provider attempt. This exercises that REAL cascade
+        logic (a fake PROVIDER object, not a replaced generate_json) so the
+        deadline check actually runs, proving the call fails fast rather
+        than hanging for a full configured timeout.
+        """
         calls = {"n": 0}
 
-        def should_never_be_called(prompt, use_search=False, max_tokens=None):
-            calls["n"] += 1
-            return LLMResult(ok=True, provider="fake", model="fake", text="", data={})
+        class _ShouldNeverBeCalledProvider:
+            name = "fake"
+            timeout_seconds = 180.0
 
-        self.agent.provider_chain.generate_json = should_never_be_called
-        result = self.agent._call_section_safe("requirements", "prompt", max_tokens=1000)
+            def generate_json(self, prompt, use_search=False, max_tokens=None, **kwargs):
+                calls["n"] += 1
+                return LLMResult(ok=True, provider="fake", model="fake", text="", data={})
 
-        self.assertIsNone(result)
+        self.agent.provider_chain.providers = [_ShouldNeverBeCalledProvider()]
+        already_expired = time.monotonic() - 5.0
+
+        result = self.agent._call_section_concurrent_safe(
+            "requirements", "prompt", 1000, already_expired, 1,
+        )
+
+        self.assertFalse(result.success)
         self.assertEqual(calls["n"], 0)
-        self.assertEqual(self.agent.section_provenance["requirements"], "fallback")
+        self.assertLess(result.duration, 2.0)  # fails fast, does not hang
 
-    def test_budget_expiring_after_first_attempt_skips_the_retry(self):
-        import time as time_module
+    def test_queue_raises_writer_budget_exceeded_when_deadline_already_passed(self):
+        """
+        The launch loop in _generate_llm_sections must not submit ANY
+        section once writer_deadline has already passed -- see
+        test_se_documentation_timeout_correction.py's
+        test_all_sections_timing_out_produces_writer_budget_exceeded_not_a_disguised_success
+        for the full generate()-level assertion; this is the narrower,
+        directly-scoped version against _generate_llm_sections itself.
+        """
+        from app.agents.se_documentation.se_documentation_orchestrator import WriterBudgetExceededError
+        from app.agents.se_documentation.project_facts import build_project_facts
 
-        self.agent._sections_deadline = time_module.monotonic() + 100.0
+        facts = build_project_facts(SEDocumentationRequest())
+        already_expired = time.monotonic() - 5.0
 
-        def fails_and_expires_budget(prompt, use_search=False, max_tokens=None):
-            self.agent._sections_deadline = 0.0  # simulate budget running out mid-call
-            return LLMResult(ok=False, provider="fake", model="fake", text="", data=None, error="simulated")
+        with self.assertRaises(WriterBudgetExceededError) as ctx:
+            self.agent._generate_llm_sections(SEDocumentationRequest(), facts, deadline=already_expired)
 
-        self.agent.provider_chain.generate_json = fails_and_expires_budget
-        result = self.agent._call_section_safe("requirements", "prompt", max_tokens=1000)
-
-        self.assertIsNone(result)
-        self.assertEqual(self.agent.section_provenance["requirements"], "fallback")
-
-    def test_ample_budget_still_allows_the_normal_retry(self):
-        import time as time_module
-
-        self.agent._sections_deadline = time_module.monotonic() + 100.0
-        calls = {"n": 0}
-
-        def fails_once_then_succeeds(prompt, use_search=False, max_tokens=None):
-            calls["n"] += 1
-            if calls["n"] == 1:
-                return LLMResult(ok=False, provider="fake", model="fake", text="", data=None, error="simulated")
-            return LLMResult(ok=True, provider="fake", model="fake", text="", data={"ok": True})
-
-        self.agent.provider_chain.generate_json = fails_once_then_succeeds
-        result = self.agent._call_section_safe("requirements", "prompt", max_tokens=1000)
-
-        self.assertEqual(result, {"ok": True})
-        self.assertEqual(calls["n"], 2)
-        self.assertEqual(self.agent.section_provenance["requirements"], "provider")
+        self.assertEqual(ctx.exception.completed_sections, [])
+        self.assertEqual(len(ctx.exception.missing_sections), 6)
 
 
 class ContentDepthScoringTests(unittest.TestCase):

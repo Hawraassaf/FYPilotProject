@@ -13,6 +13,7 @@ from app.agents.se_documentation.se_documentation_orchestrator import (
     SEDocumentationRequest,
     SEDocStudentProfile,
     SEDocSelectedIdea,
+    WriterBudgetExceededError,
 )
 from app.review.context import ReviewContext
 from app.review.pipeline import ReviewPipeline
@@ -20,6 +21,15 @@ from app.review.registry import get_agent_config
 from app.review.response import build_review_response
 
 router = APIRouter(tags=["SE Documentation"])
+
+
+# Reserved for the semantic Reviewer / one rewrite / final re-review -- the
+# Writer must never consume this. writer_deadline = global_deadline - this;
+# global_deadline itself (unmodified) is what reaches ReviewPipeline. See
+# SEDocumentationOrchestratorAgent._generate_llm_sections's docstring and
+# registry.py's SEDocumentationAgent.max_total_seconds comment for the full
+# history/measurement behind these numbers.
+_SEMANTIC_REVIEW_RESERVE_SECONDS = 300.0
 
 
 # The 6 core sections a real generation must actually produce -- matches
@@ -153,21 +163,52 @@ def generate_se_documentation(request: SEDocumentationRequest) -> Dict[str, Any]
     # SEDocumentationOrchestratorAgent.__init__'s "se_documentation" tier.
     pipeline = ReviewPipeline("SEDocumentationAgent", tier="se_documentation")
 
-    # ONE absolute deadline, computed here and passed unchanged into both the
-    # Writer callable (agent.generate_candidate) and the pipeline itself --
-    # this is what makes section generation, structural repair, semantic
-    # review, and rewrite all share the same budget instead of each stage
-    # getting its own fresh clock. See ReviewPipeline.run()'s and
-    # SEDocumentationOrchestratorAgent.generate()'s docstrings.
-    deadline = time.monotonic() + pipeline.config.max_total_seconds
+    # ONE global absolute deadline, computed here from the registry value
+    # (1200s) -- passed UNCHANGED to ReviewPipeline (structural repair,
+    # semantic review, rewrite, final re-review all measure against this
+    # exact value). The Writer callable gets a SEPARATE, earlier
+    # writer_deadline (global - the 300s semantic-review reserve) so the
+    # Writer can never consume the time set aside for review -- see
+    # SEDocumentationOrchestratorAgent._generate_llm_sections's docstring.
+    global_deadline = time.monotonic() + pipeline.config.max_total_seconds
+    writer_deadline = global_deadline - _SEMANTIC_REVIEW_RESERVE_SECONDS
 
-    result = pipeline.run(
-        lambda: agent.generate_candidate(request, deadline=deadline),
-        context,
-        writer_trusted_parts=context.trusted_text_fields(),
-        writer_untrusted_parts=context.untrusted_text_fields(),
-        deadline=deadline,
-    )
+    try:
+        result = pipeline.run(
+            lambda: agent.generate_candidate(request, deadline=writer_deadline),
+            context,
+            writer_trusted_parts=context.trusted_text_fields(),
+            writer_untrusted_parts=context.untrusted_text_fields(),
+            deadline=global_deadline,
+        )
+    except WriterBudgetExceededError as e:
+        # The Writer ran out of its own reserved budget before every core
+        # section could even be attempted -- distinct from a normal
+        # provider failure. Never assemble a partial/fallback document,
+        # never persist anything: .NET's acceptance gate rejects this
+        # outright (see DocumentationGeneratorService) and the previously
+        # accepted document is preserved untouched.
+        return {
+            "documentation": None,
+            "agent": "SEDocumentationAgent",
+            "llmUsed": False,
+            "source": "writer-budget-exceeded",
+            "provider": None,
+            "modelUsed": None,
+            "ollamaError": None,
+            "ollamaRawPreview": None,
+            "review": None,
+            "coreSectionFallback": False,
+            "writerBudgetExceeded": True,
+            "missingSections": e.missing_sections,
+            "completedSections": e.completed_sections,
+            "generatedAt": datetime.utcnow().isoformat(),
+            "message": (
+                f"Documentation generation ran out of time before {e.missing_sections} "
+                f"could be attempted (completed: {e.completed_sections}). "
+                "No document was saved; your previous documentation is unchanged."
+            ),
+        }
 
     documentation = (
         result.output if result.usable else agent.build_safe_fallback(request).model_dump()
@@ -216,6 +257,7 @@ def generate_se_documentation(request: SEDocumentationRequest) -> Dict[str, Any]
         "ollamaRawPreview": agent.last_raw_llm_response,
         "review": build_review_response(result),
         "coreSectionFallback": core_section_fallback,
+        "writerBudgetExceeded": False,
         "generatedAt": datetime.utcnow().isoformat(),
         "message": "SE documentation generated successfully",
     }
@@ -306,6 +348,16 @@ def run_se_documentation_job(job_id: str, request: SEDocumentationRequest):
             message="SE documentation generated successfully",
         )
 
+    except WriterBudgetExceededError as e:
+        update_job(
+            job_id,
+            status="failed",
+            progress=100,
+            message=(
+                f"Documentation generation ran out of time before {e.missing_sections} "
+                f"could be attempted (completed: {e.completed_sections})."
+            ),
+        )
     except Exception as e:
         update_job(
             job_id,

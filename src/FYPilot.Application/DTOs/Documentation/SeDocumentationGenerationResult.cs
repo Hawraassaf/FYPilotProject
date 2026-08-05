@@ -22,6 +22,13 @@ public enum SeDocumentationErrorCode
     // from ProviderUnavailable/ReviewRejected so logs/UI can say precisely
     // why a document with a real provider response was still rejected.
     CoreSectionFallback,
+    // Python's Writer stage ran out of its own reserved budget before every
+    // core section could even be ATTEMPTED (see WriterBudgetExceededError
+    // in se_documentation_orchestrator.py) -- distinct from
+    // ProviderUnavailable (a provider call was attempted and failed) and
+    // from CoreSectionFallback (every section was attempted, some just
+    // fell back to deterministic content).
+    WriterBudgetExceeded,
     PersistenceFailure,
     UnexpectedError,
 }

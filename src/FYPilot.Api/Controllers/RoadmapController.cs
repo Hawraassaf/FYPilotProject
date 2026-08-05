@@ -1,82 +1,48 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
-using FYPilot.Infrastructure.Data;
-using FYPilot.Application.DTOs;
-using FYPilot.Domain.Entities;
-using FYPilot.Application.Interfaces;
-using FYPilot.Infrastructure.Services;
 
 namespace FYPilot.Api.Controllers;
 
+/// <summary>
+/// DISABLED (Roadmap fallback-provenance stabilization). This controller
+/// used to call the static <see cref="FYPilot.Infrastructure.Services.RoadmapGenerator"/>
+/// -- a fully hardcoded, non-AI, non-reviewed 12-phase template that
+/// recommends forbidden technologies (React, React Native, AWS/Azure/
+/// Kubernetes) -- and wrote to the SAME ProjectRoadmap/RoadmapPhase tables
+/// the real Roadmap pipeline uses (Razor Page ->
+/// IAiServiceClient.GenerateProjectRoadmapAsync -> Python
+/// ProjectRoadmapAgent, see src/FYPilot.Web/Pages/Student/Roadmap.cshtml.cs).
+/// Nothing in the product calls this controller (FYPilot.Api is a
+/// separately-run process, not started by the AppHost by default), but a
+/// stray call to it -- authorized or not -- could silently overwrite a
+/// student's real, AI-reviewed roadmap with generic, unreviewed content.
+///
+/// Every route now returns 410 Gone rather than being deleted outright, so
+/// a caller gets an explicit, actionable error instead of a 404 (which
+/// looks like "this was never a route") or silent data corruption. The
+/// route itself is kept discoverable (rather than removed from routing)
+/// specifically so this message is what anyone hitting the old URL sees.
+/// </summary>
 [ApiController]
 [Route("api/roadmap")]
 [Authorize]
-public class RoadmapController(ApplicationDbContext db) : ControllerBase
+public class RoadmapController : ControllerBase
 {
-    private int UserId => int.Parse(User.FindFirst("userId")!.Value);
+    private const string DisabledMessage =
+        "This legacy Roadmap API is disabled. It generated generic, " +
+        "non-AI, unreviewed roadmap content and has been superseded by " +
+        "the AI-generated, reviewed Roadmap on the Student Roadmap page " +
+        "(Razor Page -> AI service -> ProjectRoadmapAgent). It no longer " +
+        "reads or writes roadmap data.";
 
     [HttpGet("{ideaId}")]
-    public async Task<IActionResult> Get(int ideaId)
-    {
-        var roadmap = await db.ProjectRoadmaps
-            .Include(r => r.Phases)
-            .FirstOrDefaultAsync(r => r.IdeaId == ideaId && r.UserId == UserId);
-        if (roadmap == null) return Ok(null);
-        return Ok(MapRoadmap(roadmap));
-    }
+    public IActionResult Get(int ideaId) => Gone();
 
     [HttpPost("{ideaId}/generate")]
-    public async Task<IActionResult> Generate(int ideaId)
-    {
-        var idea = await db.ProjectIdeas.FirstOrDefaultAsync(i => i.Id == ideaId && i.UserId == UserId);
-        if (idea == null) return NotFound();
-
-        var existing = await db.ProjectRoadmaps.Include(r => r.Phases)
-            .FirstOrDefaultAsync(r => r.IdeaId == ideaId && r.UserId == UserId);
-        if (existing != null)
-        {
-            db.RoadmapPhases.RemoveRange(existing.Phases);
-            db.ProjectRoadmaps.Remove(existing);
-        }
-
-        var roadmap = new ProjectRoadmap { IdeaId = ideaId, UserId = UserId };
-        db.ProjectRoadmaps.Add(roadmap);
-        await db.SaveChangesAsync();
-
-        var phases = RoadmapGenerator.Generate(idea);
-        foreach (var phase in phases)
-        {
-            phase.RoadmapId = roadmap.Id;
-            db.RoadmapPhases.Add(phase);
-        }
-        await db.SaveChangesAsync();
-
-        var full = await db.ProjectRoadmaps.Include(r => r.Phases)
-            .FirstAsync(r => r.Id == roadmap.Id);
-        return Ok(MapRoadmap(full));
-    }
+    public IActionResult Generate(int ideaId) => Gone();
 
     [HttpPatch("phases/{phaseId}/complete")]
-    public async Task<IActionResult> MarkComplete(int phaseId)
-    {
-        var phase = await db.RoadmapPhases.Include(p => p.Roadmap)
-            .FirstOrDefaultAsync(p => p.Id == phaseId && p.Roadmap!.UserId == UserId);
-        if (phase == null) return NotFound();
-        phase.IsCompleted = !phase.IsCompleted;
-        await db.SaveChangesAsync();
-        return Ok(new { phase.Id, phase.IsCompleted });
-    }
+    public IActionResult MarkComplete(int phaseId) => Gone();
 
-    private static RoadmapResponse MapRoadmap(ProjectRoadmap r) => new(
-        r.Id, r.IdeaId,
-        r.Phases.OrderBy(p => p.PhaseNumber).Select(p => new RoadmapPhaseResponse(
-            p.Id, p.PhaseNumber, p.Name, p.Objective,
-            JsonSerializer.Deserialize<List<string>>(p.TasksJson) ?? [],
-            p.ExpectedOutput, p.ToolsNeeded, p.EstimatedWeeks,
-            p.Dependencies, p.Risks, p.SuccessCriteria, p.IsCompleted
-        )).ToList(),
-        r.CreatedAt
-    );
+    private ObjectResult Gone() => StatusCode(StatusCodes.Status410Gone, new { message = DisabledMessage });
 }

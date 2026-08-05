@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 import time
 import uuid
 from dataclasses import dataclass
@@ -36,11 +37,29 @@ from app.review.review_decision_engine import ReviewDecisionEngine
 from app.review.reviewer_agent import ReviewerAgent
 from app.review.rewrite_agent import RewriteAgent
 from app.review.schema_validation import validate_detailed
+from app.review.se_documentation_rewrite_scope import (
+    ScopeResolutionError,
+    build_compact_rewrite_candidate,
+    merge_targeted_rewrite,
+    resolve_rewrite_closure,
+)
+from app.review.se_documentation_structural_repair_scope import (
+    StructuralRepairPayloadTooLargeError,
+    StructuralRepairScopeError,
+    estimate_tokens,
+    merge_structural_repair,
+    resolve_structural_repair_plan,
+    restore_never_llm_rewritable_fields,
+)
 from app.review.section_scope import apply_scoped_rewrite, revision_scope_for
 from app.services.llm_provider import LLMResult, ProviderChain
 
+logger = logging.getLogger("fypilot-review-pipeline")
+
 Candidate = dict[str, Any]
 ReviewedCandidate = tuple[Candidate, ReviewerFindings]
+
+_SE_DOCUMENTATION_AGENT_NAME = "SEDocumentationAgent"
 
 
 def _safe_str(value: Any, *, max_length: int = 6000) -> str:
@@ -297,52 +316,114 @@ class ReviewPipeline:
                     review_run_id=review_run_id, history=history, attempts=attempt + 1,
                 )
 
-            allowed_rewrite_sections = sorted(
-                revision_scope_for(self.agent_name, version, decision.blockingIssues)
-            )
+            if self.agent_name == _SE_DOCUMENTATION_AGENT_NAME:
+                # SE Documentation-only path: send only the reviewer-confirmed
+                # sections (row-filtered where possible) instead of the
+                # complete document -- see se_documentation_rewrite_scope.py's
+                # module docstring for the ~30,000-token full-document
+                # rewrite request this replaces. Every other agent falls
+                # through to the unchanged full-object path below.
+                try:
+                    closure = resolve_rewrite_closure(version, decision.blockingIssues)
+                except ScopeResolutionError as exc:
+                    logger.warning("se_documentation.rewrite_scope_resolution_failed reason=%s", exc)
+                    return self._review_unavailable_result(
+                        state, review_run_id, history, attempt,
+                    )
 
-            rewrite_result = guarded_call(
-                GuardedCallRequest(
-                    stage="rewrite",
-                    trusted_parts=writer_trusted_parts,
-                    untrusted_parts={
-                        **writer_untrusted_parts,
-                        "candidate_output": _safe_str(version),
-                        "reviewer_findings": _safe_str([i.model_dump() for i in decision.blockingIssues]),
-                        "allowed_rewrite_sections": _safe_str(allowed_rewrite_sections),
-                    },
-                    call_fn=lambda v=version, d=decision: _invoke_with_deadline(
-                        self.rewrite_agent.rewrite,
-                        v,
-                        d.blockingIssues,
-                        context,
-                        agent_name=self.agent_name,
-                        deadline=deadline,
+                allowed_rewrite_sections = sorted(closure.allowed_sections)
+
+                rewrite_result = guarded_call(
+                    GuardedCallRequest(
+                        stage="rewrite",
+                        trusted_parts=writer_trusted_parts,
+                        untrusted_parts={
+                            **writer_untrusted_parts,
+                            "candidate_output": _safe_str(build_compact_rewrite_candidate(version, closure)),
+                            "reviewer_findings": _safe_str([i.model_dump() for i in decision.blockingIssues]),
+                            "allowed_rewrite_sections": _safe_str(allowed_rewrite_sections),
+                        },
+                        # No `schema=` here on purpose: the raw LLM response is
+                        # a PARTIAL object (only the allowed sections), which
+                        # would fail full-SEDocumentationDto validation even
+                        # when perfectly correct. The merged, complete
+                        # candidate is schema-validated below instead (same
+                        # validate_detailed call the full-object path uses).
+                        call_fn=lambda v=version, c=closure, d=decision: _invoke_with_deadline(
+                            self.rewrite_agent.rewrite_targeted,
+                            v,
+                            c,
+                            d.blockingIssues,
+                            context,
+                            agent_name=self.agent_name,
+                            schema_cls=self.config.schema,
+                            deadline=deadline,
+                        ),
+                        url_mode=self.config.url_mode,
+                        allowed_sources=context.allowed_source_metadata,
                     ),
-                    schema=self.config.schema,
-                    url_mode=self.config.url_mode,
-                    allowed_sources=context.allowed_source_metadata,
-                ),
-                self.firewall,
-            )
-
-            if rewrite_result.provider_failed:
-                return self._review_unavailable_result(
-                    state, review_run_id, history, attempt, guarded=rewrite_result,
+                    self.firewall,
                 )
 
-            if rewrite_result.blocked:
-                return self._firewall_blocked_result(
-                    state, review_run_id, history, attempt, rewrite_result, stage_label="rewritten",
+                if rewrite_result.provider_failed:
+                    return self._review_unavailable_result(
+                        state, review_run_id, history, attempt, guarded=rewrite_result,
+                    )
+
+                if rewrite_result.blocked:
+                    return self._firewall_blocked_result(
+                        state, review_run_id, history, attempt, rewrite_result, stage_label="rewritten",
+                    )
+
+                raw_rewritten = rewrite_result.output or {}
+                version = merge_targeted_rewrite(version, raw_rewritten, closure)
+            else:
+                allowed_rewrite_sections = sorted(
+                    revision_scope_for(self.agent_name, version, decision.blockingIssues)
                 )
 
-            raw_rewritten = rewrite_result.output or {}
-            version, _rewrite_scope = apply_scoped_rewrite(
-                self.agent_name,
-                version,
-                raw_rewritten,
-                decision.blockingIssues,
-            )
+                rewrite_result = guarded_call(
+                    GuardedCallRequest(
+                        stage="rewrite",
+                        trusted_parts=writer_trusted_parts,
+                        untrusted_parts={
+                            **writer_untrusted_parts,
+                            "candidate_output": _safe_str(version),
+                            "reviewer_findings": _safe_str([i.model_dump() for i in decision.blockingIssues]),
+                            "allowed_rewrite_sections": _safe_str(allowed_rewrite_sections),
+                        },
+                        call_fn=lambda v=version, d=decision: _invoke_with_deadline(
+                            self.rewrite_agent.rewrite,
+                            v,
+                            d.blockingIssues,
+                            context,
+                            agent_name=self.agent_name,
+                            deadline=deadline,
+                        ),
+                        schema=self.config.schema,
+                        url_mode=self.config.url_mode,
+                        allowed_sources=context.allowed_source_metadata,
+                    ),
+                    self.firewall,
+                )
+
+                if rewrite_result.provider_failed:
+                    return self._review_unavailable_result(
+                        state, review_run_id, history, attempt, guarded=rewrite_result,
+                    )
+
+                if rewrite_result.blocked:
+                    return self._firewall_blocked_result(
+                        state, review_run_id, history, attempt, rewrite_result, stage_label="rewritten",
+                    )
+
+                raw_rewritten = rewrite_result.output or {}
+                version, _rewrite_scope = apply_scoped_rewrite(
+                    self.agent_name,
+                    version,
+                    raw_rewritten,
+                    decision.blockingIssues,
+                )
 
             # The provider returned a schema-valid complete object, but the
             # deterministic scoped merge restores untouched sections. Re-run
@@ -388,34 +469,22 @@ class ReviewPipeline:
 
         validation = validate_detailed(self.config.schema, version)
 
-        # The candidate reached this branch because the guarded Writer/Rewrite
-        # result was schema-invalid. Re-validating here gives the repair stage
-        # the exact Pydantic errors and expected schema instead of the old
-        # generic "fix the structure" instruction.
-        fix_result = guarded_call(
-            GuardedCallRequest(
-                stage="rewrite",
-                trusted_parts=writer_trusted_parts,
-                untrusted_parts={
-                    **writer_untrusted_parts,
-                    "invalid_candidate": _safe_str(validation.data),
-                    "schema_validation_errors": _safe_str(validation.errors),
-                },
-                call_fn=lambda v=validation.data, e=validation.errors, s=validation.expected_schema: (
-                    _invoke_with_deadline(
-                        self.rewrite_agent.fix_structure,
-                        v,
-                        agent_name=self.agent_name,
-                        validation_errors=e,
-                        expected_schema=s,
-                        deadline=deadline,
-                    )
-                ),
-                schema=self.config.schema,
-                url_mode=self.config.url_mode,
-                allowed_sources=context.allowed_source_metadata,
-            ),
-            self.firewall,
+        # SE Documentation-only path: contain the structural-repair payload
+        # to only the sections the validation errors actually name, instead
+        # of resending the complete ~30,000-token candidate and complete
+        # top-level schema on every repair attempt -- see
+        # se_documentation_structural_repair_scope.py's module docstring.
+        # Every other agent falls through to the unchanged full-object path
+        # below (byte-identical to before this change).
+        if self.agent_name == _SE_DOCUMENTATION_AGENT_NAME:
+            return self._attempt_se_documentation_structural_repair(
+                version, validation, attempt, structural_repairs, context,
+                writer_trusted_parts, writer_untrusted_parts, state,
+                review_run_id, history, deadline,
+            )
+
+        fix_result = self._run_full_structural_repair(
+            validation, context, writer_trusted_parts, writer_untrusted_parts, deadline,
         )
 
         next_attempt = attempt + 1
@@ -452,6 +521,250 @@ class ReviewPipeline:
             next_structural_repairs,
             None,
         )
+
+    def _run_full_structural_repair(
+        self,
+        validation: Any,
+        context: ReviewContext,
+        writer_trusted_parts: dict[str, str],
+        writer_untrusted_parts: dict[str, str],
+        deadline: float,
+        *,
+        prompt: str | None = None,
+    ) -> GuardedResult:
+        """
+        The original, unmodified full-candidate/full-schema structural
+        repair call -- factored out unchanged so the SE Documentation path
+        can reuse it verbatim for its own payload-gated full-repair
+        fallback (see _attempt_se_documentation_structural_repair), instead
+        of duplicating this guarded_call block.
+
+        `prompt`, when supplied, is the exact prompt string
+        resolve_structural_repair_plan already gated with estimate_tokens()
+        -- forwarded to fix_structure() so it is reused verbatim instead of
+        rebuilt (see fix_structure's docstring). Every generic-agent caller
+        omits it, leaving this call byte-identical to before this parameter
+        existed. `_accepts_keyword` keeps older/minimal fix_structure test
+        doubles that predate the `prompt` keyword working unchanged, the
+        same way `deadline` is handled below.
+        """
+        extra_kwargs: dict[str, Any] = {}
+        if prompt is not None and _accepts_keyword(self.rewrite_agent.fix_structure, "prompt"):
+            extra_kwargs["prompt"] = prompt
+
+        return guarded_call(
+            GuardedCallRequest(
+                stage="rewrite",
+                trusted_parts=writer_trusted_parts,
+                untrusted_parts={
+                    **writer_untrusted_parts,
+                    "invalid_candidate": _safe_str(validation.data),
+                    "schema_validation_errors": _safe_str(validation.errors),
+                },
+                call_fn=lambda v=validation.data, e=validation.errors, s=validation.expected_schema, kw=extra_kwargs: (
+                    _invoke_with_deadline(
+                        self.rewrite_agent.fix_structure,
+                        v,
+                        agent_name=self.agent_name,
+                        validation_errors=e,
+                        expected_schema=s,
+                        deadline=deadline,
+                        **kw,
+                    )
+                ),
+                schema=self.config.schema,
+                url_mode=self.config.url_mode,
+                allowed_sources=context.allowed_source_metadata,
+            ),
+            self.firewall,
+        )
+
+    def _attempt_se_documentation_structural_repair(
+        self,
+        version: Candidate,
+        validation: Any,
+        attempt: int,
+        structural_repairs: int,
+        context: ReviewContext,
+        writer_trusted_parts: dict[str, str],
+        writer_untrusted_parts: dict[str, str],
+        state: _PipelineState,
+        review_run_id: str,
+        history: list[AttemptRecord],
+        deadline: float,
+    ) -> tuple[Candidate, bool, int, int, PipelineResult | None]:
+        next_attempt = attempt + 1
+        next_structural_repairs = structural_repairs + 1
+
+        try:
+            plan = resolve_structural_repair_plan(
+                validation.data, validation.errors, validation.expected_schema,
+                agent_name=self.agent_name,
+                schema_cls=self.config.schema,
+            )
+        except StructuralRepairPayloadTooLargeError as exc:
+            # Neither a scoped repair nor a payload-safe full repair is
+            # possible -- fail honestly (existing schema_invalid terminal,
+            # preserving whatever prior valid candidate the pipeline
+            # already tracks) rather than send a known-oversized request to
+            # any provider, or truncate the payload.
+            logger.warning("se_documentation.structural_repair_payload_too_large reason=%s", exc)
+            terminal = self._schema_invalid_result(state, review_run_id, history, next_attempt)
+            return version, False, next_attempt, next_structural_repairs, terminal
+
+        if plan.use_full_repair:
+            logger.info(
+                "se_documentation.structural_repair_mode mode=full_payload_within_limit "
+                "estimated_prompt_tokens=%d",
+                estimate_tokens(plan.prompt),
+            )
+            fix_result = self._run_full_structural_repair(
+                validation, context, writer_trusted_parts, writer_untrusted_parts, deadline,
+                prompt=plan.prompt,
+            )
+
+            if fix_result.provider_failed or fix_result.blocked:
+                terminal = self._schema_invalid_result(
+                    state, review_run_id, history, next_attempt, guarded=fix_result,
+                )
+                return version, False, next_attempt, next_structural_repairs, terminal
+
+            # The generic full-repair path (_run_full_structural_repair)
+            # accepts fix_structure()'s raw response as the complete
+            # document unchanged -- correct for every other agent, but SE
+            # Documentation must still guarantee _NEVER_LLM_REWRITABLE_
+            # FIELDS can never change even on this fallback path (the
+            # scoped path's merge_structural_repair already guarantees this;
+            # see restore_never_llm_rewritable_fields's docstring). The
+            # restored candidate is the one actually validated/returned, so
+            # an immutable-field validation error that the platform's own
+            # deterministic logic can't fix fails safely as schema_invalid
+            # instead of accepting an LLM-guessed replacement.
+            restored_output = restore_never_llm_rewritable_fields(validation.data, fix_result.output or {})
+            restored_validation = validate_detailed(self.config.schema, restored_output)
+
+            history.append(
+                AttemptRecord(
+                    attemptNumber=next_attempt,
+                    stage="rewrite",
+                    operation="structural_repair",
+                    outputHash=output_hash(restored_validation.data),
+                    firewallPassed=True,
+                    schemaValid=restored_validation.valid,
+                    reviewed=False,
+                    generatorProvider=fix_result.provider,
+                    generatorModel=fix_result.model,
+                    kept=False,
+                )
+            )
+
+            if restored_validation.valid:
+                state.last_structurally_valid_candidate = restored_validation.data
+
+            return (
+                restored_validation.data,
+                restored_validation.valid,
+                next_attempt,
+                next_structural_repairs,
+                None,
+            )
+
+        closure = plan.closure
+        assert closure is not None  # resolve_structural_repair_plan's contract
+
+        logger.info(
+            "se_documentation.structural_repair_mode mode=scoped sections=%d "
+            "estimated_prompt_tokens=%d",
+            len(closure.allowed_sections), estimate_tokens(plan.prompt),
+        )
+
+        scoped_kwargs: dict[str, Any] = {}
+        if _accepts_keyword(self.rewrite_agent.fix_structure_scoped, "prompt"):
+            scoped_kwargs["prompt"] = plan.prompt
+
+        fix_result = guarded_call(
+            GuardedCallRequest(
+                stage="rewrite",
+                trusted_parts=writer_trusted_parts,
+                untrusted_parts={
+                    **writer_untrusted_parts,
+                    "invalid_candidate_sections": _safe_str(
+                        build_compact_rewrite_candidate(validation.data, closure)
+                    ),
+                    "schema_validation_errors": _safe_str(validation.errors),
+                    "repaired_sections": _safe_str(sorted(closure.allowed_sections)),
+                },
+                # No `schema=` here on purpose: the raw response is a
+                # PARTIAL object (only the requested sections), which would
+                # fail full-candidate-schema validation even when perfectly
+                # correct. The merged, complete candidate is validated
+                # below via the same validate_detailed the full-repair path
+                # uses.
+                call_fn=lambda v=validation.data, c=closure, e=validation.errors, kw=scoped_kwargs: _invoke_with_deadline(
+                    self.rewrite_agent.fix_structure_scoped,
+                    v,
+                    c,
+                    agent_name=self.agent_name,
+                    validation_errors=e,
+                    schema_cls=self.config.schema,
+                    deadline=deadline,
+                    **kw,
+                ),
+                url_mode=self.config.url_mode,
+                allowed_sources=context.allowed_source_metadata,
+            ),
+            self.firewall,
+        )
+
+        if fix_result.provider_failed or fix_result.blocked:
+            terminal = self._schema_invalid_result(
+                state, review_run_id, history, next_attempt, guarded=fix_result,
+            )
+            return version, False, next_attempt, next_structural_repairs, terminal
+
+        try:
+            merged = merge_structural_repair(validation.data, fix_result.output, closure)
+        except StructuralRepairScopeError as exc:
+            # Missing/unsolicited/malformed scoped response -- never merged,
+            # never accepted as a partial repair.
+            logger.warning("se_documentation.structural_repair_response_rejected reason=%s", exc)
+            terminal = self._schema_invalid_result(
+                state, review_run_id, history, next_attempt, guarded=fix_result,
+            )
+            return version, False, next_attempt, next_structural_repairs, terminal
+
+        # Full-document validation remains authoritative: a scoped repair is
+        # only ever successful when the COMPLETE merged candidate passes the
+        # complete schema -- never because the repaired fragment alone
+        # validated.
+        merged_validation = validate_detailed(self.config.schema, merged)
+        merged = merged_validation.data
+        schema_valid = merged_validation.valid
+
+        logger.info(
+            "se_documentation.structural_repair_result schema_valid=%s",
+            schema_valid,
+        )
+
+        history.append(
+            AttemptRecord(
+                attemptNumber=next_attempt,
+                stage="rewrite",
+                operation="structural_repair",
+                outputHash=output_hash(merged),
+                firewallPassed=True,
+                schemaValid=schema_valid,
+                reviewed=False,
+                generatorProvider=fix_result.provider,
+                generatorModel=fix_result.model,
+                kept=False,
+            )
+        )
+
+        if schema_valid:
+            state.last_structurally_valid_candidate = merged
+
+        return (merged, schema_valid, next_attempt, next_structural_repairs, None)
 
     # ------------------------------------------------------------------
     # Audit helpers

@@ -122,6 +122,10 @@ class SpyRewriteAgent:
         self.received_context = context
         return SimpleNamespace()
 
+    def rewrite_targeted(self, candidate, closure, blocking_issues, context, *, agent_name, schema_cls, deadline=None):
+        self.received_context = context
+        return SimpleNamespace()
+
 
 def _guarded_result(*, output, schema_valid=True):
     return SimpleNamespace(

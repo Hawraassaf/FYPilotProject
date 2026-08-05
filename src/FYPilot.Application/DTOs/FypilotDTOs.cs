@@ -535,7 +535,35 @@ public record ProjectRoadmapServiceResponse(
     string Message,
     AiQualityPassportDto? Review = null,
     string? Provider = null,
-    string? ModelUsed = null
+    string? ModelUsed = null,
+    // ---- Additive fields (Roadmap fallback-provenance stabilization).
+    // All optional/defaulted so an older cached response shape (or a test
+    // that constructs this record without them) still works unchanged.
+    // See services/FYPilot.AI/app/routers/roadmap.py for what sets each one.
+    string? RequestId = null,
+    // "ai_generated" | "ai_rewritten" | "deterministic_fallback" | null
+    // (null only if the AI service predates this field).
+    string? OutputOrigin = null,
+    bool FallbackUsed = false,
+    string? FallbackReasonCode = null,
+    string? FallbackReasonMessage = null,
+    List<RoadmapProviderAttemptDto>? ProviderAttempts = null,
+    RoadmapGenerationDiagnosticsDto? GenerationDiagnostics = null
+);
+
+public record RoadmapProviderAttemptDto(
+    string Stage,
+    string? Provider,
+    string? Model,
+    bool Success
+);
+
+public record RoadmapGenerationDiagnosticsDto(
+    string? PhasePlanSource,
+    int UsablePhaseCount,
+    bool LifecycleCoveragePassed,
+    List<string>? MissingLifecycleCategories,
+    int BlockedTermTasksDropped
 );
 
 public record ProjectRoadmapDto(

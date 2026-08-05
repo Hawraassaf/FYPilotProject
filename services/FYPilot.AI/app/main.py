@@ -83,7 +83,6 @@ app.add_middleware(
 
 app.include_router(health.router)
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Hybrid AI routers
 # These are loaded safely so one optional feature cannot stop the whole service.

@@ -251,6 +251,85 @@ class ParseJsonResponseTests(unittest.TestCase):
         substantial = '{"title": "' + "x" * 500 + '", "b": "y", "c": "z", "d": "w"}'
         self.assertTrue(jr.is_substantial(substantial))
 
+    # -----------------------------------------------------------------
+    # Follow-up coverage: these behaviors already worked correctly (see
+    # the module's quote-aware extractor and the json_repair-backed local
+    # repair step), but were previously only exercised indirectly or at
+    # the extract_json_object level, not through the full
+    # parse_json_response contract. Added while investigating the seven
+    # JSON-reliability test failures, which turned out to be caused by
+    # running pytest with a Python interpreter that lacks the project's
+    # `.venv`-installed `json_repair` dependency (declared in
+    # requirements.txt), not a defect in this module -- see the task
+    # report for the full root-cause writeup.
+    # -----------------------------------------------------------------
+
+    def test_valid_top_level_array_parses_without_repair(self):
+        outcome = jr.parse_json_response('[{"a": 1}, {"a": 2}]')
+        self.assertTrue(outcome.success)
+        self.assertEqual(outcome.data, [{"a": 1}, {"a": 2}])
+        self.assertTrue(outcome.initial_json_valid)
+        self.assertFalse(outcome.repair_attempted)
+
+    def test_fenced_array_parses_end_to_end(self):
+        text = '```json\n[{"a": 1}, {"a": 2}]\n```'
+        outcome = jr.parse_json_response(text)
+        self.assertTrue(outcome.success)
+        self.assertEqual(outcome.data, [{"a": 1}, {"a": 2}])
+
+    def test_fenced_array_without_language_tag_parses_end_to_end(self):
+        text = '```\n[{"a": 1}]\n```'
+        outcome = jr.parse_json_response(text)
+        self.assertTrue(outcome.success)
+        self.assertEqual(outcome.data, [{"a": 1}])
+
+    def test_escaped_backslashes_in_paths_regex_and_diagram_text_survive_parsing(self):
+        # Windows paths, regex patterns, and Mermaid arrow syntax all carry
+        # backslashes that must round-trip exactly, not be interpreted as
+        # escape sequences for anything other than themselves.
+        original = {
+            "windowsPath": "C:\\Users\\student\\project",
+            "regexPattern": r"\d+\.\d+",
+            "mermaidNote": "A-->|label\\nline2|B",
+        }
+        text = json.dumps(original)
+        outcome = jr.parse_json_response(text)
+        self.assertTrue(outcome.success)
+        self.assertEqual(outcome.data, original)
+        self.assertFalse(outcome.repair_attempted)
+
+    def test_comma_inside_string_is_never_altered_by_trailing_comma_repair(self):
+        # The malformed trailing comma after "b": 2 must be removed, but the
+        # commas INSIDE the "a" string value must never be touched -- a
+        # naive regex-based trailing-comma fix operating on the whole
+        # payload could otherwise strip commas out of string content too.
+        outcome = jr.parse_json_response('{"a": "one, two, three", "b": 2,}')
+        self.assertTrue(outcome.success)
+        self.assertEqual(outcome.data, {"a": "one, two, three", "b": 2})
+        self.assertEqual(outcome.repair_method, "local_json_repair")
+
+    def test_multiple_complete_fragments_extracts_only_the_first(self):
+        # Two complete, unrelated top-level JSON values -- the documented
+        # deterministic rule is "the first complete value", never a
+        # concatenation of both and never a guess at which one is "right".
+        text = '{"a": 1}\n{"b": 2}'
+        extracted = jr.extract_json_object(text)
+        self.assertEqual(extracted, '{"a": 1}')
+        outcome = jr.parse_json_response(text)
+        self.assertTrue(outcome.success)
+        self.assertEqual(outcome.data, {"a": 1})
+
+    def test_repair_preserves_semantic_values_exactly_when_it_succeeds(self):
+        # Combines escaped quotes, an escaped backslash, and a trailing
+        # comma in one malformed payload -- repair must fix ONLY the
+        # trailing comma and leave every semantic value byte-for-byte as
+        # originally intended.
+        text = '{"title": "Keep \\"quoted\\" and back\\\\slash", "n": 5,}'
+        outcome = jr.parse_json_response(text)
+        self.assertTrue(outcome.success)
+        self.assertEqual(outcome.data, {"title": 'Keep "quoted" and back\\slash', "n": 5})
+        self.assertEqual(outcome.repair_method, "local_json_repair")
+
 
 if __name__ == "__main__":
     unittest.main()

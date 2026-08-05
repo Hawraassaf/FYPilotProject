@@ -69,6 +69,119 @@ public sealed record RoadmapWorkloadSummaryView(
     int RecommendedAdditionalWeeks
 );
 
+/// <summary>
+/// Where a phase's INTENDED duration (RoadmapPhase.EstimatedWeeks, the real
+/// scheduler-computed duration -- never re-derived from unrelated task
+/// estimates) places it relative to the student's requested target
+/// duration. Display-only classification: never persisted, never fed back
+/// into Python or the database. See RoadmapModel.ClassifyPhaseTimeline.
+/// </summary>
+public enum RoadmapPhaseTimelineStatus
+{
+    /// <summary>Fully fits inside the requested target duration.</summary>
+    WithinTarget,
+
+    /// <summary>Starts inside the target duration but its intended
+    /// duration runs past it.</summary>
+    PartiallyBeyondTarget,
+
+    /// <summary>Starts entirely after the requested target duration.</summary>
+    BeyondTarget,
+
+    /// <summary>EstimatedWeeks is missing/non-positive -- cannot be placed
+    /// on a timeline at all. Never silently forced into the last target
+    /// week.</summary>
+    NeedsReview,
+}
+
+/// <summary>
+/// One phase's display-only position on the timeline, computed purely from
+/// the cumulative sum of preceding phases' EstimatedWeeks (never clamped to
+/// the target duration) -- see RoadmapModel.ClassifyPhaseTimeline's
+/// docstring for why this replaced the old clamped-cumulative-cursor
+/// approach that made unrelated overflowing phases collapse onto the same
+/// final target week.
+/// </summary>
+public sealed record RoadmapPhaseTimelineView(
+    RoadmapPhase Phase,
+    int DisplayStartWeek,
+    int DisplayEndWeek,
+    /// <summary>DisplayEndWeek clamped to the target duration -- only
+    /// meaningful (and only used for rendering) when Status is WithinTarget
+    /// or PartiallyBeyondTarget.</summary>
+    int WithinTargetEndWeek,
+    RoadmapPhaseTimelineStatus Status
+);
+
+/// <summary>
+/// What a Roadmap generation attempt actually produced -- distinct from
+/// RoadmapPhaseTimelineStatus (which classifies WHERE a phase sits on the
+/// calendar, not whether the plan itself is real AI output). See
+/// RoadmapModel.ClassifyRoadmapOutcome's docstring for the full evidence
+/// priority this is derived from.
+/// </summary>
+public enum RoadmapOutcome
+{
+    /// <summary>A real, provider-generated candidate that review accepted
+    /// (usable=true, not a fallback).</summary>
+    AcceptedAi,
+
+    /// <summary>Every provider failed, was rejected, or was skipped, and
+    /// no more specific reason below applies -- Python's deterministic,
+    /// non-AI phase catalog was used instead.</summary>
+    DeterministicFallback,
+
+    /// <summary>The Writer's own reserved slice of the pipeline deadline
+    /// ran out before any provider produced a usable candidate.</summary>
+    WriterDeadlineExceeded,
+
+    /// <summary>The Writer produced a candidate, but the semantic Reviewer
+    /// could not be reached/complete in time.</summary>
+    ReviewUnavailable,
+
+    /// <summary>The Writer produced a candidate, but review found it
+    /// structurally invalid or a blocking quality issue survived
+    /// correction.</summary>
+    ReviewRejected,
+
+    /// <summary>No more specific reason is known -- a provider-level
+    /// failure (unreachable, rate-limited, malformed response, etc.).
+    /// Never used when a more precise typed reason exists.</summary>
+    ProviderFailure,
+
+    /// <summary>No usable response was received from the AI service at
+    /// all (network/deserialize failure, or a response with no Roadmap
+    /// payload).</summary>
+    InvalidResponse,
+}
+
+public enum RoadmapOutcomeStyle
+{
+    Success,
+    Warning,
+    Error,
+}
+
+/// <summary>
+/// The honest, user-facing description of a RoadmapOutcome -- the single
+/// source of both the POST-time flash message and the persisted-reload
+/// banner, so the two can never contradict each other. Never built from
+/// raw backend exception text.
+/// </summary>
+public sealed record RoadmapOutcomeDescription(
+    RoadmapOutcome Outcome,
+    RoadmapOutcomeStyle Style,
+    string Title,
+    string Message,
+    /// <summary>True only for AcceptedAi -- every other outcome must never
+    /// be described to the student as AI-generated.</summary>
+    bool IsAiGenerated,
+    /// <summary>True whenever the roadmap currently displayed/persisted is
+    /// the deterministic (non-AI) fallback, so the UI can keep the
+    /// prominent fallback banner visible.</summary>
+    bool IsFallbackDisplayed
+);
+
 [Authorize(Roles = "student")]
 public class RoadmapModel(
     ApplicationDbContext db,
@@ -136,6 +249,191 @@ public class RoadmapModel(
         _ => ("bg-secondary", review.Status),
     };
 
+    /// <summary>
+    /// The single, centralized Roadmap result classifier -- both
+    /// OnPostGenerateAsync's flash message and the persisted-reload banner
+    /// (Roadmap.cshtml) call this instead of each re-deriving their own
+    /// "was this really AI-generated" logic, so the two can never disagree.
+    ///
+    /// Evidence priority (strongest first -- a weaker field can never
+    /// override a stronger one that says otherwise, see Test 6 in
+    /// RoadmapOutcomeClassificationTests for the exact conflicting-fields
+    /// case this guards):
+    ///   1. OutputOrigin        -- "deterministic_fallback" is authoritative
+    ///   2. FallbackUsed        -- explicit boolean from the same source
+    ///   3. LlmUsed             -- false means no provider ever produced output
+    ///   4. Usable (review)     -- false means review rejected/never accepted it
+    ///   5. Review status       -- narrows WHY (rejected/unavailable/etc.)
+    ///   6. FallbackReasonCode  -- narrows WHICH fallback reason, when known
+    ///   7. Response availability -- no response/Roadmap at all
+    ///
+    /// Only reachable immediately after POST (this overload), since
+    /// FallbackReasonCode/OutputOrigin are not persisted as their own
+    /// columns -- see the AiOutputReview overload below for the
+    /// necessarily coarser classification available after a page reload.
+    /// </summary>
+    public static RoadmapOutcomeDescription ClassifyRoadmapOutcome(ProjectRoadmapServiceResponse? response)
+    {
+        if (response?.Roadmap == null)
+        {
+            return DescribeRoadmapOutcome(RoadmapOutcome.InvalidResponse);
+        }
+
+        var review = response.Review;
+
+        var isFallback =
+            response.OutputOrigin == "deterministic_fallback"
+            || response.FallbackUsed
+            || !response.LlmUsed
+            || review?.Usable == false;
+
+        if (!isFallback)
+        {
+            return DescribeRoadmapOutcome(RoadmapOutcome.AcceptedAi, review?.Status);
+        }
+
+        return response.FallbackReasonCode switch
+        {
+            "writer_deadline_exceeded" => DescribeRoadmapOutcome(RoadmapOutcome.WriterDeadlineExceeded),
+            "reviewer_unavailable" => DescribeRoadmapOutcome(RoadmapOutcome.ReviewUnavailable),
+            "schema_invalid" or "semantic_rewrite_failed" or "final_review_failed"
+                or "blocked_content" or "insufficient_usable_phases" or "lifecycle_coverage_failed"
+                => DescribeRoadmapOutcome(RoadmapOutcome.ReviewRejected),
+            "provider_unavailable" or "provider_authentication_failed" or "provider_rate_limited"
+                or "provider_timeout" or "provider_payload_invalid" or "json_parse_failed"
+                => DescribeRoadmapOutcome(RoadmapOutcome.ProviderFailure),
+            _ => ClassifyFallbackFromReviewStatus(review?.Status),
+        };
+    }
+
+    /// <summary>
+    /// Reload-path overload: only Status/Usable/DecisionReason survive
+    /// into the persisted AiOutputReview (no OutputOrigin/FallbackUsed/
+    /// FallbackReasonCode column exists -- adding one is out of scope, see
+    /// class docs). This necessarily cannot distinguish
+    /// WriterDeadlineExceeded from a generic ProviderFailure on a cold
+    /// reload the way the POST-time overload can; the flash message shown
+    /// immediately after generation (which DOES have the precise reason)
+    /// is the authoritative one for that distinction.
+    /// </summary>
+    public static RoadmapOutcomeDescription ClassifyRoadmapOutcome(AiOutputReview review)
+    {
+        ArgumentNullException.ThrowIfNull(review);
+
+        if (!review.Usable)
+        {
+            return ClassifyFallbackFromReviewStatus(review.Status);
+        }
+
+        return DescribeRoadmapOutcome(RoadmapOutcome.AcceptedAi, review.Status);
+    }
+
+    private static RoadmapOutcomeDescription ClassifyFallbackFromReviewStatus(string? reviewStatus) => reviewStatus switch
+    {
+        "review_unavailable" => DescribeRoadmapOutcome(RoadmapOutcome.ReviewUnavailable),
+        "rejected" or "schema_invalid" or "firewall_blocked" or "unresolved"
+            => DescribeRoadmapOutcome(RoadmapOutcome.ReviewRejected),
+        "provider_unavailable" => DescribeRoadmapOutcome(RoadmapOutcome.ProviderFailure),
+        _ => DescribeRoadmapOutcome(RoadmapOutcome.DeterministicFallback),
+    };
+
+    private static RoadmapOutcomeDescription DescribeRoadmapOutcome(RoadmapOutcome outcome, string? reviewStatus = null) => outcome switch
+    {
+        RoadmapOutcome.AcceptedAi => new RoadmapOutcomeDescription(
+            outcome, RoadmapOutcomeStyle.Success, "AI accepted",
+            reviewStatus == "approved_with_minor_warnings"
+                ? "Your AI roadmap was generated and saved. The reviewer noted minor, non-blocking notes."
+                : "Your AI roadmap was generated, reviewed, and saved successfully.",
+            IsAiGenerated: true, IsFallbackDisplayed: false),
+
+        RoadmapOutcome.WriterDeadlineExceeded => new RoadmapOutcomeDescription(
+            outcome, RoadmapOutcomeStyle.Warning, "Generation timed out",
+            "AI generation exceeded the available processing time. A deterministic fallback roadmap is displayed, and no result is being presented as accepted AI output.",
+            IsAiGenerated: false, IsFallbackDisplayed: true),
+
+        RoadmapOutcome.ReviewUnavailable => new RoadmapOutcomeDescription(
+            outcome, RoadmapOutcomeStyle.Warning, "Review unavailable",
+            "The roadmap could not be fully reviewed within the available time. It has not been presented as an accepted AI roadmap.",
+            IsAiGenerated: false, IsFallbackDisplayed: true),
+
+        RoadmapOutcome.ReviewRejected => new RoadmapOutcomeDescription(
+            outcome, RoadmapOutcomeStyle.Warning, "Review rejected",
+            "The generated roadmap did not pass quality review. A safe deterministic roadmap is displayed instead.",
+            IsAiGenerated: false, IsFallbackDisplayed: true),
+
+        RoadmapOutcome.ProviderFailure => new RoadmapOutcomeDescription(
+            outcome, RoadmapOutcomeStyle.Warning, "AI service unavailable",
+            "The AI provider was temporarily unavailable. A deterministic fallback roadmap is displayed instead.",
+            IsAiGenerated: false, IsFallbackDisplayed: true),
+
+        RoadmapOutcome.DeterministicFallback => new RoadmapOutcomeDescription(
+            outcome, RoadmapOutcomeStyle.Warning, "Deterministic fallback",
+            "AI generation could not produce an accepted roadmap. A deterministic fallback roadmap is displayed instead.",
+            IsAiGenerated: false, IsFallbackDisplayed: true),
+
+        _ => new RoadmapOutcomeDescription(
+            RoadmapOutcome.InvalidResponse, RoadmapOutcomeStyle.Error, "Roadmap unavailable",
+            "The AI roadmap service did not return a usable response. Please try again.",
+            IsAiGenerated: false, IsFallbackDisplayed: false),
+    };
+
+    /// <summary>
+    /// Maps the SAME centralized classification used for the student flash
+    /// message/banner (see ClassifyRoadmapOutcome/DescribeRoadmapOutcome)
+    /// into supervisor-notification wording -- a second, audience-
+    /// appropriate rendering of one outcome, never a second classifier.
+    /// Pure and database-free (no DI, no I/O), so it can never itself
+    /// throw inside NotifySupervisorAsync's existing try/catch, and is
+    /// directly unit-testable without mocking anything.
+    ///
+    /// The returned Message deliberately does NOT include the project
+    /// title -- NotifySupervisorAsync already appends
+    /// `Project: "{projectTitle}"` to whatever message it's given (see its
+    /// own body), so embedding it here too would duplicate it.
+    ///
+    /// Exhaustive over every RoadmapOutcome value; a case this switch
+    /// doesn't specifically recognize falls through to safe, neutral
+    /// wording that never claims a generated/accepted result -- see the
+    /// InvalidResponse arm's comment for why that branch is unreachable
+    /// from OnPostGenerateAsync's actual call site today.
+    /// </summary>
+    public static (string Title, string Message) BuildSupervisorRoadmapNotification(
+        RoadmapOutcomeDescription outcome, int phaseCount) => outcome.Outcome switch
+    {
+        RoadmapOutcome.AcceptedAi => (
+            "AI Roadmap Generated",
+            $"A reviewed AI roadmap with {phaseCount} phase(s) was generated."),
+
+        RoadmapOutcome.DeterministicFallback => (
+            "Fallback Roadmap Generated",
+            $"A deterministic fallback roadmap with {phaseCount} phase(s) was generated because an accepted AI roadmap was not available."),
+
+        RoadmapOutcome.WriterDeadlineExceeded => (
+            "Roadmap Generation Timed Out",
+            $"AI roadmap generation exceeded the available processing time. A deterministic fallback roadmap with {phaseCount} phase(s) was generated instead."),
+
+        RoadmapOutcome.ReviewUnavailable => (
+            "Roadmap Review Unavailable",
+            $"The generated roadmap could not complete AI quality review. A deterministic fallback roadmap with {phaseCount} phase(s) was generated instead."),
+
+        RoadmapOutcome.ReviewRejected => (
+            "Roadmap Quality Review Failed",
+            $"The AI-generated roadmap did not pass quality review. A deterministic fallback roadmap with {phaseCount} phase(s) was generated instead."),
+
+        RoadmapOutcome.ProviderFailure => (
+            "AI Provider Unavailable",
+            $"The AI provider was unavailable while generating the roadmap. A deterministic fallback roadmap with {phaseCount} phase(s) was generated instead."),
+
+        // InvalidResponse, and any future/unrecognized outcome: never
+        // reachable from OnPostGenerateAsync today (it already returns
+        // before persistence/notification whenever response.Roadmap is
+        // null), kept only so this mapping stays exhaustive and safe if
+        // reused elsewhere -- never claims a roadmap was generated.
+        _ => (
+            "Roadmap Generation Issue",
+            "A roadmap generation attempt did not produce a confirmed result."),
+    };
+
     public async Task<IActionResult> OnGetAsync(
         int? ideaId,
         CancellationToken cancellationToken)
@@ -196,7 +494,80 @@ public class RoadmapModel(
 
         var request = BuildRoadmapRequest(Idea, profile, studentSkills);
 
-        var response = await aiService.GenerateProjectRoadmapAsync(request);
+        // Correlation id for this .NET-side attempt -- logged alongside every
+        // failure branch below so a support/debug session can find the
+        // matching AI-service-side logs even when no response (and therefore
+        // no Python requestId) was ever received. AiServiceClient
+        // deliberately THROWS on transport/HTTP/deserialize failure (see its
+        // own header comment) rather than returning null, so every one of
+        // those cases must be caught here explicitly -- an uncaught throw
+        // would otherwise surface as an unhandled 500 instead of the
+        // existing roadmap page with a friendly error, and would never reach
+        // the persistence code below (so nothing would be at risk of being
+        // overwritten either way, but the user would see a crash, not this
+        // page).
+        var correlationId = Guid.NewGuid();
+        ProjectRoadmapServiceResponse? response;
+
+        try
+        {
+            response = await aiService.GenerateProjectRoadmapAsync(request);
+        }
+        catch (TaskCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            // The request's OWN cancellationToken did not fire, so this is
+            // AiServiceClient's HttpClient timeout (600s), not the user
+            // navigating away -- a genuine timeout deserves a specific
+            // message, not the generic one below.
+            logger.LogWarning(
+                exception,
+                "Roadmap generation timed out for idea {IdeaId} (correlation {CorrelationId}).",
+                Idea.Id,
+                correlationId);
+
+            ErrorMessage =
+                "Roadmap generation took too long and timed out. Your previous roadmap, if any, has been kept. Please try again.";
+            return Page();
+        }
+        catch (HttpRequestException exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Roadmap AI service call failed for idea {IdeaId} (correlation {CorrelationId}).",
+                Idea.Id,
+                correlationId);
+
+            ErrorMessage =
+                "The AI roadmap service could not be reached. Your previous roadmap, if any, has been kept. Please try again shortly.";
+            return Page();
+        }
+        catch (InvalidOperationException exception)
+        {
+            // AiServiceClient wraps a JSON deserialize failure in this type
+            // (see its PostAsync catch block) -- the AI service responded,
+            // but not with a shape .NET could understand.
+            logger.LogWarning(
+                exception,
+                "Roadmap AI service returned an unreadable response for idea {IdeaId} (correlation {CorrelationId}).",
+                Idea.Id,
+                correlationId);
+
+            ErrorMessage =
+                "The AI service returned a response that could not be understood. Your previous roadmap, if any, has been kept. Please try again.";
+            return Page();
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                exception,
+                "Unexpected error generating roadmap for idea {IdeaId} (correlation {CorrelationId}).",
+                Idea.Id,
+                correlationId);
+
+            ErrorMessage =
+                "Something went wrong while generating the roadmap. Your previous roadmap, if any, has been kept.";
+            return Page();
+        }
 
         if (response?.Roadmap == null)
         {
@@ -232,6 +603,20 @@ public class RoadmapModel(
 
         if (review != null)
         {
+            // review.Usable is the authoritative "was this AI-generated?"
+            // signal (false means the Python router used
+            // agent.build_safe_fallback() -- see routers/roadmap.py's
+            // outputOrigin/fallbackUsed derivation). Some non-usable
+            // pipeline statuses (provider_unavailable, firewall_blocked)
+            // never set a DecisionReason at the Writer stage -- see
+            // ReviewPipeline._result()'s "decision" param, which stays None
+            // there -- so without this backfill the review badge's tooltip
+            // would be blank for the single most common fallback case.
+            var decisionReason =
+                !review.Usable && string.IsNullOrWhiteSpace(review.DecisionReason)
+                    ? response.FallbackReasonMessage ?? "AI roadmap generation was not usable; a safe fallback roadmap was shown instead."
+                    : review.DecisionReason;
+
             db.AiOutputReviews.Add(new AiOutputReview
             {
                 ReviewRunId = Guid.TryParse(review.ReviewRunId, out var reviewRunId)
@@ -246,7 +631,7 @@ public class RoadmapModel(
                 WasRewritten = review.Attempts > 1,
                 Attempts = review.Attempts,
                 QualityScore = review.QualityScore,
-                DecisionReason = review.DecisionReason,
+                DecisionReason = decisionReason,
                 GeneratorProvider = response.Provider,
                 GeneratorModel = response.ModelUsed,
                 ReviewerProvider = review.ReviewerProvider,
@@ -265,15 +650,42 @@ public class RoadmapModel(
 
         await db.SaveChangesAsync(cancellationToken);
 
+        var realPhaseCount = phases.Count(p => p.Name != DeferredScopePhaseMarker);
+
+        // Classified ONCE here and reused for both audiences below -- was
+        // previously computed only for the student flash message, AFTER
+        // NotifySupervisorAsync had already been called with unconditional
+        // "AI roadmap ... generated" wording regardless of whether AI
+        // generation actually happened. That let a deterministic fallback,
+        // a rejected/unusable candidate, or a writer-deadline/review-
+        // unavailable case notify the supervisor as if a real AI roadmap
+        // had been accepted, while the student simultaneously saw an
+        // honest fallback warning. ClassifyRoadmapOutcome is the single
+        // source of truth for this wording; the persisted-reload banner
+        // (Roadmap.cshtml) derives the same wording from LatestReview via
+        // the AiOutputReview overload, so all three surfaces can never
+        // disagree.
+        var outcome = ClassifyRoadmapOutcome(response);
+
+        var (supervisorTitle, supervisorMessage) = BuildSupervisorRoadmapNotification(outcome, realPhaseCount);
         await NotifySupervisorAsync(
             userId,
-            "Project roadmap generated",
-            $"A new AI roadmap with {phases.Count(p => p.Name != DeferredScopePhaseMarker)} phase(s) was generated for the project.",
+            supervisorTitle,
+            supervisorMessage,
             "roadmap_generated",
             cancellationToken);
 
-        var realPhaseCount = phases.Count(p => p.Name != DeferredScopePhaseMarker);
-        TempData["Success"] = $"AI roadmap with {realPhaseCount} phases generated.";
+        var outcomeMessage = outcome.Outcome == RoadmapOutcome.AcceptedAi
+            ? $"{outcome.Message} ({realPhaseCount} phase(s).)"
+            : outcome.Message;
+
+        TempData[outcome.Style switch
+        {
+            RoadmapOutcomeStyle.Success => "Success",
+            RoadmapOutcomeStyle.Warning => "Warning",
+            _ => "Error",
+        }] = outcomeMessage;
+
         return RedirectToPage(
             new
             {
@@ -530,6 +942,55 @@ public class RoadmapModel(
         {
             return [];
         }
+    }
+
+    /// <summary>
+    /// Display-only classification of where each phase sits relative to
+    /// the requested target duration, using a cumulative-cursor walk over
+    /// phases' already-authoritative EstimatedWeeks in canonical
+    /// (PhaseNumber) order -- deliberately NEVER clamped to targetWeeks
+    /// (the old `Math.Min(weekCursor, totalWeeks)` approach this replaces
+    /// made every phase past the target collapse onto the exact same final
+    /// week, e.g. three different phases all showing "Week 16"). Pure
+    /// function: never mutates orderedPhases or touches the database --
+    /// see RoadmapPhaseTimelineView's docstring.
+    ///
+    /// Deliberately does NOT invent exact post-target week numbers beyond
+    /// what EstimatedWeeks already implies -- it only classifies using data
+    /// that is already authoritative (the persisted phase duration), never
+    /// re-derives duration from task estimates or guesses.
+    /// </summary>
+    public static List<RoadmapPhaseTimelineView> ClassifyPhaseTimeline(
+        IReadOnlyList<RoadmapPhase> orderedPhases,
+        int targetWeeks)
+    {
+        var safeTarget = Math.Max(1, targetWeeks);
+        var result = new List<RoadmapPhaseTimelineView>(orderedPhases.Count);
+        var cursor = 1;
+
+        foreach (var phase in orderedPhases)
+        {
+            if (phase.EstimatedWeeks <= 0)
+            {
+                result.Add(new RoadmapPhaseTimelineView(
+                    phase, 0, 0, 0, RoadmapPhaseTimelineStatus.NeedsReview));
+                continue;
+            }
+
+            var displayStart = cursor;
+            var displayEnd = displayStart + phase.EstimatedWeeks - 1;
+            cursor = displayEnd + 1;
+
+            var status =
+                displayEnd <= safeTarget ? RoadmapPhaseTimelineStatus.WithinTarget :
+                displayStart <= safeTarget ? RoadmapPhaseTimelineStatus.PartiallyBeyondTarget :
+                RoadmapPhaseTimelineStatus.BeyondTarget;
+
+            result.Add(new RoadmapPhaseTimelineView(
+                phase, displayStart, displayEnd, Math.Min(displayEnd, safeTarget), status));
+        }
+
+        return result;
     }
 
     private static RoadmapWorkloadSummaryView ComputeWorkloadSummary(

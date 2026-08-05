@@ -11,6 +11,8 @@ public interface IAiServiceClient
 {
     /// <summary>GET /health — Check whether the Python service is up.</summary>
     Task<AiHealthResponse?> GetHealthAsync();
+    Task<IReadOnlySet<string>> GetRegisteredRoutesAsync(
+    CancellationToken cancellationToken = default);
 
     /// <summary>POST /defense-simulator/generate-questions — Generate defense simulator questions.</summary>
     Task<DefenseGenerateQuestionsResponse?> GenerateDefenseQuestionsAsync(

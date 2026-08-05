@@ -1,77 +1,181 @@
 @page
 @model FYPilot.Web.Pages.SystemTestModel
+
 @{
     Layout = "_Layout";
     ViewData["Title"] = "System Test";
-    ViewData["Subtitle"] = "Verify all platform connections are operational";
+    ViewData["Subtitle"] =
+        "Verify critical platform services and recorded AI execution evidence";
+
+    var tests = new[]
+    {
+        (
+            Id: "frontend",
+            Icon: "bi-window",
+            Label: "Razor Pages Web App",
+            Description:
+                "Confirms that this authenticated .NET Razor Page loaded successfully"
+        ),
+        (
+            Id: "database",
+            Icon: "bi-database",
+            Label: "PostgreSQL Connectivity",
+            Description:
+                "Checks that EF Core can connect and query real application tables"
+        ),
+        (
+            Id: "migrations",
+            Icon: "bi-diagram-2",
+            Label: "Database Migration State",
+            Description:
+                "Checks whether the deployed database has pending EF Core migrations"
+        ),
+        (
+            Id: "ai-health",
+            Icon: "bi-heart-pulse",
+            Label: "Python AI Service Health",
+            Description:
+                "Calls the real FastAPI /health endpoint"
+        ),
+        (
+            Id: "ai-auth",
+            Icon: "bi-shield-check",
+            Label: "Authenticated Python Channel",
+            Description:
+                "Calls /analyze-skills to verify the internal API key and JSON channel without using an LLM"
+        ),
+        (
+    Id: "ai-routes",
+    Icon: "bi-signpost-split",
+    Label: "Live AI Route Registry",
+    Description:
+        "Reads the protected FastAPI route document and verifies every required application endpoint"
+),
+(
+    Id: "legacy-routes",
+    Icon: "bi-archive",
+    Label: "Legacy Route Audit",
+    Description:
+        "Reports whether removed or transitional Python endpoints are still registered"
+),
+        (
+            Id: "review-audit",
+            Icon: "bi-clipboard2-check",
+            Label: "Persisted AI Execution Evidence",
+            Description:
+                "Checks AiOutputReview for recorded executions of registered AI agents"
+        )
+    };
 }
 
 <section class="system-test-page">
 
     <header class="system-hero">
-        <div>
-            <span class="system-eyebrow">FYPilot Health Monitor</span>
+        <div class="system-hero-content">
+            <span class="system-eyebrow">
+                FYPilot Health Monitor
+            </span>
+
             <h1>System Test Center</h1>
+
             <p>
-                Verify the web app, database, API layer, and Python AI services from one
-                clean operational health dashboard.
+                Run safe infrastructure, authentication, route-registration,
+                and persisted-review checks from one operational dashboard.
+                These checks do not trigger paid LLM generation.
             </p>
+        </div>
+
+        <div class="system-hero-status">
+            <i class="bi bi-shield-check"></i>
+            <div>
+                <strong>Admin-only diagnostics</strong>
+                <span>
+                    Technical exception details are written to server logs,
+                    not exposed in the browser.
+                </span>
+            </div>
         </div>
     </header>
 
-    @{
-        var tests = new[] {
-            ("frontend",      "bi-window",           "Razor Pages Web App",          "Verifies the .NET Razor Pages frontend is running"),
-            ("database",      "bi-database",         "PostgreSQL Database",           "Checks EF Core can connect and query the database"),
-            ("ai-health",     "bi-cpu",              "Python AI Service /health",     "Calls GET /health on the Python FastAPI service"),
-            ("skill-analysis","bi-lightning-charge", "AI Skill Analysis",             "Calls POST /analyze-skills with sample data"),
-            ("feasibility",   "bi-graph-up-arrow",   "AI Feasibility Prediction",     "Calls POST /predict-feasibility with sample features"),
-            ("similarity",    "bi-diagram-3",        "AI Similarity / Originality",   "Calls POST /check-similarity with a sample idea"),
-            ("market-match",  "bi-shop",             "AI Market Matching",            "Calls POST /match-market with a sample idea"),
-            ("risk-alarms",   "bi-exclamation-triangle", "AI Risk Alarms",            "Calls POST /risk-alarms with sample project data"),
-        };
-    }
-
     <section class="system-main-grid">
-
         <article class="system-panel test-panel">
+
             <div class="system-panel-head">
                 <div>
-                    <span class="system-eyebrow">Live Tests</span>
+                    <span class="system-eyebrow">Live checks</span>
+
                     <h2>System Health Check</h2>
-                    <p>Tests all critical service connections. Admin access only.</p>
+
+                    <p>
+                        Tests real infrastructure, API authentication,
+                        route registration, and persisted AI evidence.
+                    </p>
                 </div>
 
-                <button id="run-btn" class="system-run-btn inside-card" onclick="FYPilot.SystemTest.run()">
+                <button id="run-btn"
+                        type="button"
+                        class="system-run-btn inside-card"
+                        onclick="FYPilot.SystemTest.run()">
                     <i class="bi bi-play-circle"></i>
                     Run Tests
                 </button>
             </div>
 
-            <div class="system-test-list">
-                @foreach (var (id, icon, label, desc) in tests)
-                {
-                    <div id="test-@id" class="test-card">
-                        <div class="status-dot bg-secondary"></div>
+            <div class="system-safety-note">
+                <i class="bi bi-info-circle"></i>
 
-                        <div class="system-test-icon">
-                            <i class="@icon"></i>
+                <span>
+                    This page deliberately avoids live idea, roadmap,
+                    documentation, market, mentor, and defense generations
+                    so an admin health check cannot consume provider quota.
+                </span>
+            </div>
+
+            <div class="system-test-list">
+                @foreach (var test in tests)
+                {
+                    <div id="test-@test.Id"
+                         class="test-card"
+                         data-test-id="@test.Id">
+
+                        <div class="status-dot bg-secondary"
+                             aria-hidden="true"></div>
+
+                        <div class="system-test-icon"
+                             aria-hidden="true">
+                            <i class="bi @test.Icon"></i>
                         </div>
 
                         <div class="system-test-content">
-                            <div class="system-test-title">@label</div>
-                            <div class="test-detail system-test-detail" style="display:none"></div>
-                            <div class="system-test-desc">@desc</div>
+                            <div class="system-test-title">
+                                @test.Label
+                            </div>
+
+                            <div class="test-detail system-test-detail"
+                                 role="status"
+                                 aria-live="polite"
+                                 style="display:none">
+                            </div>
+
+                            <div class="system-test-desc">
+                                @test.Description
+                            </div>
                         </div>
 
-                        <span class="test-badge badge bg-secondary">PENDING</span>
+                        <span class="test-badge badge bg-secondary">
+                            PENDING
+                        </span>
                     </div>
                 }
             </div>
 
-            <div id="test-summary" class="alert mt-3 system-summary" style="display:none"></div>
+            <div id="test-summary"
+                 class="alert mt-3 system-summary"
+                 role="status"
+                 aria-live="polite"
+                 style="display:none">
+            </div>
         </article>
-
     </section>
 
     <section class="architecture-section">
@@ -83,38 +187,354 @@
         </div>
 
         <div class="architecture-grid">
-            @foreach (var (label, val, icon, tone) in new[] {
-                ("Razor Pages App",      "FYPilot.Web — ASP.NET Core 8",        "window",      "blue"),
-                ("API Server",           "FYPilot.Api — REST / JWT",            "server",      "steel"),
-                ("Database",             "PostgreSQL fyp_db + EF Core 8",       "database",    "green"),
-                ("Python AI Service",    "FastAPI — localhost:8000",            "cpu",         "amber"),
-                ("Architecture",         "Clean Architecture — 7 .NET projects","layers",      "navy"),
-                ("Auth",                 "Cookie Auth (Web) + JWT (API)",       "shield-lock", "purple"),
+            @foreach (var component in new[]
+            {
+                (
+                    Label: "Razor Pages App",
+                    Value: "FYPilot.Web — ASP.NET Core 8",
+                    Icon: "window",
+                    Tone: "blue"
+                ),
+                (
+                    Label: "API Server",
+                    Value: "FYPilot.Api — REST / JWT",
+                    Icon: "server",
+                    Tone: "steel"
+                ),
+                (
+                    Label: "Database",
+                    Value: "PostgreSQL fyp_db + EF Core 8",
+                    Icon: "database",
+                    Tone: "green"
+                ),
+                (
+                    Label: "Python AI Service",
+                    Value: "FastAPI — configured AI service URL",
+                    Icon: "cpu",
+                    Tone: "amber"
+                ),
+                (
+                    Label: "Architecture",
+                    Value: "Clean Architecture — multi-project solution",
+                    Icon: "layers",
+                    Tone: "navy"
+                ),
+                (
+                    Label: "Authentication",
+                    Value: "Cookie authentication + internal API key + JWT",
+                    Icon: "shield-lock",
+                    Tone: "purple"
+                )
             })
             {
-                <article class="architecture-card @tone">
+                <article class="architecture-card @component.Tone">
                     <div class="architecture-icon">
-                        <i class="bi bi-@icon"></i>
+                        <i class="bi bi-@component.Icon"></i>
                     </div>
 
                     <div>
-                        <strong>@label</strong>
-                        <span>@val</span>
+                        <strong>@component.Label</strong>
+                        <span>@component.Value</span>
                     </div>
                 </article>
             }
         </div>
     </section>
-
 </section>
 
 @Html.AntiForgeryToken()
 
 @section Scripts {
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            FYPilot.SystemTest.setStatus('frontend', 'ok', 'Razor Pages running on .NET 8');
-        });
+        window.FYPilot = window.FYPilot || {};
+
+        FYPilot.SystemTest = {
+            backendTestIds: [
+                'database',
+                'migrations',
+                'ai-health',
+                'ai-auth',
+                'ai-routes',
+                'legacy-routes',
+                'review-audit'
+            ],
+
+            setStatus: function (id, status, detail) {
+                const card =
+                    document.getElementById(`test-${id}`);
+
+                if (!card) {
+                    console.warn(
+                        `System Test card was not found for ID: ${id}`
+                    );
+
+                    return;
+                }
+
+                const dot =
+                    card.querySelector('.status-dot');
+
+                const badge =
+                    card.querySelector('.test-badge');
+
+                const detailElement =
+                    card.querySelector('.test-detail');
+
+                const cssByStatus = {
+                    ok: 'bg-success',
+                    warning: 'bg-warning',
+                    error: 'bg-danger',
+                    running: 'bg-warning',
+                    pending: 'bg-secondary'
+                };
+
+                const labelByStatus = {
+                    ok: 'PASS',
+                    warning: 'WARNING',
+                    error: 'FAILED',
+                    running: 'RUNNING',
+                    pending: 'PENDING'
+                };
+
+                const normalizedStatus =
+                    Object.prototype.hasOwnProperty.call(
+                        cssByStatus,
+                        status
+                    )
+                        ? status
+                        : 'pending';
+
+                const cssClass =
+                    cssByStatus[normalizedStatus];
+
+                card.dataset.status =
+                    normalizedStatus;
+
+                dot.className =
+                    `status-dot ${cssClass}`;
+
+                badge.className =
+                    `test-badge badge ${cssClass}`;
+
+                badge.textContent =
+                    labelByStatus[normalizedStatus];
+
+                if (detail) {
+                    detailElement.textContent =
+                        detail;
+
+                    detailElement.style.display =
+                        'block';
+                } else {
+                    detailElement.textContent = '';
+                    detailElement.style.display =
+                        'none';
+                }
+            },
+
+            setAllBackendStatuses: function (
+                status,
+                detail
+            ) {
+                this.backendTestIds.forEach(id => {
+                    this.setStatus(
+                        id,
+                        status,
+                        detail
+                    );
+                });
+            },
+
+            run: async function () {
+                const button =
+                    document.getElementById('run-btn');
+
+                const summary =
+                    document.getElementById('test-summary');
+
+                if (!button || !summary) {
+                    return;
+                }
+
+                button.disabled = true;
+
+                button.innerHTML =
+                    '<span class="spinner-border ' +
+                    'spinner-border-sm" aria-hidden="true"></span>' +
+                    '<span>Running checks</span>';
+
+                summary.style.display = 'none';
+                summary.className =
+                    'alert mt-3 system-summary';
+                summary.textContent = '';
+
+                this.setAllBackendStatuses(
+                    'running',
+                    'Running system check…'
+                );
+
+                try {
+                    const tokenElement =
+                        document.querySelector(
+                            'input[name="__RequestVerificationToken"]'
+                        );
+
+                    const token =
+                        tokenElement?.value ?? '';
+
+                    const response =
+                        await fetch(
+                            '?handler=RunAll',
+                            {
+                                method: 'POST',
+                                credentials: 'same-origin',
+                                headers: {
+                                    'RequestVerificationToken': token,
+                                    'Accept': 'application/json'
+                                }
+                            }
+                        );
+
+                    if (!response.ok) {
+                        throw new Error(
+                            `System-test request returned ` +
+                            `HTTP ${response.status}.`
+                        );
+                    }
+
+                    const results =
+                        await response.json();
+
+                    if (!Array.isArray(results)) {
+                        throw new Error(
+                            'The system-test response was not an array.'
+                        );
+                    }
+
+                    const completedIds =
+                        new Set();
+
+                    for (const result of results) {
+                        if (
+                            !result
+                            || typeof result.id !== 'string'
+                        ) {
+                            continue;
+                        }
+
+                        completedIds.add(result.id);
+
+                        const durationValue =
+                            Number(result.durationMs);
+
+                        const duration =
+                            Number.isFinite(durationValue)
+                                ? ` (${durationValue} ms)`
+                                : '';
+
+                        this.setStatus(
+                            result.id,
+                            result.status,
+                            `${result.detail ?? 'No detail returned.'}` +
+                            duration
+                        );
+                    }
+
+                    this.backendTestIds
+                        .filter(id =>
+                            !completedIds.has(id))
+                        .forEach(id => {
+                            this.setStatus(
+                                id,
+                                'error',
+                                'The server did not return a result ' +
+                                'for this check.'
+                            );
+                        });
+
+                    const backendStatuses =
+                        this.backendTestIds.map(id => {
+                            const card =
+                                document.getElementById(
+                                    `test-${id}`
+                                );
+
+                            return card?.dataset.status
+                                ?? 'error';
+                        });
+
+                    const passCount =
+                        backendStatuses.filter(
+                            status => status === 'ok'
+                        ).length + 1; // frontend
+
+                    const warningCount =
+                        backendStatuses.filter(
+                            status => status === 'warning'
+                        ).length;
+
+                    const errorCount =
+                        backendStatuses.filter(
+                            status => status === 'error'
+                        ).length;
+
+                    if (errorCount > 0) {
+                        summary.classList.add(
+                            'alert-danger'
+                        );
+                    } else if (warningCount > 0) {
+                        summary.classList.add(
+                            'alert-warning'
+                        );
+                    } else {
+                        summary.classList.add(
+                            'alert-success'
+                        );
+                    }
+
+                    summary.textContent =
+                        `${passCount} passed, ` +
+                        `${warningCount} warning(s), ` +
+                        `${errorCount} failed.`;
+
+                    summary.style.display = 'block';
+                } catch (error) {
+                    this.setAllBackendStatuses(
+                        'error',
+                        'The System Test request failed. ' +
+                        'Check the web server log.'
+                    );
+
+                    summary.classList.add(
+                        'alert-danger'
+                    );
+
+                    summary.textContent =
+                        'The test request could not be completed.';
+
+                    summary.style.display = 'block';
+
+                    console.error(error);
+                } finally {
+                    button.disabled = false;
+
+                    button.innerHTML =
+                        '<i class="bi bi-play-circle"></i>' +
+                        '<span>Run Tests</span>';
+                }
+            }
+        };
+
+        document.addEventListener(
+            'DOMContentLoaded',
+            function () {
+                FYPilot.SystemTest.setStatus(
+                    'frontend',
+                    'ok',
+                    'Authenticated Razor Page loaded successfully.'
+                );
+            }
+        );
     </script>
 }
 
@@ -143,12 +563,77 @@
         }
 
         .system-hero {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1.5rem;
             margin-bottom: 1rem;
             padding: 1.15rem;
             border-radius: 30px;
             color: white;
-            background: radial-gradient(circle at 15% 12%, rgba(255,255,255,.18), transparent 22%), radial-gradient(circle at 88% 20%, rgba(255,255,255,.10), transparent 20%), linear-gradient(135deg, var(--sys-deep), var(--sys-navy) 58%, var(--sys-steel) 135%);
-            box-shadow: 0 22px 48px rgba(40,56,94,.16);
+            background:
+                radial-gradient(
+                    circle at 15% 12%,
+                    rgba(255, 255, 255, .18),
+                    transparent 22%
+                ),
+                radial-gradient(
+                    circle at 88% 20%,
+                    rgba(255, 255, 255, .10),
+                    transparent 20%
+                ),
+                linear-gradient(
+                    135deg,
+                    var(--sys-deep),
+                    var(--sys-navy) 58%,
+                    var(--sys-steel) 135%
+                );
+            box-shadow:
+                0 22px 48px rgba(40, 56, 94, .16);
+        }
+
+        .system-hero-content {
+            min-width: 0;
+        }
+
+        .system-hero-status {
+            flex: 0 1 420px;
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            align-items: center;
+            gap: .8rem;
+            padding: .85rem;
+            border: 1px solid rgba(255, 255, 255, .16);
+            border-radius: 18px;
+            background: rgba(255, 255, 255, .08);
+            backdrop-filter: blur(8px);
+        }
+
+        .system-hero-status > i {
+            display: grid;
+            place-items: center;
+            width: 42px;
+            height: 42px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, .13);
+            font-size: 1.05rem;
+        }
+
+        .system-hero-status strong,
+        .system-hero-status span {
+            display: block;
+        }
+
+        .system-hero-status strong {
+            color: white;
+            font-size: .8rem;
+        }
+
+        .system-hero-status span {
+            margin-top: .15rem;
+            color: rgba(255, 255, 255, .7);
+            font-size: .69rem;
+            line-height: 1.45;
         }
 
         .system-eyebrow {
@@ -162,7 +647,7 @@
         }
 
         .system-hero .system-eyebrow {
-            color: rgba(255,255,255,.72);
+            color: rgba(255, 255, 255, .72);
         }
 
         .system-hero h1 {
@@ -177,7 +662,7 @@
         .system-hero p {
             max-width: 850px;
             margin: .65rem 0 0;
-            color: rgba(255,255,255,.76);
+            color: rgba(255, 255, 255, .76);
             font-size: .9rem;
             line-height: 1.6;
         }
@@ -193,7 +678,8 @@
         .architecture-section {
             background: white;
             border: 1px solid var(--sys-border);
-            box-shadow: 0 14px 34px rgba(40,56,94,.055);
+            box-shadow:
+                0 14px 34px rgba(40, 56, 94, .055);
         }
 
         .system-panel {
@@ -209,24 +695,30 @@
             justify-content: space-between;
             gap: 1rem;
             padding: 1rem;
-            background: radial-gradient(circle at 8% 20%, rgba(81,108,141,.12), transparent 18%), linear-gradient(180deg, #FBFCFE, #FFFFFF);
+            background:
+                radial-gradient(
+                    circle at 8% 20%,
+                    rgba(81, 108, 141, .12),
+                    transparent 18%
+                ),
+                linear-gradient(180deg, #FBFCFE, #FFFFFF);
             border-bottom: 1px solid var(--sys-border);
         }
 
-            .system-panel-head h2,
-            .architecture-head h2 {
-                margin: 0;
-                color: var(--sys-text);
-                font-size: 1.12rem;
-                font-weight: 600;
-                letter-spacing: -.02em;
-            }
+        .system-panel-head h2,
+        .architecture-head h2 {
+            margin: 0;
+            color: var(--sys-text);
+            font-size: 1.12rem;
+            font-weight: 600;
+            letter-spacing: -.02em;
+        }
 
-            .system-panel-head p {
-                margin: .25rem 0 0;
-                color: var(--sys-muted);
-                font-size: .76rem;
-            }
+        .system-panel-head p {
+            margin: .25rem 0 0;
+            color: var(--sys-muted);
+            font-size: .76rem;
+        }
 
         .system-run-btn {
             display: inline-flex;
@@ -235,20 +727,51 @@
             gap: .48rem;
             border: 0;
             color: white;
-            background: linear-gradient(135deg, var(--sys-navy), var(--sys-steel));
+            background:
+                linear-gradient(
+                    135deg,
+                    var(--sys-navy),
+                    var(--sys-steel)
+                );
             border-radius: 15px;
             padding: .78rem 1.1rem;
             font-size: .84rem;
             font-weight: 600;
             transition: .15s ease;
             white-space: nowrap;
-            box-shadow: 0 12px 24px rgba(40,56,94,.16);
+            box-shadow:
+                0 12px 24px rgba(40, 56, 94, .16);
         }
 
-            .system-run-btn:hover {
-                transform: translateY(-1px);
-                box-shadow: 0 16px 30px rgba(40,56,94,.20);
-            }
+        .system-run-btn:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow:
+                0 16px 30px rgba(40, 56, 94, .20);
+        }
+
+        .system-run-btn:disabled {
+            cursor: wait;
+            opacity: .72;
+        }
+
+        .system-safety-note {
+            display: flex;
+            align-items: flex-start;
+            gap: .55rem;
+            margin: 1rem 1rem 0;
+            padding: .75rem .85rem;
+            border: 1px solid #DCE6F1;
+            border-radius: 15px;
+            color: #40526A;
+            background: #F6F9FC;
+            font-size: .73rem;
+            line-height: 1.5;
+        }
+
+        .system-safety-note i {
+            margin-top: .08rem;
+            color: var(--sys-steel);
+        }
 
         .system-test-list {
             display: grid;
@@ -258,7 +781,8 @@
 
         .test-card {
             display: grid;
-            grid-template-columns: auto auto minmax(0, 1fr) auto;
+            grid-template-columns:
+                auto auto minmax(0, 1fr) auto;
             gap: .75rem;
             align-items: center;
             min-height: 76px;
@@ -271,29 +795,51 @@
             transition: .18s ease;
         }
 
-            .test-card::before {
-                content: "";
-                position: absolute;
-                left: .45rem;
-                top: 18px;
-                bottom: 18px;
-                width: 3px;
-                border-radius: 999px;
-                background: var(--sys-steel);
-                opacity: .22;
-                transition: .18s ease;
-            }
+        .test-card::before {
+            content: "";
+            position: absolute;
+            left: .45rem;
+            top: 18px;
+            bottom: 18px;
+            width: 3px;
+            border-radius: 999px;
+            background: var(--sys-steel);
+            opacity: .22;
+            transition: .18s ease;
+        }
 
-            .test-card:hover {
-                background: linear-gradient(90deg, rgba(238,242,246,.70), #FFFFFF 48%);
-                transform: translateY(-1px);
-                box-shadow: 0 12px 24px rgba(40,56,94,.06);
-            }
+        .test-card:hover {
+            background:
+                linear-gradient(
+                    90deg,
+                    rgba(238, 242, 246, .70),
+                    #FFFFFF 48%
+                );
+            transform: translateY(-1px);
+            box-shadow:
+                0 12px 24px rgba(40, 56, 94, .06);
+        }
 
-                .test-card:hover::before {
-                    opacity: .75;
-                    background: var(--sys-blue);
-                }
+        .test-card:hover::before {
+            opacity: .75;
+            background: var(--sys-blue);
+        }
+
+        .test-card[data-status="ok"]::before {
+            background: var(--sys-green);
+            opacity: .85;
+        }
+
+        .test-card[data-status="warning"]::before,
+        .test-card[data-status="running"]::before {
+            background: var(--sys-amber);
+            opacity: .85;
+        }
+
+        .test-card[data-status="error"]::before {
+            background: var(--sys-red);
+            opacity: .85;
+        }
 
         .status-dot {
             width: 10px;
@@ -317,8 +863,14 @@
 
         .test-card:hover .system-test-icon {
             color: white;
-            background: linear-gradient(135deg, var(--sys-navy), var(--sys-steel));
-            box-shadow: 0 10px 22px rgba(40,56,94,.14);
+            background:
+                linear-gradient(
+                    135deg,
+                    var(--sys-navy),
+                    var(--sys-steel)
+                );
+            box-shadow:
+                0 10px 22px rgba(40, 56, 94, .14);
         }
 
         .system-test-title {
@@ -333,6 +885,15 @@
             color: var(--sys-muted);
             font-size: .72rem;
             line-height: 1.4;
+        }
+
+        .system-test-detail {
+            margin-top: .18rem;
+            font-weight: 500;
+        }
+
+        .system-test-desc {
+            margin-top: .14rem;
         }
 
         .test-badge {
@@ -363,13 +924,15 @@
 
         .architecture-grid {
             display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-template-columns:
+                repeat(3, minmax(0, 1fr));
             gap: .75rem;
         }
 
         .architecture-card {
             display: grid;
-            grid-template-columns: auto minmax(0, 1fr);
+            grid-template-columns:
+                auto minmax(0, 1fr);
             gap: .75rem;
             align-items: center;
             min-height: 86px;
@@ -380,11 +943,12 @@
             transition: .18s ease;
         }
 
-            .architecture-card:hover {
-                transform: translateY(-1px);
-                border-color: #B8C8DD;
-                box-shadow: 0 10px 22px rgba(40,56,94,.07);
-            }
+        .architecture-card:hover {
+            transform: translateY(-1px);
+            border-color: #B8C8DD;
+            box-shadow:
+                0 10px 22px rgba(40, 56, 94, .07);
+        }
 
         .architecture-icon {
             width: 44px;
@@ -437,17 +1001,20 @@
 
         .status-dot.bg-success,
         .test-badge.bg-success {
-            background-color: var(--sys-green) !important;
+            background-color:
+                var(--sys-green) !important;
         }
 
         .status-dot.bg-danger,
         .test-badge.bg-danger {
-            background-color: var(--sys-red) !important;
+            background-color:
+                var(--sys-red) !important;
         }
 
         .status-dot.bg-warning,
         .test-badge.bg-warning {
-            background-color: var(--sys-amber) !important;
+            background-color:
+                var(--sys-amber) !important;
         }
 
         .test-badge.bg-success,
@@ -459,7 +1026,19 @@
 
         @@media (max-width: 1280px) {
             .architecture-grid {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
+                grid-template-columns:
+                    repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @@media (max-width: 900px) {
+            .system-hero {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .system-hero-status {
+                flex-basis: auto;
             }
         }
 
@@ -474,11 +1053,17 @@
             }
 
             .test-card {
-                grid-template-columns: auto minmax(0, 1fr);
+                grid-template-columns:
+                    auto minmax(0, 1fr);
+            }
+
+            .status-dot {
+                align-self: start;
+                margin-top: 1rem;
             }
 
             .system-test-icon {
-                grid-column: 1;
+                display: none;
             }
 
             .system-test-content {

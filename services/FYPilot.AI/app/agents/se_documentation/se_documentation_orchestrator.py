@@ -1,6 +1,9 @@
 import json
+import logging
 import re
 import time
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -23,6 +26,33 @@ from app.agents.se_documentation.project_facts import (
     required_screens_for_text,
 )
 from app.services.llm_provider import LLMResult, ProviderChain
+
+logger = logging.getLogger("fypilot-se-documentation")
+
+# Canonical launch order for the ordered bounded queue (see
+# _generate_llm_sections). "aiReport" is appended conditionally, only when
+# facts.ai_involved. Every one of these 7 prompts is built solely from the
+# same static facts_context_text(facts) string -- none reads another
+# section's generated output -- so this order reflects the previous
+# sequential order for minimal behavioral drift, not a true dependency
+# requirement.
+_CORE_SECTION_QUEUE: tuple[str, ...] = (
+    "requirements",
+    "useCases",
+    "modulesArchitecture",
+    "database",
+    "uiApi",
+    "testingSecurity",
+)
+
+# At most this many section calls run concurrently.
+_MAX_CONCURRENT_SECTION_CALLS = 2
+
+# Matches ProviderChain._MIN_SECONDS_PER_PROVIDER_ATTEMPT -- do not launch
+# (or attempt a fallback provider within) a call when less than this much
+# Writer budget remains; a call started with less than this has no
+# realistic chance of completing usefully.
+_MIN_SECONDS_PER_SECTION_ATTEMPT = 4.0
 
 
 class SEDocStudentProfile(BaseModel):
@@ -702,6 +732,63 @@ _SCREEN_TEMPLATES: Dict[str, Dict[str, Any]] = {
 }
 
 
+@dataclass
+class SectionCallResult:
+    """
+    The complete, self-contained outcome of ONE section's provider-chain
+    attempt, returned by a worker running on the bounded ThreadPoolExecutor.
+    Deliberately carries everything the caller needs (including provenance
+    and timing) so nothing about a concurrent section call is ever read
+    from or written to shared `self.*` instance state -- see
+    _call_section_concurrent_safe, which builds this purely from local
+    values and its own arguments.
+    """
+
+    section_key: str
+    launch_order: int  # position in the canonical-order launch sequence (1-based) -- the ordered-queue analog of a fixed "wave number"
+    success: bool
+    data: Optional[Dict[str, Any]]
+    provider: Optional[str]
+    model: Optional[str]
+    provenance: str  # "provider" | "fallback"
+    error_code: Optional[str]
+    error_message: Optional[str]
+    start_time: float  # time.monotonic()
+    end_time: float
+    duration: float
+    configured_timeout: float
+    effective_timeout: float
+    remaining_writer_budget_at_start: float
+
+
+class WriterBudgetExceededError(Exception):
+    """
+    Raised when the Writer's reserved deadline (writer_deadline = global
+    deadline - the semantic-review reserve, see routers/se_documentation.py)
+    is reached before every queued core section could even be ATTEMPTED --
+    not a per-section content/provider failure (that still falls back to
+    per-section deterministic content, caught downstream by the router's
+    existing strict core-fallback rejection), but a genuine "ran out of time
+    to even try" condition.
+
+    Deliberately a typed exception rather than a mutable agent-instance
+    flag (e.g. self.writer_budget_exceeded = True) -- an instance attribute
+    would be unsafe to read/write if this agent were ever reused across
+    concurrent requests; this exception is caught ONLY by the SE
+    Documentation router (see se_documentation.py), which must reject the
+    candidate outright: no core deterministic fallback, no partial
+    document, no persistence, previous accepted document preserved.
+    """
+
+    def __init__(self, missing_sections: List[str], completed_sections: List[str]):
+        self.missing_sections = missing_sections
+        self.completed_sections = completed_sections
+        super().__init__(
+            f"Writer budget exceeded before {missing_sections} could be attempted "
+            f"(completed: {completed_sections})."
+        )
+
+
 class SEDocumentationOrchestratorAgent:
     def __init__(self):
         # Switched from "high" (anthropic/claude-opus-4-8, expensive) to a
@@ -753,6 +840,14 @@ class SEDocumentationOrchestratorAgent:
 
         try:
             llm_sections = self._generate_llm_sections(request, facts, deadline=deadline)
+        except WriterBudgetExceededError:
+            # Must reach the router uncaught -- a genuine "ran out of time
+            # to even attempt every core section" is never masked as a
+            # normal per-section provider failure/fallback. See
+            # WriterBudgetExceededError's docstring for the full
+            # propagation path (nothing between here and the router
+            # catches broad Exception around this call chain).
+            raise
         except Exception as e:
             self.last_error = str(e)
             llm_sections = {}
@@ -793,11 +888,11 @@ class SEDocumentationOrchestratorAgent:
         than duplicating it, then wraps the result as an LLMResult so it can
         flow through guarded_call like any other LLM stage.
 
-        ``deadline`` should be the SAME absolute deadline passed to
-        ReviewPipeline.run() for this request -- see generate()'s docstring.
-        This is what makes section generation, structural repair, semantic
-        review, and rewrite all share one absolute deadline instead of each
-        stage getting its own fresh budget.
+        ``deadline`` here is the WRITER's own deadline (writer_deadline =
+        global_deadline - the semantic-review reserve), NOT the same value
+        passed to ReviewPipeline.run() -- the router computes both from one
+        shared global_deadline and passes writer_deadline here, global_deadline
+        unchanged to the pipeline. See routers/se_documentation.py.
 
         Returns None -- signaling "no real provider output" to guarded_call,
         which the pipeline maps to status="provider_unavailable" -- when
@@ -805,6 +900,11 @@ class SEDocumentationOrchestratorAgent:
         meaning at least one of the section calls failed), since in that
         case there is no real candidate to review; the router should use
         build_safe_fallback() directly instead.
+
+        Propagates WriterBudgetExceededError uncaught (see that exception's
+        docstring) -- neither this method nor generate() catches it; it must
+        reach the router, which is the only place that decides how to
+        respond to a genuine budget exhaustion (reject, never fall back).
         """
         result = self.generate(request, deadline=deadline)
 
@@ -826,26 +926,27 @@ class SEDocumentationOrchestratorAgent:
     # the raw request fields.
     # =========================================================================
 
-    # Soft overall wall-clock budget for ALL section calls combined (retries
-    # included). Without this, a sustained provider outage combined with the
-    # "retry once" resilience fix could make a single request take tens of
-    # minutes. Once this budget is spent, remaining/retry attempts are
-    # skipped and fall back to detailed deterministic content immediately
-    # instead of queuing another slow, likely-doomed network call.
+    # Fallback-only default WRITER budget, used solely when no external
+    # deadline is supplied (e.g. a direct/test caller) -- the normal
+    # production path never reads this: the router always computes
+    # writer_deadline = global_deadline (1200s) - the semantic-review
+    # reserve (300s) = 900s from request start, and passes it in explicitly.
+    # 900 is used here to match that real production value.
     #
-    # Raised 180s -> 600s -> 960s as real measurements came in: 600s assumed
-    # the "high" tier's claude-opus-4-8 (~7s/section normally, occasional
-    # Groq/Ollama cascades on failure); after moving to the cheaper
-    # "se_documentation" tier (Llama-3.3-70B via DeepInfra), a single
-    # ~6500-token section was measured live at 121s, and up to 7 sections run
-    # sequentially -- 960s gives that real per-section cost enough combined
-    # headroom, matching registry.py's SEDocumentationAgent.max_total_seconds
-    # (the two are coordinated by the router computing ONE shared deadline;
-    # see routers/se_documentation.py). This is a background "Generate
-    # Documentation" click, not a live chat -- several extra minutes for a
-    # genuinely provider-generated document beats a fast but
-    # mostly-generic-fallback one.
-    _SECTIONS_TIME_BUDGET_SECONDS = 960.0
+    # History: 180s -> 600s -> 960s (a single deadline shared by section
+    # generation AND review) as real measurements came in -- after moving to
+    # the "se_documentation" tier (Llama-3.3-70B via DeepInfra), a single
+    # ~6500-token section was measured live at 121s, and a LIVE END-TO-END
+    # RUN with the OLD single-960s-deadline design measured the Writer stage
+    # alone (7 sequential sections, 2 of which needed a full 180s DeepInfra
+    # timeout before falling back to Groq) taking ~967s -- already past the
+    # 960s deadline before ReviewPipeline's semantic Reviewer was ever
+    # called (confirmed live: the persisted result was status=
+    # "review_unavailable" with reviewer_provider/reviewer_model both null).
+    # This is the exact defect the ordered bounded queue (max 2 concurrent
+    # section calls) plus the separate 300s semantic-review RESERVE fixes --
+    # see _generate_llm_sections and routers/se_documentation.py.
+    _SECTIONS_TIME_BUDGET_SECONDS = 900.0
 
     def _generate_llm_sections(
         self,
@@ -854,19 +955,132 @@ class SEDocumentationOrchestratorAgent:
         *,
         deadline: Optional[float] = None,
     ) -> Dict[str, Any]:
-        context = facts_context_text(facts)
+        """
+        Runs every section through an ORDERED BOUNDED QUEUE: at most
+        _MAX_CONCURRENT_SECTION_CALLS (2) section calls in flight at once,
+        the next queued section starts the instant either active call
+        finishes (never waiting for a fixed pair to both complete), and
+        final aggregation always follows _CORE_SECTION_QUEUE's canonical
+        order regardless of completion order. All 7 prompts are mutually
+        independent -- every one is built solely from `context` (computed
+        once, below, from `facts`), never from another section's generated
+        output -- confirmed by inspection: no prompt below reads `sections`.
+        The queue order therefore only needs to roughly match the previous
+        sequential order for minimal behavioral drift, not because any
+        section actually depends on another's output.
 
-        sections: Dict[str, Any] = {}
-        # Use the externally-supplied absolute deadline verbatim when given
-        # (the normal production path -- see generate()'s docstring) rather
-        # than starting a fresh clock here, which would let section
-        # generation silently run past the same deadline ReviewPipeline is
-        # enforcing for structural repair/review/rewrite.
-        self._sections_deadline = (
+        ``deadline`` here is the WRITER's own deadline (writer_deadline =
+        global_deadline - the semantic-review reserve; computed once by the
+        router in routers/se_documentation.py and passed here unchanged --
+        never the pipeline's overall deadline directly, and never
+        recomputed partway through). When omitted (e.g. a direct/test
+        caller), falls back to a fresh _SECTIONS_TIME_BUDGET_SECONDS-wide
+        budget starting now.
+
+        Raises WriterBudgetExceededError when writer_deadline is reached
+        before every queued section could even be ATTEMPTED (see that
+        exception's docstring) -- a section that WAS attempted and failed
+        for a genuine content/provider reason still falls back to
+        per-section deterministic content exactly as before, unchanged.
+        """
+        context = facts_context_text(facts)
+        writer_deadline = (
             deadline if deadline is not None else time.monotonic() + self._SECTIONS_TIME_BUDGET_SECONDS
         )
+        # No concurrently-running worker ever reads this -- every worker
+        # receives writer_deadline as an explicit argument instead. Kept
+        # only as a convenience for any future single-threaded caller.
+        self._sections_deadline = writer_deadline
 
-        requirements_prompt = f"""
+        prompts = self._build_section_prompts(context, facts)
+
+        queue_order = list(_CORE_SECTION_QUEUE)
+        if facts.ai_involved:
+            queue_order.append("aiReport")
+
+        pending = list(queue_order)
+        results: Dict[str, SectionCallResult] = {}
+        in_flight: Dict[Future, str] = {}
+        launch_counter = 0
+
+        def _launch_next_if_possible(executor: ThreadPoolExecutor) -> None:
+            nonlocal launch_counter
+            while pending and len(in_flight) < _MAX_CONCURRENT_SECTION_CALLS:
+                remaining = writer_deadline - time.monotonic()
+                if remaining < _MIN_SECONDS_PER_SECTION_ATTEMPT:
+                    break
+                key = pending.pop(0)
+                launch_counter += 1
+                prompt_text, max_tokens = prompts[key]
+                future = executor.submit(
+                    self._call_section_concurrent_safe,
+                    key, prompt_text, max_tokens, writer_deadline, launch_counter,
+                )
+                in_flight[future] = key
+
+        with ThreadPoolExecutor(max_workers=_MAX_CONCURRENT_SECTION_CALLS) as executor:
+            _launch_next_if_possible(executor)
+            while in_flight:
+                done, _still_pending = wait(list(in_flight.keys()), return_when=FIRST_COMPLETED)
+                for finished in done:
+                    key = in_flight.pop(finished)
+                    results[key] = finished.result()
+                _launch_next_if_possible(executor)
+            # Exiting the `with` block joins/awaits any last stragglers
+            # (there should be none left once `in_flight` is empty) before
+            # the executor's own threads are torn down.
+
+        if pending:
+            # writer_deadline was reached before these could even be
+            # attempted -- distinct from a section that WAS attempted and
+            # failed for a real content/provider reason (handled below,
+            # unchanged from before). No new task is launched past this
+            # point; nothing here waits further, since a "pending" section
+            # by definition was never submitted to the executor at all.
+            completed = [key for key in queue_order if key in results and results[key].success]
+            logger.warning(
+                "se_documentation.writer_budget_exceeded missing=%s completed=%s overrun_seconds=%.1f",
+                pending, completed, time.monotonic() - writer_deadline,
+            )
+            raise WriterBudgetExceededError(missing_sections=list(pending), completed_sections=completed)
+
+        self._update_last_fields_from_results(results, queue_order)
+
+        sections: Dict[str, Any] = {}
+        for key in queue_order:
+            record = results.get(key)
+            if record is not None and record.success:
+                sections[key] = record.data
+                self.section_provenance[key] = "provider"
+            else:
+                self.section_provenance[key] = "fallback"
+                if record is not None and record.error_message:
+                    self.last_error = self.last_error or record.error_message
+
+            if record is not None:
+                logger.info(
+                    "se_documentation.section_result key=%s launch_order=%d provenance=%s "
+                    "provider=%s model=%s duration=%.1fs configured_timeout=%.1fs "
+                    "effective_timeout=%.1fs remaining_writer_budget_at_start=%.1fs",
+                    key, record.launch_order, "provider" if record.success else "fallback",
+                    record.provider, record.model, record.duration,
+                    record.configured_timeout, record.effective_timeout,
+                    record.remaining_writer_budget_at_start,
+                )
+
+        return sections
+
+    def _build_section_prompts(
+        self, context: str, facts: ProjectFacts,
+    ) -> Dict[str, "tuple[str, int]"]:
+        """
+        Every prompt string below is UNCHANGED text from the previous
+        sequential implementation -- only the control flow around them
+        changed (see _generate_llm_sections). Returns {key: (prompt, max_tokens)}.
+        """
+        prompts: Dict[str, "tuple[str, int]"] = {}
+
+        prompts["requirements"] = (f"""
 Return ONLY valid JSON.
 
 {context}
@@ -911,12 +1125,9 @@ Rules:
 - Do not invent unrelated features (multilingual support, support tickets, external APIs,
   university credential integration, human escalation, etc.) unless implied by the project
   facts above; if you do include one of these, set sourceClassification to "assumption".
-"""
-        data = self._call_section_safe("requirements", requirements_prompt, max_tokens=6500)
-        if data is not None:
-            sections["requirements"] = data
+""", 6500)
 
-        use_cases_prompt = f"""
+        prompts["useCases"] = (f"""
 Return ONLY valid JSON.
 
 {context}
@@ -955,12 +1166,9 @@ Rules:
 - relatedRequirements / relatedRequirement must only reference requirement ids that make
   sense for this project (FR-xx or NFR-xx).
 - Do not repeat the same edge case scenario under multiple ids.
-"""
-        data = self._call_section_safe("useCases", use_cases_prompt, max_tokens=6500)
-        if data is not None:
-            sections["useCases"] = data
+""", 6500)
 
-        modules_prompt = f"""
+        prompts["modulesArchitecture"] = (f"""
 Return ONLY valid JSON.
 
 {context}
@@ -996,12 +1204,9 @@ Rules:
 - Explain real responsibilities and data flow (e.g. "the query-processing module validates
   input, calls the AI/NLP service for intent classification, and retrieves the matching
   knowledge article") -- do not use a vague one-line architecture description.
-"""
-        data = self._call_section_safe("modulesArchitecture", modules_prompt, max_tokens=4500)
-        if data is not None:
-            sections["modulesArchitecture"] = data
+""", 4500)
 
-        database_prompt = f"""
+        prompts["database"] = (f"""
 Return ONLY valid JSON.
 
 {context}
@@ -1046,12 +1251,9 @@ Rules:
 - Every field needs a clear purpose -- no filler fields.
 - Set isSensitive true for passwords/personal data and list them in sensitiveFields.
 - relatedRequirementIds must reference real FR/NFR ids this entity supports.
-"""
-        data = self._call_section_safe("database", database_prompt, max_tokens=6000)
-        if data is not None:
-            sections["database"] = data
+""", 6000)
 
-        ui_api_prompt = f"""
+        prompts["uiApi"] = (f"""
 Return ONLY valid JSON.
 
 {context}
@@ -1094,12 +1296,9 @@ Rules:
 - Do not guess an exact route path with confidence -- use a conceptual endpoint name and
   set sourceClassification to "assumption" unless the exact route was confirmed.
 - relatedRequirements must reference real FR/NFR ids.
-"""
-        data = self._call_section_safe("uiApi", ui_api_prompt, max_tokens=6000)
-        if data is not None:
-            sections["uiApi"] = data
+""", 6000)
 
-        testing_prompt = f"""
+        prompts["testingSecurity"] = (f"""
 Return ONLY valid JSON.
 
 {context}
@@ -1139,13 +1338,10 @@ Rules:
 - Generate 5 to 10 security/privacy requirements covering authentication, authorization,
   input validation, secret management, session management, and data protection as relevant
   to this project. Do not claim GDPR/HIPAA compliance unless the project facts require it.
-"""
-        data = self._call_section_safe("testingSecurity", testing_prompt, max_tokens=7000)
-        if data is not None:
-            sections["testingSecurity"] = data
+""", 7000)
 
         if facts.ai_involved:
-            ai_report_prompt = f"""
+            prompts["aiReport"] = (f"""
 Return ONLY valid JSON.
 
 {context}
@@ -1177,63 +1373,109 @@ Rules:
 - Do not mention retrieval-augmented generation (RAG) or vector databases unless the
   canonical AI approach above is "rag" or "hybrid".
 - evaluationMetrics must be relevant to the actual AI task type described.
-"""
-            data = self._call_section_safe("aiReport", ai_report_prompt, max_tokens=3000)
-            if data is not None:
-                sections["aiReport"] = data
+""", 3000)
 
-        return sections
+        return prompts
 
-    def _call_section_safe(self, key: str, prompt: str, max_tokens: int) -> Optional[Dict[str, Any]]:
+    def _call_section_concurrent_safe(
+        self,
+        key: str,
+        prompt: str,
+        max_tokens: int,
+        writer_deadline: float,
+        launch_order: int,
+    ) -> SectionCallResult:
         """
-        Tries the section's LLM call, retries once on failure, and records
-        section_provenance["provider"|"fallback"] either way. Returns None
-        (never raises) when both attempts fail, so _generate_llm_sections
-        can simply omit that key from `sections` -- the existing per-section
-        `_x_or_fallback` methods already treat a missing/empty section as
-        "use the deterministic fallback for just this section", which is
-        what actually fixes the "one failed call wipes the whole document"
-        bug: every OTHER section that already succeeded is preserved.
-
-        Respects self._sections_deadline (see _SECTIONS_TIME_BUDGET_SECONDS):
-        once the overall budget is spent, this skips straight to fallback
-        (or skips the retry) instead of queuing another slow, likely-doomed
-        call during a sustained provider outage.
+        Runs on a worker thread from the bounded ThreadPoolExecutor.
+        THREAD-SAFETY CONTRACT: never reads or writes self.last_provider /
+        self.last_model_used / self.last_raw_llm_response / self.last_error
+        / self._sections_deadline, and never raises -- every outcome
+        (success, provider failure, or unexpected exception) is captured
+        into the returned SectionCallResult, which the main orchestrator
+        thread aggregates AFTER every wave/queue step. self.provider_chain
+        and its underlying provider objects ARE shared across concurrent
+        calls, but they are safe to call concurrently: each generate_json
+        call builds a fresh SDK client per attempt and never mutates
+        instance state on the provider objects themselves.
         """
-        last_error: Optional[str] = None
-        deadline = getattr(self, "_sections_deadline", None)
+        start = time.monotonic()
+        remaining_at_start = writer_deadline - start
+        configured_timeout = self._primary_provider_configured_timeout()
+        effective_timeout = max(0.0, min(configured_timeout, remaining_at_start))
 
-        max_attempts = 0 if (deadline is not None and time.monotonic() >= deadline) else 2
-
-        for attempt in range(max_attempts):
-            if attempt > 0 and deadline is not None and time.monotonic() >= deadline:
-                break
-
-            try:
-                data = self._call_llm_json(prompt, max_tokens=max_tokens)
-                self.section_provenance[key] = "provider"
-                return data
-            except Exception as e:
-                last_error = str(e)
-
-        self.section_provenance[key] = "fallback"
-        self.last_error = self.last_error or last_error or "Section skipped: overall generation time budget was already spent."
-        return None
-
-    def _call_llm_json(self, prompt: str, max_tokens: int = 2200) -> Dict[str, Any]:
-        result = self.provider_chain.generate_json(prompt, use_search=False, max_tokens=max_tokens)
-
-        self.last_provider = result.provider if result.provider != "none" else None
-        self.last_model_used = result.model
-
-        if not result.ok or not isinstance(result.data, dict):
-            raise RuntimeError(
-                result.error or "No provider returned valid JSON for this section."
+        try:
+            result = self.provider_chain.generate_json(
+                prompt,
+                use_search=False,
+                max_tokens=max_tokens,
+                deadline=writer_deadline,
+                cap_timeout_to_deadline=True,
+            )
+        except Exception as e:  # never propagate -- always return a result
+            end = time.monotonic()
+            return SectionCallResult(
+                section_key=key, launch_order=launch_order, success=False, data=None,
+                provider=None, model=None, provenance="fallback",
+                error_code="unexpected_exception", error_message=str(e),
+                start_time=start, end_time=end, duration=end - start,
+                configured_timeout=configured_timeout, effective_timeout=effective_timeout,
+                remaining_writer_budget_at_start=remaining_at_start,
             )
 
-        self.last_raw_llm_response = json.dumps(result.data, ensure_ascii=False)[:3000]
+        end = time.monotonic()
 
-        return result.data
+        if result.ok and isinstance(result.data, dict):
+            return SectionCallResult(
+                section_key=key, launch_order=launch_order, success=True, data=result.data,
+                provider=(result.provider if result.provider != "none" else None),
+                model=result.model, provenance="provider", error_code=None, error_message=None,
+                start_time=start, end_time=end, duration=end - start,
+                configured_timeout=configured_timeout, effective_timeout=effective_timeout,
+                remaining_writer_budget_at_start=remaining_at_start,
+            )
+
+        return SectionCallResult(
+            section_key=key, launch_order=launch_order, success=False, data=None,
+            provider=(result.provider if result.provider != "none" else None),
+            model=result.model, provenance="fallback",
+            error_code=result.error_category, error_message=result.error,
+            start_time=start, end_time=end, duration=end - start,
+            configured_timeout=configured_timeout, effective_timeout=effective_timeout,
+            remaining_writer_budget_at_start=remaining_at_start,
+        )
+
+    def _primary_provider_configured_timeout(self) -> float:
+        """The primary (first-tried) provider's own configured timeout --
+        read-only, safe to call concurrently. Used purely for instrumentation/
+        effective_timeout math, never mutated."""
+        providers = getattr(self.provider_chain, "providers", [])
+        if providers:
+            return float(getattr(providers[0], "timeout_seconds", 180.0) or 180.0)
+        return 180.0
+
+    def _update_last_fields_from_results(
+        self, results: Dict[str, SectionCallResult], queue_order: List[str],
+    ) -> None:
+        """
+        Runs ONLY on the main orchestrator thread, AFTER every concurrent
+        section call has already completed and been collected -- never
+        called while a ThreadPoolExecutor worker could still be running.
+        Picks the LAST-in-canonical-order successful result, matching the
+        previous sequential implementation's "whichever section ran last
+        wins" semantics as closely as possible for these backward-compatible
+        aggregate fields.
+        """
+        chosen: Optional[SectionCallResult] = None
+        for key in queue_order:
+            record = results.get(key)
+            if record is not None and record.success:
+                chosen = record
+
+        if chosen is not None:
+            self.last_provider = chosen.provider
+            self.last_model_used = chosen.model
+            if chosen.data is not None:
+                self.last_raw_llm_response = json.dumps(chosen.data, ensure_ascii=False)[:3000]
 
     # =========================================================================
     # Deterministic assembly -- every field below is derived from ProjectFacts

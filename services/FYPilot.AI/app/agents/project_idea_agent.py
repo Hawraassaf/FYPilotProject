@@ -25,9 +25,11 @@ Design:
 - The app should never crash because an AI provider is unavailable.
 """
 
+import inspect
 import json
 import logging
 import re
+import time
 from difflib import SequenceMatcher
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -42,6 +44,38 @@ logger = logging.getLogger("fypilot-agent")
 
 
 IDEAS_PER_BATCH = 4
+
+# Typed reason for Writer-deadline exhaustion (see routers/ideas.py's
+# writer_deadline / _WRITER_TIME_RESERVE_SECONDS). Uses the SAME string as
+# ProjectRoadmapAgent's fallback_reason.WRITER_DEADLINE_EXCEEDED
+# (app/agents/roadmap/fallback_reason.py) -- that module is documented as
+# Roadmap-specific and is deliberately not imported here (it pulls in the
+# whole Roadmap fallback-reason taxonomy, out of scope for this agent), but
+# the spelling of this one generic code is kept identical rather than
+# inventing a differently-spelled equivalent.
+WRITER_DEADLINE_EXCEEDED = "writer_deadline_exceeded"
+
+
+def _accepts_keyword(callable_obj: Any, keyword: str) -> bool:
+    """
+    Mirrors app.review.pipeline._accepts_keyword's compatibility check
+    (duplicated, not imported -- importing it here would create
+    project_idea_agent -> review.pipeline -> review.registry ->
+    project_idea_agent, a circular import, since registry.py already imports
+    from this module). Lets an older provider-chain test double that doesn't
+    yet accept `deadline`/`cap_timeout_to_deadline` keep working completely
+    unchanged, while a real ProviderChain (or an updated fake) gets the
+    deadline threaded through.
+    """
+    try:
+        parameters = inspect.signature(callable_obj).parameters.values()
+    except (TypeError, ValueError):
+        return True
+
+    return any(
+        parameter.name == keyword or parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
 
 
 # ── Pydantic models kept compatible with current ideas router ─────────────────
@@ -215,6 +249,14 @@ class ProjectIdeaAgent:
         self.last_raw_llm_response: str | None = None
         self.last_provider: str | None = None
         self.last_model_used: str | None = None
+        # Typed diagnostic (see WRITER_DEADLINE_EXCEEDED above) -- set only
+        # when generate_ideas() had to fall back because the Writer's own
+        # reserved deadline ran out, never for any other failure category
+        # (that finer-grained classification is out of scope for this
+        # agent). None means "not attempted yet" or "no deadline was
+        # involved in the fallback" -- unchanged from before this field
+        # existed for any caller that never passes a deadline.
+        self.last_fallback_reason_code: str | None = None
         self.last_search_used = False
         self.last_search_failed = False
         self.last_search_provider: str | None = None
@@ -257,7 +299,9 @@ class ProjectIdeaAgent:
             "smart contract"
         ]
 
-    def generate_ideas(self, profile: StudentProfile) -> list[ProjectIdea]:
+    def generate_ideas(
+        self, profile: StudentProfile, *, deadline: float | None = None,
+    ) -> list[ProjectIdea]:
         """
         Generate exactly four ideas using a two-step grounded workflow.
 
@@ -266,6 +310,24 @@ class ProjectIdeaAgent:
 
         Step 2: The normal provider chain generates strict idea JSON from the
         student profile plus the compact evidence gathered in step 1.
+
+        ``deadline``, when supplied, is an absolute time.monotonic()
+        timestamp -- the Writer's own reserved slice of the ReviewPipeline's
+        total budget (routers/ideas.py's writer_deadline). It is the SAME
+        value threaded into BOTH step 1's provider_chain.search_web() call
+        (clamping each search provider's own timeout and skipping a
+        fallback search provider once too little time remains -- see
+        ProviderChain.search_web) and step 2's provider_chain.generate_json()
+        call (identical clamping/skipping for generation providers), plus
+        the emergency direct-Ollama leg below -- one shared Writer budget,
+        never reset or recomputed between stages. Because ``deadline`` is an
+        ABSOLUTE clock value, however long step 1 actually takes is
+        automatically reflected in however much budget step 2 sees
+        remaining; step 2 additionally re-checks the remaining budget BEFORE
+        entering the provider cascade at all (see _writer_deadline_exhausted
+        below), rather than relying only on the cascade to discover this
+        after the fact. None (the default) preserves the exact prior
+        unbounded behavior for every caller that doesn't pass one.
         """
         # Full reset of every request-scoped field at the top of every call.
         # ProjectIdeaAgent is instantiated fresh per HTTP request in
@@ -289,15 +351,32 @@ class ProjectIdeaAgent:
         self.last_sources = []
         self.last_search_firewall_blocked = False
         self.last_search_firewall_flags = []
+        self.last_fallback_reason_code = None
 
         raw_ideas: Optional[list[dict[str, Any]]] = None
 
         # --------------------------------------------------------------
         # STEP 1: Small, dedicated Groq Compound web-search request.
         # --------------------------------------------------------------
+        # `_accepts_keyword` guard: an older provider-chain test double
+        # (which doesn't accept `deadline`) keeps working completely
+        # unchanged -- see _accepts_keyword's docstring. A real
+        # ProviderChain accepts it, so production calls always get the
+        # SAME Writer deadline forwarded here that step 2 will also use.
+        search_kwargs: dict[str, Any] = {}
+        if deadline is not None and _accepts_keyword(self.provider_chain.search_web, "deadline"):
+            search_kwargs["deadline"] = deadline
+
+        remaining_before_search = deadline - time.monotonic() if deadline is not None else None
+        logger.info(
+            "idea_generation.search_attempt remaining_writer_seconds=%s",
+            f"{remaining_before_search:.1f}" if remaining_before_search is not None else "unbounded",
+        )
+
         try:
             search_result = self.provider_chain.search_web(
-                self._build_search_query(profile)
+                self._build_search_query(profile),
+                **search_kwargs,
             )
 
             self.last_search_provider = (
@@ -317,6 +396,13 @@ class ProjectIdeaAgent:
             self.last_search_failed = True
             self.last_search_error = f"Search step failed: {ex}"
             logger.exception("Idea market-evidence search failed.")
+
+        remaining_after_search = deadline - time.monotonic() if deadline is not None else None
+        logger.info(
+            "idea_generation.search_complete search_used=%s remaining_writer_seconds=%s",
+            self.last_search_used,
+            f"{remaining_after_search:.1f}" if remaining_after_search is not None else "unbounded",
+        )
 
         evidence_context = self._format_sources_for_prompt(self.last_sources)
 
@@ -359,47 +445,100 @@ class ProjectIdeaAgent:
         # --------------------------------------------------------------
         # STEP 2: Structured generation without another web-search call.
         # --------------------------------------------------------------
-        try:
-            result = self.provider_chain.generate_json(
-                prompt,
-                use_search=False
+        if self._writer_deadline_exhausted(deadline):
+            # Step 1 (search) already consumed the shared Writer budget
+            # down to (or below) the minimum useful generation-start
+            # threshold -- do not enter the provider cascade at all;
+            # classify directly here rather than relying on ProviderChain
+            # to discover this after the fact (it would, via the same
+            # _MIN_SECONDS_PER_PROVIDER_ATTEMPT check, but that happens only
+            # after building the prompt and entering the cascade).
+            self.last_fallback_reason_code = WRITER_DEADLINE_EXCEEDED
+            self.last_error = (
+                "Writer deadline exhausted before generation could start "
+                "(insufficient time remained after the search step)."
             )
-
-            self.last_provider = (
-                result.provider
-                if result.provider != "none"
-                else None
+            logger.info(
+                "idea_generation.generation_skipped_deadline_exhausted"
             )
-            self.last_model_used = result.model
+        else:
+            # `_accepts_keyword` guards let an older provider-chain test
+            # double (which doesn't accept `deadline`/`cap_timeout_to_deadline`)
+            # keep working completely unchanged -- see _accepts_keyword's
+            # docstring. A real ProviderChain accepts both, so production
+            # calls always get the SAME Writer deadline forwarded here that
+            # step 1's search already used.
+            writer_kwargs: dict[str, Any] = {}
+            if deadline is not None and _accepts_keyword(self.provider_chain.generate_json, "deadline"):
+                writer_kwargs["deadline"] = deadline
+                if _accepts_keyword(self.provider_chain.generate_json, "cap_timeout_to_deadline"):
+                    writer_kwargs["cap_timeout_to_deadline"] = True
 
-            if result.ok and isinstance(result.data, dict):
-                self.last_raw_llm_response = json.dumps(
-                    result.data,
-                    ensure_ascii=False
-                )[:1500]
-                raw_ideas = self._extract_ideas_from_data(result.data)
-            else:
-                self.last_error = (
-                    result.error
-                    or "ProviderChain did not return valid idea JSON."
+            try:
+                result = self.provider_chain.generate_json(
+                    prompt,
+                    use_search=False,
+                    **writer_kwargs,
                 )
 
-        except Exception as ex:
-            self.last_error = f"Generation step failed: {ex}"
-            logger.exception("ProviderChain idea generation failed.")
+                self.last_provider = (
+                    result.provider
+                    if result.provider != "none"
+                    else None
+                )
+                self.last_model_used = result.model
+
+                if result.ok and isinstance(result.data, dict):
+                    self.last_raw_llm_response = json.dumps(
+                        result.data,
+                        ensure_ascii=False
+                    )[:1500]
+                    raw_ideas = self._extract_ideas_from_data(result.data)
+                else:
+                    self.last_error = (
+                        result.error
+                        or "ProviderChain did not return valid idea JSON."
+                    )
+                    if self._writer_deadline_exhausted(deadline):
+                        self.last_fallback_reason_code = WRITER_DEADLINE_EXCEEDED
+
+            except Exception as ex:
+                self.last_error = f"Generation step failed: {ex}"
+                if self._writer_deadline_exhausted(deadline):
+                    self.last_fallback_reason_code = WRITER_DEADLINE_EXCEEDED
+                logger.exception("ProviderChain idea generation failed.")
 
         # Emergency direct Ollama fallback. It receives the same evidence in
-        # the prompt, so sources can still be shown when cloud generation fails.
+        # the prompt, so sources can still be shown when cloud generation
+        # fails. This leg bypasses ProviderChain entirely (a raw `requests`
+        # call with its own hardcoded timeout), so it must independently
+        # respect the same Writer deadline: skipped outright once too little
+        # time remains (mirrors ProviderChain._run_cascade's
+        # _MIN_SECONDS_PER_PROVIDER_ATTEMPT skip), and its own request
+        # timeout is clamped to whatever budget is actually left otherwise --
+        # never starting a call this deadline has no time left to wait for.
         if not raw_ideas:
-            ollama_text = self._call_ollama(prompt)
+            if self._writer_deadline_exhausted(deadline):
+                if self.last_fallback_reason_code is None:
+                    self.last_fallback_reason_code = WRITER_DEADLINE_EXCEEDED
+                logger.info(
+                    "idea_generation.ollama_fallback_skipped -- "
+                    "insufficient Writer deadline time remaining."
+                )
+            else:
+                ollama_timeout = (
+                    None if deadline is None
+                    else max(0.0, min(600.0, deadline - time.monotonic()))
+                )
+                ollama_text = self._call_ollama(prompt, timeout_seconds=ollama_timeout)
 
-            if ollama_text:
-                parsed = self._parse_llm_json(ollama_text)
+                if ollama_text:
+                    parsed = self._parse_llm_json(ollama_text)
 
-                if parsed:
-                    raw_ideas = parsed
-                    self.last_provider = "ollama"
-                    self.last_model_used = self.model
+                    if parsed:
+                        raw_ideas = parsed
+                        self.last_provider = "ollama"
+                        self.last_model_used = self.model
 
         if raw_ideas:
             self.last_llm_used = True
@@ -468,7 +607,9 @@ class ProjectIdeaAgent:
 
         return {"ideas": [idea.model_dump() for idea in ideas]}
 
-    def generate_candidate(self, profile: StudentProfile) -> LLMResult | None:
+    def generate_candidate(
+        self, profile: StudentProfile, *, deadline: float | None = None,
+    ) -> LLMResult | None:
         """
         Writer-stage entry point for ReviewPipeline. Reuses generate_ideas()
         end to end (live search step -> LLM idea generation -> deterministic
@@ -476,13 +617,26 @@ class ProjectIdeaAgent:
         LLMResult so it can flow through guarded_call like any other LLM
         stage.
 
+        ``deadline`` (an absolute time.monotonic() timestamp) is forwarded
+        unchanged to generate_ideas() -- see its docstring. guarded_call
+        (app/llm_firewall/guard.py) calls this as a zero-arg
+        ``request.call_fn()``, so the router supplies this via a closure
+        (``lambda: agent.generate_candidate(profile, deadline=writer_deadline)``,
+        matching Roadmap/SE Documentation's identical pattern) rather than a
+        global or mutable-agent-state deadline -- safe under concurrent
+        requests since each request gets its own ProjectIdeaAgent instance
+        (see routers/ideas.py).
+
         Returns None -- signaling "no real provider output" to guarded_call,
         which the pipeline maps to status="provider_unavailable" -- when
         generate_ideas() had to fall back internally (self.last_llm_used is
-        False), since in that case there is no real candidate to review; the
-        router should use build_safe_fallback() directly instead.
+        False), whether that's because every provider failed OR because the
+        Writer deadline was exceeded (self.last_fallback_reason_code
+        distinguishes the two -- see WRITER_DEADLINE_EXCEEDED above). In
+        either case there is no real candidate to review; the router should
+        use build_safe_fallback() directly instead.
         """
-        ideas = self.generate_ideas(profile)
+        ideas = self.generate_ideas(profile, deadline=deadline)
 
         if not self.last_llm_used:
             return None
@@ -494,6 +648,24 @@ class ProjectIdeaAgent:
             text="",
             data={"ideas": [idea.model_dump() for idea in ideas]},
             sources=self.last_sources,
+        )
+
+    def _writer_deadline_exhausted(self, deadline: float | None) -> bool:
+        """
+        True when `deadline` is set and effectively run out -- not only when
+        it has literally passed, but also when the remaining time is below
+        ProviderChain's own _MIN_SECONDS_PER_PROVIDER_ATTEMPT floor (the
+        SAME threshold ProviderChain._run_cascade uses to decide whether
+        it's even worth starting one more attempt): a cascade that skipped
+        every provider for that reason returns a generic "All providers
+        failed" result well BEFORE the deadline timestamp itself is reached,
+        so comparing only against the exact deadline would misclassify that
+        (very common) case as an ordinary provider failure. Mirrors
+        ProjectRoadmapAgent._classify_generation_failure's identical check.
+        """
+        return (
+            deadline is not None
+            and (deadline - time.monotonic()) < ProviderChain._MIN_SECONDS_PER_PROVIDER_ATTEMPT
         )
 
     def _build_search_query(self, profile: StudentProfile) -> str:
@@ -564,7 +736,16 @@ class ProjectIdeaAgent:
 
     # ── Ollama ────────────────────────────────────────────────────────────────
 
-    def _call_ollama(self, prompt: str) -> Optional[str]:
+    def _call_ollama(
+        self, prompt: str, *, timeout_seconds: float | None = None,
+    ) -> Optional[str]:
+        """
+        ``timeout_seconds``, when supplied, replaces the default 600s HTTP
+        timeout -- see generate_ideas()'s emergency-fallback clamping,
+        which computes this as the remaining Writer deadline budget (capped
+        at 600s). None (the default) preserves the exact prior unbounded
+        600s timeout for every caller that doesn't pass one.
+        """
         try:
             response = requests.post(
                 self.ollama_url,
@@ -578,7 +759,7 @@ class ProjectIdeaAgent:
                         "num_predict": 1400
                     }
                 },
-                timeout=600
+                timeout=timeout_seconds if timeout_seconds is not None else 600
             )
 
             if not response.ok:
