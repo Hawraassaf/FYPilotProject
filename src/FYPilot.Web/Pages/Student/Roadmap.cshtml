@@ -150,7 +150,7 @@ else
             </div>
         }
 
-        <header class="roadmap-command-header">
+        <header class="roadmap-command-header @(Model.Phases.Any() ? "" : "is-launch-state")">
             <div class="roadmap-command-main">
                 <div class="roadmap-command-icon" aria-hidden="true">
                     <i class="bi bi-kanban"></i>
@@ -183,20 +183,29 @@ else
             </div>
 
             <div class="roadmap-command-actions">
-                <form method="post" asp-page-handler="Generate" id="rmGenerateForm">
-                    @Html.AntiForgeryToken()
-                    <input type="hidden"
-                           name="projectId"
-                           value="@Model.ProjectId" />
-                    <input type="hidden" name="ideaId" value="@Model.Idea.Id" />
+                @if (Model.Phases.Any())
+                {
+                    <form method="post"
+                          asp-page-handler="Generate"
+                          id="rmGenerateForm">
+                        @Html.AntiForgeryToken()
 
-                    <button type="submit"
-                            class="btn @(Model.Phases.Any() ? "roadmap-btn-secondary" : "roadmap-btn-primary")">
-                        <i class="bi @(Model.Phases.Any() ? "bi-arrow-clockwise" : "bi-magic")"
-                           aria-hidden="true"></i>
-                        @(Model.Phases.Any() ? "Regenerate" : "Generate Roadmap")
-                    </button>
-                </form>
+                        <input type="hidden"
+                               name="projectId"
+                               value="@Model.ProjectId" />
+
+                        <input type="hidden"
+                               name="ideaId"
+                               value="@Model.Idea.Id" />
+
+                        <button type="submit"
+                                class="btn roadmap-btn-secondary">
+                            <i class="bi bi-arrow-clockwise"
+                               aria-hidden="true"></i>
+                            Regenerate Roadmap
+                        </button>
+                    </form>
+                }
 
                 <a href="/Student/ProjectDNA?projectId=@Model.ProjectId&amp;ideaId=@Model.Idea.Id"
                    class="btn roadmap-btn-secondary">
@@ -205,72 +214,101 @@ else
                 </a>
             </div>
 
-            <div class="roadmap-header-progress" aria-label="@pct percent complete">
-                <div class="roadmap-header-progress-copy">
-                    <span>@done of @total phases completed</span>
-                    <strong>@pct%</strong>
-                </div>
+            @if (!Model.Phases.Any())
+            {
+                <section class="roadmap-launch-section"
+                         aria-labelledby="roadmap-start-title">
+                    <div class="roadmap-start-copy">
+                        <div class="roadmap-start-icon"
+                             aria-hidden="true">
+                            <i class="bi bi-diagram-3"></i>
+                        </div>
 
-                <div class="roadmap-progress-track">
-                    <div class="roadmap-progress-fill" style="width:@pct%"></div>
+                        <div>
+                            <div class="roadmap-eyebrow">Ready to plan</div>
+
+                            <h2 id="roadmap-start-title">
+                                Generate a project-specific execution plan
+                            </h2>
+
+                            <p>
+                                FYPilot will create dynamic phases, estimate task effort,
+                                distribute team workload, check capacity, and review the
+                                final roadmap before showing it.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="roadmap-start-features"
+                         aria-label="Roadmap generation capabilities">
+                        <div>
+                            <i class="bi bi-calendar-range"></i>
+                            <span>Dynamic phase scheduling</span>
+                        </div>
+
+                        <div>
+                            <i class="bi bi-hourglass-split"></i>
+                            <span>Realistic effort estimates</span>
+                        </div>
+
+                        <div>
+                            <i class="bi bi-people"></i>
+                            <span>Team workload allocation</span>
+                        </div>
+
+                        <div>
+                            <i class="bi bi-speedometer2"></i>
+                            <span>Capacity validation</span>
+                        </div>
+                    </div>
+
+                    <form method="post"
+                          asp-page-handler="Generate"
+                          id="rmGenerateForm"
+                          class="roadmap-launch-action">
+                        @Html.AntiForgeryToken()
+
+                        <input type="hidden"
+                               name="projectId"
+                               value="@Model.ProjectId" />
+
+                        <input type="hidden"
+                               name="ideaId"
+                               value="@Model.Idea.Id" />
+
+                        <button type="submit"
+                                class="btn roadmap-btn-primary roadmap-btn-large">
+                            <i class="bi bi-magic"
+                               aria-hidden="true"></i>
+                            Generate AI Roadmap
+                        </button>
+
+                        <small>
+                            Generates, validates, reviews, and saves the complete plan.
+                        </small>
+                    </form>
+                </section>
+            }
+            else
+            {
+                <div class="roadmap-header-progress"
+                     aria-label="@pct percent complete">
+                    <div class="roadmap-header-progress-copy">
+                        <span>@done of @total phases completed</span>
+                        <strong>@pct%</strong>
+                    </div>
+
+                    <div class="roadmap-progress-track">
+                        <div class="roadmap-progress-fill"
+                             style="width:@pct%"></div>
+                    </div>
                 </div>
-            </div>
+            }
         </header>
 
-        @if (!Model.Phases.Any())
+        @if (Model.Phases.Any())
         {
-            <section class="roadmap-start-panel" aria-labelledby="roadmap-start-title">
-                <div class="roadmap-start-copy">
-                    <div class="roadmap-start-icon" aria-hidden="true">
-                        <i class="bi bi-diagram-3"></i>
-                    </div>
 
-                    <div>
-                        <div class="roadmap-eyebrow">Ready to plan</div>
-                        <h2 id="roadmap-start-title">Generate a project-specific execution plan</h2>
-
-                        <p>
-                            FYPilot will create dynamic phases, estimate task effort, distribute team workload,
-                            check capacity, and review the final roadmap before showing it.
-                        </p>
-                    </div>
-                </div>
-
-                <div class="roadmap-start-features">
-                    <div>
-                        <i class="bi bi-calendar-range"></i>
-                        <span>Dynamic phase scheduling</span>
-                    </div>
-                    <div>
-                        <i class="bi bi-hourglass-split"></i>
-                        <span>Realistic effort estimates</span>
-                    </div>
-                    <div>
-                        <i class="bi bi-people"></i>
-                        <span>Team workload allocation</span>
-                    </div>
-                    <div>
-                        <i class="bi bi-speedometer2"></i>
-                        <span>Capacity validation</span>
-                    </div>
-                </div>
-
-                <form method="post" asp-page-handler="Generate" id="rmGenerateFormEmpty">
-                    @Html.AntiForgeryToken()
-                    <input type="hidden"
-                           name="projectId"
-                           value="@Model.ProjectId" />
-                    <input type="hidden" name="ideaId" value="@Model.Idea.Id" />
-
-                    <button type="submit" class="btn roadmap-btn-primary roadmap-btn-large">
-                        <i class="bi bi-magic"></i>
-                        Generate AI Roadmap
-                    </button>
-                </form>
-            </section>
-        }
-        else
-        {
             var summary = Model.WorkloadSummary;
 
             <section class="roadmap-summary-strip" aria-label="Roadmap summary">
@@ -1058,6 +1096,7 @@ else
 
         .roadmap-empty-card h1,
         .roadmap-start-panel h2,
+        .roadmap-launch-section h2,
         .roadmap-command-header h1,
         .roadmap-panel-heading h2,
         .roadmap-detail-panel h3,
@@ -1297,6 +1336,57 @@ else
             border-radius: inherit;
             transition: width .25s ease;
         }
+
+        .roadmap-command-header.is-launch-state {
+            grid-template-columns: minmax(0, 1fr) auto;
+        }
+
+        .roadmap-launch-section {
+            grid-column: 1 / -1;
+            display: grid;
+            grid-template-columns: minmax(0, 1.2fr) minmax(290px, .8fr) minmax(210px, auto);
+            align-items: center;
+            gap: 1.25rem;
+            margin-top: .15rem;
+            padding: 1.1rem;
+            border: 1px solid #dbe4ee;
+            border-radius: 15px;
+            background: radial-gradient( circle at 100% 0, rgba(81, 108, 141, .10), transparent 34%), linear-gradient( 135deg, #f8fafc 0%, #f2f6fa 100%);
+        }
+
+            .roadmap-launch-section h2 {
+                margin: .2rem 0 .4rem;
+                font-size: clamp(1.25rem, 2vw, 1.72rem);
+                font-weight: 800;
+            }
+
+            .roadmap-launch-section p {
+                max-width: 760px;
+                margin: 0;
+                color: var(--roadmap-muted);
+                line-height: 1.6;
+            }
+
+        .roadmap-launch-action {
+            display: grid;
+            justify-items: stretch;
+            gap: .45rem;
+            min-width: 210px;
+        }
+
+            .roadmap-launch-action .roadmap-btn-large {
+                width: 100%;
+                min-height: 50px;
+                white-space: nowrap;
+            }
+
+            .roadmap-launch-action small {
+                max-width: 230px;
+                color: var(--roadmap-muted);
+                font-size: .67rem;
+                line-height: 1.4;
+                text-align: center;
+            }
 
         .roadmap-start-panel {
             display: grid;
@@ -2512,9 +2602,20 @@ else
                 justify-content: flex-start;
             }
 
-            .roadmap-start-panel {
+            .roadmap-start-panel,
+            .roadmap-launch-section {
                 grid-template-columns: 1fr;
             }
+
+            .roadmap-launch-action {
+                width: 100%;
+                min-width: 0;
+            }
+
+                .roadmap-launch-action small {
+                    max-width: none;
+                    text-align: left;
+                }
 
             .roadmap-workspace {
                 grid-template-columns: 1fr;
@@ -2774,23 +2875,49 @@ else
         })();
 
         (function () {
-            const overlay = document.getElementById("rmLoadingOverlay");
-            const forms = [
-                document.getElementById("rmGenerateForm"),
-                document.getElementById("rmGenerateFormEmpty")
-            ].filter(Boolean);
+            const overlay =
+                document.getElementById("rmLoadingOverlay");
 
-            if (!overlay || forms.length === 0) {
+            const form =
+                document.getElementById("rmGenerateForm");
+
+            if (!overlay || !form) {
                 return;
             }
 
-            const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-            const steps = Array.from(overlay.querySelectorAll(".roadmap-loading-steps li"));
-            let timerId = null;
+            const submitButton =
+                form.querySelector('button[type="submit"]');
 
-            forms.forEach(function (form) {
-                form.addEventListener("submit", function () {
+            const reduceMotion =
+                window.matchMedia(
+                    "(prefers-reduced-motion: reduce)"
+                ).matches;
+
+            const steps = Array.from(
+                overlay.querySelectorAll(
+                    ".roadmap-loading-steps li")
+            );
+
+            let timerId = null;
+            let isSubmitting = false;
+
+            form.addEventListener(
+                "submit",
+                function (event) {
+                    if (isSubmitting) {
+                        event.preventDefault();
+                        return;
+                    }
+
+                    isSubmitting = true;
                     overlay.classList.remove("d-none");
+
+                    if (submitButton) {
+                        submitButton.disabled = true;
+                        submitButton.setAttribute(
+                            "aria-disabled",
+                            "true");
+                    }
 
                     if (reduceMotion || steps.length === 0) {
                         return;
@@ -2798,24 +2925,39 @@ else
 
                     let currentIndex = 0;
 
-                    timerId = window.setInterval(function () {
-                        steps.forEach(function (step, index) {
-                            step.classList.toggle("is-active", index === currentIndex);
-                        });
+                    timerId = window.setInterval(
+                        function () {
+                            steps.forEach(
+                                function (step, index) {
+                                    step.classList.toggle(
+                                        "is-active",
+                                        index === currentIndex);
+                                });
 
-                        currentIndex = (currentIndex + 1) % steps.length;
-                    }, 1300);
+                            currentIndex =
+                                (currentIndex + 1)
+                                % steps.length;
+                        },
+                        1300);
                 });
-            });
 
-            window.addEventListener("pageshow", function () {
-                overlay.classList.add("d-none");
+            window.addEventListener(
+                "pageshow",
+                function () {
+                    overlay.classList.add("d-none");
+                    isSubmitting = false;
 
-                if (timerId) {
-                    window.clearInterval(timerId);
-                    timerId = null;
-                }
-            });
+                    if (submitButton) {
+                        submitButton.disabled = false;
+                        submitButton.removeAttribute(
+                            "aria-disabled");
+                    }
+
+                    if (timerId) {
+                        window.clearInterval(timerId);
+                        timerId = null;
+                    }
+                });
         })();
     </script>
 }
