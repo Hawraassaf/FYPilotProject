@@ -302,10 +302,14 @@
 
                                                 <form method="post"
                                                       asp-page-handler="ToggleGuidanceActive"
-                                                      asp-route-id="@item.Id"
-                                                      onsubmit="return confirm('@(item.IsActive ? "Deactivate" : "Activate") this guidance item?');">
-                                                    <button type="submit" title="@(item.IsActive ? "Deactivate" : "Activate")">
-                                                        <i class="bi @(item.IsActive ? "bi-pause-circle" : "bi-play-circle")"></i>
+                                                      asp-route-id="@item.Id">
+                                                    <button type="submit"
+                                                            title="@(item.IsActive ? "Deactivate" : "Activate")"
+                                                            aria-label="@(item.IsActive ? "Deactivate guidance" : "Activate guidance")">
+                                                        <i class="bi @(item.IsActive
+                                                                       ? "bi-pause-circle"
+                                                                       : "bi-play-circle")"
+                                                           aria-hidden="true"></i>
                                                     </button>
                                                 </form>
                                             </div>
@@ -509,13 +513,16 @@
                                                     <i class="bi bi-pencil"></i>
                                                     Edit
                                                 </a>
-
                                                 <form method="post"
                                                       asp-page-handler="ToggleProjectActive"
-                                                      asp-route-id="@project.Id"
-                                                      onsubmit="return confirm('@(project.IsActive ? "Deactivate" : "Activate") this project?');">
-                                                    <button type="submit" title="@(project.IsActive ? "Deactivate" : "Activate")">
-                                                        <i class="bi @(project.IsActive ? "bi-pause-circle" : "bi-play-circle")"></i>
+                                                      asp-route-id="@project.Id">
+                                                    <button type="submit"
+                                                            title="@(project.IsActive ? "Deactivate" : "Activate")"
+                                                            aria-label="@(project.IsActive ? "Deactivate project" : "Activate project")">
+                                                        <i class="bi @(project.IsActive
+                                                                       ? "bi-pause-circle"
+                                                                       : "bi-play-circle")"
+                                                           aria-hidden="true"></i>
                                                     </button>
                                                 </form>
                                             </div>
@@ -707,10 +714,16 @@
 
                                                 <form method="post"
                                                       asp-page-handler="ToggleOpportunityActive"
-                                                      asp-route-id="@opportunity.Id"
-                                                      onsubmit="return confirm('@(opportunity.IsActive ? "Deactivate" : "Activate") this future opportunity?');">
-                                                    <button type="submit" title="@(opportunity.IsActive ? "Deactivate" : "Activate")">
-                                                        <i class="bi @(opportunity.IsActive ? "bi-pause-circle" : "bi-play-circle")"></i>
+                                                      asp-route-id="@opportunity.Id">
+                                                    <button type="submit"
+                                                            title="@(opportunity.IsActive ? "Deactivate" : "Activate")"
+                                                            aria-label="@(opportunity.IsActive
+                                                                            ? "Deactivate future opportunity"
+                                                                            : "Activate future opportunity")">
+                                                        <i class="bi @(opportunity.IsActive
+                                                                       ? "bi-pause-circle"
+                                                                       : "bi-play-circle")"
+                                                           aria-hidden="true"></i>
                                                     </button>
                                                 </form>
                                             </div>
