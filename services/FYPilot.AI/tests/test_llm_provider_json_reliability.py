@@ -384,13 +384,13 @@ class OllamaJsonReliabilityTests(unittest.TestCase):
             if previous is not None:
                 _os.environ["ROADMAP_OLLAMA_TIMEOUT_SECONDS"] = previous
 
-    def test_deepinfra_roadmap_tier_timeout_defaults_to_120_and_is_configurable(self):
+    def test_deepinfra_roadmap_tier_timeout_defaults_to_280_and_is_configurable(self):
         import os as _os
         from app.services.llm_provider import _deepinfra_timing_for_tier
 
         previous = _os.environ.pop("ROADMAP_DEEPINFRA_TIMEOUT_SECONDS", None)
         try:
-            self.assertEqual(_deepinfra_timing_for_tier("roadmap")["timeout_seconds"], 120.0)
+            self.assertEqual(_deepinfra_timing_for_tier("roadmap")["timeout_seconds"], 280.0)
             _os.environ["ROADMAP_DEEPINFRA_TIMEOUT_SECONDS"] = "150"
             self.assertEqual(_deepinfra_timing_for_tier("roadmap")["timeout_seconds"], 150.0)
         finally:

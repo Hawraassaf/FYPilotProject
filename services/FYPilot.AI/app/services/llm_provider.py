@@ -1741,6 +1741,235 @@ class GroqProvider(BaseProvider):
             )
 
 
+class AnthropicProvider(BaseProvider):
+    """
+    Direct Anthropic API provider (native Messages API, NOT the DeepInfra
+    proxy for Claude models -- see llm_provider.py's roadmap/se_documentation
+    tier comments for why: DeepInfra's Claude proxy was observed live
+    truncating long structured responses at wildly inconsistent points
+    (4.7k/18.9k/25.9k chars across repeated identical requests), which a
+    direct connection to Anthropic's own API should not exhibit since it
+    removes that third-party relay entirely.
+
+    Only wired into ProviderChain for the "roadmap" and "se_documentation"
+    tiers (see ProviderChain.__init__) -- every other agent's chain is
+    unaffected and never sees this provider.
+    """
+
+    name = "anthropic"
+
+    def __init__(
+        self,
+        model: str | None = None,
+        max_retries: int | None = None,
+        timeout_seconds: float | None = None,
+    ):
+        self.api_key = os.getenv("ANTHROPIC_API_KEY")
+        self.model = model or os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
+        # Same SEC-3 rationale as GroqProvider/DeepInfraProvider: an explicit
+        # per-call timeout is required so a hung request cannot block a
+        # review-pipeline attempt indefinitely. Kept well below the 300s
+        # Roadmap/SE Documentation writer budget (unlike the 240-280s
+        # allowance DeepInfra's flaky Claude proxy needed) -- this provider
+        # is now FIRST in a 4-provider chain (Anthropic -> DeepInfra -> Groq
+        # -> Ollama), so it must leave real time for the rest of the cascade
+        # if it fails, not consume nearly the whole budget itself. A direct
+        # Anthropic connection (no third-party relay) is expected to be
+        # meaningfully faster than DeepInfra's proxy was; adjust from live
+        # testing if this is too tight.
+        self.timeout_seconds = timeout_seconds or float(
+            os.getenv("ANTHROPIC_TIMEOUT_SECONDS", "120"),
+        )
+        self.max_retries = max_retries
+        self.enabled = bool(self.api_key)
+        # Claude Sonnet 5 defaults every request to output_config.effort=
+        # "high", which lets it spend an unbounded share of max_tokens on
+        # invisible internal reasoning before writing the actual answer --
+        # confirmed live (and via Anthropic's own docs) as the root cause of
+        # this provider's truncated JSON: thinking tokens count against the
+        # same max_tokens budget, so truncation was happening well before
+        # the requested budget was reached. "medium" is Anthropic's
+        # documented recommendation for structured, non-agentic output like
+        # ours (JSON generation, not multi-step reasoning) -- a meaningful
+        # cost/speed step down from "high" with quality comparable to the
+        # previous model generation at "high".
+        self.effort = os.getenv("ANTHROPIC_EFFORT", "medium")
+
+    def _client(self, timeout_override: float | None = None):
+        from anthropic import Anthropic
+
+        client_kwargs: dict[str, Any] = {
+            "api_key": self.api_key,
+            "timeout": timeout_override if timeout_override is not None else self.timeout_seconds,
+        }
+        if self.max_retries is not None:
+            client_kwargs["max_retries"] = self.max_retries
+
+        return Anthropic(**client_kwargs)
+
+    @staticmethod
+    def _extract_text(response: Any) -> str:
+        return "".join(
+            getattr(block, "text", "") for block in (response.content or [])
+            if getattr(block, "type", None) == "text"
+        )
+
+    def _repair_json_with_provider(
+        self, malformed_text: str, parse_error: str, schema_description: str | None,
+        max_tokens: int = 2200,
+    ) -> str | None:
+        """Same contract as DeepInfraProvider._repair_json_with_provider --
+        ONE low-temperature JSON-syntax-only repair request, never raises."""
+        try:
+            response = self._client().messages.create(
+                model=self.model,
+                # No `temperature` -- Claude Sonnet 5 rejects it with a 400
+                # ("temperature is deprecated for this model"), observed live.
+                max_tokens=max(max_tokens, 2200),
+                output_config={"effort": self.effort},
+                # Fully disabled, not just lower effort -- structured JSON
+                # generation doesn't need Claude's internal reasoning pass,
+                # and disabling it removes thinking-token consumption from
+                # max_tokens entirely rather than just reducing it.
+                thinking={"type": "disabled"},
+                system=_JSON_REPAIR_SYSTEM_PROMPT,
+                messages=[
+                    {"role": "user", "content": _build_repair_prompt(
+                        malformed_text, parse_error, schema_description or "",
+                    )},
+                ],
+            )
+            return self._extract_text(response) or None
+        except Exception as ex:
+            logger.warning("llm_provider.provider_repair_failed provider=%s error=%s", self.name, ex)
+            return None
+
+    def generate_json(
+        self,
+        prompt: str,
+        *,
+        use_search: bool = False,
+        max_tokens: int | None = None,
+        reporter: "ProgressReporter | None" = None,
+        schema_description: str | None = None,
+        writer_budget_seconds: float | None = None,
+    ) -> LLMResult:
+        """
+        Same `writer_budget_seconds` contract as DeepInfraProvider.generate_json
+        -- never stored on self, only ever shortens THIS one attempt's
+        timeout to min(self.timeout_seconds, writer_budget_seconds).
+        use_search is accepted for signature uniformity but unsupported --
+        this provider is never wired into a tier that sets it (Roadmap/SE
+        Documentation never search).
+        """
+        if not self.enabled:
+            return LLMResult(
+                ok=False,
+                provider=self.name,
+                model=None,
+                text="",
+                data=None,
+                error="ANTHROPIC_API_KEY is missing",
+                search_used=False,
+                search_failed=use_search,
+                error_category=json_reliability.TRANSPORT_FAILURE,
+            )
+
+        effective_timeout = (
+            self.timeout_seconds if writer_budget_seconds is None
+            else max(0.0, min(self.timeout_seconds, writer_budget_seconds))
+        )
+
+        system_message = (
+            "You are a precise JSON-only AI engine. "
+            "Return valid JSON only. "
+            "Do not use markdown. "
+            "Do not wrap the response in code fences."
+        )
+
+        # 2200 (the fallback every other provider uses when a caller omits
+        # max_tokens, e.g. ReviewerAgent's own generate_json call) was
+        # observed live consuming its ENTIRE budget on invisible thinking
+        # tokens alone (thinking_tokens=2200, text_chars=0) -- Claude Sonnet
+        # 5's adaptive thinking needs real headroom even at effort="medium",
+        # so this provider's own no-max_tokens-given fallback is kept much
+        # higher than DeepInfra/Groq's, which never had this problem.
+        effective_max_tokens = max_tokens or 8000
+
+        try:
+            response = self._client(
+                effective_timeout if writer_budget_seconds is not None else None,
+            ).messages.create(
+                model=self.model,
+                # No `temperature` -- see the repair method's comment above;
+                # Claude Sonnet 5 400s on this parameter entirely.
+                max_tokens=effective_max_tokens,
+                output_config={"effort": self.effort},
+                # Fully disabled -- see the repair method's identical
+                # comment above. Structured JSON generation doesn't need
+                # Claude's internal reasoning pass, and this removes
+                # thinking-token consumption from max_tokens entirely.
+                thinking={"type": "disabled"},
+                system=system_message,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = self._extract_text(response)
+            finish_reason = getattr(response, "stop_reason", None)
+            usage = getattr(response, "usage", None)
+            thinking_tokens = getattr(
+                getattr(usage, "output_tokens_details", None), "thinking_tokens", None,
+            )
+            logger.info(
+                "llm_provider.anthropic_usage effort=%s stop_reason=%s output_tokens=%s thinking_tokens=%s "
+                "text_chars=%d",
+                self.effort, finish_reason, getattr(usage, "output_tokens", None), thinking_tokens, len(text),
+            )
+        except Exception as ex:
+            category = _classify_sdk_exception(ex)
+            status_code = getattr(ex, "status_code", None)
+            logger.warning(
+                "llm_provider.transport_failure provider=%s model=%s category=%s status_code=%s error=%s",
+                self.name, self.model, category, status_code, ex,
+            )
+            return LLMResult(
+                ok=False,
+                provider=self.name,
+                model=self.model,
+                text="",
+                data=None,
+                error=str(ex),
+                search_used=False,
+                search_failed=use_search,
+                error_category=category,
+            )
+
+        outcome = json_reliability.parse_json_response(
+            text,
+            repair_fn=(
+                (lambda candidate, error: self._repair_json_with_provider(
+                    candidate, error, schema_description, max_tokens=effective_max_tokens,
+                ))
+                if schema_description else None
+            ),
+            schema_description=schema_description or "",
+            finish_reason=finish_reason,
+        )
+        _log_json_parse_result(provider=self.name, model=self.model, outcome=outcome)
+
+        return LLMResult(
+            ok=outcome.success,
+            provider=self.name,
+            model=self.model,
+            text=text,
+            data=outcome.data,
+            error=None if outcome.success else (outcome.error or "Anthropic returned invalid JSON."),
+            search_used=False,
+            search_failed=use_search,
+            error_category=None if outcome.success else outcome.category,
+            parse_diagnostics=_parse_diagnostics(outcome),
+        )
+
+
 class GeminiProvider(BaseProvider):
     """
     Secondary cloud provider.
@@ -2215,12 +2444,24 @@ _DEEPINFRA_TIER_DEFAULTS["comparison"] = _DEEPINFRA_TIER_DEFAULTS["light"]
 # Project Roadmap gets its OWN tier -- originally the same DeepInfra model as
 # "high" so its Ollama fallback leg (see _OLLAMA_TIER_TIMING below) could use
 # a longer, roadmap-specific timeout without changing the shared "high"
-# tier's timing for Idea Generator. Switched off "high" (anthropic/claude-
-# opus-4-8, expensive) to "standard"'s model (cheap, same cost-driven move
-# already made for SE Documentation) -- Idea Generator is the only agent
-# still intentionally on "high". The roadmap-specific timing tuning below is
-# unaffected: only the model changed, not the timeout/retry values.
+# tier's timing for Idea Generator. Was moved off "high" (anthropic/claude-
+# opus-4-8, expensive) to "standard"'s model (cheap) for cost, but live
+# testing showed the 70B model consistently dropping 2-3 of the mandatory
+# lifecycle categories (safety_validation, data_governance_privacy,
+# architecture_design) from its phase plan under this prompt's combined
+# constraint load, even with named example phases spelled out for each --
+# moved to Claude Sonnet 5 for stronger instruction-following on this
+# specific many-constraint task; same "org/model" slug format as "high"
+# requires (see that tier's comment). The roadmap-specific timing tuning
+# below is unaffected: only the model changed, not the timeout/retry values.
 _DEEPINFRA_TIER_DEFAULTS["roadmap"] = _DEEPINFRA_TIER_DEFAULTS["standard"]
+# NOTE: Claude Sonnet 5 (anthropic/claude-sonnet-5) was tried here and wrote
+# noticeably better, more complete content when it worked -- but DeepInfra's
+# proxy for it truncated long responses at wildly inconsistent points across
+# repeated live tests (4.7k / 18.9k / 25.9k chars), which isn't fixable by
+# tuning a timeout or token budget number. Reverted to the reliable 70B
+# model for the Roadmap tier's live deadline; revisit if DeepInfra's Claude
+# proxy stability improves.
 
 # Idea Comparison's job-based Reviewer stage only (app/jobs/workers/
 # idea_comparison_worker.py) -- kept separate from "comparison" above, which
@@ -2234,12 +2475,16 @@ _DEEPINFRA_TIER_DEFAULTS["roadmap"] = _DEEPINFRA_TIER_DEFAULTS["standard"]
 # priced well below the "standard" 70B tier.
 _DEEPINFRA_TIER_DEFAULTS["comparison_review"] = "google/gemma-3-27b-it"
 
-# SE Documentation gets its OWN tier (same DeepInfra model as "standard",
-# unchanged from the earlier cost-driven move off "high") purely so its
-# DeepInfra per-call timeout (see _DEEPINFRA_TIER_TIMING below) can be sized
-# for its actual ~6500-token structured JSON sections (measured live at 121s)
-# without changing "standard"'s 60s default for every other agent sharing
-# that tier (market needs, project DNA, market footprint).
+# SE Documentation gets its OWN tier so its DeepInfra per-call timeout (see
+# _DEEPINFRA_TIER_TIMING below) can be sized for its actual ~6500-token
+# structured JSON sections (measured live at 121s) without changing
+# "standard"'s 60s default for every other agent sharing that tier (market
+# needs, project DNA, project footprint). Claude Sonnet 5 was tried here
+# (same rationale as "roadmap": a rejected document whose Architecture and
+# AI Technical Report sections described mutually inconsistent AI
+# approaches) but never live-verified before Sonnet's DeepInfra proxy was
+# found to truncate long Roadmap responses at inconsistent points -- kept on
+# the reliable 70B model here too rather than ship an unverified path.
 _DEEPINFRA_TIER_DEFAULTS["se_documentation"] = _DEEPINFRA_TIER_DEFAULTS["standard"]
 
 # Per-tier timing overrides for the DeepInfra leg of the chain. Absent here
@@ -2355,7 +2600,7 @@ def _deepinfra_model_for_tier(tier: str) -> str:
     return os.getenv(env_key, _DEEPINFRA_TIER_DEFAULTS[resolved_tier])
 
 
-_DEFAULT_ROADMAP_DEEPINFRA_TIMEOUT_SECONDS = 120.0
+_DEFAULT_ROADMAP_DEEPINFRA_TIMEOUT_SECONDS = 280.0
 _DEFAULT_SE_DOCUMENTATION_DEEPINFRA_TIMEOUT_SECONDS = 180.0
 
 
@@ -2436,7 +2681,20 @@ class ProviderChain:
         groq_timing = _groq_timing_for_tier(tier)
         ollama_timing = _ollama_timing_for_tier(tier)
 
-        self.providers = providers or [
+        # Anthropic (direct API, NOT the DeepInfra Claude proxy -- see
+        # AnthropicProvider's docstring for why) is prepended as the FIRST
+        # provider only for "roadmap" and "se_documentation" -- every other
+        # tier's chain (mentor, market needs, project DNA, etc.) is
+        # completely unaffected and never constructs an AnthropicProvider at
+        # all. When ANTHROPIC_API_KEY is unset, AnthropicProvider.enabled is
+        # False and generate_json fails fast with a clear "key is missing"
+        # error, so the cascade falls straight through to DeepInfra exactly
+        # as before -- this is safe to leave wired in even without a key set.
+        anthropic_providers = (
+            [AnthropicProvider()] if tier in ("roadmap", "se_documentation") else []
+        )
+
+        self.providers = providers or anthropic_providers + [
             DeepInfraProvider(
                 model=_deepinfra_model_for_tier(tier),
                 max_retries=deepinfra_timing.get("max_retries"),

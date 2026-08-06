@@ -677,6 +677,10 @@ class ProjectIdeaAgent:
             "Use live web search. Find 5 to 8 current credible sources about "
             f"real market needs, public problems, and technology opportunities "
             f"in Lebanon relevant to {domain} and {major} final-year projects. "
+            "Also include, where available, academic sources (recent papers, "
+            "theses, or survey articles) whose 'future work', 'limitations', "
+            "or 'research gap' sections point to a concrete unsolved problem "
+            "or unfinished extension a student could realistically build on. "
             "Prioritize official institutions, universities, international "
             "organizations, reputable research, and established news sources. "
             "Focus on education, SMEs, agriculture, energy, healthcare, jobs, "
@@ -836,6 +840,11 @@ item, but do not place citations or URLs inside the idea fields. The API will
 display the verified sources separately. If the evidence is weak, keep claims
 qualitative. Avoid generic outdated CRUD projects. Each idea must still match
 the student's skills, available time, team size, target difficulty, and domain.
+When the evidence includes an academic source whose future-work/limitations/
+research-gap section names a concrete unsolved problem, prefer grounding at
+least one idea in that gap over a purely market-driven idea -- a project that
+explicitly extends or addresses a cited research gap is stronger for
+academic evaluation than one motivated by market need alone.
 
 Student profile:
 - Major: {profile.major}

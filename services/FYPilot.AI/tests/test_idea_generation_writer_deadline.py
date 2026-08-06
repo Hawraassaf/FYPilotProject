@@ -612,10 +612,15 @@ class LegacyProviderChainCompatibilityTests(unittest.TestCase):
 
 
 class OtherAgentsUnaffectedTests(unittest.TestCase):
-    def test_project_dna_agent_generate_candidate_signature_is_unaffected(self):
-        from app.agents.project_dna_agent import ProjectDNAAgent
+    def test_market_footprint_agent_signature_is_unaffected(self):
+        # ProjectDNAAgent is no longer a valid "unaffected agent" example --
+        # a separate task (see tests/test_project_dna_writer_deadline.py)
+        # gave it the identical deadline/writer_deadline propagation this
+        # test file is proving for Idea Generation. MarketFootprintAgent
+        # remains a genuinely untouched agent for this assertion.
+        from app.agents.market_footprint_agent import MarketFootprintAgent
 
-        signature = inspect.signature(ProjectDNAAgent.generate_candidate)
+        signature = inspect.signature(MarketFootprintAgent.generate_candidate_from_result)
         self.assertNotIn("deadline", signature.parameters)
 
 

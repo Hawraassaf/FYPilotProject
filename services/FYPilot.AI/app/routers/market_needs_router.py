@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 
 from fastapi import APIRouter, HTTPException, status
 
@@ -16,6 +17,32 @@ from app.review.response import build_review_response
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Market Demand Intelligence"])
+
+# Reserved for the semantic Reviewer / one structural repair / one semantic
+# rewrite / final re-review -- the Writer must never consume this. Mirrors
+# Idea Generation's identical global_deadline/writer_deadline split (see
+# routers/ideas.py's _WRITER_TIME_RESERVE_SECONDS = 30.0 out of a 120s total
+# budget: registry.py's ProjectIdeaAgent.max_total_seconds) -- reused here
+# unchanged rather than re-derived, because MarketNeedsAgent's own registry
+# budget (registry.py's MarketNeedsAgent.max_total_seconds) is the SAME
+# 120.0s, its Writer stage makes the SAME shape of two sequential provider
+# calls (a live search, then structured-JSON generation) before the
+# Reviewer runs once, and its Reviewer/Rewrite stages run on the SAME
+# "standard" tier as its own Writer (no tier mismatch to compensate for,
+# unlike Roadmap's earlier fix). 30s leaves the Reviewer at least one
+# meaningful provider attempt (ProviderChain's shared
+# _MIN_SECONDS_PER_PROVIDER_ATTEMPT floor is 4s) plus headroom for the
+# deterministic parsing/firewall/schema-validation steps around it, while
+# still leaving the Writer the large majority of the 120s budget for its
+# own two-call sequence. Previously there was no writer_deadline at all --
+# _analyze_sync()'s search_web()/generate_json() calls (each able to use
+# their provider's full independent timeout, DeepInfra/Groq ~60s, Ollama
+# ~90s) ran entirely BEFORE pipeline.run() was ever invoked, so a
+# slow-but-successful candidate could arrive only for ReviewPipeline.run's
+# own _time_budget_exceeded check (working from its own internally
+# self-computed deadline, which never reached _analyze_sync in the first
+# place) to discard it before the Reviewer ever ran.
+_WRITER_TIME_RESERVE_SECONDS = 30.0
 
 
 def _build_review_context(request: MarketNeedsRequest) -> ReviewContext:
@@ -67,6 +94,27 @@ async def analyze_market_needs(
 ) -> MarketNeedsResponse:
     try:
         agent = MarketNeedsAgent()
+        pipeline = ReviewPipeline("MarketNeedsAgent")
+
+        # ONE absolute monotonic deadline, computed here from the registry's
+        # max_total_seconds (120s) -- passed UNCHANGED to ReviewPipeline
+        # (schema/structural-repair/semantic-review/rewrite/final-review all
+        # measure against this exact value via ReviewPipeline.run's own
+        # deadline threading). writer_deadline (global - the review reserve
+        # above) reaches _analyze_sync() DIRECTLY -- NOT via pipeline.run's
+        # writer_call_fn closure -- because MarketNeedsAgent's real Writer
+        # work (search + generation) runs BEFORE pipeline.run() is ever
+        # called; see generate_candidate_from_result's docstring. This
+        # matches Roadmap/Idea Generation's identical global_deadline/
+        # writer_deadline split, adapted to this agent's pre-computed-result
+        # architecture.
+        global_deadline = time.monotonic() + pipeline.config.max_total_seconds
+        writer_deadline = global_deadline - _WRITER_TIME_RESERVE_SECONDS
+
+        logger.info(
+            "market_needs.request_received writer_budget_seconds=%.1f total_budget_seconds=%.1f",
+            writer_deadline - time.monotonic(), pipeline.config.max_total_seconds,
+        )
 
         # Run the real analysis (live research + deterministic scoring/
         # forecasting) exactly once, up front -- the same work
@@ -75,14 +123,14 @@ async def analyze_market_needs(
         # allowed_source_metadata below, letting url_mode="source_metadata_only"
         # correctly allow those exact URLs without ever trusting an
         # LLM-authored one.
-        raw_result = await asyncio.to_thread(agent._analyze_sync, request)
+        raw_result = await asyncio.to_thread(
+            agent._analyze_sync, request, deadline=writer_deadline,
+        )
 
         context = _build_review_context(request)
         context.allowed_source_metadata = [
             source.model_dump() for source in raw_result.sources
         ]
-
-        pipeline = ReviewPipeline("MarketNeedsAgent")
 
         # ReviewPipeline is a synchronous component (real, blocking Reviewer/
         # Rewrite provider calls) — offloaded to a worker thread so this
@@ -93,6 +141,12 @@ async def analyze_market_needs(
             context,
             writer_trusted_parts=context.trusted_text_fields(),
             writer_untrusted_parts=context.untrusted_text_fields(),
+            deadline=global_deadline,
+        )
+
+        logger.info(
+            "market_needs.response_built status=%s usable=%s writer_deadline_reason=%s",
+            result.status, result.usable, agent.last_fallback_reason_code,
         )
 
         final = (

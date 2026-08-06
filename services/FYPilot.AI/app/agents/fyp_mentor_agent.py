@@ -29,14 +29,26 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
 from app.llm_firewall.firewall import LlmFirewall
-from app.services.llm_provider import LLMResult, ProviderChain
+from app.services.llm_provider import LLMResult, ProviderChain, _accepts_keyword
 
 logger = logging.getLogger("fypilot-mentor-agent")
+
+# Typed reason for Writer-deadline exhaustion (see routers/fyp_chat.py's
+# writer_deadline / _WRITER_TIME_RESERVE_SECONDS). Uses the SAME string as
+# ProjectRoadmapAgent's fallback_reason.WRITER_DEADLINE_EXCEEDED
+# (app/agents/roadmap/fallback_reason.py) and the identical module constant
+# in project_idea_agent.py / market_needs_agent.py / project_dna_agent.py --
+# none of those modules is imported here (each would pull in an
+# agent-specific taxonomy module out of scope for this agent), but the
+# spelling of this one generic code is kept identical rather than inventing
+# a differently-spelled equivalent.
+WRITER_DEADLINE_EXCEEDED = "writer_deadline_exceeded"
 
 
 # =============================================================================
@@ -186,6 +198,15 @@ class FypMentorAgent:
         self.last_search_firewall_blocked = False
         self.last_search_firewall_flags: list[str] = []
 
+        # Typed diagnostic (see WRITER_DEADLINE_EXCEEDED above) -- set only
+        # when chat() had to fall back because the Writer's own reserved
+        # deadline ran out, never for any other failure category (that
+        # finer-grained classification is out of scope for this agent).
+        # None means "not attempted yet" or "no deadline was involved in
+        # the fallback". Internal/diagnostic only -- never added to
+        # FypMentorAnswer (schema changes are out of scope for this task).
+        self.last_fallback_reason_code: Optional[str] = None
+
         self.allowed_intents = {
             "general_fyp_help",
             "idea_explanation",
@@ -327,7 +348,32 @@ class FypMentorAgent:
 
         return None
 
-    def chat(self, request: FypMentorRequest) -> FypMentorAnswer:
+    def chat(
+        self, request: FypMentorRequest, *, deadline: float | None = None,
+    ) -> FypMentorAnswer:
+        """
+        ``deadline``, when supplied, is an absolute time.monotonic()
+        timestamp -- the Writer's own reserved slice of the ReviewPipeline's
+        total budget (routers/fyp_chat.py's writer_deadline), strictly
+        earlier than the deadline passed to ReviewPipeline.run() itself, so
+        the Writer can never consume the time reserved for Reviewer/Rewrite.
+        It is the SAME value threaded into BOTH the optional search_web()
+        call below (clamping each search provider's own timeout and
+        skipping a fallback search provider once too little time remains --
+        see ProviderChain.search_web) and the generate_json() call further
+        down (identical clamping/skipping for generation providers) -- one
+        shared Writer budget, never reset or recomputed between stages.
+        Because ``deadline`` is an ABSOLUTE clock value, however long the
+        search step actually takes is automatically reflected in however
+        much budget generation sees remaining; generation additionally
+        re-checks the remaining budget BEFORE entering its own provider
+        cascade at all (see _writer_deadline_exhausted), rather than relying
+        only on the cascade to discover this after the fact. None (the
+        default) preserves the exact prior unbounded behavior for every
+        caller that doesn't pass one. Mirrors ProjectIdeaAgent.generate_ideas
+        / MarketNeedsAgent._analyze_sync's identical shared-Writer-budget
+        pattern.
+        """
         # Full reset of every request-scoped field at the top of every call.
         # FypMentorAgent is instantiated fresh per HTTP request in
         # app/routers/fyp_chat.py (confirmed: the only instantiation site in
@@ -350,6 +396,7 @@ class FypMentorAgent:
         self.last_sources = []
         self.last_search_firewall_blocked = False
         self.last_search_firewall_flags = []
+        self.last_fallback_reason_code = None
 
         short_circuit = self.try_short_circuit_answer(request)
 
@@ -359,9 +406,26 @@ class FypMentorAgent:
         search_context = ""
 
         if self._should_search_web(request.message):
+            # `_accepts_keyword` guard: an older provider-chain test double
+            # (which doesn't accept `deadline`) keeps working completely
+            # unchanged -- see _accepts_keyword's docstring. A real
+            # ProviderChain accepts it, so production calls always get the
+            # SAME Writer deadline forwarded here that generation will also
+            # use.
+            search_kwargs: dict[str, Any] = {}
+            if deadline is not None and _accepts_keyword(self.provider_chain.search_web, "deadline"):
+                search_kwargs["deadline"] = deadline
+
+            remaining_before_search = deadline - time.monotonic() if deadline is not None else None
+            logger.info(
+                "mentor.search_attempt remaining_writer_seconds=%s",
+                f"{remaining_before_search:.1f}" if remaining_before_search is not None else "unbounded",
+            )
+
             try:
                 search_result = self.provider_chain.search_web(
-                    self._build_search_query(request)
+                    self._build_search_query(request),
+                    **search_kwargs,
                 )
 
                 self.last_search_provider = (
@@ -381,6 +445,13 @@ class FypMentorAgent:
                 self.last_search_failed = True
                 self.last_search_error = f"Mentor web search failed: {ex}"
                 logger.exception("Mentor web search failed.")
+
+            remaining_after_search = deadline - time.monotonic() if deadline is not None else None
+            logger.info(
+                "mentor.search_complete search_used=%s remaining_writer_seconds=%s",
+                self.last_search_used,
+                f"{remaining_after_search:.1f}" if remaining_after_search is not None else "unbounded",
+            )
 
             search_context = self._format_sources_for_prompt(self.last_sources)
 
@@ -421,28 +492,55 @@ class FypMentorAgent:
 
         raw = None
 
-        try:
-            result = self.provider_chain.generate_json(prompt, use_search=False)
-
-            self.last_provider = (
-                result.provider if result.provider != "none" else None
+        if self._writer_deadline_exhausted(deadline):
+            # Search (if it ran) already consumed the shared Writer budget
+            # down to (or below) the minimum useful generation-start
+            # threshold -- do not enter the provider cascade at all;
+            # classify directly here rather than relying on ProviderChain
+            # to discover this after the fact (it would, via the same
+            # _MIN_SECONDS_PER_PROVIDER_ATTEMPT check, but only after
+            # entering the cascade).
+            self.last_fallback_reason_code = WRITER_DEADLINE_EXCEEDED
+            self.last_error = (
+                "Writer deadline exhausted before generation could start "
+                "(insufficient time remained after the search step)."
             )
-            self.last_model_used = result.model
+            logger.info("mentor.generation_skipped_deadline_exhausted")
+        else:
+            generate_kwargs: dict[str, Any] = {}
+            if deadline is not None and _accepts_keyword(self.provider_chain.generate_json, "deadline"):
+                generate_kwargs["deadline"] = deadline
+                if _accepts_keyword(self.provider_chain.generate_json, "cap_timeout_to_deadline"):
+                    generate_kwargs["cap_timeout_to_deadline"] = True
 
-            if result.ok and isinstance(result.data, dict):
-                self.last_raw_llm_response = json.dumps(
-                    result.data,
-                    ensure_ascii=False,
-                )[:2500]
-                raw = result.data
-            else:
-                self.last_error = (
-                    result.error or "No provider returned valid mentor JSON."
+            try:
+                result = self.provider_chain.generate_json(
+                    prompt, use_search=False, **generate_kwargs,
                 )
 
-        except Exception as ex:
-            self.last_error = f"Mentor generation failed: {ex}"
-            logger.exception("Mentor generation failed.")
+                self.last_provider = (
+                    result.provider if result.provider != "none" else None
+                )
+                self.last_model_used = result.model
+
+                if result.ok and isinstance(result.data, dict):
+                    self.last_raw_llm_response = json.dumps(
+                        result.data,
+                        ensure_ascii=False,
+                    )[:2500]
+                    raw = result.data
+                else:
+                    self.last_error = (
+                        result.error or "No provider returned valid mentor JSON."
+                    )
+                    if self._writer_deadline_exhausted(deadline):
+                        self.last_fallback_reason_code = WRITER_DEADLINE_EXCEEDED
+
+            except Exception as ex:
+                self.last_error = f"Mentor generation failed: {ex}"
+                if self._writer_deadline_exhausted(deadline):
+                    self.last_fallback_reason_code = WRITER_DEADLINE_EXCEEDED
+                logger.exception("Mentor generation failed.")
 
         if raw:
             self.last_llm_used = True
@@ -473,7 +571,9 @@ class FypMentorAgent:
         """
         return self._fallback_answer(request)
 
-    def generate_candidate(self, request: FypMentorRequest) -> LLMResult | None:
+    def generate_candidate(
+        self, request: FypMentorRequest, *, deadline: float | None = None,
+    ) -> LLMResult | None:
         """
         Writer-stage entry point for ReviewPipeline (see app/review/pipeline.py).
 
@@ -489,13 +589,25 @@ class FypMentorAgent:
         duplicating or bypassing it, then wraps the result as an LLMResult so
         it can flow through guarded_call like any other LLM stage.
 
+        ``deadline`` (an absolute time.monotonic() timestamp) is forwarded
+        unchanged to chat() -- see its docstring. guarded_call
+        (app/llm_firewall/guard.py) calls this as a zero-arg
+        ``request.call_fn()``, so the router supplies this via a closure
+        (matching ProjectRoadmapAgent/ProjectIdeaAgent's identical pattern)
+        rather than a global or mutable-agent-state deadline -- safe under
+        concurrent requests since each request gets its own FypMentorAgent
+        instance (see routers/fyp_chat.py).
+
         Returns None -- signaling "no real provider output" to guarded_call,
         which the pipeline maps to status="provider_unavailable" -- when
         chat() itself had to fall back internally (self.last_llm_used is
-        False), since in that case there is no real candidate to review; the
-        router should use build_safe_fallback() directly instead.
+        False), whether that's because every provider failed OR because the
+        Writer deadline was exceeded (self.last_fallback_reason_code
+        distinguishes the two -- see WRITER_DEADLINE_EXCEEDED above). In
+        either case there is no real candidate to review; the router uses
+        build_safe_fallback() directly instead.
         """
-        answer = self.chat(request)
+        answer = self.chat(request, deadline=deadline)
 
         if not self.last_llm_used:
             return None
@@ -506,6 +618,20 @@ class FypMentorAgent:
             model=self.last_model_used,
             text="",
             data=answer.model_dump(),
+        )
+
+    def _writer_deadline_exhausted(self, deadline: float | None) -> bool:
+        """
+        True when `deadline` is set and effectively run out -- not only when
+        it has literally passed, but also when the remaining time is below
+        ProviderChain's own _MIN_SECONDS_PER_PROVIDER_ATTEMPT floor (the
+        SAME threshold ProviderChain._run_cascade/search_web use to decide
+        whether it's even worth starting one more attempt). Mirrors
+        ProjectIdeaAgent._writer_deadline_exhausted's identical check.
+        """
+        return (
+            deadline is not None
+            and (deadline - time.monotonic()) < ProviderChain._MIN_SECONDS_PER_PROVIDER_ATTEMPT
         )
 
     # =========================================================================

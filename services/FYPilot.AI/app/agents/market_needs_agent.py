@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
@@ -13,7 +15,7 @@ from app.models.market_needs_models import (
     SimilarSolution,
     SourceItem,
 )
-from app.services.llm_provider import LLMResult, ProviderChain
+from app.services.llm_provider import LLMResult, ProviderChain, _accepts_keyword
 from app.services.market_needs_scoring import (
     calculate_confidence_score,
     calculate_demand_score,
@@ -21,6 +23,20 @@ from app.services.market_needs_scoring import (
     confidence_label,
     demand_label,
 )
+
+logger = logging.getLogger("fypilot-market-needs-agent")
+
+# Typed reason for Writer-deadline exhaustion (see
+# routers/market_needs_router.py's writer_deadline /
+# _WRITER_TIME_RESERVE_SECONDS). Uses the SAME string as
+# ProjectRoadmapAgent's fallback_reason.WRITER_DEADLINE_EXCEEDED
+# (app/agents/roadmap/fallback_reason.py) and ProjectIdeaAgent's identical
+# module constant (app/agents/project_idea_agent.py) -- neither module is
+# imported here (each would pull in an agent-specific taxonomy/module that
+# is out of scope for this agent), but the spelling of this one generic
+# code is kept identical rather than inventing a differently-spelled
+# equivalent.
+WRITER_DEADLINE_EXCEEDED = "writer_deadline_exceeded"
 
 
 class MarketNeedsAgent:
@@ -99,23 +115,73 @@ class MarketNeedsAgent:
         self.last_search_firewall_blocked = False
         self.last_search_firewall_flags: list[str] = []
 
+        # Typed diagnostic (see WRITER_DEADLINE_EXCEEDED above) -- set only
+        # when _analyze_sync() had to fall back because the Writer's own
+        # reserved deadline ran out, never for any other failure category
+        # (that finer-grained classification is out of scope for this
+        # agent). None means "not attempted yet" or "no deadline was
+        # involved in the fallback". Internal/diagnostic only -- never
+        # added to MarketNeedsResponse (schema changes are out of scope for
+        # this task).
+        self.last_fallback_reason_code: str | None = None
+
     async def analyze(
         self,
         request: MarketNeedsRequest,
+        *,
+        deadline: float | None = None,
     ) -> MarketNeedsResponse:
         """
-        Async public entry point (unchanged contract) — delegates to the
-        synchronous core via a worker thread, so the existing async FastAPI
-        router caller is unaffected. ReviewPipeline is a plain synchronous
-        component and cannot await this directly, so _analyze_sync is also
-        exposed as a plain synchronous method for that caller.
+        Async public entry point (unchanged contract otherwise) — delegates
+        to the synchronous core via a worker thread, so the existing async
+        FastAPI router caller is unaffected. ReviewPipeline is a plain
+        synchronous component and cannot await this directly, so
+        _analyze_sync is also exposed as a plain synchronous method for
+        that caller. ``deadline`` is forwarded unchanged -- see
+        _analyze_sync's docstring.
         """
-        return await asyncio.to_thread(self._analyze_sync, request)
+        return await asyncio.to_thread(self._analyze_sync, request, deadline=deadline)
+
+    def _writer_deadline_exhausted(self, deadline: float | None) -> bool:
+        """
+        True when `deadline` is set and effectively run out -- not only when
+        it has literally passed, but also when the remaining time is below
+        ProviderChain's own _MIN_SECONDS_PER_PROVIDER_ATTEMPT floor (the
+        SAME threshold ProviderChain._run_cascade/search_web use to decide
+        whether it's even worth starting one more attempt). Mirrors
+        ProjectIdeaAgent._writer_deadline_exhausted /
+        ProjectRoadmapAgent._classify_generation_failure's identical check.
+        """
+        return (
+            deadline is not None
+            and (deadline - time.monotonic()) < ProviderChain._MIN_SECONDS_PER_PROVIDER_ATTEMPT
+        )
 
     def _analyze_sync(
         self,
         request: MarketNeedsRequest,
+        *,
+        deadline: float | None = None,
     ) -> MarketNeedsResponse:
+        """
+        ``deadline``, when supplied, is an absolute time.monotonic()
+        timestamp -- the Writer's own reserved slice of the request's total
+        budget (routers/market_needs_router.py's writer_deadline). It is
+        the SAME value threaded into BOTH the search_web() call below
+        (clamping each search provider's own timeout and skipping a
+        fallback search provider once too little time remains -- see
+        ProviderChain.search_web) and the generate_json() call further down
+        (identical clamping/skipping for generation providers) -- one
+        shared Writer budget, never reset or recomputed between stages.
+        Because ``deadline`` is an ABSOLUTE clock value, however long the
+        search step actually takes is automatically reflected in however
+        much budget generation sees remaining; generation additionally
+        re-checks the remaining budget BEFORE entering its own provider
+        cascade at all (see _writer_deadline_exhausted), rather than
+        relying only on the cascade to discover this after the fact. None
+        (the default) preserves the exact prior unbounded behavior for
+        every caller that doesn't pass one.
+        """
         # Full reset of every request-scoped search field at the top of
         # every call -- MarketNeedsAgent is instantiated fresh per HTTP
         # request in market_needs_router.py (same pattern confirmed for
@@ -130,10 +196,28 @@ class MarketNeedsAgent:
         self.last_sources = []
         self.last_search_firewall_blocked = False
         self.last_search_firewall_flags = []
+        self.last_fallback_reason_code = None
 
         evidence_context = ""
 
         if request.use_search:
+            # `_accepts_keyword` guard (shared helper, imported from
+            # llm_provider.py rather than duplicated again -- see
+            # ProjectIdeaAgent's identical pattern): an older
+            # provider-chain test double (which doesn't accept `deadline`)
+            # keeps working completely unchanged. A real ProviderChain
+            # accepts it, so production calls always get the SAME Writer
+            # deadline forwarded here that generation will also use.
+            search_kwargs: dict[str, Any] = {}
+            if deadline is not None and _accepts_keyword(self.chain.search_web, "deadline"):
+                search_kwargs["deadline"] = deadline
+
+            remaining_before_search = deadline - time.monotonic() if deadline is not None else None
+            logger.info(
+                "market_needs.search_attempt remaining_writer_seconds=%s",
+                f"{remaining_before_search:.1f}" if remaining_before_search is not None else "unbounded",
+            )
+
             search_query = self._build_search_query(request)
 
             try:
@@ -141,7 +225,7 @@ class MarketNeedsAgent:
                 # no evidence. Independent of generation (DeepInfra -> Groq
                 # -> Ollama) -- generate_json(use_search=...) below is no
                 # longer relied on for retrieval.
-                search_result = self.chain.search_web(search_query)
+                search_result = self.chain.search_web(search_query, **search_kwargs)
 
                 self.last_search_provider = (
                     search_result.provider
@@ -159,6 +243,13 @@ class MarketNeedsAgent:
             except Exception as ex:
                 self.last_search_failed = True
                 self.last_search_error = f"Market needs search failed: {ex}"
+
+            remaining_after_search = deadline - time.monotonic() if deadline is not None else None
+            logger.info(
+                "market_needs.search_complete search_used=%s remaining_writer_seconds=%s",
+                self.last_search_used,
+                f"{remaining_after_search:.1f}" if remaining_after_search is not None else "unbounded",
+            )
 
             evidence_context = self._format_evidence_for_prompt(self.last_sources)
 
@@ -196,9 +287,32 @@ class MarketNeedsAgent:
 
         prompt = self._build_prompt(request, evidence_context=evidence_context)
 
+        if self._writer_deadline_exhausted(deadline):
+            # Search already consumed the shared Writer budget down to (or
+            # below) the minimum useful generation-start threshold -- do
+            # not enter the provider cascade at all; classify directly here
+            # rather than relying on ProviderChain to discover this after
+            # the fact (it would, via the same
+            # _MIN_SECONDS_PER_PROVIDER_ATTEMPT check, but only after
+            # entering the cascade).
+            self.last_fallback_reason_code = WRITER_DEADLINE_EXCEEDED
+            logger.info("market_needs.generation_skipped_deadline_exhausted")
+            return self._fallback(
+                request,
+                "Writer deadline exhausted before generation could start "
+                "(insufficient time remained after the search step).",
+            )
+
+        generate_kwargs: dict[str, Any] = {}
+        if deadline is not None and _accepts_keyword(self.chain.generate_json, "deadline"):
+            generate_kwargs["deadline"] = deadline
+            if _accepts_keyword(self.chain.generate_json, "cap_timeout_to_deadline"):
+                generate_kwargs["cap_timeout_to_deadline"] = True
+
         result = self.chain.generate_json(
             prompt,
             use_search=False,
+            **generate_kwargs,
         )
 
         if not getattr(result, "ok", False) or not getattr(
@@ -206,6 +320,8 @@ class MarketNeedsAgent:
             "data",
             None,
         ):
+            if self._writer_deadline_exhausted(deadline):
+                self.last_fallback_reason_code = WRITER_DEADLINE_EXCEEDED
             return self._fallback(
                 request,
                 getattr(result, "error", None),

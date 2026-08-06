@@ -37,20 +37,26 @@ logger = logging.getLogger("fypilot-roadmap-router")
 # rewrite / final re-review -- the Writer must never consume this. Mirrors
 # SE Documentation's identical global_deadline/writer_deadline split (see
 # routers/se_documentation.py's _SEMANTIC_REVIEW_RESERVE_SECONDS = 300.0 out
-# of a 1200s total budget), sized down for Roadmap's much smaller 90s total
-# (registry.py's ProjectRoadmapAgent.max_total_seconds): 25s leaves the
-# Reviewer at least one meaningful provider attempt (ProviderChain's shared
+# of a 1200s total budget), sized for Roadmap's 360s total (registry.py's
+# ProjectRoadmapAgent.max_total_seconds): 60s leaves the Reviewer at least
+# one meaningful provider attempt (ProviderChain's shared
 # _MIN_SECONDS_PER_PROVIDER_ATTEMPT floor is 4s) plus headroom for the
 # deterministic parsing/firewall/schema-validation steps around it, while
-# still leaving the Writer the majority of the 90s budget for its own,
-# comparatively more expensive structured phase-plan generation. Previously
-# there was no writer_deadline at all -- the Writer's own provider chain
-# (DeepInfra up to 120s, Ollama up to 180s -- see llm_provider.py's
-# "roadmap" tier timing) could alone exceed the ENTIRE 90s pipeline budget,
-# so a slow-but-successful candidate could arrive only for
-# ReviewPipeline.run's own _time_budget_exceeded check to discard it before
-# the Reviewer ever ran (status="review_unavailable" with no candidate).
-_SEMANTIC_REVIEW_RESERVE_SECONDS = 25.0
+# leaving the Writer a 300s budget (360s - 60s) for its own, comparatively
+# more expensive structured phase-plan generation -- enough for DeepInfra's
+# full 240s single-attempt cap (ROADMAP_DEEPINFRA_TIMEOUT_SECONDS, see
+# llm_provider.py's _deepinfra_timing_for_tier) PLUS roughly 60s of Writer
+# budget still available afterward for a Groq/Ollama fallback attempt, all
+# still clamped against this same absolute Writer deadline (cap_timeout_to_
+# deadline in _try_generate_phase_plan). Previously (90s total / 25s
+# reserve, then 240s total / 120s DeepInfra cap) too little of the budget
+# was left for DeepInfra's genuinely slow single-attempt latency, so a
+# slow-but-successful candidate could either time out early or arrive only
+# for ReviewPipeline.run's own _time_budget_exceeded check to discard it
+# before the Reviewer ever ran (status="review_unavailable" with no
+# candidate) -- this 360/300/60 split is sized specifically so DeepInfra's
+# full attempt plus a fallback both fit inside the Writer budget.
+_SEMANTIC_REVIEW_RESERVE_SECONDS = 60.0
 
 # Maps a non-usable PipelineResult.status (review/models.py's PipelineStatus)
 # to a typed Roadmap fallback reason -- covers every review-layer failure

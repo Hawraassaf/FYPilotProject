@@ -23,6 +23,7 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -939,6 +940,30 @@ class ReviewPipeline:
             return self._result(
                 "rejected", usable=True, output=output, reviewer_findings=prior_findings, decision=decision,
                 warning="A critical issue remained after the maximum number of rewrites; showing the last version without a critical issue.",
+                review_run_id=review_run_id, history=history, attempts=attempt + 1,
+            )
+
+        # TEMPORARY diagnostic bypass (SE_DOCUMENTATION_CRITICAL_GATE_DISABLED=1,
+        # SEDocumentationAgent only) -- shows the last structurally-valid AI
+        # candidate even though a critical issue was never resolved, instead
+        # of the generic deterministic fallback. The critical finding is
+        # still attached via reviewer_findings so it stays visible in the UI
+        # -- this is NOT the same as fixing the issue, only surfacing raw AI
+        # content for inspection. Unset before treating output as reviewed.
+        if (
+            self.agent_name == "SEDocumentationAgent"
+            and os.getenv("SE_DOCUMENTATION_CRITICAL_GATE_DISABLED", "").strip().lower() in ("1", "true", "yes")
+            and state.last_structurally_valid_candidate
+        ):
+            logger.warning(
+                "review_pipeline.critical_gate_DISABLED_bypassing_rejection agent=%s review_run_id=%s",
+                self.agent_name, review_run_id,
+            )
+            return self._result(
+                "rejected", usable=True, output=state.last_structurally_valid_candidate,
+                reviewer_findings=findings, decision=decision,
+                warning="[CRITICAL GATE DISABLED FOR DEBUGGING] A critical issue was never resolved -- "
+                        "verify manually before using this document.",
                 review_run_id=review_run_id, history=history, attempts=attempt + 1,
             )
 
