@@ -161,14 +161,25 @@ LIFECYCLE_EVIDENCE_KEYWORDS: dict[str, tuple[str, ...]] = {
     "core_implementation": ("implement", "develop", "build the", "core workflow", "core feature"),
     "integration": ("integration", "integrate", "connect", "endpoint", "api"),
     "testing_validation": ("test", "testing", "validation", "qa", "bug fix"),
-    "documentation": ("documentation", "user guide", "technical report", "write up"),
+    "documentation": ("documentation", "user guide", "technical report", "write up", "report", "write-up"),
     "final_delivery": ("deployment", "submission", "presentation", "demo", "final package"),
     "data_sourcing": ("dataset", "data collection", "data sourcing", "corpus", "data acquisition"),
-    "data_preprocessing": ("preprocessing", "data cleaning", "annotation", "normalization", "tokenization"),
+    "data_preprocessing": (
+        "preprocessing", "preprocess", "data cleaning", "clean the data", "annotation", "annotate",
+        "normalization", "normalize", "tokenization", "tokenize",
+    ),
     "baseline_model": ("baseline model", "baseline", "initial model"),
-    "model_evaluation": ("evaluation", "error analysis", "model performance", "metrics", "confusion matrix"),
-    "data_governance_privacy": ("privacy", "data governance", "consent", "anonymization", "licensing"),
-    "safety_validation": ("safety", "supervisor validation", "domain validation", "clinical review", "expert review"),
+    "model_evaluation": (
+        "evaluation", "evaluate", "evaluating", "error analysis", "model performance", "metrics",
+        "confusion matrix",
+    ),
+    "data_governance_privacy": (
+        "privacy", "data governance", "consent", "anonymization", "licensing", "gdpr", "compliance",
+    ),
+    "safety_validation": (
+        "safety", "supervisor validation", "domain validation", "clinical review", "expert review",
+        "supervisor review", "safety validation", "clinical validation", "domain expert",
+    ),
     "threat_modeling": ("threat model", "risk assessment", "attack surface"),
     "security_testing": ("security testing", "penetration test", "vulnerability", "security review"),
     "hardware_integration": ("hardware integration", "firmware", "sensor integration", "circuit"),
@@ -203,6 +214,20 @@ def _lifecycle_for_profile(
     # De-dupe, preserve order.
     mandatory = list(dict.fromkeys(mandatory))
     optional = [item for item in dict.fromkeys(optional) if item not in mandatory]
+
+    # Move safety/compliance-critical categories to right after
+    # requirements_scope instead of leaving them at the end of the list.
+    # Live testing showed that when a provider's response gets cut off
+    # (token budget or transport truncation), the categories listed LAST in
+    # the prompt are consistently the ones the model hadn't written a phase
+    # for yet -- for a safety-sensitive project, safety_validation and
+    # data_governance_privacy must not be the ones silently lost to that.
+    _EARLY_PRIORITY = ("safety_validation", "data_governance_privacy")
+    priority_present = [c for c in _EARLY_PRIORITY if c in mandatory]
+    if priority_present:
+        rest = [c for c in mandatory if c not in _EARLY_PRIORITY]
+        insert_at = min(1, len(rest))
+        mandatory = rest[:insert_at] + priority_present + rest[insert_at:]
 
     return tuple(mandatory), tuple(optional)
 

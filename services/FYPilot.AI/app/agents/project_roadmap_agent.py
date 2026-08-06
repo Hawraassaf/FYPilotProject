@@ -23,6 +23,7 @@ Design (v3 -- hybrid AI + deterministic planning engine):
 
 import json
 import logging
+import os
 import re
 import time
 from typing import Any, Optional
@@ -211,6 +212,17 @@ class _RoadmapPlan(BaseModel):
 # _repair_json_with_provider on each provider) -- deliberately terse (a
 # repair call only needs to know the shape to restore, not the full
 # generation prompt's rules/examples) so that request stays small.
+# Concrete example phrasing for the lifecycle areas that were empirically
+# observed (live, across DeepInfra and Groq) to be skipped most often even
+# when listed in _LIFECYCLE_LABELS -- these are the areas a model tends to
+# assume are "implicit" in another phase rather than writing a dedicated one
+# for, so the prompt spells out what a compliant phase looks like.
+_LIFECYCLE_HINTS: dict[str, str] = {
+    "architecture_design": "'System Architecture and Database Design' -- decide the component layout and design the database schema, before core implementation starts",
+    "data_governance_privacy": "'Data Governance and Privacy Compliance' -- define consent, storage, retention, and anonymization rules for the data this project collects",
+    "safety_validation": "'Supervisor and Safety Validation' -- have the supervisor or a domain expert review outputs for safety before they are relied on",
+}
+
 _ROADMAP_PHASE_PLAN_SCHEMA_DESCRIPTION = """{
   "roadmapTitle": string, "teamStrategy": string, "finalAdvice": string,
   "phases": [{
@@ -539,7 +551,7 @@ class ProjectRoadmapAgent:
         existed, which a fixed-budget repair request then couldn't fix
         either (see DeepInfraProvider._repair_json_with_provider).
         """
-        return max(3000, min(8000, 1500 + profile.phase_count_max * 700))
+        return max(3000, min(16000, 1500 + profile.phase_count_max * 900))
 
     def _classify_generation_failure(
         self,
@@ -634,8 +646,19 @@ class ProjectRoadmapAgent:
         self.last_model_used = result.model
 
         diagnostics = result.parse_diagnostics or {}
-        is_transport_failure = result.error_category in (
-            json_reliability.TRANSPORT_FAILURE, json_reliability.TIMEOUT, json_reliability.PROVIDER_HTTP_ERROR,
+        # provider=="none" means the whole cascade was exhausted (every
+        # provider failed or was skipped for lack of remaining deadline) --
+        # ProviderChain._run_cascade's final LLMResult in that case carries
+        # error_category=None (it was never set by any single provider
+        # attempt), so checking error_category ALONE would print the
+        # misleading "transport=success" even though literally no provider
+        # ever returned output. Treat "no provider identified at all" as a
+        # transport failure too.
+        is_transport_failure = (
+            result.provider == "none"
+            or result.error_category in (
+                json_reliability.TRANSPORT_FAILURE, json_reliability.TIMEOUT, json_reliability.PROVIDER_HTTP_ERROR,
+            )
         )
 
         def log_provider_output(*, schema_valid: bool, semantic_valid: bool) -> None:
@@ -695,7 +718,25 @@ class ProjectRoadmapAgent:
         _covered, missing_mandatory = project_profile.lifecycle_coverage(profile, phase_texts)
         self.last_missing_lifecycle_categories = list(missing_mandatory)
 
-        if missing_mandatory and _lifecycle_gap_is_blocking(missing_mandatory):
+        # TEMPORARY diagnostic bypass (ROADMAP_LIFECYCLE_GATE_DISABLED=1) --
+        # lets a partial AI candidate through even with missing mandatory
+        # categories, so the raw model output can be inspected instead of
+        # always seeing the generic deterministic fallback. Unset/remove
+        # this before relying on the output as fully reviewed: nothing else
+        # checks lifecycle coverage once this is on.
+        _gate_disabled = os.getenv("ROADMAP_LIFECYCLE_GATE_DISABLED", "").strip().lower() in ("1", "true", "yes")
+        if _gate_disabled and missing_mandatory:
+            readable = ", ".join(_LIFECYCLE_LABELS.get(c, c) for c in missing_mandatory)
+            logger.warning(
+                "roadmap.lifecycle_gate_DISABLED_bypassing_rejection request_id=%s missing=%s",
+                self.request_id, missing_mandatory,
+            )
+            self.last_lifecycle_coverage_passed = False
+            self.last_error = (
+                f"[LIFECYCLE GATE DISABLED FOR DEBUGGING] Plan is missing: {readable}. "
+                f"Not auto-rejected -- verify these areas manually before using this plan."
+            )
+        elif missing_mandatory and _lifecycle_gap_is_blocking(missing_mandatory):
             readable = ", ".join(_LIFECYCLE_LABELS.get(c, c) for c in missing_mandatory)
             log_provider_output(schema_valid=True, semantic_valid=False)
             self.last_error = (
@@ -866,6 +907,7 @@ class ProjectRoadmapAgent:
 
         lifecycle_lines = "\n".join(
             f"  - {_LIFECYCLE_LABELS.get(category, category)}"
+            + (f" (e.g. a phase like: {_LIFECYCLE_HINTS[category]})" if category in _LIFECYCLE_HINTS else "")
             for category in profile.mandatory_lifecycle
         )
 
@@ -897,9 +939,10 @@ Student/team:
 
 Timeline:
 - Total project duration: {total_weeks} weeks.
-- Design between {profile.phase_count_min} and {profile.phase_count_max} phases -- this range already accounts for this project's duration and domain, so do not default to a generic 4-7 regardless of what is asked. Each phase's "weeks" field should be a rough weight (1-6).
-- This project must have identifiable phase coverage for EACH of the following lifecycle areas (multiple areas may share one phase when they are genuinely one unit of work, but do not compress clearly different areas into one vague "umbrella" phase):
+- You MUST design AT LEAST {profile.phase_count_min} phases (up to {profile.phase_count_max}) -- this is not a suggestion. A plan with fewer than {profile.phase_count_min} phases will be automatically rejected before a human ever sees it. Do not default to a generic 4-7 regardless of what is asked. Each phase's "weeks" field should be a rough weight (1-6).
+- EVERY one of the following lifecycle areas MUST have its own clearly identifiable phase, with phase name/goal/tasks that unambiguously cover it. At most TWO areas may share a single phase, and only when they are genuinely one unit of work -- never compress three or more distinct areas into one "umbrella" phase, and never silently drop an area:
 {lifecycle_lines}
+  A plan that omits more than one of these areas will be automatically rejected and replaced with a generic, non-project-specific fallback roadmap -- so when in doubt, add another phase rather than skip or bury an area.
 - Give MORE weeks/effort to the phases that are hardest FOR THIS SPECIFIC PROJECT AND TEAM: complex core features, AI/data work, and areas where skills are missing. Give FEWER weeks to easy or routine phases.
 
 Phase design rules:

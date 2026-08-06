@@ -311,7 +311,10 @@ def test_all_sections_timing_out_produces_writer_budget_exceeded_not_a_disguised
 
 def test_other_agents_registry_deadlines_are_unchanged():
     assert get_agent_config("FypMentorAgent").max_total_seconds == 90.0
-    assert get_agent_config("ProjectRoadmapAgent").max_total_seconds == 90.0
+    # ProjectRoadmapAgent is intentionally 240.0 now, not 90.0 -- see the
+    # Roadmap-only timeout adjustment in registry.py and
+    # tests/test_roadmap_timeout_adjustment.py.
+    assert get_agent_config("ProjectRoadmapAgent").max_total_seconds == 240.0
     assert get_agent_config("ProjectIdeaAgent").max_total_seconds == 120.0
     assert get_agent_config("ProjectDNAAgent").max_total_seconds == 90.0
     assert get_agent_config("IdeaComparisonAgent").max_total_seconds == 45.0

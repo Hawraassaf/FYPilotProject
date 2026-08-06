@@ -12,6 +12,7 @@ Design:
 import json
 import logging
 import re
+import time
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -19,6 +20,16 @@ from pydantic import BaseModel, Field
 from app.services.llm_provider import LLMResult, ProviderChain
 
 logger = logging.getLogger("fypilot-dna-agent")
+
+# Typed reason for Writer-deadline exhaustion (see routers/dna.py's
+# writer_deadline / _WRITER_TIME_RESERVE_SECONDS). Uses the SAME string as
+# ProjectRoadmapAgent's fallback_reason.WRITER_DEADLINE_EXCEEDED
+# (app/agents/roadmap/fallback_reason.py) and the identical module constant
+# in project_idea_agent.py / market_needs_agent.py -- none of those modules
+# is imported here (each would pull in an agent-specific taxonomy module
+# out of scope for this agent), but the spelling of this one generic code
+# is kept identical rather than inventing a differently-spelled equivalent.
+WRITER_DEADLINE_EXCEEDED = "writer_deadline_exceeded"
 
 
 class ProjectDNARequest(BaseModel):
@@ -96,6 +107,15 @@ class ProjectDNAAgent:
         self.last_provider: str | None = None
         self.last_model_used: str | None = None
 
+        # Typed diagnostic (see WRITER_DEADLINE_EXCEEDED above) -- set only
+        # when analyze() had to fall back because the Writer's own reserved
+        # deadline ran out, never for any other failure category (that
+        # finer-grained classification is out of scope for this agent).
+        # None means "not attempted yet" or "no deadline was involved in
+        # the fallback". Internal/diagnostic only -- never added to
+        # ProjectDNAResponse (schema changes are out of scope for this task).
+        self.last_fallback_reason_code: str | None = None
+
         self.blocked_terms = [
             "react",
             "node",
@@ -114,19 +134,50 @@ class ProjectDNAAgent:
             "smart contract",
         ]
 
-    def analyze(self, request: ProjectDNARequest) -> ProjectDNAResponse:
+    def analyze(
+        self, request: ProjectDNARequest, *, deadline: float | None = None,
+    ) -> ProjectDNAResponse:
+        """
+        ``deadline``, when supplied, is an absolute time.monotonic()
+        timestamp -- the Writer's own reserved slice of the ReviewPipeline's
+        total budget (routers/dna.py's writer_deadline), strictly earlier
+        than the deadline passed to ReviewPipeline.run() itself, so the
+        Writer can never consume the time reserved for Reviewer/Rewrite.
+        Forwarded to the provider cascade via generate_json's ``deadline``/
+        ``cap_timeout_to_deadline`` kwargs, which clamp each provider's own
+        configured timeout to whatever Writer budget actually remains and
+        skip starting a fallback provider once too little remains -- see
+        ProjectRoadmapAgent.generate()'s identical pattern. None (the
+        default) preserves the exact prior unbounded behavior for every
+        caller that doesn't pass one.
+        """
         self.last_llm_used = False
         self.last_error = None
         self.last_raw_llm_response = None
         self.last_provider = None
         self.last_model_used = None
+        self.last_fallback_reason_code = None
 
         prompt = self._build_prompt(request)
 
         raw = None
 
+        # No manual pre-check here before the single generate_json() call --
+        # ProviderChain._run_cascade already applies the SAME
+        # _MIN_SECONDS_PER_PROVIDER_ATTEMPT floor to its own first-provider
+        # check (see ProjectRoadmapAgent._try_generate_phase_plan's identical
+        # single-call pattern), so a redundant agent-level pre-check would
+        # only duplicate that decision -- and would consume its own
+        # time.monotonic() read before the cascade's, throwing off exactly
+        # how much of the Writer's remaining budget the cascade sees.
+        extra_kwargs: dict[str, Any] = {}
+        if deadline is not None:
+            extra_kwargs["cap_timeout_to_deadline"] = True
+
         try:
-            result = self.provider_chain.generate_json(prompt, use_search=False)
+            result = self.provider_chain.generate_json(
+                prompt, use_search=False, deadline=deadline, **extra_kwargs,
+            )
 
             self.last_provider = (
                 result.provider if result.provider != "none" else None
@@ -143,9 +194,13 @@ class ProjectDNAAgent:
                 self.last_error = (
                     result.error or "No provider returned valid Project DNA JSON."
                 )
+                if self._writer_deadline_exhausted(deadline):
+                    self.last_fallback_reason_code = WRITER_DEADLINE_EXCEEDED
 
         except Exception as ex:
             self.last_error = f"Project DNA generation failed: {ex}"
+            if self._writer_deadline_exhausted(deadline):
+                self.last_fallback_reason_code = WRITER_DEADLINE_EXCEEDED
             logger.exception("Project DNA generation failed.")
 
         if raw:
@@ -176,20 +231,35 @@ class ProjectDNAAgent:
         """
         return self._complete_and_validate(request, self._fallback_raw_analysis(request))
 
-    def generate_candidate(self, request: ProjectDNARequest) -> LLMResult | None:
+    def generate_candidate(
+        self, request: ProjectDNARequest, *, deadline: float | None = None,
+    ) -> LLMResult | None:
         """
         Writer-stage entry point for ReviewPipeline. Reuses analyze() end to
         end (LLM reasoning -> deterministic score clamping/completion) rather
         than duplicating it, then wraps the result as an LLMResult so it can
         flow through guarded_call like any other LLM stage.
 
+        ``deadline`` (an absolute time.monotonic() timestamp) is forwarded
+        unchanged to analyze() -- see its docstring. guarded_call
+        (app/llm_firewall/guard.py) calls this as a zero-arg
+        ``request.call_fn()``, so the router supplies this via a closure
+        (``lambda: agent.generate_candidate(request, deadline=writer_deadline)``,
+        matching ProjectRoadmapAgent's identical pattern in
+        routers/roadmap.py) rather than a global or mutable-agent-state
+        deadline -- safe under concurrent requests since each request gets
+        its own ProjectDNAAgent instance (see routers/dna.py).
+
         Returns None -- signaling "no real provider output" to guarded_call,
         which the pipeline maps to status="provider_unavailable" -- when
         analyze() had to fall back internally (self.last_llm_used is False),
-        since in that case there is no real candidate to review; the router
-        should use build_safe_fallback() directly instead.
+        whether that's because every provider failed OR because the Writer
+        deadline was exceeded (self.last_fallback_reason_code distinguishes
+        the two -- see WRITER_DEADLINE_EXCEEDED above). In either case there
+        is no real candidate to review; the router uses build_safe_fallback()
+        directly instead.
         """
-        result = self.analyze(request)
+        result = self.analyze(request, deadline=deadline)
 
         if not self.last_llm_used:
             return None
@@ -200,6 +270,20 @@ class ProjectDNAAgent:
             model=self.last_model_used,
             text="",
             data=result.model_dump(),
+        )
+
+    def _writer_deadline_exhausted(self, deadline: float | None) -> bool:
+        """
+        True when `deadline` is set and effectively run out -- not only when
+        it has literally passed, but also when the remaining time is below
+        ProviderChain's own _MIN_SECONDS_PER_PROVIDER_ATTEMPT floor (the
+        SAME threshold ProviderChain._run_cascade uses to decide whether
+        it's even worth starting one more attempt). Mirrors
+        ProjectRoadmapAgent._classify_generation_failure's identical check.
+        """
+        return (
+            deadline is not None
+            and (deadline - time.monotonic()) < ProviderChain._MIN_SECONDS_PER_PROVIDER_ATTEMPT
         )
 
     def _build_prompt(self, request: ProjectDNARequest) -> str:

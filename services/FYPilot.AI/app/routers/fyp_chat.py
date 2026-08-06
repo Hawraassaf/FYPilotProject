@@ -16,6 +16,8 @@ usable code context) are intentionally never sent to an LLM or the review
 pipeline at all -- see FypMentorAgent.try_short_circuit_answer.
 """
 
+import logging
+import time
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
@@ -29,8 +31,37 @@ from app.review.response import build_review_response, empty_review_response
 
 router = APIRouter(tags=["FYP Mentor Chat"])
 
+logger = logging.getLogger("fypilot-mentor-router")
+
 _MAX_RESPONSE_SOURCES = 6
 _MAX_SOURCE_TITLE_LENGTH = 180
+
+# Reserved for the semantic Reviewer / one structural repair / one semantic
+# rewrite / final re-review -- the Writer must never consume this. Mentor
+# Chat's registry budget (registry.py's FypMentorAgent.max_total_seconds) is
+# 90.0s -- the SAME total as Roadmap's single-call budget, so
+# _SEMANTIC_REVIEW_RESERVE_SECONDS = 25.0 (routers/roadmap.py) is reused
+# unchanged rather than re-derived: it already leaves the Reviewer at least
+# one meaningful provider attempt (ProviderChain's shared
+# _MIN_SECONDS_PER_PROVIDER_ATTEMPT floor is 4s) plus headroom for the
+# deterministic parsing/firewall/schema-validation steps around it, while
+# still leaving the Writer the large majority of the 90s budget. Mentor
+# Chat's Writer stage CAN also make a search call before generation (see
+# FypMentorAgent._should_search_web), the same two-call shape Idea
+# Generation's larger 30s reserve was sized for -- but that search step is
+# heuristically gated and skipped for the common case (a typical
+# project-context question), unlike Idea Generation's unconditional two-call
+# sequence, so it does not carry the same risk of routinely eating into a
+# larger fixed reserve; when it does run, it shares (never adds to) this
+# SAME Writer budget, exactly like Idea Generation's shared-budget search
+# step. Previously there was no writer_deadline at all -- chat()'s
+# search_web()/generate_json() calls (each able to use their provider's own
+# full independent timeout) ran entirely inside the Writer closure passed to
+# pipeline.run(), which only self-computed an internal deadline that never
+# reached them, so a slow-but-successful candidate could arrive only for
+# ReviewPipeline.run's own _time_budget_exceeded check to discard it before
+# the Reviewer ever ran.
+_WRITER_TIME_RESERVE_SECONDS = 25.0
 
 
 def _is_safe_source_url(url: str) -> bool:
@@ -200,8 +231,25 @@ def fyp_chat(request: FypMentorRequest):
     context = _build_review_context(request)
     pipeline = ReviewPipeline("FypMentorAgent", tier="mentor")
 
+    # ONE absolute monotonic deadline, computed here from the registry's
+    # max_total_seconds (90s) -- passed UNCHANGED to ReviewPipeline (schema/
+    # structural-repair/semantic-review/rewrite/final-review all measure
+    # against this exact value via ReviewPipeline.run's own deadline
+    # threading). The Writer closure gets a SEPARATE, earlier
+    # writer_deadline (global - the review reserve above) so it can never
+    # consume the time set aside for review -- see
+    # _WRITER_TIME_RESERVE_SECONDS's comment for why. Matches Roadmap's
+    # identical pattern in routers/roadmap.py.
+    global_deadline = time.monotonic() + pipeline.config.max_total_seconds
+    writer_deadline = global_deadline - _WRITER_TIME_RESERVE_SECONDS
+
+    logger.info(
+        "mentor.request_received writer_budget_seconds=%.1f total_budget_seconds=%.1f",
+        writer_deadline - time.monotonic(), pipeline.config.max_total_seconds,
+    )
+
     def _run_writer():
-        candidate = mentor_agent.generate_candidate(request)
+        candidate = mentor_agent.generate_candidate(request, deadline=writer_deadline)
 
         # generate_candidate() runs chat() internally, which performs the
         # web search lazily -- last_sources is only populated once this
@@ -220,10 +268,16 @@ def fyp_chat(request: FypMentorRequest):
         context,
         writer_trusted_parts=context.trusted_text_fields(),
         writer_untrusted_parts=context.untrusted_text_fields(),
+        deadline=global_deadline,
     )
 
     final_answer = (
         result.output if result.usable else mentor_agent.build_safe_fallback(request).model_dump()
+    )
+
+    logger.info(
+        "mentor.response_built status=%s usable=%s writer_deadline_reason=%s",
+        result.status, result.usable, mentor_agent.last_fallback_reason_code,
     )
 
     return {

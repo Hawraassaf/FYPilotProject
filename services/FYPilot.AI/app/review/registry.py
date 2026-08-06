@@ -1299,7 +1299,14 @@ AGENT_REGISTRY: dict[str, AgentReviewConfig] = {
         allow_unreviewed_output=False,
         known_risky_claims=_ROADMAP_KNOWN_RISKY_CLAIMS,
         mandatory_fields=["roadmapTitle", "teamStrategy", "finalAdvice"],
-        max_total_seconds=90.0,
+        # Raised 90s -> 240s -> 360s (Roadmap-only timing adjustments): DeepInfra
+        # remains the paid primary provider and is allowed its full 240s
+        # single-attempt cap (ROADMAP_DEEPINFRA_TIMEOUT_SECONDS) even under a
+        # deadline (see routers/roadmap.py's _SEMANTIC_REVIEW_RESERVE_SECONDS
+        # = 60.0, which derives the 300s Writer budget = 360s - 60s), with
+        # ~60s of the Writer's own budget still reserved for a Groq/Ollama
+        # fallback attempt after DeepInfra.
+        max_total_seconds=360.0,
         extra_rubric=_ROADMAP_EXTRA_RUBRIC,
     ),
     "SEDocumentationAgent": AgentReviewConfig(

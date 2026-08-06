@@ -271,8 +271,11 @@ class ThreadSafetyTests(unittest.TestCase):
 
 class EffectiveTimeoutTests(unittest.TestCase):
     def test_se_documentation_configured_deepinfra_timeout_is_still_180_seconds(self):
+        # index 1, not 0 -- AnthropicProvider (direct API) is now prepended
+        # ahead of DeepInfra for this tier, see ProviderChain's docstring.
         chain = ProviderChain(tier="se_documentation")
-        self.assertEqual(chain.providers[0].timeout_seconds, 180.0)
+        self.assertEqual(type(chain.providers[1]).__name__, "DeepInfraProvider")
+        self.assertEqual(chain.providers[1].timeout_seconds, 180.0)
 
     def test_effective_timeout_is_capped_by_remaining_writer_budget(self):
         """
@@ -571,7 +574,13 @@ class OtherAgentsUnaffectedTests(unittest.TestCase):
         # duplicated narrowly here as a direct "16" proof for this specific
         # test file's completeness.
         self.assertEqual(get_agent_config("FypMentorAgent").max_total_seconds, 90.0)
-        self.assertEqual(get_agent_config("ProjectRoadmapAgent").max_total_seconds, 90.0)
+        # ProjectRoadmapAgent is intentionally 240.0, not 90.0 -- the
+        # Roadmap-only timeout adjustment (see registry.py's
+        # ProjectRoadmapAgent.max_total_seconds and
+        # tests/test_roadmap_timeout_adjustment.py) raised it from 90s so
+        # DeepInfra's own 120s single-attempt cap can fit inside the
+        # Writer's budget alongside a Groq/Ollama fallback attempt.
+        self.assertEqual(get_agent_config("ProjectRoadmapAgent").max_total_seconds, 360.0)
         self.assertEqual(get_agent_config("ProjectDNAAgent").max_total_seconds, 90.0)
         self.assertEqual(get_agent_config("IdeaComparisonAgent").max_total_seconds, 45.0)
 

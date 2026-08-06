@@ -1125,7 +1125,7 @@ Rules:
 - Do not invent unrelated features (multilingual support, support tickets, external APIs,
   university credential integration, human escalation, etc.) unless implied by the project
   facts above; if you do include one of these, set sourceClassification to "assumption".
-""", 6500)
+""", 13000)
 
         prompts["useCases"] = (f"""
 Return ONLY valid JSON.
@@ -1166,7 +1166,7 @@ Rules:
 - relatedRequirements / relatedRequirement must only reference requirement ids that make
   sense for this project (FR-xx or NFR-xx).
 - Do not repeat the same edge case scenario under multiple ids.
-""", 6500)
+""", 13000)
 
         prompts["modulesArchitecture"] = (f"""
 Return ONLY valid JSON.
@@ -1204,7 +1204,7 @@ Rules:
 - Explain real responsibilities and data flow (e.g. "the query-processing module validates
   input, calls the AI/NLP service for intent classification, and retrieves the matching
   knowledge article") -- do not use a vague one-line architecture description.
-""", 4500)
+""", 9000)
 
         prompts["database"] = (f"""
 Return ONLY valid JSON.
@@ -1251,7 +1251,7 @@ Rules:
 - Every field needs a clear purpose -- no filler fields.
 - Set isSensitive true for passwords/personal data and list them in sensitiveFields.
 - relatedRequirementIds must reference real FR/NFR ids this entity supports.
-""", 6000)
+""", 12000)
 
         prompts["uiApi"] = (f"""
 Return ONLY valid JSON.
@@ -1296,7 +1296,7 @@ Rules:
 - Do not guess an exact route path with confidence -- use a conceptual endpoint name and
   set sourceClassification to "assumption" unless the exact route was confirmed.
 - relatedRequirements must reference real FR/NFR ids.
-""", 6000)
+""", 12000)
 
         prompts["testingSecurity"] = (f"""
 Return ONLY valid JSON.
@@ -1338,7 +1338,7 @@ Rules:
 - Generate 5 to 10 security/privacy requirements covering authentication, authorization,
   input validation, secret management, session management, and data protection as relevant
   to this project. Do not claim GDPR/HIPAA compliance unless the project facts require it.
-""", 7000)
+""", 14000)
 
         if facts.ai_involved:
             prompts["aiReport"] = (f"""
@@ -1373,7 +1373,7 @@ Rules:
 - Do not mention retrieval-augmented generation (RAG) or vector databases unless the
   canonical AI approach above is "rag" or "hybrid".
 - evaluationMetrics must be relevant to the actual AI task type described.
-""", 3000)
+""", 6000)
 
         return prompts
 
