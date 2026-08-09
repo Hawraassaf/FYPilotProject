@@ -192,6 +192,24 @@ def _is_client_side_rejection(ex: Exception) -> bool:
     return isinstance(status_code, int) and 400 <= status_code < 500
 
 
+# A truncated candidate handed to the provider-repair step already consumed
+# (close to) its ORIGINAL request's full max_tokens budget -- the repair
+# prompt asks the model to echo the entire malformed text back corrected
+# (see _build_repair_prompt), which needs AT LEAST that many tokens just to
+# reproduce what's already there, plus more to finish the truncated
+# structure and close it out. Reusing the original call's own max_tokens as
+# the repair budget therefore reproduces the exact same truncation on the
+# repair attempt itself -- observed live 2026-08-06: a database section
+# truncated at max_tokens=14000, and its provider-repair call ALSO hit
+# max_tokens (11193) and failed (repair_success=False), because 14000 was
+# never enough headroom over an input that already used all 14000. 1.5x
+# gives the repair call real room to both reproduce and complete the
+# content; uncapped beyond that since every provider here already accepts
+# max_tokens values far above the ~2200 default without error.
+def _repair_max_tokens(original_max_tokens: int) -> int:
+    return max(int(original_max_tokens * 1.5), 2200)
+
+
 def _parse_diagnostics(outcome: "json_reliability.ParseOutcome") -> dict[str, Any]:
     return {
         "initialJsonValid": outcome.initial_json_valid,
@@ -772,7 +790,7 @@ class DeepInfraProvider(BaseProvider):
                         text,
                         repair_fn=(
                             (lambda candidate, error: self._repair_json_with_provider(
-                                candidate, error, schema_description, max_tokens=effective_max_tokens,
+                                candidate, error, schema_description, max_tokens=_repair_max_tokens(effective_max_tokens),
                             ))
                             if schema_description else None
                         ),
@@ -812,7 +830,7 @@ class DeepInfraProvider(BaseProvider):
             text,
             repair_fn=(
                 (lambda candidate, error: self._repair_json_with_provider(
-                    candidate, error, schema_description, max_tokens=effective_max_tokens,
+                    candidate, error, schema_description, max_tokens=_repair_max_tokens(effective_max_tokens),
                 ))
                 if schema_description else None
             ),
@@ -1648,7 +1666,7 @@ class GroqProvider(BaseProvider):
             text,
             repair_fn=(
                 (lambda candidate, error: self._repair_json_with_provider(
-                    candidate, error, schema_description, max_tokens=effective_max_tokens,
+                    candidate, error, schema_description, max_tokens=_repair_max_tokens(effective_max_tokens),
                 ))
                 if schema_description and not use_search else None
             ),
@@ -1816,16 +1834,30 @@ class AnthropicProvider(BaseProvider):
 
     def _repair_json_with_provider(
         self, malformed_text: str, parse_error: str, schema_description: str | None,
-        max_tokens: int = 2200,
+        max_tokens: int = 2200, deadline: float | None = None,
     ) -> str | None:
         """Same contract as DeepInfraProvider._repair_json_with_provider --
-        ONE low-temperature JSON-syntax-only repair request, never raises."""
+        ONE low-temperature JSON-syntax-only repair request, never raises.
+
+        `deadline` is OPTIONAL (an absolute time.monotonic() timestamp, same
+        convention as ReviewPipeline.run's `deadline` -- see that method's
+        docstring) purely for the repair-attempt telemetry below: it lets
+        llm_provider.anthropic_repair_usage report how much of the caller's
+        overall wall-clock budget remained when this repair request started
+        and finished, without this method making any timeout/scheduling
+        decision of its own. None (the default, every existing caller before
+        this parameter existed) simply omits that reading rather than
+        guessing a budget.
+        """
+        requested_max_tokens = max(max_tokens, 2200)
+        start = time.monotonic()
+        remaining_at_start = None if deadline is None else round(deadline - start, 1)
         try:
             response = self._client().messages.create(
                 model=self.model,
                 # No `temperature` -- Claude Sonnet 5 rejects it with a 400
                 # ("temperature is deprecated for this model"), observed live.
-                max_tokens=max(max_tokens, 2200),
+                max_tokens=requested_max_tokens,
                 output_config={"effort": self.effort},
                 # Fully disabled, not just lower effort -- structured JSON
                 # generation doesn't need Claude's internal reasoning pass,
@@ -1839,9 +1871,26 @@ class AnthropicProvider(BaseProvider):
                     )},
                 ],
             )
-            return self._extract_text(response) or None
+            text = self._extract_text(response)
+            usage = getattr(response, "usage", None)
+            end = time.monotonic()
+            remaining_at_end = None if deadline is None else round(deadline - end, 1)
+            logger.info(
+                "llm_provider.anthropic_repair_usage provider=%s model=%s effort=%s stop_reason=%s "
+                "requested_max_tokens=%s input_tokens=%s output_tokens=%s text_chars=%d "
+                "duration=%.1fs deadline_remaining_at_start=%s deadline_remaining_at_end=%s",
+                self.name, self.model, self.effort, getattr(response, "stop_reason", None),
+                requested_max_tokens, getattr(usage, "input_tokens", None),
+                getattr(usage, "output_tokens", None), len(text or ""),
+                end - start, remaining_at_start, remaining_at_end,
+            )
+            return text or None
         except Exception as ex:
-            logger.warning("llm_provider.provider_repair_failed provider=%s error=%s", self.name, ex)
+            logger.warning(
+                "llm_provider.provider_repair_failed provider=%s model=%s error=%s "
+                "deadline_remaining_at_start=%s",
+                self.name, self.model, ex, remaining_at_start,
+            )
             return None
 
     def generate_json(
@@ -1879,6 +1928,16 @@ class AnthropicProvider(BaseProvider):
             self.timeout_seconds if writer_budget_seconds is None
             else max(0.0, min(self.timeout_seconds, writer_budget_seconds))
         )
+
+        # Approximate absolute deadline for the repair-attempt telemetry
+        # below -- this provider has no absolute deadline parameter of its
+        # own (see _repair_json_with_provider's docstring), only the
+        # relative writer_budget_seconds ProviderChain._run_cascade already
+        # recomputes fresh for each cascade attempt. Captured once here, at
+        # generate_json entry, so the repair call's "remaining" reading is
+        # relative to the SAME instant this whole attempt's budget was
+        # measured, not a moving target.
+        call_deadline = None if writer_budget_seconds is None else time.monotonic() + writer_budget_seconds
 
         system_message = (
             "You are a precise JSON-only AI engine. "
@@ -1947,7 +2006,8 @@ class AnthropicProvider(BaseProvider):
             text,
             repair_fn=(
                 (lambda candidate, error: self._repair_json_with_provider(
-                    candidate, error, schema_description, max_tokens=effective_max_tokens,
+                    candidate, error, schema_description,
+                    max_tokens=_repair_max_tokens(effective_max_tokens), deadline=call_deadline,
                 ))
                 if schema_description else None
             ),

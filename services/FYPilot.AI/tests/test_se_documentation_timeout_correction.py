@@ -107,8 +107,17 @@ def test_se_documentation_timeout_is_actually_wired_into_the_openai_client():
 
 def test_se_documentation_provider_chain_uses_se_documentation_tier():
     chain = ProviderChain(tier="se_documentation")
-    deepinfra = chain.providers[0]
+    # providers[0] is AnthropicProvider for this tier (prepended ahead of
+    # DeepInfra -- see ProviderChain.__init__'s anthropic_providers). Its
+    # timeout_seconds is NOT tier-adjusted (AnthropicProvider has no
+    # per-tier override, unlike DeepInfra/Groq/Ollama): it always falls
+    # back to the global ANTHROPIC_TIMEOUT_SECONDS env var default (120.0),
+    # by design -- see that provider's own __init__ docstring ("adjust from
+    # live testing if this is too tight").
+    anthropic = chain.providers[0]
+    assert anthropic.timeout_seconds == 120.0
 
+    deepinfra = chain.providers[1]
     assert deepinfra.timeout_seconds == 180.0
     assert deepinfra.max_retries == 0
     # Model unchanged from the earlier cost-driven move off "high" --
@@ -311,10 +320,12 @@ def test_all_sections_timing_out_produces_writer_budget_exceeded_not_a_disguised
 
 def test_other_agents_registry_deadlines_are_unchanged():
     assert get_agent_config("FypMentorAgent").max_total_seconds == 90.0
-    # ProjectRoadmapAgent is intentionally 240.0 now, not 90.0 -- see the
-    # Roadmap-only timeout adjustment in registry.py and
-    # tests/test_roadmap_timeout_adjustment.py.
-    assert get_agent_config("ProjectRoadmapAgent").max_total_seconds == 240.0
+    # ProjectRoadmapAgent is intentionally 360.0 now (raised 90s -> 240s ->
+    # 360s across successive Roadmap-only timeout adjustments -- see
+    # registry.py's own comment trail on this field and
+    # tests/test_roadmap_timeout_adjustment.py, the authoritative test for
+    # this progression, which already expects 360.0).
+    assert get_agent_config("ProjectRoadmapAgent").max_total_seconds == 360.0
     assert get_agent_config("ProjectIdeaAgent").max_total_seconds == 120.0
     assert get_agent_config("ProjectDNAAgent").max_total_seconds == 90.0
     assert get_agent_config("IdeaComparisonAgent").max_total_seconds == 45.0
@@ -326,9 +337,12 @@ def test_other_deepinfra_tiers_are_unchanged():
     assert _deepinfra_timing_for_tier("standard") == {}
     # "high" (Project Roadmap, Idea Generator): untouched.
     assert _deepinfra_model_for_tier("high") == "anthropic/claude-opus-4-8"
-    # "roadmap": untouched (120s default, max_retries=0, its own env var).
+    # "roadmap": intentionally 280.0 now (raised alongside the registry
+    # max_total_seconds progression above -- see
+    # _DEFAULT_ROADMAP_DEEPINFRA_TIMEOUT_SECONDS in llm_provider.py and
+    # tests/test_roadmap_timeout_adjustment.py, which already expects 280.0).
     roadmap_timing = _deepinfra_timing_for_tier("roadmap")
-    assert roadmap_timing["timeout_seconds"] == 120.0
+    assert roadmap_timing["timeout_seconds"] == 280.0
     assert roadmap_timing["max_retries"] == 0
     # "comparison"/"comparison_review": untouched.
     assert _deepinfra_timing_for_tier("comparison") == {"timeout_seconds": 34.0, "max_retries": 0}

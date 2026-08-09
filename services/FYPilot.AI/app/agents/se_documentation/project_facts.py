@@ -125,8 +125,40 @@ def _looks_like_integration(*texts: str) -> bool:
 # mix of intent classification / RAG / fine-tuning / JWT.
 # ---------------------------------------------------------------------------
 
+# Confirmed local ML/DS framework names -- a strong local-training/inference
+# signal on their own, but per this classifier's evidence-precedence rule
+# (see _classify_ai_approach) NEVER sufficient alone to confirm an approach:
+# a project can list "PyTorch" as an assumed/exploratory dependency without
+# actually building a classifier. Only combined with an explicit
+# classification-task signal (has_classification below) does this become a
+# confirmed "supervised_classification" approach.
+_ML_FRAMEWORK_KEYWORDS = (
+    "pytorch", "tensorflow", "scikit-learn", "sklearn", "keras", "huggingface",
+    "transformers", "spacy", "nltk", "xgboost", "lightgbm", "opencv",
+)
+
+
 def _classify_ai_approach(blob: str, ai_involved: bool) -> tuple[str, str, str, str, List[str]]:
-    """Returns (ai_approach, ai_provider_type, training_mode, retrieval_mode, assumptions)."""
+    """Returns (ai_approach, ai_provider_type, training_mode, retrieval_mode, assumptions).
+
+    Evidence precedence (see this module's docstring / the canonical-AI-
+    profile task that hardened this function): a fact only becomes
+    "confirmed" here on a STRONG combination of signals -- e.g. a confirmed
+    ML framework name (from the student's own confirmed technology stack,
+    already part of `blob`) together with explicit classification-task
+    language ("classification"/"classify") -- never a single weak keyword
+    alone (see the supervised_classification branch below). This is what
+    previously classified a project whose confirmed stack was "PyTorch,
+    scikit-learn" and whose own requirements said "the trained NLP model
+    ... classif[ies] submitted symptom text into an urgency level" as fully
+    "unresolved" -- none of the older keywords (intent/training phrase/rag/
+    external api/fine-tun/knowledge base) matched a plain supervised
+    classification task at all, so every AI-dependent section either
+    invented its own confident description (contradicting the "unresolved"
+    signal every prompt was actually given) or dutifully hedged everything
+    as unresolved (the aiReport section) -- a live cross-section
+    consistency defect the semantic Reviewer correctly caught.
+    """
     assumptions: List[str] = []
 
     if not ai_involved:
@@ -139,6 +171,8 @@ def _classify_ai_approach(blob: str, ai_involved: bool) -> tuple[str, str, str, 
     has_external_api = any(p in lowered for p in ["openai", "gpt-", "chatgpt", "external llm", "llm api", "anthropic", "claude api"])
     has_finetune = "fine-tun" in lowered or "finetun" in lowered
     has_kb = "knowledge base" in lowered or "faq" in lowered
+    has_classification = "classif" in lowered  # matches classification/classify/classifier
+    has_ml_framework = any(keyword in lowered for keyword in _ML_FRAMEWORK_KEYWORDS)
 
     if has_rag and (has_external_api or has_finetune):
         approach = "hybrid"
@@ -150,6 +184,13 @@ def _classify_ai_approach(blob: str, ai_involved: bool) -> tuple[str, str, str, 
         approach = "llm_api"
     elif has_kb:
         approach = "retrieval_based"
+    elif has_classification and (has_ml_framework or has_finetune):
+        # Strong combination: an explicit classification task PLUS a real
+        # local ML framework (or explicit fine-tuning language) -- e.g. a
+        # confirmed "PyTorch, scikit-learn" stack plus "urgency
+        # classification" in the requirements. Neither signal alone (see
+        # tests: framework-only, "AI" keyword alone) reaches this branch.
+        approach = "supervised_classification"
     else:
         approach = "unresolved"
         assumptions.append(
@@ -158,10 +199,12 @@ def _classify_ai_approach(blob: str, ai_involved: bool) -> tuple[str, str, str, 
         )
 
     provider_type = "external_api" if (has_external_api or approach in ("llm_api", "hybrid")) else (
-        "local_model" if approach in ("intent_classification", "retrieval_based", "rag") else "unresolved"
+        "local_model" if approach in ("intent_classification", "retrieval_based", "rag", "supervised_classification") else "unresolved"
     )
 
-    if has_finetune and not has_external_api:
+    if approach == "supervised_classification":
+        training_mode = "local_supervised_training"
+    elif has_finetune and not has_external_api:
         training_mode = "local_supervised_training"
     elif approach == "intent_classification" and has_training_phrase:
         training_mode = "local_supervised_training"
@@ -173,7 +216,9 @@ def _classify_ai_approach(blob: str, ai_involved: bool) -> tuple[str, str, str, 
     else:
         training_mode = "no_local_training"
 
-    if has_rag or "vector" in lowered:
+    if approach == "supervised_classification":
+        retrieval_mode = "none"
+    elif has_rag or "vector" in lowered:
         retrieval_mode = "vector_retrieval"
     elif has_kb:
         retrieval_mode = "knowledge_base_lookup"
@@ -183,6 +228,32 @@ def _classify_ai_approach(blob: str, ai_involved: bool) -> tuple[str, str, str, 
         retrieval_mode = "none"
 
     return approach, provider_type, training_mode, retrieval_mode, assumptions
+
+
+# Human-readable AI/service-layer label per canonical approach -- the single
+# source both the architecture Writer-repair path (_architecture_or_fallback)
+# and the deterministic fallback (_fallback_architecture) in
+# se_documentation_orchestrator.py use, so neither one falls back to a
+# generic "AI/LLM component" label when the canonical profile actually knows
+# the approach (the confirmed live defect: a supervised classification
+# project's architecture section said "AI/Service layer: AI/LLM component"
+# purely because the model's own JSON response omitted the field and the
+# orchestrator's own setdefault() filled in that hardcoded generic string).
+_AI_APPROACH_LABELS: dict[str, str] = {
+    "none": "Not applicable",
+    "rule_based": "Rule-based decision service",
+    "intent_classification": "Local intent-classification service",
+    "supervised_classification": "Locally-hosted NLP classification service",
+    "retrieval_based": "Knowledge-base retrieval service",
+    "llm_api": "External LLM API integration",
+    "rag": "Retrieval-augmented generation service",
+    "hybrid": "Hybrid retrieval + generation service",
+    "unresolved": "AI/ML component (approach pending confirmation)",
+}
+
+
+def ai_service_label(profile: TechnicalProfile) -> str:
+    return _AI_APPROACH_LABELS.get(profile.ai_approach, "AI/ML component")
 
 
 def _classify_authentication(blob: str) -> tuple[str, List[str]]:
@@ -578,17 +649,29 @@ def build_project_facts(request) -> ProjectFacts:
     if team_size and team_size > 0:
         supporting_actors.append("System Administrator")
 
-    ai_text_blob = " ".join([title, problem, solution, domain, raw_tech, final_deliverables, why_useful])
-    ai_involved = _looks_like_ai(ai_text_blob)
-    ai_classification = "confirmed" if ai_involved else "unknown"
-
-    has_external_integration = _looks_like_integration(ai_text_blob)
-
     roadmap_modules = [
         (getattr(phase, "name", "") or "").strip()
         for phase in roadmap
         if (getattr(phase, "name", "") or "").strip()
     ]
+
+    # Roadmap phases are real, student-confirmed evidence of technical
+    # approach (e.g. a phase literally named "Fine-Tuned Arabic NLP Triage
+    # Model and FastAPI Service") that the AI-involvement/AI-approach/
+    # authentication classifiers previously never saw at all -- only
+    # title/problem/solution/tech/deliverables fed these blobs before.
+    roadmap_text_parts: List[str] = []
+    for phase in roadmap:
+        roadmap_text_parts.append((getattr(phase, "name", "") or "").strip())
+        roadmap_text_parts.append((getattr(phase, "objective", "") or "").strip())
+        roadmap_text_parts.extend(str(t).strip() for t in (getattr(phase, "tasks", None) or []))
+    roadmap_text = " ".join(part for part in roadmap_text_parts if part)
+
+    ai_text_blob = " ".join([title, problem, solution, domain, raw_tech, final_deliverables, why_useful, roadmap_text])
+    ai_involved = _looks_like_ai(ai_text_blob)
+    ai_classification = "confirmed" if ai_involved else "unknown"
+
+    has_external_integration = _looks_like_integration(ai_text_blob)
 
     objectives: List[str] = []
     if final_deliverables:
@@ -597,7 +680,7 @@ def build_project_facts(request) -> ProjectFacts:
         objectives = [f"Deliver a working {title} that addresses the stated problem for {primary_actor}."]
         assumptions.append("No final deliverables were confirmed; a single generic objective was derived from the title instead.")
 
-    full_blob = " ".join([title, problem, solution, domain, raw_tech, final_deliverables, why_useful, target_users])
+    full_blob = " ".join([title, problem, solution, domain, raw_tech, final_deliverables, why_useful, target_users, roadmap_text])
 
     ai_approach, ai_provider_type, training_mode, retrieval_mode, ai_assumptions = _classify_ai_approach(
         full_blob, ai_involved
@@ -679,6 +762,19 @@ Authentication mechanism: {profile.authentication_mechanism}
 - If AI approach is "intent_classification", describe intent classification with
   knowledge-base lookup -- do NOT mention retrieval-augmented generation (RAG) or
   fine-tuned pretrained LLMs unless the approach above is "rag" or "hybrid".
+- If AI approach is "supervised_classification", describe a locally trained/fine-tuned
+  supervised NLP/ML classification model (training mode: {profile.training_mode};
+  inference mode: the trained model loaded and served by the confirmed backend) --
+  explicitly do NOT describe this as calling an external pretrained LLM API, and do NOT
+  describe it as retrieval-augmented generation or knowledge-base lookup. Lower-level
+  details this profile does not state (exact model architecture, feature representation,
+  label taxonomy, confidence threshold, dataset size, retraining cadence) remain pending
+  design decisions -- do not present them as confirmed.
+- If AI approach is "unresolved", say explicitly that the AI/ML technique itself has not
+  been confirmed yet (do not confidently describe ANY specific technique -- classification,
+  retrieval, or an external API -- as if it were decided).
+- Never summarize the AI/service layer as a generic "AI/LLM component" when a more specific
+  approach is stated above -- name what it actually is (e.g. "NLP classification service").
 - If authentication mechanism is "ASP.NET Core Identity with cookie authentication", do
   NOT mention JWT tokens anywhere. If it is "not confirmed", describe the authentication
   workflow as proposed, not confirmed.

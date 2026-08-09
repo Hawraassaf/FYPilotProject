@@ -1015,7 +1015,7 @@ def test_pipeline_full_repair_restores_immutable_field_even_if_llm_returned_a_va
 
     from app.review.registry import get_agent_config
     from app.review.se_documentation_structural_repair_scope import (
-        resolve_structural_repair_plan as _real_resolve_structural_repair_plan,
+        resolve_structural_repair_plans as _real_resolve_structural_repair_plans,
     )
 
     real_candidate = _real_valid_candidate()
@@ -1038,10 +1038,10 @@ def test_pipeline_full_repair_restores_immutable_field_even_if_llm_returned_a_va
     )
 
     generous_limit_plan = functools.partial(
-        _real_resolve_structural_repair_plan, full_payload_token_limit=200_000,
+        _real_resolve_structural_repair_plans, full_payload_token_limit=200_000,
     )
 
-    with patch("app.review.pipeline.resolve_structural_repair_plan", generous_limit_plan):
+    with patch("app.review.pipeline.resolve_structural_repair_plans", generous_limit_plan):
         result = pipeline.run(
             lambda: _llm_ok(invalid_candidate),
             _se_doc_context(),

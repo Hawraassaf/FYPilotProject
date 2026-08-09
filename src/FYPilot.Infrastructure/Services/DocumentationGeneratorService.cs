@@ -16,6 +16,18 @@ public class DocumentationGeneratorService : IDocumentationGeneratorService
     // gemini, ollama, ...) never contain either word.
     private static readonly string[] FallbackSourceMarkers = ["fallback", "template"];
 
+    // A review status is an application acceptance decision, not display
+    // metadata.  Python's usable/displayable fields remain mandatory below,
+    // but they can never promote a rejected, unavailable, blocked, invalid,
+    // unresolved, or future/unknown status into a persistable student
+    // document.  Keep this explicit allowlist aligned with ReviewPipeline's
+    // accepted terminal statuses.
+    private static readonly HashSet<string> AcceptedReviewStatuses = new(StringComparer.Ordinal)
+    {
+        "approved",
+        "approved_with_minor_warnings",
+    };
+
     // The 6 core sections a real generation must actually produce -- must
     // match app/routers/se_documentation.py's _CORE_SECTION_KEYS exactly
     // (same string contract via SectionProvenance's keys). Any core section
@@ -236,11 +248,11 @@ public class DocumentationGeneratorService : IDocumentationGeneratorService
     /// <summary>
     /// The single acceptance gate for persisting a generation result. A
     /// result must have reached a real provider, carry parsed documentation,
-    /// and be marked usable+displayable by the review pipeline; a status of
-    /// "review_unavailable" (structural validation passed, semantic review
-    /// couldn't run) is still accepted here as long as usable/displayable are
-    /// both true -- only the pipeline itself decides that, this gate does not
-    /// second-guess it based on status alone.
+    /// and be marked usable+displayable by the review pipeline. Its review
+    /// status must also be explicitly accepted: only "approved" and
+    /// "approved_with_minor_warnings" pass. This independently prevents a
+    /// diagnostic or future Python response from making a rejected or
+    /// unresolved candidate persistable merely by setting usable/displayable.
     /// </summary>
     private static bool IsRealAiOutput(
         AiSeDocumentationServiceResponse? response,
@@ -280,6 +292,13 @@ public class DocumentationGeneratorService : IDocumentationGeneratorService
         {
             reason = "review field was null despite llmUsed=true.";
             errorCode = SeDocumentationErrorCode.InvalidResponse;
+            return false;
+        }
+
+        if (!AcceptedReviewStatuses.Contains(response.Review.Status))
+        {
+            reason = $"review status '{response.Review.Status}' is not an accepted SE Documentation outcome.";
+            errorCode = SeDocumentationErrorCode.ReviewRejected;
             return false;
         }
 

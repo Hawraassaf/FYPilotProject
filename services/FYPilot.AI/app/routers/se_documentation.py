@@ -6,9 +6,10 @@ from uuid import uuid4
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
+from app.agents.se_documentation.project_facts import build_project_facts
 from app.agents.se_documentation.quality_outcome_policy import apply_review_outcome_to_quality
+from app.agents.se_documentation.quality_recomputation import compute_documentation_quality
 from app.agents.se_documentation.se_documentation_orchestrator import (
-    QualityAssessmentDto,
     SEDocumentationOrchestratorAgent as SEDocumentationAgent,
     SEDocumentationRequest,
     SEDocStudentProfile,
@@ -214,14 +215,35 @@ def generate_se_documentation(request: SEDocumentationRequest) -> Dict[str, Any]
         result.output if result.usable else agent.build_safe_fallback(request).model_dump()
     )
 
-    # The score/assessment must reflect what the semantic Reviewer actually
-    # found, not only the deterministic checks run before review -- see
-    # quality_outcome_policy.py's module docstring. Only applied when this
-    # candidate genuinely went through this pipeline run (result.usable);
-    # the build_safe_fallback branch above is a fresh, never-reviewed
-    # candidate that this run's outcome does not describe.
+    # The persisted qualityAssessment/documentationQualityScore fields are in
+    # _NEVER_LLM_REWRITABLE_FIELDS (see section_scope.py) -- correctly so,
+    # the LLM must never choose its own score -- but that same protection
+    # means merge_structural_repair/merge_targeted_rewrite always RESTORE
+    # those two fields from the PRE-repair candidate on every merge, so by
+    # the time result.output reaches here it may describe an EARLIER
+    # version of this document: databaseEntities normalization
+    # (PasswordHash, primary keys), the assumptions rebuild, requirement-
+    # reference reconciliation/reverse-reference rebuild, the traceability
+    # rebuild, and the ERD/class/activity/sequence diagram rebuilds can all
+    # have changed the document AFTER that stale score was computed. Only
+    # applied when this candidate genuinely went through this pipeline run
+    # (result.usable); the build_safe_fallback branch above is a fresh,
+    # never-reviewed candidate that this run's outcome does not describe.
+    #
+    # Order (must stay exactly this sequence -- see quality_recomputation.py
+    # and quality_outcome_policy.py's module docstrings): pipeline.run()
+    # above already did every deterministic rebuild + structural validation
+    # + semantic re-review; here we (1) recompute a FRESH deterministic base
+    # assessment from THIS FINAL candidate, entirely independently of
+    # whatever stale value it currently carries, then (2) apply the final
+    # Reviewer outcome policy to that fresh base EXACTLY ONCE.
     if result.usable and documentation.get("qualityAssessment"):
-        base_assessment = QualityAssessmentDto.model_validate(documentation["qualityAssessment"])
+        project_facts = build_project_facts(request)
+        base_assessment = compute_documentation_quality(
+            documentation,
+            project_facts=project_facts,
+            section_provenance=documentation.get("sectionProvenance", {}),
+        )
         final_assessment = apply_review_outcome_to_quality(
             base_assessment,
             result,

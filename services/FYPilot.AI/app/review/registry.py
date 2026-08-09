@@ -682,8 +682,14 @@ class SEDocumentationCandidateSchema(SEDocumentationDto):
             if not is_junction and len(entity.fields) < 3:
                 raise ValueError(f"databaseEntity '{entity.name}' has fewer than 3 fields and is not a junction table")
 
-            if not any(f.isPrimaryKey for f in entity.fields):
+            primary_key_fields = [f for f in entity.fields if f.isPrimaryKey]
+            if not primary_key_fields:
                 raise ValueError(f"databaseEntity '{entity.name}' has no primary key field")
+            if len(primary_key_fields) > 1:
+                raise ValueError(
+                    f"databaseEntity '{entity.name}' has {len(primary_key_fields)} fields marked as "
+                    "primary key; exactly one is expected"
+                )
 
             for field in entity.fields:
                 if field.name.strip().lower() == "password":

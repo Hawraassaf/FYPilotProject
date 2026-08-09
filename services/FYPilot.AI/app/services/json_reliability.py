@@ -51,9 +51,33 @@ EMPTY_RESPONSE = "empty_response"
 INVALID_JSON_SYNTAX = "invalid_json_syntax"
 SCHEMA_VALIDATION_FAILURE = "schema_validation_failure"
 SEMANTIC_VALIDATION_FAILURE = "semantic_validation_failure"
+# A narrower classification than INVALID_JSON_SYNTAX (ParseOutcome.category
+# stays INVALID_JSON_SYNTAX for both, to avoid widening that field's existing
+# contract) for callers that need to tell "the provider stopped early because
+# it hit its own output-token ceiling" apart from any other malformed-JSON
+# cause, e.g. to decide whether a bounded, single retry with a larger
+# max_tokens is worth attempting. See classify_truncation_failure below.
+OUTPUT_TRUNCATED = "output_truncated"
 
 _MIN_SUBSTANTIAL_CHARS = 400
 _FINISH_REASONS_INDICATING_TRUNCATION = {"length", "max_tokens", "max_output_tokens"}
+
+
+def classify_truncation_failure(parse_diagnostics: dict[str, Any] | None) -> str:
+    """
+    Classifies a failed provider/repair call as OUTPUT_TRUNCATED when its
+    ParseOutcome (surfaced via LLMResult.parse_diagnostics /
+    GuardedResult.parse_diagnostics -- see llm_provider._parse_diagnostics)
+    reports isTruncated=True (i.e. stop_reason/finish_reason was one of
+    _FINISH_REASONS_INDICATING_TRUNCATION, or the JSON was structurally
+    unbalanced in a truncation-shaped way -- see looks_truncated), and
+    SCHEMA_VALIDATION_FAILURE otherwise. Never returns anything else, so a
+    caller can safely branch `== OUTPUT_TRUNCATED` to decide retry eligibility
+    without needing to know this module's other category constants.
+    """
+    if parse_diagnostics and parse_diagnostics.get("isTruncated"):
+        return OUTPUT_TRUNCATED
+    return SCHEMA_VALIDATION_FAILURE
 
 
 def is_substantial(text: str) -> bool:
@@ -352,6 +376,25 @@ def parse_json_response(
             except Exception:
                 pass
 
+    # On total failure below, `final_is_truncated`/`final_error_context`
+    # describe the LAST thing actually parsed -- the repaired candidate when
+    # a repair was attempted and returned text, the original candidate
+    # otherwise. Blindly reporting the ORIGINAL candidate's truncation status
+    # after a repair attempt is misleading: a repair_fn that returns a
+    # complete-but-differently-malformed candidate (e.g. a JSON-syntax slip
+    # introduced while regenerating a large object) would be logged as
+    # "truncated" even though nothing about the repair attempt was cut off --
+    # and, symmetrically, a repair candidate that is ITSELF cut off (e.g. the
+    # repair call hit its own max_tokens ceiling) would be logged as
+    # "not truncated" simply because the ORIGINAL candidate happened to
+    # balance differently. Observed live 2026-08-06: a provider_repair
+    # attempt returned text, json.loads on it failed, and the resulting log
+    # line's is_truncated=True was carried over from the ORIGINAL failure --
+    # there was no way to tell from that log alone whether the repair
+    # attempt's own output was truncated or malformed some other way.
+    final_is_truncated = truncated
+    final_error_context = error_context
+
     if repair_fn is not None and is_substantial(candidate):
         repair_attempted = True
         repair_method = "provider_repair"
@@ -372,8 +415,17 @@ def parse_json_response(
                     repair_success=True, repaired_char_count=len(repaired_candidate),
                     error_context=error_context,
                 )
+            except json.JSONDecodeError as repair_exc:
+                final_is_truncated = looks_truncated(repaired_candidate)
+                final_error_context = build_error_context(repaired_candidate, repair_exc)
             except Exception:
-                pass
+                # Non-JSONDecodeError failure (e.g. extract_json_object
+                # returned an empty string) -- still recompute truncation
+                # against the repaired candidate so is_truncated never
+                # silently falls back to describing the original failure,
+                # but there is no JSONDecodeError to rebuild error_context
+                # from, so that stays as the original error's context.
+                final_is_truncated = looks_truncated(repaired_candidate)
 
     return ParseOutcome(
         success=False,
@@ -381,15 +433,15 @@ def parse_json_response(
         category=INVALID_JSON_SYNTAX,
         error=(
             f"Provider output was truncated before valid JSON completed "
-            f"(line {error_context['line']}, column {error_context['column']})."
-            if truncated else
+            f"(line {final_error_context['line']}, column {final_error_context['column']})."
+            if final_is_truncated else
             f"Provider returned malformed JSON that could not be repaired "
-            f"(line {error_context['line']}, column {error_context['column']})."
+            f"(line {final_error_context['line']}, column {final_error_context['column']})."
         ),
         initial_json_valid=False,
-        is_truncated=truncated,
+        is_truncated=final_is_truncated,
         repair_attempted=repair_attempted,
         repair_method=repair_method,
         repair_success=False,
-        error_context=error_context,
+        error_context=final_error_context,
     )

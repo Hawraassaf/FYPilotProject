@@ -72,7 +72,7 @@ public class DocumentationGeneratorModel : PageModel
     {
         "approved" => ("bg-success", "Approved"),
         "approved_with_minor_warnings" => ("bg-success", "Approved with warnings"),
-        "unresolved" => ("bg-warning text-dark", "Unresolved · shown as-is"),
+        "unresolved" => ("bg-warning text-dark", "Needs Human Revision"),
         "rejected" => ("bg-danger", "Rejected · showing safe documentation"),
         "firewall_blocked" => ("bg-danger", "Blocked by content firewall"),
         "review_unavailable" => ("bg-secondary", "Structural validation completed; semantic review unavailable"),
@@ -195,7 +195,7 @@ public class DocumentationGeneratorModel : PageModel
     {
         "approved" => "Fully reviewed, no findings",
         "approved_with_minor_warnings" => "Fully reviewed, minor warnings only",
-        "unresolved" => "Reviewed -- unresolved findings remain",
+        "unresolved" => "Reviewed -- a few points need your revision",
         "rejected" => "Reviewed -- rejected candidate replaced with a safe version",
         "review_unavailable" => "Structural checks only -- semantic review did not complete",
         "provider_unavailable" => "Not reviewed -- no AI provider responded",

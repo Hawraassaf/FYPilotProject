@@ -106,12 +106,15 @@ class BoundedQueueSchedulingTests(unittest.TestCase):
         self.assertEqual(active["peak"], 2)  # actually reaches the cap, not just never exceeds it
         self.assertEqual(_MAX_CONCURRENT_SECTION_CALLS, 2)
 
-    def test_next_task_starts_when_either_active_task_finishes_not_both(self):
+    def test_requirements_phase_fully_completes_before_any_dependent_section_starts(self):
         """
-        Section 1 (requirements) takes a long time; section 2 (useCases)
-        finishes fast. Section 3 (modulesArchitecture) must start as soon
-        as section 2 frees a slot -- it must NOT wait for section 1 (the
-        OTHER member of the first pair) to also finish.
+        requirements now runs ALONE, blocking, in its own phase (Phase 1) --
+        because every dependent section's prompt is built from the
+        RequirementsRegistry frozen from requirements' own resolved output
+        (see RequirementsRegistry's docstring). So unlike the old bundled
+        queue, no dependent section (useCases, modulesArchitecture, ...) may
+        start until requirements has fully FINISHED, even though
+        requirements itself is deliberately slow here.
         """
         start_times: dict[str, float] = {}
         end_times: dict[str, float] = {}
@@ -133,10 +136,46 @@ class BoundedQueueSchedulingTests(unittest.TestCase):
                 SEDocumentationRequest(), self.facts, deadline=time.monotonic() + 60.0,
             )
 
-        # modulesArchitecture (3rd in queue) must have STARTED before
-        # requirements (1st, the slow one) FINISHED -- proof the queue
-        # didn't wait for the whole first pair to complete.
-        self.assertLess(start_times["modulesArchitecture"], end_times["requirements"])
+        for key in ("useCases", "modulesArchitecture", "database", "uiApi", "testingSecurity"):
+            self.assertGreaterEqual(
+                start_times[key], end_times["requirements"],
+                f"{key} started before requirements finished -- phase separation violated",
+            )
+
+    def test_next_dependent_task_starts_when_either_active_task_finishes_not_both(self):
+        """
+        Within Phase 2 (after requirements has already resolved): useCases
+        (1st dependent) takes a long time; modulesArchitecture (2nd
+        dependent) finishes fast. database (3rd dependent) must start as
+        soon as modulesArchitecture frees a slot -- it must NOT wait for
+        useCases (the OTHER member of the first dependent pair) to also
+        finish.
+        """
+        start_times: dict[str, float] = {}
+        end_times: dict[str, float] = {}
+        lock = threading.Lock()
+
+        def instrumented_call(key, prompt, max_tokens, writer_deadline, launch_order):
+            with lock:
+                start_times[key] = time.monotonic()
+            if key == "useCases":
+                time.sleep(0.3)  # deliberately slow
+            else:
+                time.sleep(0.02)  # fast
+            with lock:
+                end_times[key] = time.monotonic()
+            return _result(key, launch_order)
+
+        with patch.object(self.agent, "_call_section_concurrent_safe", side_effect=instrumented_call):
+            self.agent._generate_llm_sections(
+                SEDocumentationRequest(), self.facts, deadline=time.monotonic() + 60.0,
+            )
+
+        # database (3rd dependent section) must have STARTED before
+        # useCases (1st dependent, the slow one) FINISHED -- proof the
+        # Phase-2 queue didn't wait for the whole first dependent pair to
+        # complete.
+        self.assertLess(start_times["database"], end_times["useCases"])
 
     def test_launch_order_follows_canonical_queue_order(self):
         launch_sequence: list[str] = []
@@ -477,17 +516,18 @@ class BudgetExpiryMidQueueTests(unittest.TestCase):
 
     def test_sections_still_pending_when_deadline_hits_are_never_launched(self):
         """
-        The first 2 sections consume the ENTIRE remaining budget; by the
-        time they finish, writer_deadline has passed. The remaining 4 core
-        sections must never be launched (never even attempted) -- proven by
-        a call counter that must equal exactly 2, and by the exception's
-        completed/missing lists.
+        requirements (Phase 1, run alone) consumes enough of the remaining
+        budget that by the time it finishes, less than
+        _MIN_SECONDS_PER_SECTION_ATTEMPT (4.0s) remains -- so Phase 2 (every
+        dependent section) must never be launched at all (never even
+        attempted), proven by a call counter that must equal exactly 1, and
+        by the exception's completed/missing lists.
         """
         call_count = {"n": 0}
         # Enough remaining budget to clear the launch threshold
-        # (_MIN_SECONDS_PER_SECTION_ATTEMPT=4.0s) for the FIRST pair, but
-        # the first pair's own 0.5s duration deliberately eats enough of it
-        # that the SECOND pair's launch check then falls back below 4.0s.
+        # (_MIN_SECONDS_PER_SECTION_ATTEMPT=4.0s) for requirements alone,
+        # but requirements' own 0.5s duration deliberately eats enough of it
+        # that Phase 2's launch check then falls below 4.0s.
         writer_deadline = time.monotonic() + 4.3
 
         def instrumented_call(key, prompt, max_tokens, deadline, launch_order):
@@ -501,9 +541,9 @@ class BudgetExpiryMidQueueTests(unittest.TestCase):
                     SEDocumentationRequest(), self.facts, deadline=writer_deadline,
                 )
 
-        self.assertEqual(call_count["n"], 2)  # only the first pair was ever launched
-        self.assertEqual(len(ctx.exception.completed_sections), 2)  # both finished (awaited), just too late
-        self.assertEqual(len(ctx.exception.missing_sections), 4)  # never even attempted
+        self.assertEqual(call_count["n"], 1)  # only requirements (Phase 1) was ever launched
+        self.assertEqual(ctx.exception.completed_sections, ["requirements"])  # finished (awaited), just too late for Phase 2
+        self.assertEqual(len(ctx.exception.missing_sections), 5)  # every dependent section: never even attempted
 
 
 # ---------------------------------------------------------------------------

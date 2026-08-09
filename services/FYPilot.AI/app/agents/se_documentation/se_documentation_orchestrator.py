@@ -19,6 +19,7 @@ from app.agents.se_documentation.project_facts import (
     CanonicalFeature,
     ProjectFacts,
     TechnicalProfile,
+    ai_service_label,
     build_project_facts,
     derive_canonical_features,
     facts_context_text,
@@ -53,6 +54,97 @@ _MAX_CONCURRENT_SECTION_CALLS = 2
 # Writer budget remains; a call started with less than this has no
 # realistic chance of completing usefully.
 _MIN_SECONDS_PER_SECTION_ATTEMPT = 4.0
+
+# Generic AI/ML vocabulary used ONLY as a project-agnostic centrality signal
+# (see _select_primary_use_case and _build_sequence_diagram) -- never a
+# project-type check like "if medical project then choose triage". Matches
+# equally well against, e.g., a spam-classification FYP, a course-
+# recommendation FYP, or a symptom-triage FYP, because it keys off generic
+# ML task vocabulary that a requirement/module/use-case's own title or
+# description already contains, never off a domain name.
+_AI_CENTRALITY_KEYWORDS = (
+    "ai", "ml", "nlp", "model", "classif", "predict", "recommend", "inference", "intent", "confidence",
+)
+
+
+def _normalize_actor_key(name: str) -> str:
+    """Folds trivial actor-name variants (plural, case, punctuation/
+    whitespace) to the SAME identity key -- "Patients"/"Patient"/"patient"
+    all normalize to "patient" -- while leaving genuinely different actors
+    (e.g. "Administrator" vs "Patient") distinct. Deliberately simple (strip
+    non-letters, lowercase, drop a trailing 's' on words longer than 3
+    letters) -- good enough for the short actor names this project ever
+    generates, not a general English pluralization library."""
+    cleaned = re.sub(r"[^a-z]", "", (name or "").lower())
+    if len(cleaned) > 3 and cleaned.endswith("s"):
+        cleaned = cleaned[:-1]
+    return cleaned
+
+
+@dataclass
+class _DiagramParticipant:
+    key: str
+    mermaid_id: str
+    label: str
+    is_actor: bool = False
+
+
+class _ParticipantRegistry:
+    """
+    Deterministic sequence-diagram participant registry (see this task's
+    "participant registry" requirement): every participant is registered
+    exactly once, keyed by a NORMALIZED semantic identity (not raw display
+    text), and rendered exactly once. This is what actually fixes the live
+    duplicate-participant bug -- architecture.frontend and
+    architecture.backend both resolving to the literal string "ASP.NET Core
+    Razor Pages" (because that technology name matches both the frontend and
+    backend keyword lists in _pick_layer) used to produce two separate
+    `participant ASPNETCoreRazorPages as ASP.NET Core Razor Pages`
+    declarations plus a meaningless `ASPNETCoreRazorPages -> ASPNETCoreRazorPages`
+    self-call. Registering both under the same normalized key collapses them
+    into a single participant instead.
+
+    Mermaid ids are also guaranteed unique even when two DIFFERENT
+    participants sanitize to the same id (e.g. "AI Service" and
+    "AI-Service" both sanitizing to "AIService") -- a numeric suffix is
+    appended deterministically (AIService, AIService2, ...).
+    """
+
+    def __init__(self) -> None:
+        self._by_key: Dict[str, _DiagramParticipant] = {}
+        self._used_ids: set = set()
+        self._order: List[str] = []
+
+    @staticmethod
+    def _normalize_key(value: str) -> str:
+        return re.sub(r"\s+", " ", (value or "").strip()).lower()
+
+    def register(self, identity: str, label: str, *, is_actor: bool = False) -> _DiagramParticipant:
+        key = self._normalize_key(identity) or self._normalize_key(label) or "participant"
+        existing = self._by_key.get(key)
+        if existing is not None:
+            return existing
+
+        base_id = safe_participant_id(label) or "Participant"
+        candidate_id = base_id
+        suffix = 2
+        while candidate_id in self._used_ids:
+            candidate_id = f"{base_id}{suffix}"
+            suffix += 1
+        self._used_ids.add(candidate_id)
+
+        participant = _DiagramParticipant(key=key, mermaid_id=candidate_id, label=label.strip() or label, is_actor=is_actor)
+        self._by_key[key] = participant
+        self._order.append(key)
+        return participant
+
+    def render(self) -> List[str]:
+        return [
+            participant_declaration(
+                self._by_key[key].mermaid_id, self._by_key[key].label, is_actor=self._by_key[key].is_actor,
+            )
+            for key in self._order
+        ]
 
 
 class SEDocStudentProfile(BaseModel):
@@ -732,6 +824,86 @@ _SCREEN_TEMPLATES: Dict[str, Dict[str, Any]] = {
 }
 
 
+@dataclass(frozen=True)
+class RequirementsRegistryEntry:
+    """One immutable, canonical entry -- id/title never change after the
+    requirements section is frozen (see RequirementsRegistry)."""
+
+    id: str
+    title: str
+    description: str
+    priority: str
+    sourceClassification: str
+    acceptanceCriteria: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class RequirementsRegistry:
+    """
+    The frozen, canonical FR/NFR id -> meaning mapping built ONCE, right
+    after the requirements section is generated and validated, and handed
+    to every dependent section's prompt (useCases, modulesArchitecture,
+    database, uiApi, testingSecurity) so they all agree on what each id
+    actually means.
+
+    Root cause this exists to close: every section prompt used to be built
+    solely from the same static project-facts context, independently of one
+    another (see _generate_llm_sections' old docstring, and
+    se_documentation_relationship_fallback.py's sibling fix for the
+    analogous entityRelationships problem) -- so nothing stopped
+    requirements from deciding "FR-02 = Symptom Description Submission"
+    while testingSecurity, generated as a completely separate call with no
+    visibility into that choice, independently guessed "FR-02 = Login" for
+    its own test cases. Every id referenced was syntactically real (both
+    sections used the FR-01..FR-16 numbering scheme), so structural
+    validation never caught it -- the meanings had just drifted apart.
+    Injecting this registry's compact rendering into every dependent
+    prompt is what actually fixes that: the ids stop being ambiguous.
+    """
+
+    entries: tuple[RequirementsRegistryEntry, ...]
+
+    @property
+    def ids(self) -> frozenset[str]:
+        return frozenset(entry.id for entry in self.entries)
+
+    def render_compact(self) -> str:
+        """Deliberately terse -- id and title only, no long prose per
+        entry -- so this doesn't blow up every dependent section's prompt
+        budget just to keep ids unambiguous."""
+        if not self.entries:
+            return "CANONICAL REQUIREMENTS -- THESE IDS ARE IMMUTABLE\n(none generated; do not reference any requirement id)"
+        lines = ["CANONICAL REQUIREMENTS -- THESE IDS ARE IMMUTABLE", ""]
+        for entry in self.entries:
+            lines.append(f"{entry.id} | {entry.title}")
+        return "\n".join(lines)
+
+    def render_with_acceptance_criteria(self) -> str:
+        """Richer rendering used only by the testingSecurity prompt, which
+        can use each requirement's own acceptance criteria to generate
+        specific positive/negative tests instead of guessing an FR id --
+        see this task's Testing prompt-change requirement."""
+        if not self.entries:
+            return "CANONICAL REQUIREMENTS -- THESE IDS ARE IMMUTABLE\n(none generated; do not reference any requirement id)"
+        lines = ["CANONICAL REQUIREMENTS -- THESE IDS ARE IMMUTABLE (with acceptance criteria)", ""]
+        for entry in self.entries:
+            lines.append(f"{entry.id} | {entry.title}")
+            for criterion in entry.acceptanceCriteria[:4]:
+                lines.append(f"  - {criterion}")
+        return "\n".join(lines)
+
+
+_REGISTRY_REFERENCE_RULES = """
+Reference rules for the canonical requirements above:
+- Never redefine an id -- each id above has exactly the meaning shown, nothing else.
+- Never invent another meaning for an existing id.
+- Only reference ids listed above (FR-xx / NFR-xx); never invent a new requirement id.
+- If no requirement genuinely applies, use [] for that reference list.
+- Do not force a relationship just to increase coverage -- a wrong reference is worse
+  than no reference.
+"""
+
+
 @dataclass
 class SectionCallResult:
     """
@@ -956,18 +1128,23 @@ class SEDocumentationOrchestratorAgent:
         deadline: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
-        Runs every section through an ORDERED BOUNDED QUEUE: at most
-        _MAX_CONCURRENT_SECTION_CALLS (2) section calls in flight at once,
-        the next queued section starts the instant either active call
-        finishes (never waiting for a fixed pair to both complete), and
-        final aggregation always follows _CORE_SECTION_QUEUE's canonical
-        order regardless of completion order. All 7 prompts are mutually
-        independent -- every one is built solely from `context` (computed
-        once, below, from `facts`), never from another section's generated
-        output -- confirmed by inspection: no prompt below reads `sections`.
-        The queue order therefore only needs to roughly match the previous
-        sequential order for minimal behavioral drift, not because any
-        section actually depends on another's output.
+        Two-phase generation, NOT the fully-independent single bounded queue
+        this method used to run: "requirements" is generated FIRST, alone,
+        and every other section's prompt is only built AFTER requirements
+        resolves, once its FR/NFR ids and meanings are frozen into a
+        RequirementsRegistry (see that class' docstring for the exact defect
+        this closes -- e.g. testingSecurity independently guessing "FR-02 =
+        Login" while requirements had actually defined "FR-02 = Symptom
+        Description Submission", both syntactically valid so structural
+        validation never caught it). Phase 2 (useCases, modulesArchitecture,
+        database, uiApi, testingSecurity, and conditionally aiReport) then
+        runs through the SAME ordered-bounded-queue mechanism as before (at
+        most _MAX_CONCURRENT_SECTION_CALLS (2) calls in flight at once, next
+        queued section starts the instant either active call finishes),
+        just starting from a registry-aware prompt set instead of the
+        static one. Final aggregation still always follows
+        _CORE_SECTION_QUEUE's canonical order regardless of completion
+        order.
 
         ``deadline`` here is the WRITER's own deadline (writer_deadline =
         global_deadline - the semantic-review reserve; computed once by the
@@ -992,16 +1169,68 @@ class SEDocumentationOrchestratorAgent:
         # only as a convenience for any future single-threaded caller.
         self._sections_deadline = writer_deadline
 
-        prompts = self._build_section_prompts(context, facts)
-
         queue_order = list(_CORE_SECTION_QUEUE)
         if facts.ai_involved:
             queue_order.append("aiReport")
 
-        pending = list(queue_order)
         results: Dict[str, SectionCallResult] = {}
-        in_flight: Dict[Future, str] = {}
         launch_counter = 0
+
+        # ------------------------------------------------------------------
+        # Phase 1: requirements alone, blocking. Every other section's
+        # prompt depends on this section's resolved output (via the
+        # registry built right after), so nothing else may be launched
+        # until this single call returns (or the deadline is already gone).
+        # ------------------------------------------------------------------
+        requirements_prompt_text, requirements_max_tokens = self._build_section_prompts(context, facts)["requirements"]
+
+        pending = ["requirements"]
+        if writer_deadline - time.monotonic() >= _MIN_SECONDS_PER_SECTION_ATTEMPT:
+            launch_counter += 1
+            results["requirements"] = self._call_section_concurrent_safe(
+                "requirements", requirements_prompt_text, requirements_max_tokens,
+                writer_deadline, launch_counter,
+            )
+            pending = []
+
+        if pending:
+            logger.warning(
+                "se_documentation.writer_budget_exceeded missing=%s completed=%s overrun_seconds=%.1f",
+                pending, [], time.monotonic() - writer_deadline,
+            )
+            raise WriterBudgetExceededError(missing_sections=list(queue_order), completed_sections=[])
+
+        # ------------------------------------------------------------------
+        # Freeze the registry from whichever requirements content is about
+        # to be used -- real provider output, or deterministic fallback
+        # content if that single call itself failed -- so every dependent
+        # prompt below always sees a coherent, immutable id->meaning
+        # mapping, never an empty/ambiguous one.
+        # ------------------------------------------------------------------
+        requirements_record = results["requirements"]
+        if requirements_record.success:
+            requirements_raw = requirements_record.data or {}
+        else:
+            requirements_raw = {}
+        frs_for_registry = self._requirements_or_fallback(
+            requirements_raw.get("functionalRequirements"),
+            self._fallback_functional_requirements(facts),
+        )
+        nfrs_for_registry = self._requirements_or_fallback(
+            requirements_raw.get("nonFunctionalRequirements"),
+            self._fallback_nonfunctional_requirements(facts),
+        )
+        registry = self._build_requirements_registry(frs_for_registry, nfrs_for_registry)
+
+        prompts = self._build_section_prompts(context, facts, registry=registry)
+
+        # ------------------------------------------------------------------
+        # Phase 2: every remaining section, through the same bounded-queue
+        # mechanism as before, now registry-aware. launch_counter continues
+        # from Phase 1 so provenance/logging ordering stays monotonic.
+        # ------------------------------------------------------------------
+        pending = [key for key in queue_order if key != "requirements"]
+        in_flight: Dict[Future, str] = {}
 
         def _launch_next_if_possible(executor: ThreadPoolExecutor) -> None:
             nonlocal launch_counter
@@ -1070,15 +1299,50 @@ class SEDocumentationOrchestratorAgent:
 
         return sections
 
+    def _build_requirements_registry(
+        self, frs: List[RequirementDto], nfrs: List[RequirementDto],
+    ) -> RequirementsRegistry:
+        """Freezes the FR/NFR id -> meaning mapping from whichever
+        requirements content is about to be used (real provider output, or
+        deterministic fallback content if that call itself failed/timed
+        out -- either way, dependent sections get a coherent, immutable
+        registry, never an empty/ambiguous one). See RequirementsRegistry's
+        own docstring for why this exists."""
+        entries = tuple(
+            RequirementsRegistryEntry(
+                id=req.id,
+                title=req.title,
+                description=(req.description or "")[:160],
+                priority=req.priority,
+                sourceClassification=req.sourceClassification,
+                acceptanceCriteria=tuple(req.acceptanceCriteria[:4]),
+            )
+            for req in (*frs, *nfrs)
+        )
+        return RequirementsRegistry(entries=entries)
+
     def _build_section_prompts(
         self, context: str, facts: ProjectFacts,
+        *, registry: Optional[RequirementsRegistry] = None,
     ) -> Dict[str, "tuple[str, int]"]:
         """
         Every prompt string below is UNCHANGED text from the previous
-        sequential implementation -- only the control flow around them
-        changed (see _generate_llm_sections). Returns {key: (prompt, max_tokens)}.
+        sequential implementation, aside from the `{registry_block}` /
+        `{registry_block_with_ac}` insertions this method now splices into
+        every DEPENDENT section's prompt (useCases, modulesArchitecture,
+        database, uiApi, testingSecurity) when `registry` is supplied --
+        never into "requirements" itself (which DEFINES the ids) or
+        "aiReport" (which never references a requirement id at all).
+        `registry=None` (the default, and every call before this parameter
+        existed) renders both blocks as empty strings, leaving every prompt
+        byte-identical to before. Returns {key: (prompt, max_tokens)}.
         """
         prompts: Dict[str, "tuple[str, int]"] = {}
+        registry_block = f"\n{registry.render_compact()}\n{_REGISTRY_REFERENCE_RULES}\n" if registry is not None else ""
+        registry_block_with_ac = (
+            f"\n{registry.render_with_acceptance_criteria()}\n{_REGISTRY_REFERENCE_RULES}\n"
+            if registry is not None else ""
+        )
 
         prompts["requirements"] = (f"""
 Return ONLY valid JSON.
@@ -1131,7 +1395,7 @@ Rules:
 Return ONLY valid JSON.
 
 {context}
-
+{registry_block}
 Generate detailed use cases and edge cases for THIS project only.
 
 JSON shape:
@@ -1172,7 +1436,7 @@ Rules:
 Return ONLY valid JSON.
 
 {context}
-
+{registry_block}
 Generate system modules and architecture details for THIS project only.
 
 JSON shape:
@@ -1210,7 +1474,7 @@ Rules:
 Return ONLY valid JSON.
 
 {context}
-
+{registry_block}
 Generate a detailed database design for THIS project only.
 
 JSON shape:
@@ -1225,13 +1489,13 @@ JSON shape:
           "isPrimaryKey": true, "isForeignKey": false, "referencedEntity": "", "referencedField": ""
         }}
       ],
-      "primaryKey": "Id", "foreignKeys": [], "uniqueConstraints": [], "indexes": [],
+      "primaryKey": "Id", "foreignKeys": ["ExampleFkField -> OtherEntity.Id"], "uniqueConstraints": [], "indexes": [],
       "validationConstraints": [], "sensitiveFields": [],
       "relatedRequirementIds": ["FR-01"], "sourceClassification": "confirmed"
     }}
   ],
   "entityRelationships": [
-    {{"fromEntity": "", "toEntity": "", "type": "one-to-many", "description": ""}}
+    {{"fromEntity": "OtherEntity", "toEntity": "ExampleEntity", "type": "one-to-many", "description": "One OtherEntity has many ExampleEntity records."}}
   ]
 }}
 
@@ -1246,7 +1510,12 @@ Rules:
   clearly needs real domain fields (e.g. Conversation needs Status/StartedAt/LastMessageAt;
   Message needs SenderType/Content/DetectedIntent/ConfidenceScore).
 - Every foreign key must reference a field on another entity in this same list, and the
-  referenced field's dataType must match.
+  referenced field's dataType must match. For EVERY foreign key: mark the referencing
+  field's isForeignKey=true with referencedEntity/referencedField set, AND add a matching
+  "ColumnName -> Entity.Field" string to that entity's own top-level "foreignKeys" list
+  (do not leave "foreignKeys" as an empty list when the entity has any FK field), AND add
+  a corresponding row to the top-level "entityRelationships" array. All three must agree
+  with each other for the same relationship -- never populate only one of them.
 - Password fields must be named "PasswordHash" (a hash), never "Password" or a raw value.
 - Every field needs a clear purpose -- no filler fields.
 - Set isSensitive true for passwords/personal data and list them in sensitiveFields.
@@ -1257,7 +1526,7 @@ Rules:
 Return ONLY valid JSON.
 
 {context}
-
+{registry_block}
 Generate the user-facing screens (never development/backend modules) and, only if this
 project involves external APIs or third-party integrations, the API integration points.
 
@@ -1302,7 +1571,7 @@ Rules:
 Return ONLY valid JSON.
 
 {context}
-
+{registry_block_with_ac}
 Generate a testing plan and security/privacy requirements for THIS project only.
 
 JSON shape:
@@ -1555,6 +1824,8 @@ Rules:
         self._reconcile_requirement_references(requirement_ids, use_cases, edge_cases, modules, tests)
         self._reconcile_screen_references(requirement_ids, ui_screens)
         self._reconcile_entity_and_api_references(requirement_ids, entities, api_points)
+        self._dedupe_reference_lists(use_cases, modules, entities, ui_screens, api_points, tests)
+        self._rebuild_requirement_reverse_references(frs, nfrs, use_cases, modules)
 
         # Deterministic coverage guarantees (section 6/13 of the stabilization
         # spec): a confirmed feature (knowledge base, escalation, feedback,
@@ -1619,11 +1890,13 @@ Rules:
             )
         if not profile.skills:
             warnings.append("Student skills were missing, so the documentation used general assumptions for this domain.")
+        warnings.extend(self._detect_traceability_integrity_issues(frs, nfrs, use_cases, tests))
 
         mermaid_erd = self._build_erd(entities, relationships)
         mermaid_class = self._build_class_diagram(entities)
-        activity_diagram = self._build_activity_diagram(facts, use_cases)
-        sequence_diagram = self._build_sequence_diagram(facts, architecture, use_cases)
+        primary_use_case = self._select_primary_use_case(facts, frs, use_cases)
+        activity_diagram = self._build_activity_diagram(facts, primary_use_case, edge_cases)
+        sequence_diagram = self._build_sequence_diagram(facts, architecture, primary_use_case, frs, modules, api_points)
 
         diagram_validation = self._validate_diagrams(
             mermaid_erd, mermaid_class, activity_diagram, sequence_diagram, facts,
@@ -1792,7 +2065,7 @@ Rules:
             data.setdefault("frontend", self._pick_layer(facts, _FRONTEND_KEYWORDS, "Frontend (not specified)"))
             data.setdefault("backend", self._pick_layer(facts, _BACKEND_KEYWORDS, "Backend (not specified)"))
             data.setdefault("database", self._pick_layer(facts, _DB_KEYWORDS, "Database (not specified)"))
-            data.setdefault("aiService", "Not applicable" if not facts.ai_involved else "AI/LLM component")
+            data.setdefault("aiService", ai_service_label(facts.technical_profile))
             data.setdefault("externalServices", [])
             data.setdefault("explanation", data.get("explanation") or "")
             return ArchitectureDto.model_validate(data)
@@ -2128,27 +2401,103 @@ Rules:
         return list(seen.values())
 
     def _fallback_relationships(self, entities: List[EntityDto]) -> List[RelationshipDto]:
-        entity_names = {e.name for e in entities}
+        """
+        Derives entityRelationships (used for the ER diagram and, when this
+        module's own relationships are absent, by rebuild_mermaid_erd in
+        se_documentation_structural_invariants.py) from TWO independent FK
+        sources on the model's own response, normalized and validated the
+        same way regardless of which one supplied them:
+
+          (a) entity.foreignKeys -- top-level "Column -> Entity.Field" strings.
+          (b) entity.fields[*] where isForeignKey=True -- referencedEntity/
+              referencedField set directly on the field (required on every
+              field by this agent's own prompt, and the actual source of the
+              human-readable "(FK: ...)" captions rendered in the Database
+              Design section).
+
+        Field-level data (b) is the more reliable source in practice:
+        observed live 2026-08-07, every entity's top-level foreignKeys list
+        came back empty despite correct field-level FK data, so the OLD
+        version of this method (which only ever read source (a)) found
+        nothing and fabricated a relationship between the first two entities
+        in the list ("Patient owns Administrator" -- no such relationship
+        existed). That fabrication path is gone: this method now returns an
+        EMPTY list rather than inventing a relationship when neither source
+        yields anything real. Never rely on the Writer to follow the
+        prompt's new instruction to populate both sources consistently --
+        this deterministic extraction from field-level metadata is the
+        actual guarantee.
+
+        Every candidate relationship is validated before being returned:
+        the source entity must exist, the target entity must exist (a
+        dangling/fabricated referencedEntity is dropped, never guessed), the
+        source field must exist on the source entity when a field name is
+        available, and the referenced field must exist on the target entity
+        WHEN one was explicitly provided (an omitted referencedField is not
+        an error -- only an explicitly wrong one is rejected). Self-
+        referencing FKs (an entity referencing itself, e.g. a parent/child
+        hierarchy) are valid and preserved. The same underlying relationship
+        described by both sources at once (or more than once within one
+        source) collapses to a single entry; distinct FKs from the same
+        entity to different targets are all preserved.
+        """
+        entities_by_name = {entity.name: entity for entity in entities if entity.name}
+        fields_by_entity: dict[str, set[str]] = {
+            name: {field.name for field in entity.fields if field.name}
+            for name, entity in entities_by_name.items()
+        }
+
+        def _is_valid(
+            referencing_entity: str, source_field: str | None,
+            target_entity: str, target_field: str | None,
+        ) -> bool:
+            if not referencing_entity or referencing_entity not in entities_by_name:
+                return False
+            if not target_entity or target_entity not in entities_by_name:
+                return False  # dangling/fabricated target -- never guessed
+            if source_field and source_field not in fields_by_entity.get(referencing_entity, set()):
+                return False
+            if target_field and target_field not in fields_by_entity.get(target_entity, set()):
+                return False  # explicitly-provided referenced field does not exist -- rejected
+            return True
+
+        seen_pairs: set[tuple[str, str]] = set()
         relationships: List[RelationshipDto] = []
 
+        def _add(target_entity: str, referencing_entity: str) -> None:
+            pair = (target_entity, referencing_entity)
+            if pair in seen_pairs:
+                return
+            seen_pairs.add(pair)
+            relationships.append(
+                RelationshipDto(
+                    fromEntity=target_entity, toEntity=referencing_entity, type="one-to-many",
+                    description=f"A {target_entity} is referenced by many {referencing_entity} records.",
+                )
+            )
+
         for entity in entities:
+            if not entity.name:
+                continue
+
+            # Source (b): field-level FK metadata -- checked first as the
+            # more reliable source (see docstring).
+            for field in entity.fields:
+                if not field.isForeignKey or not field.referencedEntity:
+                    continue
+                target_field = field.referencedField or None
+                if _is_valid(entity.name, field.name or None, field.referencedEntity, target_field):
+                    _add(field.referencedEntity, entity.name)
+
+            # Source (a): top-level "Column -> Entity.Field" strings.
             for fk in entity.foreignKeys:
                 if " -> " not in fk:
                     continue
-                _, target = fk.split(" -> ", 1)
-                target_entity = target.split(".")[0]
-                if target_entity in entity_names and target_entity != entity.name:
-                    relationships.append(
-                        RelationshipDto(
-                            fromEntity=target_entity, toEntity=entity.name, type="one-to-many",
-                            description=f"A {target_entity} is referenced by many {entity.name} records.",
-                        )
-                    )
-
-        if not relationships and len(entities) >= 2:
-            relationships.append(
-                RelationshipDto(fromEntity=entities[0].name, toEntity=entities[1].name, type="one-to-many", description=f"A {entities[0].name} owns many {entities[1].name} records.")
-            )
+                source_field, target = fk.split(" -> ", 1)
+                source_field = source_field.strip() or None
+                target_entity, _, target_field = target.strip().partition(".")
+                if _is_valid(entity.name, source_field, target_entity, target_field or None):
+                    _add(target_entity, entity.name)
 
         return relationships
 
@@ -2294,10 +2643,7 @@ Rules:
         features = self._fallback_features(facts)
         feature_names = [f.name for f in features if f.scopeStatus == "core"]
 
-        ai_service = "Not applicable"
-        if facts.ai_involved:
-            profile = facts.technical_profile
-            ai_service = f"AI/NLP service ({profile.ai_approach}, {profile.ai_provider_type})"
+        ai_service = ai_service_label(facts.technical_profile)
 
         return ArchitectureDto(
             style="Layered client-server architecture" if confirmed else "Layered client-server architecture (assumed; technology stack not confirmed)",
@@ -2400,6 +2746,104 @@ Rules:
 
         return entities
 
+    def _dedupe_reference_lists(
+        self,
+        use_cases: List[UseCaseDto],
+        modules: List[ModuleDto],
+        entities: List[EntityDto],
+        ui_screens: List[UiScreenDto],
+        api_points: List[ApiPointDto],
+        tests: List[TestCaseDto],
+    ) -> None:
+        """Collapses exact duplicate ids within a single item's own
+        relatedRequirements/relatedRequirementIds/relatedUseCaseIds list
+        (order-preserving), e.g. a test whose relatedRequirements came back
+        as ["FR-01", "FR-01"]. Mutates in place; never removes a
+        non-duplicate reference."""
+        def _dedupe(ids: List[str]) -> List[str]:
+            seen: set = set()
+            result: List[str] = []
+            for item_id in ids:
+                if item_id not in seen:
+                    seen.add(item_id)
+                    result.append(item_id)
+            return result
+
+        for use_case in use_cases:
+            use_case.relatedRequirements = _dedupe(use_case.relatedRequirements)
+        for module in modules:
+            module.relatedRequirements = _dedupe(module.relatedRequirements)
+        for entity in entities:
+            entity.relatedRequirementIds = _dedupe(entity.relatedRequirementIds)
+        for screen in ui_screens:
+            screen.relatedRequirements = _dedupe(screen.relatedRequirements)
+        for api in api_points:
+            api.relatedRequirements = _dedupe(api.relatedRequirements)
+        for test in tests:
+            test.relatedRequirements = _dedupe(test.relatedRequirements)
+            test.relatedUseCaseIds = _dedupe(test.relatedUseCaseIds)
+
+    def _detect_traceability_integrity_issues(
+        self,
+        frs: List[RequirementDto],
+        nfrs: List[RequirementDto],
+        use_cases: List[UseCaseDto],
+        tests: List[TestCaseDto],
+    ) -> List[str]:
+        """Lightweight, deterministic disagreement detection -- NOT full NL
+        semantic reasoning, and never a hard blocker (the semantic Reviewer
+        in the review pipeline remains responsible for nuanced meaning; this
+        agent only flags obvious, structurally-detectable drift as a
+        non-blocking consistencyWarnings entry). At this point every
+        reference has already been reconciled against real ids and
+        deduplicated (see _reconcile_requirement_references,
+        _dedupe_reference_lists) and RequirementDto's own reverse references
+        have already been rebuilt from the same child data (see
+        _rebuild_requirement_reverse_references) -- so this only catches the
+        one disagreement that isn't already structurally impossible by
+        construction: a test case citing both an FR and a use case that
+        doesn't actually implement that FR."""
+        warnings: List[str] = []
+        use_cases_by_id = {uc.id: uc for uc in use_cases}
+
+        for test in tests:
+            if not test.relatedUseCaseIds:
+                continue
+            linked_use_cases = [use_cases_by_id[uc_id] for uc_id in test.relatedUseCaseIds if uc_id in use_cases_by_id]
+            if not linked_use_cases:
+                continue
+            for fr_id in test.relatedRequirements:
+                if not any(fr_id in uc.relatedRequirements for uc in linked_use_cases):
+                    warnings.append(
+                        f"{test.id} references {fr_id}, but none of its linked use case(s) "
+                        f"({', '.join(uc.id for uc in linked_use_cases)}) reference {fr_id} -- "
+                        f"possible mismatched requirement traceability."
+                    )
+
+        return warnings
+
+    def _rebuild_requirement_reverse_references(
+        self,
+        frs: List[RequirementDto],
+        nfrs: List[RequirementDto],
+        use_cases: List[UseCaseDto],
+        modules: List[ModuleDto],
+    ) -> None:
+        """Rebuilds every RequirementDto.relatedUseCaseIds/relatedModuleIds
+        deterministically from use_cases[*].relatedRequirements and
+        modules[*].relatedRequirements -- the dependent objects are the
+        single source of truth here, never the requirements section's own
+        Writer-generated reverse-reference fields (which come from a
+        SEPARATE, independent LLM call and can drift from what useCases/
+        modulesArchitecture actually declared, or simply go stale after
+        _reconcile_requirement_references drops a dangling forward
+        reference). Call AFTER use_cases/modules have their final,
+        reconciled relatedRequirements -- never before.
+        """
+        for req in (*frs, *nfrs):
+            req.relatedUseCaseIds = [uc.id for uc in use_cases if req.id in uc.relatedRequirements]
+            req.relatedModuleIds = [m.id for m in modules if req.id in m.relatedRequirements]
+
     def _reconcile_requirement_references(
         self,
         requirement_ids: set,
@@ -2408,46 +2852,56 @@ Rules:
         modules: List[ModuleDto],
         tests: List[TestCaseDto],
     ) -> None:
-        """Repair any relatedRequirements/relatedRequirement reference that
+        """Drops any relatedRequirements/relatedRequirement reference that
         doesn't correspond to a real FR/NFR id -- can happen when one
         section's content came from the LLM (its own id scheme) while
         another fell back to hardcoded ids, or the LLM itself hallucinated a
-        reference. Mutates in place; falls back to the first real
-        requirement id rather than leaving a list empty."""
+        reference. Mutates in place.
+
+        Never substitutes a fabricated default (this method previously
+        replaced a dangling/empty reference with "the first requirement id
+        in sorted order" -- exactly the kind of arbitrary, meaning-blind
+        link this project's traceability-honesty requirement forbids: a
+        wrong link is worse than no link, and silently pointing every
+        unresolved reference at the same "first" id is indistinguishable
+        from a real relationship once rendered in the matrix). A dangling
+        reference is simply removed, leaving [] (or "" for the singular
+        edge-case field) when nothing valid remains -- see
+        _build_traceability, which already treats an empty reference list
+        as "genuinely not linked" rather than needing a placeholder id to
+        iterate over.
+        """
         if not requirement_ids:
+            for use_case in use_cases:
+                use_case.relatedRequirements = []
+            for edge_case in edge_cases:
+                edge_case.relatedRequirement = ""
+            for module in modules:
+                module.relatedRequirements = []
+            for test in tests:
+                test.relatedRequirements = []
             return
 
-        default_id = next(iter(sorted(requirement_ids)))
-
         for use_case in use_cases:
-            valid = [r for r in use_case.relatedRequirements if r in requirement_ids]
-            use_case.relatedRequirements = valid or [default_id]
+            use_case.relatedRequirements = [r for r in use_case.relatedRequirements if r in requirement_ids]
 
         for edge_case in edge_cases:
             if edge_case.relatedRequirement not in requirement_ids:
-                edge_case.relatedRequirement = default_id
+                edge_case.relatedRequirement = ""
 
         for module in modules:
-            valid = [r for r in module.relatedRequirements if r in requirement_ids]
-            module.relatedRequirements = valid or [default_id]
+            module.relatedRequirements = [r for r in module.relatedRequirements if r in requirement_ids]
 
         for test in tests:
-            valid = [r for r in test.relatedRequirements if r in requirement_ids]
-            test.relatedRequirements = valid or [default_id]
+            test.relatedRequirements = [r for r in test.relatedRequirements if r in requirement_ids]
 
     def _reconcile_screen_references(self, requirement_ids: set, ui_screens: List[UiScreenDto]) -> None:
-        if not requirement_ids:
-            return
-        default_id = next(iter(sorted(requirement_ids)))
         for screen in ui_screens:
-            valid = [r for r in screen.relatedRequirements if r in requirement_ids]
-            screen.relatedRequirements = valid or [default_id]
+            screen.relatedRequirements = [r for r in screen.relatedRequirements if r in requirement_ids]
 
     def _reconcile_entity_and_api_references(
         self, requirement_ids: set, entities: List[EntityDto], api_points: List[ApiPointDto]
     ) -> None:
-        if not requirement_ids:
-            return
         for entity in entities:
             entity.relatedRequirementIds = [r for r in entity.relatedRequirementIds if r in requirement_ids]
         for api in api_points:
@@ -2840,13 +3294,76 @@ Rules:
 
         return "\n".join(lines)
 
-    def _build_activity_diagram(self, facts: ProjectFacts, use_cases: List[UseCaseDto]) -> str:
-        """Deterministically derived from the project's own primary use case
-        main flow, instead of a hardcoded FYPilot doc-generator pipeline.
-        Labels are routed through mermaid_utils.safe_label so no node is a
-        raw, overly long use-case sentence and none is truncated mid-word."""
-        primary = use_cases[0] if use_cases else None
+    def _select_primary_use_case(
+        self, facts: ProjectFacts, frs: List[RequirementDto], use_cases: List[UseCaseDto],
+    ) -> Optional[UseCaseDto]:
+        """
+        Deterministically picks the use case that actually represents this
+        project's CENTRAL workflow, instead of defaulting to useCases[0]
+        (the OLD behavior -- see _build_activity_diagram/_build_sequence_
+        diagram's prior implementation, which took `use_cases[0]` directly
+        and silently rendered whatever use case a section call happened to
+        list first, e.g. account registration/login for a medical-triage
+        project whose real central workflow is symptom submission).
 
+        Scored generically (never a project-type check like "if medical
+        project then choose triage") from evidence any FYP's own generated
+        content provides:
+          1. how many of THIS project's own functional requirements the use
+             case is explicitly linked to (relatedRequirements) -- a use
+             case implementing more of the confirmed feature set is more
+             central than one implementing a single, often-incidental,
+             requirement (e.g. login);
+          2. how many of those linked requirements are themselves High
+             priority (a project-agnostic "core requirement" signal already
+             present on every RequirementDto, never invented here);
+          3. whether the use case's own actor matches this project's
+             confirmed primary actor (see _normalize_actor_key);
+          4. when facts.ai_involved, whether the use case (or a requirement
+             it implements) uses generic AI/ML vocabulary (classification,
+             recommendation, inference, ...) -- a project-agnostic
+             AI-centrality signal, never a hardcoded domain keyword.
+
+        Ties are broken by original list order (Python's max() keeps the
+        first maximal element), which only matters when no evidence
+        differentiates use cases at all -- i.e. exactly the "no clearly
+        dominant use case exists" case the task calls out, where falling
+        back to the first listed candidate is an honest, deterministic
+        choice rather than a fabricated one.
+        """
+        if not use_cases:
+            return None
+
+        high_priority_fr_ids = {fr.id for fr in frs if (fr.priority or "").strip().lower() == "high"}
+        fr_by_id = {fr.id: fr for fr in frs}
+        primary_actor_key = _normalize_actor_key(facts.primary_actor)
+
+        def _score(uc: UseCaseDto) -> int:
+            linked_fr_ids = set(uc.relatedRequirements)
+            score = len(linked_fr_ids) * 3
+            score += len(linked_fr_ids & high_priority_fr_ids) * 2
+            if primary_actor_key and _normalize_actor_key(uc.actor) == primary_actor_key:
+                score += 2
+            if facts.ai_involved:
+                linked_text = " ".join(
+                    f"{fr_by_id[fr_id].title} {fr_by_id[fr_id].description}"
+                    for fr_id in linked_fr_ids if fr_id in fr_by_id
+                ).lower()
+                own_text = f"{uc.title} {uc.goal}".lower()
+                if any(keyword in linked_text or keyword in own_text for keyword in _AI_CENTRALITY_KEYWORDS):
+                    score += 2
+            return score
+
+        return max(use_cases, key=_score)
+
+    def _build_activity_diagram(
+        self, facts: ProjectFacts, primary: Optional[UseCaseDto], edge_cases: Optional[List[EdgeCaseDto]] = None,
+    ) -> str:
+        """Deterministically derived from the project's own SELECTED primary
+        use case (see _select_primary_use_case -- never simply "the first
+        use case in the list"). Labels are routed through
+        mermaid_utils.safe_label so no node is a raw, overly long use-case
+        sentence and none is truncated mid-word."""
         lines = ["flowchart TD"]
         node_id = "A"
 
@@ -2869,44 +3386,132 @@ Rules:
             lines.append(f"    {prev} --> {node_id}[{safe_label(step)}]")
             prev = node_id
 
+        # A decision point is only added when the project's OWN edge-case
+        # data explicitly documents a confidence/uncertainty branch for the
+        # selected primary use case -- never invented (e.g. never a
+        # fabricated "low confidence?" branch for a project with no such
+        # edge case on record).
+        if primary and edge_cases:
+            linked_fr_ids = set(primary.relatedRequirements)
+            for edge_case in edge_cases:
+                if edge_case.relatedRequirement not in linked_fr_ids:
+                    continue
+                if "confiden" not in edge_case.scenario.lower() and "confiden" not in edge_case.expectedHandling.lower():
+                    continue
+                decision_id = _next_id(node_id)
+                lines.append(f"    {prev} --> {decision_id}{{{safe_label(edge_case.scenario)}}}")
+                if edge_case.recoveryAction:
+                    outcome_id = _next_id(decision_id)
+                    lines.append(f"    {decision_id} -->|Yes| {outcome_id}[{safe_label(edge_case.recoveryAction)}]")
+                    node_id = outcome_id
+                else:
+                    node_id = decision_id
+                prev = node_id
+                break
+
         return "\n".join(lines)
 
-    def _build_sequence_diagram(self, facts: ProjectFacts, architecture: ArchitectureDto, use_cases: List[UseCaseDto]) -> str:
+    def _build_sequence_diagram(
+        self,
+        facts: ProjectFacts,
+        architecture: ArchitectureDto,
+        primary: Optional[UseCaseDto],
+        frs: Optional[List[RequirementDto]] = None,
+        modules: Optional[List[ModuleDto]] = None,
+        api_points: Optional[List[ApiPointDto]] = None,
+    ) -> str:
         """Deterministically derived from this project's architecture
-        components and primary use case, instead of a hardcoded FYPilot
-        Razor/FastAPI/Ollama pipeline. Participants are declared once up
-        front with readable aliases (mermaid_utils.participant_declaration)
-        instead of squashing a combined actor description like "University
-        students and support staff" into a single illegible identifier."""
-        primary = use_cases[0] if use_cases else None
+        components, confirmed API integration points/modules, and SELECTED
+        primary use case (see _select_primary_use_case). Participants are
+        declared exactly once each via a _ParticipantRegistry keyed by
+        normalized identity, so two architecture fields that happen to
+        resolve to the SAME real component (the verified live bug: frontend
+        and backend both resolving to "ASP.NET Core Razor Pages" because
+        that technology name matches both the frontend and backend keyword
+        lists in _pick_layer) collapse into one participant instead of
+        producing a duplicate `participant ... as ...` declaration and a
+        meaningless X->>X self-call."""
+        frs = frs or []
+        modules = modules or []
+        api_points = api_points or []
+        registry = _ParticipantRegistry()
 
         actor_names = split_combined_actor(facts.primary_actor) or [facts.primary_actor or "User"]
-        primary_actor_display = actor_names[0]
-        actor_id = safe_participant_id(primary_actor_display)
+        actor = registry.register(_normalize_actor_key(actor_names[0]) or "actor", actor_names[0], is_actor=True)
 
-        frontend_id = safe_participant_id(architecture.frontend)
-        backend_id = safe_participant_id(architecture.backend)
-        database_id = safe_participant_id(architecture.database)
+        frontend = registry.register(architecture.frontend, architecture.frontend)
+        backend = registry.register(architecture.backend, architecture.backend)
+        database = registry.register(architecture.database, architecture.database)
+
+        linked_fr_ids = set(primary.relatedRequirements) if primary else set()
+
+        # Prefer a confirmed API integration point actually tied to the
+        # primary workflow's own requirements over a generic "AI Service"
+        # label -- e.g. a real "FastAPI Triage Service" apiIntegrationPoints
+        # entry, never a fabricated generic name, when this project confirms
+        # one.
+        ai_participant = None
+        if facts.ai_involved:
+            matching_apis = sorted(
+                (api for api in api_points if set(api.relatedRequirements) & linked_fr_ids),
+                key=lambda api: api.apiId,
+            )
+            if matching_apis:
+                ai_participant = registry.register(matching_apis[0].name, matching_apis[0].name)
+            elif len(api_points) == 1:
+                ai_participant = registry.register(api_points[0].name, api_points[0].name)
+            elif architecture.aiService and architecture.aiService.lower() not in ("not applicable", ""):
+                ai_participant = registry.register(architecture.aiService, architecture.aiService)
+
+        # Real intermediate processing components (e.g. preprocessing/
+        # classification modules) confirmed by this project's own
+        # modulesArchitecture output and actually tied to the primary
+        # workflow's requirements -- capped at 2 so the diagram stays
+        # bounded and readable.
+        processing_participants = []
+        if ai_participant is not None:
+            for module in modules:
+                if len(processing_participants) >= 2:
+                    break
+                if not set(module.relatedRequirements) & linked_fr_ids:
+                    continue
+                lowered = module.name.lower()
+                if not any(keyword in lowered for keyword in _AI_CENTRALITY_KEYWORDS):
+                    continue
+                processing_participants.append(registry.register(module.name, module.name))
 
         lines = ["sequenceDiagram"]
-        lines.append(participant_declaration(actor_id, primary_actor_display, is_actor=True))
-        lines.append(participant_declaration(frontend_id, architecture.frontend))
-        lines.append(participant_declaration(backend_id, architecture.backend))
-        lines.append(participant_declaration(database_id, architecture.database))
+        lines.extend(registry.render())
 
         trigger = primary.trigger if primary and primary.trigger else f"Perform primary action in {facts.title}"
+        lines.append(f"    {actor.mermaid_id}->>{frontend.mermaid_id}: {safe_label(trigger)}")
 
-        lines.append(f"    {actor_id}->>{frontend_id}: {safe_label(trigger)}")
-        lines.append(f"    {frontend_id}->>{backend_id}: Submit request")
-        if facts.technical_profile.ai_enabled:
-            ai_id = safe_participant_id("AIService")
-            lines.append(participant_declaration(ai_id, "AI Service"))
-            lines.append(f"    {backend_id}->>{ai_id}: Request AI processing")
-            lines.append(f"    {ai_id}-->>{backend_id}: Return AI result")
-        lines.append(f"    {backend_id}->>{database_id}: Read/write data")
-        lines.append(f"    {database_id}-->>{backend_id}: Return data")
-        lines.append(f"    {backend_id}-->>{frontend_id}: Return response")
-        lines.append(f"    {frontend_id}-->>{actor_id}: Display result")
+        # A duplicate/collapsed frontend+backend participant (same
+        # registered identity) must never emit a self-call -- go straight
+        # to whatever comes next instead of "X -> X: Submit request".
+        current = frontend
+        if backend.key != frontend.key:
+            lines.append(f"    {frontend.mermaid_id}->>{backend.mermaid_id}: Submit request")
+            current = backend
+
+        if ai_participant is not None and ai_participant.key != current.key:
+            chain = [current] + processing_participants + [ai_participant]
+            for step_from, step_to in zip(chain, chain[1:]):
+                lines.append(f"    {step_from.mermaid_id}->>{step_to.mermaid_id}: Process request")
+            for step_from, step_to in zip(reversed(chain), reversed(chain[:-1])):
+                lines.append(f"    {step_from.mermaid_id}-->>{step_to.mermaid_id}: Return result")
+            # The reversed loop above already walks the chain back to
+            # chain[0] (the participant we entered this block with) -- the
+            # last "Return result" line ends at chain[0], so `current`
+            # stays exactly where it was, never an intermediate module.
+
+        if database.key != current.key:
+            lines.append(f"    {current.mermaid_id}->>{database.mermaid_id}: Read/write data")
+            lines.append(f"    {database.mermaid_id}-->>{current.mermaid_id}: Return data")
+
+        if backend.key != frontend.key:
+            lines.append(f"    {backend.mermaid_id}-->>{frontend.mermaid_id}: Return response")
+        lines.append(f"    {frontend.mermaid_id}-->>{actor.mermaid_id}: Display result")
 
         return "\n".join(lines)
 
@@ -2938,6 +3543,17 @@ Rules:
     # -------------------------------------------------------------------
     # Deterministic documentation quality score (section 19 of the spec) --
     # replaces the previous hardcoded "88 if not used_fallback else 82".
+    #
+    # This method is now a THIN WRAPPER around the module-level
+    # compute_quality_assessment function below -- extracted so the exact
+    # same criteria/weights/caps can be recomputed later, from a FINAL
+    # (post-repair/post-rebuild) candidate, without a second competing
+    # scoring formula. See compute_quality_assessment's own docstring and
+    # app/agents/se_documentation/quality_recomputation.py, which is the
+    # dict-based entrypoint that calls this same function after final
+    # review. Kept as a method (rather than removed) purely so every
+    # existing call site (`self._compute_quality_assessment(...)`) and
+    # every existing test keeps working unchanged.
     # -------------------------------------------------------------------
 
     def _compute_quality_assessment(
@@ -2959,218 +3575,257 @@ Rules:
         ai_report: Optional[AiTechnicalReportDto] = None,
         ai_applicable: bool = False,
     ) -> QualityAssessmentDto:
-        failed_checks: List[str] = []
-        warnings: List[str] = []
-        missing_information: List[str] = []
-        critical_issues_count = 0
+        return compute_quality_assessment(
+            facts, frs, nfrs, use_cases, edge_cases, modules, entities, ui_screens, tests,
+            traceability, architecture, assumptions, used_fallback, diagram_validation,
+            ai_report=ai_report, ai_applicable=ai_applicable,
+        )
 
-        # Completeness (18%)
-        required_sections = [
-            ("functionalRequirements", frs), ("nonFunctionalRequirements", nfrs),
-            ("useCases", use_cases), ("edgeCases", edge_cases), ("systemModules", modules),
-            ("databaseEntities", entities), ("uiScreens", ui_screens), ("testingPlan", tests),
-        ]
-        present = sum(1 for _, items in required_sections if items)
-        completeness = round((present / len(required_sections)) * 100)
-        for name, items in required_sections:
-            if not items:
-                failed_checks.append(f"{name} is empty.")
-                missing_information.append(name)
-                critical_issues_count += 1
 
-        entities_with_empty_fields = [e.name for e in entities if not e.fields]
-        if entities_with_empty_fields:
-            completeness = min(completeness, 70)
-            failed_checks.append(f"Entities with no field details: {', '.join(entities_with_empty_fields)}.")
+def compute_quality_assessment(
+    facts: ProjectFacts,
+    frs: List[RequirementDto],
+    nfrs: List[RequirementDto],
+    use_cases: List[UseCaseDto],
+    edge_cases: List[EdgeCaseDto],
+    modules: List[ModuleDto],
+    entities: List[EntityDto],
+    ui_screens: List[UiScreenDto],
+    tests: List[TestCaseDto],
+    traceability: List[TraceabilityDto],
+    architecture: ArchitectureDto,
+    assumptions: List[AssumptionDto],
+    used_fallback: bool,
+    diagram_validation: Dict[str, Any],
+    *,
+    ai_report: Optional[AiTechnicalReportDto] = None,
+    ai_applicable: bool = False,
+) -> QualityAssessmentDto:
+    """
+    The SINGLE authoritative deterministic base-quality calculator for SE
+    Documentation -- byte-for-byte the same criteria/weights/caps
+    SEDocumentationOrchestratorAgent._compute_quality_assessment has always
+    used at Writer-assembly time (that method is now a thin wrapper around
+    this function, see its own docstring), extracted to a module-level
+    function so it can ALSO be called again, unchanged, from a FINAL
+    (post-repair/post-rebuild) candidate -- see
+    app/agents/se_documentation/quality_recomputation.py's
+    compute_documentation_quality, the dict-based entrypoint used after
+    ReviewPipeline.run() returns. Never a second competing formula: both
+    callers hit this exact function.
+    """
+    failed_checks: List[str] = []
+    warnings: List[str] = []
+    missing_information: List[str] = []
+    critical_issues_count = 0
+
+    # Completeness (18%)
+    required_sections = [
+        ("functionalRequirements", frs), ("nonFunctionalRequirements", nfrs),
+        ("useCases", use_cases), ("edgeCases", edge_cases), ("systemModules", modules),
+        ("databaseEntities", entities), ("uiScreens", ui_screens), ("testingPlan", tests),
+    ]
+    present = sum(1 for _, items in required_sections if items)
+    completeness = round((present / len(required_sections)) * 100)
+    for name, items in required_sections:
+        if not items:
+            failed_checks.append(f"{name} is empty.")
+            missing_information.append(name)
             critical_issues_count += 1
 
-        # Requirement testability (12%): fraction of FRs with non-empty acceptanceCriteria
-        testable = sum(1 for fr in frs if fr.acceptanceCriteria) if frs else 0
-        testability = round((testable / len(frs)) * 100) if frs else 0
-        if frs and testable < len(frs):
-            warnings.append(f"{len(frs) - testable} functional requirement(s) are missing acceptance criteria.")
+    entities_with_empty_fields = [e.name for e in entities if not e.fields]
+    if entities_with_empty_fields:
+        completeness = min(completeness, 70)
+        failed_checks.append(f"Entities with no field details: {', '.join(entities_with_empty_fields)}.")
+        critical_issues_count += 1
 
-        # Cross-section consistency (18%): referential integrity ratio plus
-        # AI-approach / authentication consistency (a sanitization pass
-        # having to correct either is itself evidence the sections
-        # disagreed before the fix was applied).
-        requirement_ids = {fr.id for fr in frs} | {nfr.id for nfr in nfrs}
-        ref_total = 0
-        ref_valid = 0
-        for use_case in use_cases:
-            for ref in use_case.relatedRequirements:
-                ref_total += 1
-                ref_valid += 1 if ref in requirement_ids else 0
-        for test in tests:
-            for ref in test.relatedRequirements:
-                ref_total += 1
-                ref_valid += 1 if ref in requirement_ids else 0
-        consistency = round((ref_valid / ref_total) * 100) if ref_total else 100
-        if ref_total and ref_valid < ref_total:
-            failed_checks.append("Some use case/test requirement references do not point to a real requirement id.")
+    # Requirement testability (12%): fraction of FRs with non-empty acceptanceCriteria
+    testable = sum(1 for fr in frs if fr.acceptanceCriteria) if frs else 0
+    testability = round((testable / len(frs)) * 100) if frs else 0
+    if frs and testable < len(frs):
+        warnings.append(f"{len(frs) - testable} functional requirement(s) are missing acceptance criteria.")
 
-        text_blob_for_ai_auth = " ".join(
-            [architecture.explanation, architecture.authenticationFlow]
-            + [fr.description for fr in frs]
+    # Cross-section consistency (18%): referential integrity ratio plus
+    # AI-approach / authentication consistency (a sanitization pass
+    # having to correct either is itself evidence the sections
+    # disagreed before the fix was applied).
+    requirement_ids = {fr.id for fr in frs} | {nfr.id for nfr in nfrs}
+    ref_total = 0
+    ref_valid = 0
+    for use_case in use_cases:
+        for ref in use_case.relatedRequirements:
+            ref_total += 1
+            ref_valid += 1 if ref in requirement_ids else 0
+    for test in tests:
+        for ref in test.relatedRequirements:
+            ref_total += 1
+            ref_valid += 1 if ref in requirement_ids else 0
+    consistency = round((ref_valid / ref_total) * 100) if ref_total else 100
+    if ref_total and ref_valid < ref_total:
+        failed_checks.append("Some use case/test requirement references do not point to a real requirement id.")
+
+    text_blob_for_ai_auth = " ".join(
+        [architecture.explanation, architecture.authenticationFlow]
+        + [fr.description for fr in frs]
+    ).lower()
+    ai_conflict = facts.technical_profile.ai_approach not in ("rag", "hybrid") and (
+        "retrieval-augmented" in text_blob_for_ai_auth or "fine-tun" in text_blob_for_ai_auth
+    )
+    auth_conflict = "jwt" not in facts.technical_profile.authentication_mechanism.lower() and "jwt" in text_blob_for_ai_auth
+    if ai_conflict or auth_conflict:
+        consistency = min(consistency, 60)
+        failed_checks.append("AI approach or authentication mechanism is described inconsistently across sections.")
+        critical_issues_count += 1
+
+    # Traceability coverage (18%): every FR must appear with real
+    # use-case/module/test mappings, not merely appear as a row.
+    traced_ids = {row.requirementId for row in traceability}
+    fully_covered = sum(1 for row in traceability if row.coverageStatus == "covered")
+    traceability_coverage = round((fully_covered / len(frs)) * 100) if frs else 0
+    untraced_count = len(frs) - len(traced_ids & {fr.id for fr in frs}) if frs else 0
+    if frs and len(traced_ids) < len(frs):
+        warnings.append("Not every functional requirement appears in the traceability matrix.")
+        critical_issues_count += 1
+    if untraced_count >= 4:
+        failed_checks.append(f"{untraced_count} functional requirements are missing from traceability.")
+
+    # Project specificity (12%)
+    specificity = 100
+    title_lower = facts.title.lower()
+    if "fypilot" in title_lower or "final year project" in title_lower and "pilot" in title_lower:
+        pass  # this genuinely is FYPilot; no penalty
+    else:
+        text_blob = " ".join(
+            [architecture.explanation]
+            + [fr.description for fr in frs[:5]]
+            + [uc.goal for uc in use_cases[:5]]
         ).lower()
-        ai_conflict = facts.technical_profile.ai_approach not in ("rag", "hybrid") and (
-            "retrieval-augmented" in text_blob_for_ai_auth or "fine-tun" in text_blob_for_ai_auth
-        )
-        auth_conflict = "jwt" not in facts.technical_profile.authentication_mechanism.lower() and "jwt" in text_blob_for_ai_auth
-        if ai_conflict or auth_conflict:
-            consistency = min(consistency, 60)
-            failed_checks.append("AI approach or authentication mechanism is described inconsistently across sections.")
+        if "fypilot" in text_blob:
+            specificity = 0
+            failed_checks.append("Generated content references FYPilot instead of the selected project.")
             critical_issues_count += 1
+        elif facts.title and title_lower not in text_blob and facts.domain.lower() not in text_blob:
+            specificity = 60
+            warnings.append("Some sections do not clearly reference this project's title or domain.")
 
-        # Traceability coverage (18%): every FR must appear with real
-        # use-case/module/test mappings, not merely appear as a row.
-        traced_ids = {row.requirementId for row in traceability}
-        fully_covered = sum(1 for row in traceability if row.coverageStatus == "covered")
-        traceability_coverage = round((fully_covered / len(frs)) * 100) if frs else 0
-        untraced_count = len(frs) - len(traced_ids & {fr.id for fr in frs}) if frs else 0
-        if frs and len(traced_ids) < len(frs):
-            warnings.append("Not every functional requirement appears in the traceability matrix.")
+    # Diagram validity (8%): actually validated via mermaid_utils, never
+    # assumed true.
+    diagrams_ok = diagram_validation.get("ok", False)
+    diagram_issues = diagram_validation.get("issues", [])
+    if not diagrams_ok:
+        warnings.extend(f"Diagram warning: {issue}" for issue in diagram_issues)
+        failed_checks.append("One or more Mermaid diagrams failed structural validation.")
+
+    # Assumption transparency (7%)
+    assumption_transparency = 100
+    if (used_fallback or facts.assumptions) and not assumptions:
+        assumption_transparency = 0
+        failed_checks.append("Assumptions were used but not disclosed in the assumptions section.")
+
+    # Content depth (10%, content-depth batch): distinguishes genuinely
+    # detailed content (multiple acceptance criteria/processing steps per
+    # FR, multi-step use-case flows, entities with real domain fields,
+    # fully-stated screen states, tests with real numbered steps, a
+    # complete AI report) from shallow one-line filler -- the previous
+    # score treated a 4-FR, one-sentence-each fallback identically to a
+    # detailed one as long as the section was merely non-empty.
+    def _avg(values: List[int]) -> float:
+        return (sum(values) / len(values)) if values else 0.0
+
+    avg_acceptance_criteria = _avg([len(fr.acceptanceCriteria) for fr in frs])
+    avg_processing_steps = _avg([len([s for s in fr.systemBehavior.split(";") if s.strip()]) for fr in frs])
+    avg_mainflow_steps = _avg([len(uc.mainFlow) for uc in use_cases])
+    pct_entities_rich = (sum(1 for e in entities if len(e.fields) >= 5) / len(entities) * 100) if entities else 100
+    pct_screens_full_states = (
+        sum(1 for s in ui_screens if s.loadingState and s.emptyState and s.errorState and s.successState) / len(ui_screens) * 100
+    ) if ui_screens else 100
+    pct_tests_real_steps = (sum(1 for t in tests if len(t.steps) >= 2) / len(tests) * 100) if tests else 100
+
+    ai_report_completeness = 100.0
+    if ai_applicable:
+        if ai_report is None:
+            ai_report_completeness = 0.0
+            failed_checks.append("AI technical report is applicable but missing.")
             critical_issues_count += 1
-        if untraced_count >= 4:
-            failed_checks.append(f"{untraced_count} functional requirements are missing from traceability.")
-
-        # Project specificity (12%)
-        specificity = 100
-        title_lower = facts.title.lower()
-        if "fypilot" in title_lower or "final year project" in title_lower and "pilot" in title_lower:
-            pass  # this genuinely is FYPilot; no penalty
         else:
-            text_blob = " ".join(
-                [architecture.explanation]
-                + [fr.description for fr in frs[:5]]
-                + [uc.goal for uc in use_cases[:5]]
-            ).lower()
-            if "fypilot" in text_blob:
-                specificity = 0
-                failed_checks.append("Generated content references FYPilot instead of the selected project.")
-                critical_issues_count += 1
-            elif facts.title and title_lower not in text_blob and facts.domain.lower() not in text_blob:
-                specificity = 60
-                warnings.append("Some sections do not clearly reference this project's title or domain.")
+            report_values = ai_report.model_dump()
+            filled = sum(1 for v in report_values.values() if v not in (None, "", []))
+            ai_report_completeness = round((filled / len(report_values)) * 100) if report_values else 0
+            if ai_report_completeness < 80:
+                failed_checks.append("AI technical report has empty/placeholder fields.")
 
-        # Diagram validity (8%): actually validated via mermaid_utils, never
-        # assumed true.
-        diagrams_ok = diagram_validation.get("ok", False)
-        diagram_issues = diagram_validation.get("issues", [])
-        if not diagrams_ok:
-            warnings.extend(f"Diagram warning: {issue}" for issue in diagram_issues)
-            failed_checks.append("One or more Mermaid diagrams failed structural validation.")
+    depth_components = [
+        min(100.0, (avg_acceptance_criteria / 2) * 100),
+        min(100.0, (avg_processing_steps / 3) * 100),
+        min(100.0, (avg_mainflow_steps / 5) * 100) if use_cases else 100.0,
+        pct_entities_rich,
+        pct_screens_full_states,
+        pct_tests_real_steps,
+        ai_report_completeness,
+    ]
+    content_depth = round(sum(depth_components) / len(depth_components))
+    if content_depth < 60:
+        warnings.append("Generated content is shallow (few acceptance criteria/processing steps/flow steps per item).")
 
-        # Assumption transparency (7%)
-        assumption_transparency = 100
-        if (used_fallback or facts.assumptions) and not assumptions:
-            assumption_transparency = 0
-            failed_checks.append("Assumptions were used but not disclosed in the assumptions section.")
+    # Database quality (7%): PK presence, no plaintext password, valid FKs
+    database_quality = 100
+    entities_without_pk = [e.name for e in entities if not any(f.isPrimaryKey for f in e.fields)]
+    if entities_without_pk:
+        database_quality = min(database_quality, 50)
+        failed_checks.append(f"Entities without a primary key: {', '.join(entities_without_pk)}.")
+        critical_issues_count += 1
+    plaintext_password_entities = [
+        e.name for e in entities if any(f.name.strip().lower() == "password" for f in e.fields)
+    ]
+    if plaintext_password_entities:
+        database_quality = min(database_quality, 40)
+        failed_checks.append(f"Plaintext 'Password' field found on: {', '.join(plaintext_password_entities)}.")
+        critical_issues_count += 1
+    if entities_with_empty_fields:
+        database_quality = min(database_quality, 40)
 
-        # Content depth (10%, content-depth batch): distinguishes genuinely
-        # detailed content (multiple acceptance criteria/processing steps per
-        # FR, multi-step use-case flows, entities with real domain fields,
-        # fully-stated screen states, tests with real numbered steps, a
-        # complete AI report) from shallow one-line filler -- the previous
-        # score treated a 4-FR, one-sentence-each fallback identically to a
-        # detailed one as long as the section was merely non-empty.
-        def _avg(values: List[int]) -> float:
-            return (sum(values) / len(values)) if values else 0.0
+    criterion_values = {
+        "completeness": completeness,
+        "requirementTestability": testability,
+        "crossSectionConsistency": consistency,
+        "traceabilityCoverage": traceability_coverage,
+        "projectSpecificity": specificity,
+        "diagramValidity": 100 if diagrams_ok else 60,
+        "assumptionTransparency": assumption_transparency,
+        "databaseQuality": database_quality,
+        "contentDepth": content_depth,
+    }
 
-        avg_acceptance_criteria = _avg([len(fr.acceptanceCriteria) for fr in frs])
-        avg_processing_steps = _avg([len([s for s in fr.systemBehavior.split(";") if s.strip()]) for fr in frs])
-        avg_mainflow_steps = _avg([len(uc.mainFlow) for uc in use_cases])
-        pct_entities_rich = (sum(1 for e in entities if len(e.fields) >= 5) / len(entities) * 100) if entities else 100
-        pct_screens_full_states = (
-            sum(1 for s in ui_screens if s.loadingState and s.emptyState and s.errorState and s.successState) / len(ui_screens) * 100
-        ) if ui_screens else 100
-        pct_tests_real_steps = (sum(1 for t in tests if len(t.steps) >= 2) / len(tests) * 100) if tests else 100
+    overall = round(sum(
+        criterion_values[name] * weight for name, weight in QUALITY_CRITERION_WEIGHTS.items()
+    ))
+    if used_fallback:
+        overall = min(overall, 70)
+    if untraced_count >= 4:
+        overall = min(overall, 75)
+    if critical_issues_count > 0:
+        overall = min(overall, 70)
 
-        ai_report_completeness = 100.0
-        if ai_applicable:
-            if ai_report is None:
-                ai_report_completeness = 0.0
-                failed_checks.append("AI technical report is applicable but missing.")
-                critical_issues_count += 1
-            else:
-                report_values = ai_report.model_dump()
-                filled = sum(1 for v in report_values.values() if v not in (None, "", []))
-                ai_report_completeness = round((filled / len(report_values)) * 100) if report_values else 0
-                if ai_report_completeness < 80:
-                    failed_checks.append("AI technical report has empty/placeholder fields.")
+    coverage_statistics = {
+        "requirementsCoveredByUseCases": sum(1 for row in traceability if row.useCaseIds),
+        "requirementsCoveredByTests": sum(1 for row in traceability if row.testCaseIds),
+        "requirementsCoveredByModules": sum(1 for row in traceability if row.moduleIds),
+        "requirementsCoveredByScreens": sum(1 for row in traceability if row.screenIds),
+        "requirementsCoveredByEntities": sum(1 for row in traceability if row.entityIds),
+        "requirementsCoveredByApis": sum(1 for row in traceability if row.apiIds),
+        "totalFunctionalRequirements": len(frs),
+    }
 
-        depth_components = [
-            min(100.0, (avg_acceptance_criteria / 2) * 100),
-            min(100.0, (avg_processing_steps / 3) * 100),
-            min(100.0, (avg_mainflow_steps / 5) * 100) if use_cases else 100.0,
-            pct_entities_rich,
-            pct_screens_full_states,
-            pct_tests_real_steps,
-            ai_report_completeness,
-        ]
-        content_depth = round(sum(depth_components) / len(depth_components))
-        if content_depth < 60:
-            warnings.append("Generated content is shallow (few acceptance criteria/processing steps/flow steps per item).")
-
-        # Database quality (7%): PK presence, no plaintext password, valid FKs
-        database_quality = 100
-        entities_without_pk = [e.name for e in entities if not any(f.isPrimaryKey for f in e.fields)]
-        if entities_without_pk:
-            database_quality = min(database_quality, 50)
-            failed_checks.append(f"Entities without a primary key: {', '.join(entities_without_pk)}.")
-            critical_issues_count += 1
-        plaintext_password_entities = [
-            e.name for e in entities if any(f.name.strip().lower() == "password" for f in e.fields)
-        ]
-        if plaintext_password_entities:
-            database_quality = min(database_quality, 40)
-            failed_checks.append(f"Plaintext 'Password' field found on: {', '.join(plaintext_password_entities)}.")
-            critical_issues_count += 1
-        if entities_with_empty_fields:
-            database_quality = min(database_quality, 40)
-
-        criterion_values = {
-            "completeness": completeness,
-            "requirementTestability": testability,
-            "crossSectionConsistency": consistency,
-            "traceabilityCoverage": traceability_coverage,
-            "projectSpecificity": specificity,
-            "diagramValidity": 100 if diagrams_ok else 60,
-            "assumptionTransparency": assumption_transparency,
-            "databaseQuality": database_quality,
-            "contentDepth": content_depth,
-        }
-
-        overall = round(sum(
-            criterion_values[name] * weight for name, weight in QUALITY_CRITERION_WEIGHTS.items()
-        ))
-        if used_fallback:
-            overall = min(overall, 70)
-        if untraced_count >= 4:
-            overall = min(overall, 75)
-        if critical_issues_count > 0:
-            overall = min(overall, 70)
-
-        coverage_statistics = {
-            "requirementsCoveredByUseCases": sum(1 for row in traceability if row.useCaseIds),
-            "requirementsCoveredByTests": sum(1 for row in traceability if row.testCaseIds),
-            "requirementsCoveredByModules": sum(1 for row in traceability if row.moduleIds),
-            "requirementsCoveredByScreens": sum(1 for row in traceability if row.screenIds),
-            "requirementsCoveredByEntities": sum(1 for row in traceability if row.entityIds),
-            "requirementsCoveredByApis": sum(1 for row in traceability if row.apiIds),
-            "totalFunctionalRequirements": len(frs),
-        }
-
-        return QualityAssessmentDto(
-            overallScore=max(0, min(100, overall)),
-            criterionScores={name: int(score) for name, score in criterion_values.items()},
-            failedChecks=failed_checks,
-            warnings=warnings,
-            missingInformation=missing_information,
-            assumptionsCount=len(assumptions),
-            criticalIssuesCount=critical_issues_count,
-            coverageStatistics=coverage_statistics,
-        )
+    return QualityAssessmentDto(
+        overallScore=max(0, min(100, overall)),
+        criterionScores={name: int(score) for name, score in criterion_values.items()},
+        failedChecks=failed_checks,
+        warnings=warnings,
+        missingInformation=missing_information,
+        assumptionsCount=len(assumptions),
+        criticalIssuesCount=critical_issues_count,
+        coverageStatistics=coverage_statistics,
+    )
 
 
 _FRONTEND_KEYWORDS = ["razor", "react", "angular", "vue", "blazor", "flutter", "android", "ios", "swift", "kotlin", "html", "css", "bootstrap", "tailwind", "next.js", "nextjs"]

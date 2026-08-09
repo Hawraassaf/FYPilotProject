@@ -311,6 +311,46 @@ def resolve_rewrite_closure(candidate: Candidate, blocking_issues: list[Reviewer
     )
 
 
+def group_blocking_issues_by_primary_sections(
+    candidate: Candidate, blocking_issues: list[ReviewerIssue],
+) -> list[tuple[frozenset[str], list[ReviewerIssue]]]:
+    """
+    Groups blocking_issues by the primary top-level section root(s) each
+    issue's affectedField resolves to (via the same _roots_from_affected_field
+    resolve_rewrite_closure itself uses), so ReviewPipeline can issue one
+    rewrite_targeted call per group instead of a single call spanning every
+    blocking issue at once -- the bundled-call behavior that can produce a
+    response large enough to hit a provider's max_tokens ceiling (see this
+    module's docstring for the ~30,000-token incident that motivated payload
+    scoping here in the first place; this per-group split narrows the same
+    request further, to one call per primary root or tightly-coupled set of
+    roots).
+
+    Issues that resolve to the exact same root set are merged into one group
+    (so an issue naming two sections at once is never split across two
+    separate, inconsistent calls). Returned as a list of (root_set, issues)
+    pairs in deterministic order (sorted by the group's own root set), never
+    dict iteration order. Raises ScopeResolutionError -- same contract as
+    resolve_rewrite_closure -- for any issue whose affectedField cannot be
+    resolved; never silently drops an issue or widens its scope to guess.
+    """
+    if not blocking_issues:
+        raise ScopeResolutionError("No blocking issues supplied; cannot resolve a rewrite scope.")
+
+    groups: dict[frozenset[str], list[ReviewerIssue]] = {}
+    for issue in blocking_issues:
+        roots = _roots_from_affected_field(candidate, issue.affectedField)
+        if not roots:
+            raise ScopeResolutionError(
+                f"Could not resolve a narrow rewrite scope for affectedField={issue.affectedField!r}; "
+                "refusing to fall back to the complete document."
+            )
+        key = frozenset(roots)
+        groups.setdefault(key, []).append(issue)
+
+    return [(key, groups[key]) for key in sorted(groups.keys(), key=lambda roots: sorted(roots))]
+
+
 def build_compact_rewrite_candidate(candidate: Candidate, closure: RewriteClosure) -> dict[str, Any]:
     """The (possibly row-filtered) subset of `candidate` sent for correction."""
     payload: dict[str, Any] = {}

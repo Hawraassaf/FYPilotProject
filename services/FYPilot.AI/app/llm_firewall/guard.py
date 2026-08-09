@@ -61,6 +61,15 @@ class GuardedResult:
     provider: str | None = None
     model: str | None = None
     sources: list[dict[str, Any]] = field(default_factory=list)
+    # Carried straight from LLMResult.parse_diagnostics (see llm_provider.py's
+    # _parse_diagnostics) whenever a provider call actually reached JSON
+    # parsing -- None when no LLMResult was returned at all, or the call
+    # never got that far (e.g. a transport failure). Lets callers (e.g. the
+    # SE Documentation per-section repair loop in pipeline.py) distinguish a
+    # provider response that was truncated (isTruncated=True, stop_reason
+    # max_tokens) from any other provider_failed cause, without re-deriving
+    # that from the free-text `error` string.
+    parse_diagnostics: dict[str, Any] | None = None
 
 
 def output_hash(output: Any) -> str:
@@ -98,6 +107,7 @@ def guarded_call(request: GuardedCallRequest, firewall: LlmFirewall) -> GuardedR
             provider=(llm_result.provider if llm_result else None),
             model=(llm_result.model if llm_result else None),
             input_verdict=input_verdict,
+            parse_diagnostics=(llm_result.parse_diagnostics if llm_result else None),
         )
 
     candidate = llm_result.data if llm_result.data is not None else _parse_text(llm_result.text)

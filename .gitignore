@@ -56,3 +56,6 @@ Thumbs.db
 node_modules/
 
 /src/FYPilot.Web/App_Data/
+
+# SE Documentation opt-in local debug snapshot output (never committed)
+services/FYPilot.AI/debug_snapshots/
