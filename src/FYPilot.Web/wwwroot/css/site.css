@@ -15839,3 +15839,101 @@ body,
     }
 }
 }
+/* Main documentation layout */
+.documentation-layout {
+    display: grid;
+    grid-template-columns: 295px minmax(0, 1fr);
+    gap: 18px;
+
+    /* Change 95px if your top navbar/header has another height */
+    height: calc(100vh - 95px);
+
+    min-height: 0;
+    overflow: hidden;
+    align-items: stretch;
+}
+
+/* Left chapter navigation */
+.documentation-sidebar {
+    height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* Entire right column */
+.documentation-main {
+    display: flex;
+    flex-direction: column;
+
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* Right-side title/download header */
+.documentation-main-header {
+    flex: 0 0 auto;
+}
+
+/* Only this section scrolls */
+.documentation-scroll-area {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+
+    padding-right: 8px;
+    padding-bottom: 30px;
+
+    scrollbar-gutter: stable;
+    scroll-behavior: smooth;
+}
+
+/* Optional professional scrollbar */
+.documentation-scroll-area::-webkit-scrollbar,
+.documentation-sidebar::-webkit-scrollbar {
+    width: 8px;
+}
+
+.documentation-scroll-area::-webkit-scrollbar-track,
+.documentation-sidebar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.documentation-scroll-area::-webkit-scrollbar-thumb,
+.documentation-sidebar::-webkit-scrollbar-thumb {
+    background: #b9c5d8;
+    border-radius: 20px;
+}
+
+.documentation-scroll-area::-webkit-scrollbar-thumb:hover,
+.documentation-sidebar::-webkit-scrollbar-thumb:hover {
+    background: #8fa0ba;
+}
+
+/* Mobile */
+@media (max-width: 992px) {
+    .documentation-layout {
+        display: block;
+        height: auto;
+        overflow: visible;
+    }
+
+    .documentation-sidebar {
+        height: auto;
+        max-height: 320px;
+        margin-bottom: 16px;
+    }
+
+    .documentation-main {
+        height: auto;
+        overflow: visible;
+    }
+
+    .documentation-scroll-area {
+        height: auto;
+        overflow: visible;
+    }
+}

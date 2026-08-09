@@ -77,14 +77,15 @@ public class DocumentationGeneratorServiceTests
         bool displayable,
         string status,
         string warning = "",
-        int attempts = 1) => new(
+        int attempts = 1,
+        List<ReviewerIssueDto>? issues = null) => new(
         Status: status,
         Usable: usable,
         ReviewUnavailable: status == "review_unavailable",
         Warning: warning,
         QualityScore: 80,
         Strengths: [],
-        Issues: [],
+        Issues: issues ?? [],
         DecisionReason: "test",
         Attempts: attempts,
         ReviewerVersion: "review-pipeline-v2",
@@ -121,24 +122,81 @@ public class DocumentationGeneratorServiceTests
         Assert.Equal(1, await db.AiOutputReviews.CountAsync());
     }
 
-    // 2. AI output with review_unavailable, usable=true, displayable=true is persisted with a warning.
     [Fact]
-    public async Task ReviewUnavailable_ButUsableAndDisplayable_IsPersistedWithWarning()
+    public async Task ApprovedWithMinorWarnings_AllOtherGatesValid_IsPersisted()
     {
         var (aiMock, db, service) = NewSut();
         var response = new AiSeDocumentationServiceResponse(
             MinimalValidDocumentation(), "SEDocumentationAgent", true, "deepinfra", "deepinfra",
             "anthropic/claude-opus-4-8", null, null, DateTime.UtcNow, "ok",
-            NewReview(usable: true, displayable: true, status: "review_unavailable", warning: "Semantic review unavailable."));
+            NewReview(usable: true, displayable: true, status: "approved_with_minor_warnings"));
         aiMock.Setup(x => x.GenerateSeDocumentationAsync(It.IsAny<AiSeDocumentationRequest>())).ReturnsAsync(response);
 
         var result = await service.GenerateAsync(NewRequest());
 
         Assert.True(result.Succeeded);
         Assert.True(result.Persisted);
-        Assert.Equal("review_unavailable", result.ReviewStatus);
-        Assert.False(string.IsNullOrWhiteSpace(result.Warning));
+        Assert.Equal("approved_with_minor_warnings", result.ReviewStatus);
         Assert.Equal(1, await db.ProjectDocumentations.CountAsync());
+        Assert.Equal(1, await db.AiOutputReviews.CountAsync());
+    }
+
+    // 2. usable/displayable metadata can never promote a non-accepted review
+    // status into a persistable student document.
+    [Theory]
+    [InlineData("rejected")]
+    [InlineData("review_unavailable")]
+    [InlineData("provider_unavailable")]
+    [InlineData("schema_invalid")]
+    [InlineData("firewall_blocked")]
+    [InlineData("unresolved")]
+    [InlineData("future_unknown_status")]
+    public async Task NonAcceptedReviewStatus_UsableAndDisplayable_IsRejected(string status)
+    {
+        var (aiMock, db, service) = NewSut();
+        var response = new AiSeDocumentationServiceResponse(
+            MinimalValidDocumentation(), "SEDocumentationAgent", true, "deepinfra", "deepinfra",
+            "anthropic/claude-opus-4-8", null, null, DateTime.UtcNow, "ok",
+            NewReview(usable: true, displayable: true, status: status));
+        aiMock.Setup(x => x.GenerateSeDocumentationAsync(It.IsAny<AiSeDocumentationRequest>())).ReturnsAsync(response);
+
+        var result = await service.GenerateAsync(NewRequest());
+
+        Assert.False(result.Succeeded);
+        Assert.False(result.Persisted);
+        Assert.Equal(SeDocumentationErrorCode.ReviewRejected, result.ErrorCode);
+        Assert.Equal(status, result.ReviewStatus);
+        Assert.Equal(0, await db.ProjectDocumentations.CountAsync());
+        Assert.Equal(0, await db.AiOutputReviews.CountAsync());
+    }
+
+    [Fact]
+    public async Task UnresolvedCriticalFinding_IsRejectedEvenWhenUsableAndDisplayable()
+    {
+        var (aiMock, db, service) = NewSut();
+        var criticalIssue = new ReviewerIssueDto(
+            Severity: "critical",
+            RequiresCorrection: true,
+            Category: "project_alignment",
+            AffectedField: "projectOverview",
+            Description: "The candidate contains unresolved cross-project content.",
+            RevisionInstruction: "Remove the unrelated content.");
+        var response = new AiSeDocumentationServiceResponse(
+            MinimalValidDocumentation(), "SEDocumentationAgent", true, "deepinfra", "deepinfra",
+            "anthropic/claude-opus-4-8", null, null, DateTime.UtcNow, "ok",
+            NewReview(
+                usable: true,
+                displayable: true,
+                status: "rejected",
+                issues: [criticalIssue]));
+        aiMock.Setup(x => x.GenerateSeDocumentationAsync(It.IsAny<AiSeDocumentationRequest>())).ReturnsAsync(response);
+
+        var result = await service.GenerateAsync(NewRequest());
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(SeDocumentationErrorCode.ReviewRejected, result.ErrorCode);
+        Assert.Equal(0, await db.ProjectDocumentations.CountAsync());
+        Assert.Equal(0, await db.AiOutputReviews.CountAsync());
     }
 
     // 3. Python fallback with llmUsed=false is rejected.
@@ -267,6 +325,41 @@ public class DocumentationGeneratorServiceTests
         Assert.Equal(1, await db.ProjectDocumentations.CountAsync());
         var stillThere = await db.ProjectDocumentations.FindAsync(existingId);
         Assert.NotNull(stillThere);
+
+        var preserved = await service.GetLatestForIdeaAsync(request.ProjectIdeaId);
+        Assert.NotNull(preserved);
+        Assert.Equal(existingId, preserved!.Id);
+    }
+
+    [Fact]
+    public async Task RejectedDiagnosticShape_LeavesPreviousAcceptedDocumentUnchanged()
+    {
+        var (aiMock, db, service) = NewSut();
+        var request = NewRequest();
+
+        var acceptedResponse = new AiSeDocumentationServiceResponse(
+            MinimalValidDocumentation(), "SEDocumentationAgent", true, "deepinfra", "deepinfra",
+            "anthropic/claude-opus-4-8", null, null, DateTime.UtcNow, "ok",
+            NewReview(usable: true, displayable: true, status: "approved"));
+        aiMock.Setup(x => x.GenerateSeDocumentationAsync(It.IsAny<AiSeDocumentationRequest>())).ReturnsAsync(acceptedResponse);
+        var firstResult = await service.GenerateAsync(request);
+        Assert.True(firstResult.Succeeded);
+        var existingId = firstResult.Documentation!.Id;
+
+        // This is the exact legacy diagnostic-bypass response shape. The
+        // independent .NET allowlist must reject it despite both flags.
+        var rejectedResponse = new AiSeDocumentationServiceResponse(
+            MinimalValidDocumentation(), "SEDocumentationAgent", true, "deepinfra", "deepinfra",
+            "anthropic/claude-opus-4-8", null, null, DateTime.UtcNow, "diagnostic",
+            NewReview(usable: true, displayable: true, status: "rejected"));
+        aiMock.Setup(x => x.GenerateSeDocumentationAsync(It.IsAny<AiSeDocumentationRequest>())).ReturnsAsync(rejectedResponse);
+
+        var secondResult = await service.GenerateAsync(request);
+
+        Assert.False(secondResult.Succeeded);
+        Assert.Equal(SeDocumentationErrorCode.ReviewRejected, secondResult.ErrorCode);
+        Assert.Equal(1, await db.ProjectDocumentations.CountAsync());
+        Assert.Equal(1, await db.AiOutputReviews.CountAsync());
 
         var preserved = await service.GetLatestForIdeaAsync(request.ProjectIdeaId);
         Assert.NotNull(preserved);

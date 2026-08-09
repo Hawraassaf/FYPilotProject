@@ -169,6 +169,41 @@ _DEPENDENCIES: dict[str, set[str]] = {
 }
 
 
+# A traceabilityMatrix finding's affectedField commonly names WHICH
+# dimension is wrong (e.g. "traceabilityMatrix[FR-01].entityIds") -- these
+# are the exact plural/singular field names TraceabilityDto itself uses
+# (see se_documentation_orchestrator.py), so this mapping is precise, not a
+# fuzzy keyword guess: each one identifies the SINGLE child section whose
+# own relatedRequirements/relatedRequirementIds field actually owns that
+# reference (rebuild_traceability_matrix reverse-indexes from exactly these
+# same fields). Normalizing to that section, instead of the derived
+# "traceabilityMatrix" root itself (see _NEVER_LLM_REWRITABLE_FIELDS), is
+# what lets a targeted rewrite actually reach and fix the real reference.
+_TRACEABILITY_DIMENSION_SOURCES: dict[str, str] = {
+    "entityids": "databaseEntities",
+    "entity": "databaseEntities",
+    "moduleids": "systemModules",
+    "moduleid": "systemModules",
+    "usecaseids": "useCases",
+    "usecaseid": "useCases",
+    "testcaseids": "testingPlan",
+    "testcaseid": "testingPlan",
+    "screenids": "uiScreens",
+    "screenid": "uiScreens",
+    "apiids": "apiIntegrationPoints",
+    "apiid": "apiIntegrationPoints",
+}
+
+
+def _traceability_dimension_source(candidate: Candidate, affected_field: str) -> set[str]:
+    lowered = re.sub(r"[^a-z]", "", (affected_field or "").lower())
+    matched: set[str] = set()
+    for suffix, section in _TRACEABILITY_DIMENSION_SOURCES.items():
+        if suffix in lowered:
+            matched.add(section)
+    return _match_existing_keys(candidate, matched)
+
+
 _ROOT_PATH_RE = re.compile(r"^[\s`'\"]*([A-Za-z_][A-Za-z0-9_]*)")
 
 
@@ -202,6 +237,14 @@ def _roots_from_affected_field(candidate: Candidate, affected_field: str) -> set
     if direct_match:
         direct = _match_existing_keys(candidate, [direct_match.group(1)])
         if direct:
+            if "traceabilityMatrix" in direct:
+                # traceabilityMatrix itself is never a real fix target (see
+                # _NEVER_LLM_REWRITABLE_FIELDS) -- also resolve the actual
+                # child section the affected dimension (entityIds/
+                # moduleIds/useCaseIds/testCaseIds/screenIds/apiIds) comes
+                # from, so the caller still has a real, minimal closure to
+                # act on instead of only a field that gets discarded.
+                direct = direct | _traceability_dimension_source(candidate, raw)
             return direct
 
     normalised = _normalise_text(raw)
@@ -218,7 +261,10 @@ def _roots_from_affected_field(candidate: Candidate, affected_field: str) -> set
         ):
             possible.update(keys)
 
-    return _match_existing_keys(candidate, possible)
+    matched = _match_existing_keys(candidate, possible)
+    if "traceabilityMatrix" in matched:
+        matched = matched | _traceability_dimension_source(candidate, raw)
+    return matched
 
 
 def revision_scope_for(

@@ -443,7 +443,7 @@ else
                                 <div class="roadmap-gantt-weeks" style="--week-count:@totalWeeks;">
                                     @for (var week = 1; week <= totalWeeks; week++)
                                     {
-                                        <div class="roadmap-gantt-week">W@week</div>
+                                        <div class="roadmap-gantt-week">W@(week)</div>
                                     }
                                 </div>
 
@@ -475,7 +475,10 @@ else
                                                 data-phase-select="@phaseKey"
                                                 title="@(phase.Name): week @entry.DisplayStartWeek to @entry.WithinTargetEndWeek@(isPartial ? " (continues beyond target duration)" : "")">
                                             <strong>@duration wk@(isPartial ? "+" : "")</strong>
-                                            <span>@tasks.Count task(s)</span>
+                                            @if (duration >= 2)
+                                            {
+                                                <span>@tasks.Count task(s)</span>
+                                            }
                                         </button>
                                     </div>
                                 }
@@ -1448,19 +1451,24 @@ else
 
         .roadmap-summary-strip {
             display: grid;
-            grid-template-columns: repeat(8, minmax(0, 1fr));
+            grid-template-columns: repeat(4, minmax(0, 1fr));
             overflow: hidden;
             border-radius: 15px;
         }
 
         .roadmap-summary-item {
             min-width: 0;
-            padding: .85rem .9rem;
+            padding: .9rem 1rem;
             border-right: 1px solid var(--roadmap-border);
+            border-bottom: 1px solid var(--roadmap-border);
         }
 
-            .roadmap-summary-item:last-child {
+            .roadmap-summary-item:nth-child(4n) {
                 border-right: 0;
+            }
+
+            .roadmap-summary-item:nth-last-child(-n + 4) {
+                border-bottom: 0;
             }
 
             .roadmap-summary-item span {
@@ -1474,12 +1482,14 @@ else
             }
 
             .roadmap-summary-item strong {
-                display: block;
+                display: -webkit-box;
                 color: var(--roadmap-text);
-                font-size: .82rem;
-                white-space: nowrap;
+                font-size: .84rem;
+                line-height: 1.35;
+                white-space: normal;
                 overflow: hidden;
-                text-overflow: ellipsis;
+                -webkit-box-orient: vertical;
+                -webkit-line-clamp: 2;
             }
 
         .roadmap-summary-estimate {
@@ -1527,9 +1537,18 @@ else
 
         .roadmap-workspace {
             display: grid;
-            grid-template-columns: minmax(220px, .72fr) minmax(0, 2.25fr) minmax(250px, .85fr);
+            grid-template-columns: minmax(245px, 285px) minmax(0, 1fr);
             align-items: start;
             gap: 1rem;
+            min-width: 0;
+        }
+
+        .roadmap-workspace > *,
+        .roadmap-main-column,
+        .roadmap-gantt-card,
+        .roadmap-gantt-scroll {
+            min-width: 0;
+            max-width: 100%;
         }
 
         .roadmap-phase-nav,
@@ -1540,6 +1559,12 @@ else
         }
 
         .roadmap-phase-nav {
+            position: sticky;
+            top: 1rem;
+            display: flex;
+            flex-direction: column;
+            max-height: calc(100vh - 2rem);
+            min-width: 0;
             overflow: hidden;
         }
 
@@ -1583,7 +1608,23 @@ else
 
         .roadmap-phase-list {
             display: grid;
+            min-height: 0;
             padding: .45rem;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            scrollbar-gutter: stable;
+        }
+
+        .roadmap-phase-list::-webkit-scrollbar,
+        .roadmap-gantt-scroll::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        .roadmap-phase-list::-webkit-scrollbar-thumb,
+        .roadmap-gantt-scroll::-webkit-scrollbar-thumb {
+            background: #b9c5d4;
+            border-radius: 999px;
         }
 
         .roadmap-phase-tab {
@@ -1704,14 +1745,18 @@ else
             }
 
         .roadmap-gantt-scroll {
+            width: 100%;
+            max-width: 100%;
             overflow-x: auto;
+            overflow-y: hidden;
+            overscroll-behavior-inline: contain;
             padding: .9rem;
         }
 
         .roadmap-gantt {
-            min-width: max(760px, calc(var(--week-count) * 52px + 180px));
+            min-width: max(820px, calc(var(--week-count) * 44px + 210px));
             display: grid;
-            grid-template-columns: 175px minmax(0, 1fr);
+            grid-template-columns: 210px minmax(0, 1fr);
             align-items: stretch;
             border: 1px solid var(--roadmap-border);
             border-radius: 12px;
@@ -1798,12 +1843,12 @@ else
 
         .roadmap-gantt-bar {
             min-width: 0;
-            height: 30px;
+            height: 32px;
             margin: 0 4px;
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            gap: .35rem;
+            justify-content: center;
+            gap: .4rem;
             padding: 0 .55rem;
             color: #fff;
             background: #a8b1bd;
@@ -2086,18 +2131,22 @@ else
             }
 
         .roadmap-capacity-panel {
-            position: sticky;
-            top: 1rem;
+            position: static;
+            grid-column: 1 / -1;
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
             overflow: hidden;
         }
 
         .roadmap-side-section {
+            min-width: 0;
             padding: 1rem;
-            border-bottom: 1px solid var(--roadmap-border);
+            border-right: 1px solid var(--roadmap-border);
+            border-bottom: 0;
         }
 
             .roadmap-side-section:last-child {
-                border-bottom: 0;
+                border-right: 0;
             }
 
         .roadmap-side-heading {
@@ -2573,13 +2622,11 @@ else
             }
 
             .roadmap-workspace {
-                grid-template-columns: minmax(210px, .7fr) minmax(0, 2fr);
+                grid-template-columns: minmax(225px, 260px) minmax(0, 1fr);
             }
 
             .roadmap-capacity-panel {
-                position: static;
                 grid-column: 1 / -1;
-                display: grid;
                 grid-template-columns: repeat(3, minmax(0, 1fr));
             }
 
@@ -2622,6 +2669,8 @@ else
             }
 
             .roadmap-phase-nav {
+                position: static;
+                max-height: none;
                 overflow-x: auto;
             }
 
@@ -2778,6 +2827,30 @@ else
                 .roadmap-side-section:last-child {
                     border-bottom: 0;
                 }
+        }
+
+        @@media (min-width: 1900px) {
+            .roadmap-workspace {
+                grid-template-columns: minmax(245px, 285px) minmax(0, 1fr) minmax(290px, 330px);
+            }
+
+            .roadmap-capacity-panel {
+                position: sticky;
+                top: 1rem;
+                grid-column: auto;
+                display: block;
+                max-height: calc(100vh - 2rem);
+                overflow-y: auto;
+            }
+
+            .roadmap-side-section {
+                border-right: 0;
+                border-bottom: 1px solid var(--roadmap-border);
+            }
+
+            .roadmap-side-section:last-child {
+                border-bottom: 0;
+            }
         }
 
         @@media (prefers-reduced-motion: reduce) {

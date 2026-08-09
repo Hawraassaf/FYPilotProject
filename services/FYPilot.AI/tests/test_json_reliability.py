@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -239,6 +240,89 @@ class ParseJsonResponseTests(unittest.TestCase):
         outcome = jr.parse_json_response('{"roadmapTitle": "Exact Preserved Title" "phases": [' + "a" * 400, repair_fn=repair_fn)
         self.assertTrue(outcome.success)
         self.assertEqual(outcome.data["roadmapTitle"], "Exact Preserved Title")
+
+    def test_repair_output_that_is_itself_truncated_recalculates_is_truncated_true(self):
+        # The ORIGINAL candidate is complete-but-malformed (unbalanced, not
+        # truncated) -- a repair_fn that returns something CUT OFF mid-object
+        # must make the final outcome report is_truncated=True, describing
+        # the repair attempt's own output, not the original candidate's
+        # (non-truncated) shape. Observed live 2026-08-06: a provider_repair
+        # call that itself hit its max_tokens ceiling was logged with
+        # whatever the ORIGINAL failure's truncation status happened to be,
+        # which could not distinguish "repair also truncated" from "repair
+        # produced different malformed JSON".
+        # Padded well past is_substantial's 400-char/6-quote threshold so the
+        # provider_repair path is actually reached rather than short-
+        # circuiting as "too small to bother repairing".
+        original = '{"a": 1 "b": "' + "x" * 450 + '"}'  # malformed (missing comma), but complete
+        self.assertFalse(jr.looks_truncated(original))
+
+        def repair_fn(candidate, error):
+            return '{"a": 1, "b": [1, 2, 3'  # incomplete array, cut off
+
+        # Isolates the behavior under test (provider_repair's own recompute)
+        # from whether the local `json_repair` library happens to be
+        # installed and able to silently fix THIS particular malformed input
+        # on its own -- if it did, repair_fn below would never even run.
+        with patch.object(jr, "_try_local_repair", return_value=None):
+            outcome = jr.parse_json_response(original, repair_fn=repair_fn)
+        self.assertFalse(outcome.success)
+        self.assertEqual(outcome.repair_method, "provider_repair")
+        self.assertFalse(outcome.repair_success)
+        self.assertTrue(outcome.is_truncated)
+
+    def test_repair_output_that_is_malformed_but_not_truncated_recalculates_is_truncated_false(self):
+        # The ORIGINAL candidate IS truncated (cut off mid-string) -- a
+        # repair_fn that returns something COMPLETE but differently
+        # malformed (e.g. a stray syntax slip introduced while regenerating)
+        # must make the final outcome report is_truncated=False, since the
+        # repair attempt's own output was not cut off.
+        original = '{"a": 1, "c": "x", "d": "y", "e": "z", "b": "' + "x" * 450 + " unterminated"
+        self.assertTrue(jr.looks_truncated(original))
+
+        def repair_fn(candidate, error):
+            return '{"a": 1 "b": "complete but missing a comma"}'  # complete, malformed
+
+        outcome = jr.parse_json_response(original, repair_fn=repair_fn)
+        self.assertFalse(outcome.success)
+        self.assertEqual(outcome.repair_method, "provider_repair")
+        self.assertFalse(outcome.repair_success)
+        self.assertFalse(outcome.is_truncated)
+
+    def test_repair_output_error_context_describes_the_repaired_candidate(self):
+        # error_context (line/column/position/context excerpt) must also
+        # describe the REPAIRED candidate's own parse failure when a repair
+        # was attempted, not be left stale from the original error.
+        original = '{"a": 1 "b": 2, "extra": "padding to be substantial enough' + "x" * 400 + '"}'
+
+        def repair_fn(candidate, error):
+            return '{"totally": "different" "shape": true}'
+
+        with patch.object(jr, "_try_local_repair", return_value=None):
+            outcome = jr.parse_json_response(original, repair_fn=repair_fn)
+        self.assertFalse(outcome.repair_success)
+        self.assertIn("different", outcome.error_context["context"])
+
+    def test_repair_never_called_still_reports_original_truncation(self):
+        # No repair_fn at all (schema_description omitted upstream) -- the
+        # final outcome must still describe the ORIGINAL candidate's
+        # truncation status; there is nothing to recalculate against.
+        text = '{"roadmapTitle": "Test", "phases": [{"name": "Requirements", "tasks": ["a", "b'
+        outcome = jr.parse_json_response(text)
+        self.assertFalse(outcome.repair_attempted)
+        self.assertTrue(outcome.is_truncated)
+
+    def test_finish_reason_max_tokens_forces_truncated_classification(self):
+        # Anthropic (and other providers) expose an explicit stop_reason
+        # even when the candidate text happens to balance -- finish_reason
+        # alone must be enough to classify as truncated.
+        complete_looking = '{"a": 1, "b": 2}'
+        self.assertFalse(jr.looks_truncated(complete_looking))
+        self.assertTrue(jr.looks_truncated(complete_looking, finish_reason="max_tokens"))
+
+    def test_finish_reason_end_turn_does_not_force_truncated_classification(self):
+        complete_looking = '{"a": 1, "b": 2}'
+        self.assertFalse(jr.looks_truncated(complete_looking, finish_reason="end_turn"))
 
     def test_irreparable_garbage_is_classified_invalid_json_syntax(self):
         outcome = jr.parse_json_response("this is not json in any way {{{")

@@ -332,6 +332,20 @@ def resolve_structural_repair_plan(
             "request or silently widen its scope to compensate."
         )
 
+    return _full_repair_plan(
+        candidate, validation_errors, expected_schema,
+        agent_name=agent_name, effective_limit=effective_limit,
+    )
+
+
+def _full_repair_plan(
+    candidate: Candidate,
+    validation_errors: list[dict[str, Any]],
+    expected_schema: dict[str, Any],
+    *,
+    agent_name: str,
+    effective_limit: int,
+) -> StructuralRepairPlan:
     full_prompt = build_structural_repair_prompt(
         candidate, agent_name=agent_name, validation_errors=validation_errors, expected_schema=expected_schema,
     )
@@ -345,6 +359,86 @@ def resolve_structural_repair_plan(
         f"configured safe limit ({effective_limit}) and no section-scoped repair "
         "could be resolved."
     )
+
+
+def resolve_structural_repair_plans(
+    candidate: Candidate,
+    validation_errors: list[dict[str, Any]],
+    expected_schema: dict[str, Any],
+    *,
+    agent_name: str,
+    schema_cls: type[BaseModel],
+    full_payload_token_limit: int = SE_DOC_STRUCTURAL_REPAIR_MAX_PROMPT_TOKENS,
+    safety_margin_tokens: int = SE_DOC_STRUCTURAL_REPAIR_PROMPT_SAFETY_MARGIN_TOKENS,
+) -> list[StructuralRepairPlan]:
+    """
+    Like resolve_structural_repair_plan, but never bundles more than one
+    top-level section into a single repair request: when validation errors
+    resolve to N distinct sections, returns N single-section
+    StructuralRepairPlan entries (one LLM call each), in deterministic
+    (sorted section name) order. Callers MUST issue one fix_structure_scoped
+    call per returned plan and merge each response before moving to the
+    next -- never join the plans back into one request.
+
+    Falls back to the SAME single-element full-repair-or-reject behavior as
+    resolve_structural_repair_plan (a list of exactly one plan with
+    use_full_repair=True, or a raised StructuralRepairPayloadTooLargeError)
+    whenever the validation errors cannot be localized to known sections --
+    see resolve_structural_repair_closure's docstring for why that case must
+    never guess a scope.
+
+    Each single-section prompt is measured and gated independently against
+    the same `effective_limit` the bundled path uses; if any one section's
+    OWN prompt alone still exceeds the limit (a single very large section),
+    the whole batch fails honestly via StructuralRepairPayloadTooLargeError
+    rather than silently dropping that section or truncating its content.
+    """
+    effective_limit = full_payload_token_limit - safety_margin_tokens
+
+    try:
+        closure = resolve_structural_repair_closure(candidate, validation_errors)
+    except StructuralRepairScopeError as exc:
+        logger.info("se_documentation.structural_repair_scope_unresolvable reason=%s", exc)
+        return [
+            _full_repair_plan(
+                candidate, validation_errors, expected_schema,
+                agent_name=agent_name, effective_limit=effective_limit,
+            )
+        ]
+
+    plans: list[StructuralRepairPlan] = []
+    for section in sorted(closure.allowed_sections):
+        section_closure = RewriteClosure(
+            primary_sections=frozenset({section}),
+            allowed_sections=frozenset({section}),
+        )
+        compact_candidate = build_compact_rewrite_candidate(candidate, section_closure)
+        schema_fragment = build_schema_fragment(schema_cls, section_closure.allowed_sections)
+        section_prompt = build_structural_repair_scope_prompt(
+            agent_name=agent_name,
+            compact_candidate=compact_candidate,
+            validation_errors=validation_errors,
+            closure=section_closure,
+            schema_fragment=schema_fragment,
+        )
+        section_tokens = estimate_tokens(section_prompt)
+
+        if section_tokens > effective_limit:
+            logger.warning(
+                "se_documentation.structural_repair_section_prompt_too_large section=%s tokens=%d limit=%d",
+                section, section_tokens, effective_limit,
+            )
+            raise StructuralRepairPayloadTooLargeError(
+                f"Section-scoped structural repair prompt for {section!r} (~{section_tokens} "
+                f"estimated tokens) exceeds the configured safe limit ({effective_limit}); "
+                "refusing to send an oversized request for even a single section."
+            )
+
+        plans.append(
+            StructuralRepairPlan(closure=section_closure, use_full_repair=False, prompt=section_prompt)
+        )
+
+    return plans
 
 
 def build_structural_repair_scope_prompt(
@@ -456,6 +550,7 @@ __all__ = [
     "SE_DOC_STRUCTURAL_REPAIR_PROMPT_SAFETY_MARGIN_TOKENS",
     "resolve_structural_repair_closure",
     "resolve_structural_repair_plan",
+    "resolve_structural_repair_plans",
     "build_structural_repair_prompt",
     "build_structural_repair_scope_prompt",
     "validate_structural_repair_response",

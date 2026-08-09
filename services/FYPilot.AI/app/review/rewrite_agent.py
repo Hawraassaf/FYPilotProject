@@ -42,8 +42,26 @@ from app.services.llm_provider import LLMResult, ProviderChain, groq_request_tok
 # fixed default so agents with small candidates keep today's ~2200-token
 # behavior (min() floor) while large ones get an adequate budget instead of
 # guaranteed truncation.
+# Raised from 8000 to 14000 (2026-08-06): SE Documentation's own section
+# prompts budget up to 14000 tokens for a single section (aiReport;
+# database/uiApi/testingSecurity budget 12000-13000, see
+# se_documentation_orchestrator.py's _build_section_prompts). A scoped
+# rewrite/structural-repair candidate for one of those sections is the same
+# size as the original generation, so capping the rewrite budget at 8000
+# reproduced the exact same truncation bug this module exists to prevent --
+# observed live truncating mid `entityRelationships` array on the database
+# section, compounded by rewrite_targeted/fix_structure_scoped never wiring
+# schema_description either (so the truncated response couldn't even be
+# provider-repaired).
+# Raised from 14000 to 20000 (2026-08-07): even at 14000, a live rewrite/
+# repair of the database section (large entity field lists +
+# entityRelationships) still truncated mid-response, recovered only via the
+# separate provider_repair retry (see llm_provider.py's _repair_max_tokens).
+# 20000 gives real headroom above what a full database-section echo needs,
+# reducing how often that extra repair round-trip is needed, while staying
+# well under Claude Sonnet 5's own output-token ceiling.
 _MIN_REWRITE_MAX_TOKENS = 2200
-_MAX_REWRITE_MAX_TOKENS = 8000
+_MAX_REWRITE_MAX_TOKENS = 20000
 _REWRITE_MAX_TOKENS_HEADROOM = 1.4
 
 
@@ -214,6 +232,7 @@ Return the corrected complete object as valid JSON only.
         agent_name: str,
         schema_cls: type[BaseModel],
         deadline: float | None = None,
+        max_tokens_override: int | None = None,
     ) -> LLMResult:
         """
         SE Documentation-only targeted rewrite: sends only `closure`'s
@@ -221,6 +240,14 @@ Return the corrected complete object as valid JSON only.
         complete candidate -- see se_documentation_rewrite_scope.py's module
         docstring for why. Every other agent keeps using rewrite() above,
         unchanged.
+
+        `max_tokens_override`, when supplied, is used verbatim instead of
+        _estimate_rewrite_max_tokens's own estimate -- used ONLY by the
+        pipeline's single truncation-retry attempt (see
+        pipeline.py's per-section repair loop) to give a section that just
+        got cut off at its estimated budget more room to complete on its one
+        allowed retry, without needing to change _estimate_rewrite_max_tokens
+        itself (which must stay accurate for every OTHER, non-retry call).
         """
         compact_candidate = build_compact_rewrite_candidate(candidate, closure)
         reference_fields = build_reference_fields(candidate, closure)
@@ -241,6 +268,8 @@ Return the corrected complete object as valid JSON only.
 
         kwargs: dict[str, Any] = {
             "use_search": False,
+            "max_tokens": max_tokens_override or _estimate_rewrite_max_tokens(compact_candidate),
+            "schema_description": schema_fragment,
             "estimated_prompt_tokens": estimate_tokens(prompt),
             "provider_token_limits": {"groq": groq_request_token_limit()},
         }
@@ -288,6 +317,7 @@ Return the corrected complete object as valid JSON only.
         schema_cls: type[BaseModel],
         deadline: float | None = None,
         prompt: str | None = None,
+        max_tokens_override: int | None = None,
     ) -> LLMResult:
         """
         SE Documentation-only scoped structural repair: sends only
@@ -301,14 +331,19 @@ Return the corrected complete object as valid JSON only.
         gated with estimate_tokens() (see resolve_structural_repair_plan) --
         reused verbatim rather than rebuilt, so the measured prompt and the
         sent prompt can never diverge.
+
+        `max_tokens_override`, when supplied, is used verbatim instead of
+        _estimate_rewrite_max_tokens's own estimate -- see
+        rewrite_targeted's matching parameter docstring above; used only for
+        the pipeline's single per-section truncation retry.
         """
+        compact_candidate = build_compact_rewrite_candidate(candidate, closure)
+        schema_fragment = build_schema_fragment(schema_cls, closure.allowed_sections)
+
         if prompt is None:
             from app.review.se_documentation_structural_repair_scope import (
                 build_structural_repair_scope_prompt,
             )
-
-            compact_candidate = build_compact_rewrite_candidate(candidate, closure)
-            schema_fragment = build_schema_fragment(schema_cls, closure.allowed_sections)
 
             prompt = build_structural_repair_scope_prompt(
                 agent_name=agent_name,
@@ -320,6 +355,8 @@ Return the corrected complete object as valid JSON only.
 
         kwargs: dict[str, Any] = {
             "use_search": False,
+            "max_tokens": max_tokens_override or _estimate_rewrite_max_tokens(compact_candidate),
+            "schema_description": schema_fragment,
             "estimated_prompt_tokens": estimate_tokens(prompt),
             "provider_token_limits": {"groq": groq_request_token_limit()},
         }

@@ -32,15 +32,18 @@ from typing import Any, Callable
 from app.llm_firewall.firewall import LlmFirewall
 from app.llm_firewall.guard import GuardedCallRequest, GuardedResult, guarded_call, output_hash
 from app.review.context import ReviewContext
-from app.review.models import AttemptRecord, PipelineResult, ReviewerFindings, RewriteDecision
+from app.review.models import AttemptRecord, PipelineResult, ReviewerFindings, ReviewerIssue, RewriteDecision
 from app.review.registry import AgentReviewConfig, get_agent_config
 from app.review.review_decision_engine import ReviewDecisionEngine
 from app.review.reviewer_agent import ReviewerAgent
 from app.review.rewrite_agent import RewriteAgent
 from app.review.schema_validation import validate_detailed
 from app.review.se_documentation_rewrite_scope import (
+    RewriteClosure,
     ScopeResolutionError,
+    _collect_seed_ids,
     build_compact_rewrite_candidate,
+    group_blocking_issues_by_primary_sections,
     merge_targeted_rewrite,
     resolve_rewrite_closure,
 )
@@ -50,10 +53,55 @@ from app.review.se_documentation_structural_repair_scope import (
     estimate_tokens,
     merge_structural_repair,
     resolve_structural_repair_plan,
+    resolve_structural_repair_plans,
     restore_never_llm_rewritable_fields,
 )
 from app.review.section_scope import apply_scoped_rewrite, revision_scope_for
+from app.review.se_documentation_id_lineage import added_ids, compute_section_lineage, diff_sections_against_baseline
+from app.review.se_documentation_structural_invariants import (
+    RECONCILABLE_KINDS,
+    diagnose_structural_invariants,
+    reconcile_deterministically,
+    rebuild_mermaid_activity_diagram,
+    rebuild_mermaid_class_diagram,
+    rebuild_mermaid_erd,
+    rebuild_mermaid_sequence_diagram,
+    rebuild_traceability_matrix,
+    resolve_minimal_affected_sections,
+)
+from app.review.se_documentation_deterministic_normalization import (
+    normalize_database_entities_dicts,
+    rebuild_assumptions_disclosure,
+)
+from app.review.se_documentation_debug_snapshot import maybe_write_se_documentation_debug_snapshot
+from app.services.json_reliability import OUTPUT_TRUNCATED, classify_truncation_failure
 from app.services.llm_provider import LLMResult, ProviderChain
+
+# Minimum remaining absolute-deadline seconds required before ATTEMPTING one
+# more per-section repair/rewrite LLM call (structural repair loop and SE
+# Documentation's per-primary-section semantic rewrite loop below). Matches
+# ProviderChain._MIN_SECONDS_PER_PROVIDER_ATTEMPT (llm_provider.py) and
+# SEDocumentationOrchestratorAgent._MIN_SECONDS_PER_SECTION_ATTEMPT
+# (se_documentation_orchestrator.py) -- same reasoning: below this many
+# seconds, starting one more provider call has too little chance of
+# completing before the caller's own absolute deadline, so the remaining
+# sections in the queue are left unrepaired (schema/merge validation then
+# fails or succeeds honestly on whatever was actually repaired) rather than
+# starting a call that will almost certainly be cut off by the deadline
+# itself instead of by the provider's own max_tokens.
+_MIN_SECONDS_PER_SECTION_REPAIR_ATTEMPT = 4.0
+
+# Sections whose row-identity field this pipeline can diff against the last
+# known-good candidate to detect a retroactive "added this pass" id/name --
+# see _attempt_se_documentation_invariant_reconciliation. databaseEntities is
+# handled separately (by `name`, not `entityId`/row-identity) because its
+# duplicate check (DUPLICATE_ENTITY_NAME) is itself name-based -- see
+# se_documentation_structural_invariants.py.
+_INVARIANT_DUPLICATE_CHECK_SECTIONS = (
+    "functionalRequirements", "nonFunctionalRequirements", "useCases", "edgeCases",
+    "systemModules", "testingPlan", "uiScreens", "apiIntegrationPoints",
+)
+_INVARIANT_REQUIREMENT_SECTIONS = ("functionalRequirements", "nonFunctionalRequirements")
 
 logger = logging.getLogger("fypilot-review-pipeline")
 
@@ -61,6 +109,19 @@ Candidate = dict[str, Any]
 ReviewedCandidate = tuple[Candidate, ReviewerFindings]
 
 _SE_DOCUMENTATION_AGENT_NAME = "SEDocumentationAgent"
+
+
+def _is_truncated_failure(guarded: GuardedResult) -> bool:
+    """
+    True when a provider_failed GuardedResult's underlying LLMResult was cut
+    off at the provider's own output-token ceiling (stop_reason/finish_reason
+    in {"length", "max_tokens", "max_output_tokens"} -- see
+    json_reliability.looks_truncated), as opposed to any other malformed-JSON
+    or transport cause. See json_reliability.classify_truncation_failure for
+    the underlying classification; this wrapper just turns it into the
+    boolean callers actually branch on.
+    """
+    return classify_truncation_failure(guarded.parse_diagnostics) == OUTPUT_TRUNCATED
 
 
 def _safe_str(value: Any, *, max_length: int = 6000) -> str:
@@ -318,66 +379,113 @@ class ReviewPipeline:
                 )
 
             if self.agent_name == _SE_DOCUMENTATION_AGENT_NAME:
-                # SE Documentation-only path: send only the reviewer-confirmed
-                # sections (row-filtered where possible) instead of the
-                # complete document -- see se_documentation_rewrite_scope.py's
-                # module docstring for the ~30,000-token full-document
-                # rewrite request this replaces. Every other agent falls
+                # SE Documentation-only path: one bounded rewrite call per
+                # PRIMARY section (or tightly-coupled group of sections a
+                # single reviewer finding names together), never one call
+                # spanning every blocking issue -- see
+                # se_documentation_rewrite_scope.py's module docstring for
+                # the ~30,000-token full-document rewrite request this
+                # replaces, and group_blocking_issues_by_primary_sections's
+                # docstring for the per-group split. Every other agent falls
                 # through to the unchanged full-object path below.
                 try:
-                    closure = resolve_rewrite_closure(version, decision.blockingIssues)
+                    issue_groups = group_blocking_issues_by_primary_sections(
+                        version, decision.blockingIssues,
+                    )
                 except ScopeResolutionError as exc:
                     logger.warning("se_documentation.rewrite_scope_resolution_failed reason=%s", exc)
                     return self._review_unavailable_result(
                         state, review_run_id, history, attempt,
                     )
 
-                allowed_rewrite_sections = sorted(closure.allowed_sections)
+                merged_version = version
+                rewrite_result: GuardedResult | None = None
+                last_successful_rewrite_result: GuardedResult | None = None
 
-                rewrite_result = guarded_call(
-                    GuardedCallRequest(
-                        stage="rewrite",
-                        trusted_parts=writer_trusted_parts,
-                        untrusted_parts={
-                            **writer_untrusted_parts,
-                            "candidate_output": _safe_str(build_compact_rewrite_candidate(version, closure)),
-                            "reviewer_findings": _safe_str([i.model_dump() for i in decision.blockingIssues]),
-                            "allowed_rewrite_sections": _safe_str(allowed_rewrite_sections),
-                        },
-                        # No `schema=` here on purpose: the raw LLM response is
-                        # a PARTIAL object (only the allowed sections), which
-                        # would fail full-SEDocumentationDto validation even
-                        # when perfectly correct. The merged, complete
-                        # candidate is schema-validated below instead (same
-                        # validate_detailed call the full-object path uses).
-                        call_fn=lambda v=version, c=closure, d=decision: _invoke_with_deadline(
-                            self.rewrite_agent.rewrite_targeted,
-                            v,
-                            c,
-                            d.blockingIssues,
-                            context,
-                            agent_name=self.agent_name,
-                            schema_cls=self.config.schema,
-                            deadline=deadline,
-                        ),
-                        url_mode=self.config.url_mode,
-                        allowed_sources=context.allowed_source_metadata,
-                    ),
-                    self.firewall,
-                )
+                for group_roots, group_issues in issue_groups:
+                    remaining = deadline - time.monotonic()
+                    if remaining < _MIN_SECONDS_PER_SECTION_REPAIR_ATTEMPT:
+                        logger.info(
+                            "se_documentation.semantic_rewrite_group_skipped_insufficient_time "
+                            "roots=%s remaining=%.1fs",
+                            sorted(group_roots), remaining,
+                        )
+                        break
 
-                if rewrite_result.provider_failed:
+                    try:
+                        group_closure = resolve_rewrite_closure(merged_version, group_issues)
+                    except ScopeResolutionError as exc:
+                        logger.warning(
+                            "se_documentation.rewrite_scope_resolution_failed roots=%s reason=%s",
+                            sorted(group_roots), exc,
+                        )
+                        return self._review_unavailable_result(
+                            state, review_run_id, history, attempt,
+                        )
+
+                    rewrite_result = self._attempt_one_semantic_rewrite_group(
+                        merged_version, group_closure, group_issues, context,
+                        writer_trusted_parts, writer_untrusted_parts, deadline,
+                    )
+
+                    if rewrite_result.blocked:
+                        return self._firewall_blocked_result(
+                            state, review_run_id, history, attempt, rewrite_result, stage_label="rewritten",
+                        )
+
+                    if rewrite_result.provider_failed:
+                        logger.warning(
+                            "se_documentation.semantic_rewrite_group_failed roots=%s truncated=%s",
+                            sorted(group_roots), _is_truncated_failure(rewrite_result),
+                        )
+                        continue
+
+                    raw_rewritten = rewrite_result.output or {}
+                    if "databaseEntities" in group_closure.allowed_sections:
+                        # Restore any entity this group's rewrite removed or
+                        # renamed WITHOUT the reviewer finding actually
+                        # requesting it (see se_documentation_id_lineage's
+                        # compute_section_lineage) -- "requested" here means
+                        # an entity id/name the finding's own text names,
+                        # same matching se_documentation_rewrite_scope.py's
+                        # own seed-id resolution already uses. Then apply
+                        # the SAME Writer-time hard-rule normalization a
+                        # freshly-generated section already gets.
+                        requested_entity_ids = _collect_seed_ids(merged_version, "databaseEntities", group_issues)
+                        lineage_result = compute_section_lineage(
+                            "databaseEntities",
+                            merged_version.get("databaseEntities") or [],
+                            raw_rewritten.get("databaseEntities") or [],
+                            requested_ids=frozenset(requested_entity_ids),
+                        )
+                        raw_rewritten = dict(raw_rewritten)
+                        raw_rewritten["databaseEntities"] = normalize_database_entities_dicts(
+                            lineage_result.items
+                        )
+
+                    merged_version = merge_targeted_rewrite(merged_version, raw_rewritten, group_closure)
+                    last_successful_rewrite_result = rewrite_result
+
+                if last_successful_rewrite_result is None:
                     return self._review_unavailable_result(
                         state, review_run_id, history, attempt, guarded=rewrite_result,
                     )
 
-                if rewrite_result.blocked:
-                    return self._firewall_blocked_result(
-                        state, review_run_id, history, attempt, rewrite_result, stage_label="rewritten",
-                    )
+                version = merged_version
+                rewrite_result = last_successful_rewrite_result
 
-                raw_rewritten = rewrite_result.output or {}
-                version = merge_targeted_rewrite(version, raw_rewritten, closure)
+                # Same generated-derivative rebuild the structural-repair
+                # path applies (see _attempt_se_documentation_structural_
+                # repair's matching comment) -- a semantic rewrite that
+                # changes databaseEntities/requirements/etc. must not leave
+                # traceabilityMatrix/mermaidERD/mermaidClassDiagram or the
+                # assumptions disclosure stale.
+                version["assumptions"] = rebuild_assumptions_disclosure(version)
+                version["traceabilityMatrix"] = rebuild_traceability_matrix(version)
+                version["mermaidERD"] = rebuild_mermaid_erd(version)
+                version["mermaidClassDiagram"] = rebuild_mermaid_class_diagram(version)
+                version["activityDiagram"] = rebuild_mermaid_activity_diagram(version)
+                version["sequenceDiagram"] = rebuild_mermaid_sequence_diagram(version)
             else:
                 allowed_rewrite_sections = sorted(
                     revision_scope_for(self.agent_name, version, decision.blockingIssues)
@@ -467,6 +575,15 @@ class ReviewPipeline:
         if structural_repairs >= self.config.max_structural_repairs:
             terminal = self._schema_invalid_result(state, review_run_id, history, attempt)
             return version, False, attempt, structural_repairs, terminal
+
+        if self.agent_name == _SE_DOCUMENTATION_AGENT_NAME:
+            # Opt-in, disabled-by-default (see se_documentation_debug_
+            # snapshot.py) -- a no-op unless SE_DOCUMENTATION_DEBUG_SNAPSHOT_
+            # DIR is explicitly set. Written immediately before the whole-
+            # document structural validation below, using this run's own
+            # review_run_id, so a failed run's candidate can be replayed
+            # locally afterward with zero provider calls.
+            maybe_write_se_documentation_debug_snapshot(version, request_id=review_run_id)
 
         validation = validate_detailed(self.config.schema, version)
 
@@ -598,22 +715,59 @@ class ReviewPipeline:
         next_structural_repairs = structural_repairs + 1
 
         try:
-            plan = resolve_structural_repair_plan(
+            plans = resolve_structural_repair_plans(
                 validation.data, validation.errors, validation.expected_schema,
                 agent_name=self.agent_name,
                 schema_cls=self.config.schema,
             )
         except StructuralRepairPayloadTooLargeError as exc:
-            # Neither a scoped repair nor a payload-safe full repair is
-            # possible -- fail honestly (existing schema_invalid terminal,
-            # preserving whatever prior valid candidate the pipeline
-            # already tracks) rather than send a known-oversized request to
-            # any provider, or truncate the payload.
+            # An unlocalizable ("$") validation error -- e.g. SEDocumentation
+            # CandidateSchema._check_structural_invariants' cross-section
+            # id/reference checks -- with a full-document repair prompt too
+            # large to safely send. Before failing outright, try to
+            # reconcile the SPECIFIC known invariant violation(s): first
+            # deterministically (no LLM call), then with at most one
+            # targeted correction scoped to only the sections involved --
+            # never by resending the complete document (see
+            # _attempt_se_documentation_invariant_reconciliation's
+            # docstring). Only ever attempted for genuinely unlocalizable
+            # structural errors, i.e. exactly this branch.
             logger.warning("se_documentation.structural_repair_payload_too_large reason=%s", exc)
+            logger.warning(
+                "se_documentation.unresolvable_validation_errors errors=%s",
+                _safe_str(validation.errors, max_length=4000),
+            )
+
+            reconciled, reconciled_ok, reconciler_provider, reconciler_model = (
+                self._attempt_se_documentation_invariant_reconciliation(
+                    validation.data, state, context, writer_trusted_parts, writer_untrusted_parts, deadline,
+                )
+            )
+
+            history.append(
+                AttemptRecord(
+                    attemptNumber=next_attempt,
+                    stage="rewrite",
+                    operation="structural_repair",
+                    outputHash=output_hash(reconciled),
+                    firewallPassed=True,
+                    schemaValid=reconciled_ok,
+                    reviewed=False,
+                    generatorProvider=reconciler_provider,
+                    generatorModel=reconciler_model,
+                    kept=False,
+                )
+            )
+
+            if reconciled_ok:
+                state.last_structurally_valid_candidate = reconciled
+                return reconciled, True, next_attempt, next_structural_repairs, None
+
             terminal = self._schema_invalid_result(state, review_run_id, history, next_attempt)
             return version, False, next_attempt, next_structural_repairs, terminal
 
-        if plan.use_full_repair:
+        if len(plans) == 1 and plans[0].use_full_repair:
+            plan = plans[0]
             logger.info(
                 "se_documentation.structural_repair_mode mode=full_payload_within_limit "
                 "estimated_prompt_tokens=%d",
@@ -670,102 +824,546 @@ class ReviewPipeline:
                 None,
             )
 
-        closure = plan.closure
-        assert closure is not None  # resolve_structural_repair_plan's contract
+        # Per-section repair queue: one bounded LLM call per plan (each
+        # plan's closure names exactly one top-level section -- see
+        # resolve_structural_repair_plans), never a single call spanning
+        # multiple sections. `plans` is already in deterministic (sorted
+        # section name) order. A section whose repair fails (provider
+        # failure, firewall block, or a rejected unsolicited/missing
+        # response) is simply left unrepaired -- its original content is
+        # never touched -- and the loop proceeds to the remaining sections;
+        # the final full-document validate_detailed call below is what
+        # honestly decides whether the overall repair succeeded, never any
+        # individual section's own result.
+        merged = dict(validation.data)
+        for plan in plans:
+            closure = plan.closure
+            assert closure is not None  # per-section plans always carry a closure
+            section_name = next(iter(closure.allowed_sections))
 
-        logger.info(
-            "se_documentation.structural_repair_mode mode=scoped sections=%d "
-            "estimated_prompt_tokens=%d",
-            len(closure.allowed_sections), estimate_tokens(plan.prompt),
-        )
+            remaining = deadline - time.monotonic()
+            if remaining < _MIN_SECONDS_PER_SECTION_REPAIR_ATTEMPT:
+                logger.info(
+                    "se_documentation.structural_repair_section_skipped_insufficient_time "
+                    "section=%s remaining=%.1fs",
+                    section_name, remaining,
+                )
+                break
 
-        scoped_kwargs: dict[str, Any] = {}
-        if _accepts_keyword(self.rewrite_agent.fix_structure_scoped, "prompt"):
-            scoped_kwargs["prompt"] = plan.prompt
-
-        fix_result = guarded_call(
-            GuardedCallRequest(
-                stage="rewrite",
-                trusted_parts=writer_trusted_parts,
-                untrusted_parts={
-                    **writer_untrusted_parts,
-                    "invalid_candidate_sections": _safe_str(
-                        build_compact_rewrite_candidate(validation.data, closure)
-                    ),
-                    "schema_validation_errors": _safe_str(validation.errors),
-                    "repaired_sections": _safe_str(sorted(closure.allowed_sections)),
-                },
-                # No `schema=` here on purpose: the raw response is a
-                # PARTIAL object (only the requested sections), which would
-                # fail full-candidate-schema validation even when perfectly
-                # correct. The merged, complete candidate is validated
-                # below via the same validate_detailed the full-repair path
-                # uses.
-                call_fn=lambda v=validation.data, c=closure, e=validation.errors, kw=scoped_kwargs: _invoke_with_deadline(
-                    self.rewrite_agent.fix_structure_scoped,
-                    v,
-                    c,
-                    agent_name=self.agent_name,
-                    validation_errors=e,
-                    schema_cls=self.config.schema,
-                    deadline=deadline,
-                    **kw,
-                ),
-                url_mode=self.config.url_mode,
-                allowed_sources=context.allowed_source_metadata,
-            ),
-            self.firewall,
-        )
-
-        if fix_result.provider_failed or fix_result.blocked:
-            terminal = self._schema_invalid_result(
-                state, review_run_id, history, next_attempt, guarded=fix_result,
+            logger.info(
+                "se_documentation.structural_repair_mode mode=scoped section=%s "
+                "estimated_prompt_tokens=%d",
+                section_name, estimate_tokens(plan.prompt),
             )
-            return version, False, next_attempt, next_structural_repairs, terminal
 
-        try:
-            merged = merge_structural_repair(validation.data, fix_result.output, closure)
-        except StructuralRepairScopeError as exc:
-            # Missing/unsolicited/malformed scoped response -- never merged,
-            # never accepted as a partial repair.
-            logger.warning("se_documentation.structural_repair_response_rejected reason=%s", exc)
-            terminal = self._schema_invalid_result(
-                state, review_run_id, history, next_attempt, guarded=fix_result,
+            fix_result = self._attempt_one_structural_repair_section(
+                merged, closure, plan.prompt, validation.errors,
+                context, writer_trusted_parts, writer_untrusted_parts, deadline,
             )
-            return version, False, next_attempt, next_structural_repairs, terminal
 
-        # Full-document validation remains authoritative: a scoped repair is
-        # only ever successful when the COMPLETE merged candidate passes the
-        # complete schema -- never because the repaired fragment alone
-        # validated.
+            if fix_result.provider_failed or fix_result.blocked:
+                logger.warning(
+                    "se_documentation.structural_repair_section_failed section=%s "
+                    "truncated=%s blocked=%s",
+                    section_name, _is_truncated_failure(fix_result), fix_result.blocked,
+                )
+                history.append(
+                    AttemptRecord(
+                        attemptNumber=next_attempt,
+                        stage="rewrite",
+                        operation="structural_repair",
+                        outputHash=output_hash(merged),
+                        firewallPassed=not fix_result.blocked,
+                        schemaValid=False,
+                        reviewed=False,
+                        generatorProvider=fix_result.provider,
+                        generatorModel=fix_result.model,
+                        kept=False,
+                    )
+                )
+                continue
+
+            try:
+                merged = merge_structural_repair(merged, fix_result.output, closure)
+                if section_name == "databaseEntities":
+                    # Reuses SEDocumentationOrchestratorAgent's own Writer-
+                    # time hard-rule normalization (see
+                    # se_documentation_deterministic_normalization.py) so a
+                    # structural repair to databaseEntities gets the SAME
+                    # guarantees a freshly-generated section already has
+                    # (no empty/too-few fields, exactly one primary key,
+                    # PasswordHash not Password, no fabricated foreign keys)
+                    # instead of leaving those hard rules Writer-only.
+                    merged["databaseEntities"] = normalize_database_entities_dicts(
+                        merged.get("databaseEntities") or []
+                    )
+            except StructuralRepairScopeError as exc:
+                # Missing/unsolicited/malformed scoped response for THIS
+                # section -- never merged, never accepted as a partial
+                # repair. Previously merged sections are untouched.
+                logger.warning(
+                    "se_documentation.structural_repair_response_rejected section=%s reason=%s",
+                    section_name, exc,
+                )
+                history.append(
+                    AttemptRecord(
+                        attemptNumber=next_attempt,
+                        stage="rewrite",
+                        operation="structural_repair",
+                        outputHash=output_hash(merged),
+                        firewallPassed=True,
+                        schemaValid=False,
+                        reviewed=False,
+                        generatorProvider=fix_result.provider,
+                        generatorModel=fix_result.model,
+                        kept=False,
+                    )
+                )
+                continue
+
+            history.append(
+                AttemptRecord(
+                    attemptNumber=next_attempt,
+                    stage="rewrite",
+                    operation="structural_repair",
+                    outputHash=output_hash(merged),
+                    firewallPassed=True,
+                    schemaValid=True,
+                    reviewed=False,
+                    generatorProvider=fix_result.provider,
+                    generatorModel=fix_result.model,
+                    kept=False,
+                )
+            )
+
+        # Rebuild every generated-derivative field from the (now normalized)
+        # merged sections before final validation -- traceabilityMatrix/
+        # mermaidERD/mermaidClassDiagram are never LLM targets (see
+        # _NEVER_LLM_REWRITABLE_FIELDS) and merge_structural_repair always
+        # restores them from the PRE-repair candidate, so without this they
+        # would silently go stale the moment a repair actually changes a
+        # section they're derived from (observed live: a databaseEntities
+        # repair leaving mermaidERD frozen at its old, now-inconsistent
+        # state). Cheap and idempotent -- rebuilding every pass, whether or
+        # not this pass actually touched a relevant section, is simpler and
+        # no less correct than tracking exactly which sections changed.
+        merged["assumptions"] = rebuild_assumptions_disclosure(merged)
+        merged["traceabilityMatrix"] = rebuild_traceability_matrix(merged)
+        merged["mermaidERD"] = rebuild_mermaid_erd(merged)
+        merged["mermaidClassDiagram"] = rebuild_mermaid_class_diagram(merged)
+        merged["activityDiagram"] = rebuild_mermaid_activity_diagram(merged)
+        merged["sequenceDiagram"] = rebuild_mermaid_sequence_diagram(merged)
+
+        # Full-document validation remains authoritative: the repair queue
+        # is only ever successful when the COMPLETE merged candidate (every
+        # section that was repaired, plus every section left untouched)
+        # passes the complete schema -- never because any individual
+        # section's own repair response validated in isolation.
         merged_validation = validate_detailed(self.config.schema, merged)
         merged = merged_validation.data
         schema_valid = merged_validation.valid
 
         logger.info(
-            "se_documentation.structural_repair_result schema_valid=%s",
-            schema_valid,
-        )
-
-        history.append(
-            AttemptRecord(
-                attemptNumber=next_attempt,
-                stage="rewrite",
-                operation="structural_repair",
-                outputHash=output_hash(merged),
-                firewallPassed=True,
-                schemaValid=schema_valid,
-                reviewed=False,
-                generatorProvider=fix_result.provider,
-                generatorModel=fix_result.model,
-                kept=False,
-            )
+            "se_documentation.structural_repair_result schema_valid=%s sections=%d",
+            schema_valid, len(plans),
         )
 
         if schema_valid:
             state.last_structurally_valid_candidate = merged
 
         return (merged, schema_valid, next_attempt, next_structural_repairs, None)
+
+    def _attempt_se_documentation_invariant_reconciliation(
+        self,
+        candidate: Candidate,
+        state: _PipelineState,
+        context: ReviewContext,
+        writer_trusted_parts: dict[str, str],
+        writer_untrusted_parts: dict[str, str],
+        deadline: float,
+    ) -> tuple[Candidate, bool, str | None, str | None]:
+        """
+        Returns (candidate, resolved, provider, model) -- `provider`/`model`
+        are None whenever the resolution was entirely deterministic (no LLM
+        call was made), and reflect the actual targeted-correction call's own
+        provider/model whenever that path was used -- so callers never
+        attribute a fix to a provider that never ran (see this task's
+        provenance-honesty requirement).
+
+        Reconciles a whole-document structural-invariant failure (an
+        unlocalizable "$" validation error from SEDocumentationCandidateSchema
+        ._check_structural_invariants -- see
+        se_documentation_structural_invariants.py's module docstring for why
+        the per-section repair queue cannot localize this) WITHOUT ever
+        resending the complete document for a full LLM repair.
+
+        Order: diagnose structured issues -> deterministic reconciliation
+        (duplicate ids/entity names resolved via a canonical-id allocator,
+        dangling references remapped via renames detected against the last
+        known-good candidate) -> if issues remain, exactly ONE bounded
+        targeted correction scoped to the minimal section closure those
+        issues name -> rebuild traceabilityMatrix/mermaidERD (both are
+        always fully derived from the other sections, never an LLM target --
+        see rebuild_traceability_matrix/rebuild_mermaid_erd) -> re-validate
+        the complete document. Returns (candidate, False) -- never a
+        partially-reconciled candidate reported as valid -- whenever even the
+        one targeted correction attempt does not produce a fully valid
+        document; the caller then falls back to the existing, unchanged
+        schema_invalid terminal.
+        """
+        # Deterministic normalization pass FIRST -- a safety net independent
+        # of whichever earlier rewrite call actually touched databaseEntities
+        # or introduced inferred/assumed content (that per-rewrite wiring is
+        # the FIRST line of defense; this makes the guarantee unconditional
+        # by the time this whole-document fallback stage runs). Cheap,
+        # idempotent, and reuses the exact same Writer-time hard rules --
+        # see se_documentation_deterministic_normalization.py.
+        candidate = dict(candidate)
+        candidate["databaseEntities"] = normalize_database_entities_dicts(candidate.get("databaseEntities") or [])
+        candidate["assumptions"] = rebuild_assumptions_disclosure(candidate)
+
+        # Full diagnostic pass, over every kind diagnose_structural_
+        # invariants knows how to detect (not just the reconcilable ones) --
+        # logged before any repair decision is made, so a live failure is
+        # always explainable from the logs afterward even when this module
+        # cannot yet act on it.
+        all_issues = diagnose_structural_invariants(candidate)
+        if all_issues:
+            logger.warning(
+                "se_documentation.invariant_diagnostics_detected count=%d kinds=%s details=%s",
+                len(all_issues),
+                sorted({issue.kind for issue in all_issues}),
+                _safe_str([issue.description for issue in all_issues], max_length=4000),
+            )
+
+        # Only ever act on the subset this module has a verified safe
+        # reconciliation strategy for (see RECONCILABLE_KINDS' docstring) --
+        # every other detected issue is now VISIBLE in the log line above,
+        # but never triggers a deterministic edit or an LLM call on its own.
+        issues = [issue for issue in all_issues if issue.kind in RECONCILABLE_KINDS]
+
+        if not issues:
+            if all_issues:
+                # Something WAS detected (visible in the log line above) but
+                # none of it is a kind reconcile_deterministically/targeted-
+                # correction acts on -- this does NOT necessarily mean
+                # failure: the normalization pre-pass above may already have
+                # fixed everything (e.g. every remaining `all_issues` entry
+                # was itself normalization-only, like PLAINTEXT_PASSWORD_
+                # FIELD, and normalize_database_entities_dicts already fixed
+                # the underlying data even though diagnose_structural_
+                # invariants -- run BEFORE re-checking -- still listed the
+                # pre-normalization issue.) Only full-document validation
+                # below can decide honestly.
+                logger.warning(
+                    "se_documentation.invariant_reconciliation_visibility_only_no_action_taken "
+                    "kinds=%s", sorted({issue.kind for issue in all_issues}),
+                )
+            else:
+                logger.info("se_documentation.invariant_reconciliation_resolved_by_normalization_alone")
+
+            candidate["traceabilityMatrix"] = rebuild_traceability_matrix(candidate)
+            candidate["mermaidERD"] = rebuild_mermaid_erd(candidate)
+            candidate["mermaidClassDiagram"] = rebuild_mermaid_class_diagram(candidate)
+            candidate["activityDiagram"] = rebuild_mermaid_activity_diagram(candidate)
+            candidate["sequenceDiagram"] = rebuild_mermaid_sequence_diagram(candidate)
+
+            final_validation = validate_detailed(self.config.schema, candidate)
+            return final_validation.data, final_validation.valid, None, None
+
+        baseline = state.last_structurally_valid_candidate or {}
+        rename_maps: dict[str, dict[str, str]] = {}
+        added_ids_by_section: dict[str, frozenset[str]] = {}
+
+        for section in _INVARIANT_DUPLICATE_CHECK_SECTIONS:
+            baseline_items = baseline.get(section) or []
+            current_items = candidate.get(section) or []
+            if section in _INVARIANT_REQUIREMENT_SECTIONS:
+                rename_maps[section] = diff_sections_against_baseline(section, baseline_items, current_items)
+            added_ids_by_section[section] = added_ids(section, baseline_items, current_items)
+
+        baseline_entity_names = {
+            entity.get("name") for entity in (baseline.get("databaseEntities") or [])
+            if isinstance(entity, dict) and entity.get("name")
+        }
+        current_entity_names = {
+            entity.get("name") for entity in (candidate.get("databaseEntities") or [])
+            if isinstance(entity, dict) and entity.get("name")
+        }
+        added_ids_by_section["databaseEntities"] = frozenset(current_entity_names - baseline_entity_names)
+
+        baseline_screens_by_id = {
+            str(screen.get("screenId")): screen
+            for screen in (baseline.get("uiScreens") or [])
+            if isinstance(screen, dict) and screen.get("screenId")
+        }
+
+        reconciled, remaining = reconcile_deterministically(
+            candidate, issues,
+            added_ids_by_section=added_ids_by_section,
+            rename_maps_by_section=rename_maps,
+            baseline_screens_by_id=baseline_screens_by_id,
+        )
+
+        if remaining:
+            closure_sections = resolve_minimal_affected_sections(remaining)
+            if not closure_sections:
+                return reconciled, False, None, None
+
+            remaining_time = deadline - time.monotonic()
+            if remaining_time < _MIN_SECONDS_PER_SECTION_REPAIR_ATTEMPT:
+                logger.info(
+                    "se_documentation.invariant_reconciliation_skipped_insufficient_time "
+                    "sections=%s remaining=%.1fs", sorted(closure_sections), remaining_time,
+                )
+                return reconciled, False, None, None
+
+            synthetic_issues = [
+                ReviewerIssue(
+                    severity="high",
+                    requiresCorrection=True,
+                    category="contradiction",
+                    affectedField=issue.source_section or "",
+                    description=(
+                        f"Structural invariant violation ({issue.kind}): "
+                        f"section={issue.source_section!r} field={issue.source_field!r} "
+                        f"id={issue.invalid_id!r} target={issue.target_section!r}."
+                    ),
+                    revisionInstruction=(
+                        "Fix only this specific mismatch. Preserve every existing id, every "
+                        "existing item, and every other field exactly as given -- do not "
+                        "renumber, remove, or rename anything not directly required to resolve "
+                        "this mismatch."
+                    ),
+                )
+                for issue in remaining
+            ]
+
+            closure = RewriteClosure(
+                primary_sections=frozenset(closure_sections),
+                allowed_sections=frozenset(closure_sections),
+            )
+
+            fix_result = guarded_call(
+                GuardedCallRequest(
+                    stage="rewrite",
+                    trusted_parts=writer_trusted_parts,
+                    untrusted_parts={
+                        **writer_untrusted_parts,
+                        "candidate_output": _safe_str(build_compact_rewrite_candidate(reconciled, closure)),
+                        "invariant_issues": _safe_str([issue.description for issue in synthetic_issues]),
+                    },
+                    call_fn=lambda v=reconciled, c=closure, issues_=synthetic_issues: _invoke_with_deadline(
+                        self.rewrite_agent.rewrite_targeted,
+                        v, c, issues_, context,
+                        agent_name=self.agent_name,
+                        schema_cls=self.config.schema,
+                        deadline=deadline,
+                    ),
+                    url_mode=self.config.url_mode,
+                    allowed_sources=context.allowed_source_metadata,
+                ),
+                self.firewall,
+            )
+
+            if fix_result.provider_failed or fix_result.blocked:
+                logger.warning(
+                    "se_documentation.invariant_targeted_correction_failed truncated=%s blocked=%s",
+                    _is_truncated_failure(fix_result), fix_result.blocked,
+                )
+                return reconciled, False, fix_result.provider, fix_result.model
+
+            try:
+                reconciled = merge_targeted_rewrite(reconciled, fix_result.output, closure)
+            except Exception as exc:
+                logger.warning("se_documentation.invariant_targeted_correction_merge_rejected reason=%s", exc)
+                return reconciled, False, fix_result.provider, fix_result.model
+
+            if diagnose_structural_invariants(reconciled):
+                logger.warning("se_documentation.invariant_reconciliation_unresolved_after_targeted_correction")
+                return reconciled, False, fix_result.provider, fix_result.model
+
+            reconciled = dict(reconciled)
+            reconciled["assumptions"] = rebuild_assumptions_disclosure(reconciled)
+            reconciled["traceabilityMatrix"] = rebuild_traceability_matrix(reconciled)
+            reconciled["mermaidERD"] = rebuild_mermaid_erd(reconciled)
+            reconciled["mermaidClassDiagram"] = rebuild_mermaid_class_diagram(reconciled)
+            reconciled["activityDiagram"] = rebuild_mermaid_activity_diagram(reconciled)
+            reconciled["sequenceDiagram"] = rebuild_mermaid_sequence_diagram(reconciled)
+
+            final_validation = validate_detailed(self.config.schema, reconciled)
+            return final_validation.data, final_validation.valid, fix_result.provider, fix_result.model
+
+        reconciled = dict(reconciled)
+        reconciled["assumptions"] = rebuild_assumptions_disclosure(reconciled)
+        reconciled["traceabilityMatrix"] = rebuild_traceability_matrix(reconciled)
+        reconciled["mermaidERD"] = rebuild_mermaid_erd(reconciled)
+        reconciled["mermaidClassDiagram"] = rebuild_mermaid_class_diagram(reconciled)
+        reconciled["activityDiagram"] = rebuild_mermaid_activity_diagram(reconciled)
+        reconciled["sequenceDiagram"] = rebuild_mermaid_sequence_diagram(reconciled)
+
+        final_validation = validate_detailed(self.config.schema, reconciled)
+        return final_validation.data, final_validation.valid, None, None
+
+    def _attempt_one_structural_repair_section(
+        self,
+        candidate: Candidate,
+        closure: RewriteClosure,
+        prompt: str,
+        validation_errors: list[dict[str, Any]],
+        context: ReviewContext,
+        writer_trusted_parts: dict[str, str],
+        writer_untrusted_parts: dict[str, str],
+        deadline: float,
+    ) -> GuardedResult:
+        """
+        One guarded LLM call to repair exactly the single section named by
+        `closure.allowed_sections`, plus -- when the call fails specifically
+        because the provider's response was truncated (stop_reason/
+        finish_reason indicating max_tokens; see
+        json_reliability.classify_truncation_failure) and enough of the
+        shared absolute `deadline` remains -- ONE retry of that SAME section
+        with a larger max_tokens allowance. Never retries a call that failed
+        for any other reason, and never retries more than once.
+        """
+        section_name = next(iter(closure.allowed_sections))
+
+        scoped_kwargs: dict[str, Any] = {}
+        if _accepts_keyword(self.rewrite_agent.fix_structure_scoped, "prompt"):
+            scoped_kwargs["prompt"] = prompt
+
+        def _call(max_tokens_override: int | None = None) -> GuardedResult:
+            kw = dict(scoped_kwargs)
+            if max_tokens_override is not None and _accepts_keyword(
+                self.rewrite_agent.fix_structure_scoped, "max_tokens_override",
+            ):
+                kw["max_tokens_override"] = max_tokens_override
+
+            return guarded_call(
+                GuardedCallRequest(
+                    stage="rewrite",
+                    trusted_parts=writer_trusted_parts,
+                    untrusted_parts={
+                        **writer_untrusted_parts,
+                        "invalid_candidate_sections": _safe_str(
+                            build_compact_rewrite_candidate(candidate, closure)
+                        ),
+                        "schema_validation_errors": _safe_str(validation_errors),
+                        "repaired_sections": _safe_str(sorted(closure.allowed_sections)),
+                    },
+                    # No `schema=` here on purpose: the raw response is a
+                    # PARTIAL object (only this one section), which would
+                    # fail full-candidate-schema validation even when
+                    # perfectly correct. The merged, complete candidate is
+                    # validated by the caller via the same validate_detailed
+                    # the full-repair path uses.
+                    call_fn=lambda v=candidate, c=closure, e=validation_errors, kwargs=kw: _invoke_with_deadline(
+                        self.rewrite_agent.fix_structure_scoped,
+                        v,
+                        c,
+                        agent_name=self.agent_name,
+                        validation_errors=e,
+                        schema_cls=self.config.schema,
+                        deadline=deadline,
+                        **kwargs,
+                    ),
+                    url_mode=self.config.url_mode,
+                    allowed_sources=context.allowed_source_metadata,
+                ),
+                self.firewall,
+            )
+
+        result = _call()
+
+        if result.provider_failed and _is_truncated_failure(result):
+            remaining = deadline - time.monotonic()
+            if remaining >= _MIN_SECONDS_PER_SECTION_REPAIR_ATTEMPT:
+                estimated = estimate_tokens(json.dumps(candidate, default=str))
+                retry_max_tokens = max(estimated * 2, 4400)
+                logger.info(
+                    "se_documentation.structural_repair_section_truncation_retry "
+                    "section=%s retry_max_tokens=%d remaining=%.1fs",
+                    section_name, retry_max_tokens, remaining,
+                )
+                result = _call(max_tokens_override=retry_max_tokens)
+
+        return result
+
+    def _attempt_one_semantic_rewrite_group(
+        self,
+        candidate: Candidate,
+        closure: RewriteClosure,
+        blocking_issues: list[Any],
+        context: ReviewContext,
+        writer_trusted_parts: dict[str, str],
+        writer_untrusted_parts: dict[str, str],
+        deadline: float,
+    ) -> GuardedResult:
+        """
+        One guarded rewrite_targeted call scoped to `closure` (one primary
+        section, or a tightly-coupled group sharing the same resolved root
+        set -- see group_blocking_issues_by_primary_sections), plus -- same
+        contract as _attempt_one_structural_repair_section -- ONE retry with
+        a larger max_tokens allowance when (and only when) the failure was a
+        confirmed truncation and enough of the shared absolute `deadline`
+        remains.
+        """
+        allowed_rewrite_sections = sorted(closure.allowed_sections)
+
+        def _call(max_tokens_override: int | None = None) -> GuardedResult:
+            kwargs: dict[str, Any] = {}
+            if max_tokens_override is not None and _accepts_keyword(
+                self.rewrite_agent.rewrite_targeted, "max_tokens_override",
+            ):
+                kwargs["max_tokens_override"] = max_tokens_override
+
+            return guarded_call(
+                GuardedCallRequest(
+                    stage="rewrite",
+                    trusted_parts=writer_trusted_parts,
+                    untrusted_parts={
+                        **writer_untrusted_parts,
+                        "candidate_output": _safe_str(build_compact_rewrite_candidate(candidate, closure)),
+                        "reviewer_findings": _safe_str([i.model_dump() for i in blocking_issues]),
+                        "allowed_rewrite_sections": _safe_str(allowed_rewrite_sections),
+                    },
+                    # No `schema=` here on purpose: the raw LLM response is a
+                    # PARTIAL object (only this group's allowed sections),
+                    # which would fail full-SEDocumentationDto validation
+                    # even when perfectly correct. The merged, complete
+                    # candidate is schema-validated by the caller instead.
+                    call_fn=lambda v=candidate, c=closure, issues=blocking_issues, kw=kwargs: _invoke_with_deadline(
+                        self.rewrite_agent.rewrite_targeted,
+                        v,
+                        c,
+                        issues,
+                        context,
+                        agent_name=self.agent_name,
+                        schema_cls=self.config.schema,
+                        deadline=deadline,
+                        **kw,
+                    ),
+                    url_mode=self.config.url_mode,
+                    allowed_sources=context.allowed_source_metadata,
+                ),
+                self.firewall,
+            )
+
+        result = _call()
+
+        if result.provider_failed and _is_truncated_failure(result):
+            remaining = deadline - time.monotonic()
+            if remaining >= _MIN_SECONDS_PER_SECTION_REPAIR_ATTEMPT:
+                estimated = estimate_tokens(json.dumps(candidate, default=str))
+                retry_max_tokens = max(estimated * 2, 4400)
+                logger.info(
+                    "se_documentation.semantic_rewrite_group_truncation_retry "
+                    "sections=%s retry_max_tokens=%d remaining=%.1fs",
+                    allowed_rewrite_sections, retry_max_tokens, remaining,
+                )
+                result = _call(max_tokens_override=retry_max_tokens)
+
+        return result
 
     # ------------------------------------------------------------------
     # Audit helpers
@@ -935,35 +1533,47 @@ class ReviewPipeline:
         findings: ReviewerFindings,
         decision: RewriteDecision,
     ) -> PipelineResult:
+        # SE Documentation has a strict application contract: an unresolved
+        # critical finding rejects the NEW candidate completely.  Do not
+        # return even a structurally valid candidate as usable/displayable;
+        # the .NET application will preserve the previously persisted,
+        # accepted document instead.
+        #
+        # The legacy diagnostic flag remains useful only as a request to
+        # capture the rejected candidate through the opt-in, sanitized local
+        # snapshot helper.  It no longer disables this rejection gate and it
+        # can never make the candidate eligible for an API/application result.
+        if self.agent_name == _SE_DOCUMENTATION_AGENT_NAME:
+            diagnostic_requested = os.getenv(
+                "SE_DOCUMENTATION_CRITICAL_GATE_DISABLED", ""
+            ).strip().lower() in ("1", "true", "yes")
+
+            if diagnostic_requested and state.last_structurally_valid_candidate:
+                maybe_write_se_documentation_debug_snapshot(
+                    state.last_structurally_valid_candidate,
+                    request_id=review_run_id,
+                )
+                logger.warning(
+                    "review_pipeline.se_documentation_rejected_diagnostic_snapshot_requested "
+                    "agent=%s review_run_id=%s acceptance_gate=enforced",
+                    self.agent_name,
+                    review_run_id,
+                )
+
+            return self._result(
+                "rejected", usable=False, output={}, reviewer_findings=findings, decision=decision,
+                warning=(
+                    "A critical issue remained after the maximum number of rewrites. "
+                    "The new document was rejected; any previously accepted document remains unchanged."
+                ),
+                review_run_id=review_run_id, history=history, attempts=attempt + 1,
+            )
+
         if state.last_reviewed_noncritical_candidate:
             output, prior_findings = state.last_reviewed_noncritical_candidate
             return self._result(
                 "rejected", usable=True, output=output, reviewer_findings=prior_findings, decision=decision,
                 warning="A critical issue remained after the maximum number of rewrites; showing the last version without a critical issue.",
-                review_run_id=review_run_id, history=history, attempts=attempt + 1,
-            )
-
-        # TEMPORARY diagnostic bypass (SE_DOCUMENTATION_CRITICAL_GATE_DISABLED=1,
-        # SEDocumentationAgent only) -- shows the last structurally-valid AI
-        # candidate even though a critical issue was never resolved, instead
-        # of the generic deterministic fallback. The critical finding is
-        # still attached via reviewer_findings so it stays visible in the UI
-        # -- this is NOT the same as fixing the issue, only surfacing raw AI
-        # content for inspection. Unset before treating output as reviewed.
-        if (
-            self.agent_name == "SEDocumentationAgent"
-            and os.getenv("SE_DOCUMENTATION_CRITICAL_GATE_DISABLED", "").strip().lower() in ("1", "true", "yes")
-            and state.last_structurally_valid_candidate
-        ):
-            logger.warning(
-                "review_pipeline.critical_gate_DISABLED_bypassing_rejection agent=%s review_run_id=%s",
-                self.agent_name, review_run_id,
-            )
-            return self._result(
-                "rejected", usable=True, output=state.last_structurally_valid_candidate,
-                reviewer_findings=findings, decision=decision,
-                warning="[CRITICAL GATE DISABLED FOR DEBUGGING] A critical issue was never resolved -- "
-                        "verify manually before using this document.",
                 review_run_id=review_run_id, history=history, attempts=attempt + 1,
             )
 

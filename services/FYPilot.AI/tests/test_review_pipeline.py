@@ -1564,10 +1564,15 @@ class SEDocumentationReconciliationTests(unittest.TestCase):
         result = self.agent._ensure_unique_entity_names(entities)
         self.assertEqual([e.name for e in result], ["User", "User (2)"])
 
-    def test_reconcile_replaces_dangling_reference_with_real_id(self):
+    def test_reconcile_drops_dangling_reference_without_fabricating_a_replacement(self):
         # Simulates the exact bug: requirements came from the LLM with its
         # own ids (no "FR-01" among them) while useCases/edgeCases/modules/
-        # tests fell back to hardcoded "FR-01"/"FR-02" references.
+        # tests fell back to hardcoded "FR-01"/"FR-02" references. The
+        # traceability-honesty fix means a dangling reference is DROPPED,
+        # never silently replaced by an arbitrary "first" real id -- a
+        # fabricated link is worse than none (see
+        # SEDocumentationOrchestratorAgent._reconcile_requirement_references's
+        # own docstring).
         requirement_ids = {"REQ-LOGIN", "REQ-SEARCH"}
         use_case = UseCaseDto(id="UC-01", title="t", actor="a", goal="g", relatedRequirements=["FR-01"])
         edge_case = EdgeCaseDto(id="EC-01", scenario="s", expectedHandling="h", relatedRequirement="FR-02")
@@ -1578,10 +1583,10 @@ class SEDocumentationReconciliationTests(unittest.TestCase):
             requirement_ids, [use_case], [edge_case], [module], [test]
         )
 
-        self.assertIn(use_case.relatedRequirements[0], requirement_ids)
-        self.assertIn(edge_case.relatedRequirement, requirement_ids)
-        self.assertTrue(all(r in requirement_ids for r in module.relatedRequirements))
-        self.assertTrue(all(r in requirement_ids for r in test.relatedRequirements))
+        self.assertEqual(use_case.relatedRequirements, [])
+        self.assertEqual(edge_case.relatedRequirement, "")
+        self.assertEqual(module.relatedRequirements, [])
+        self.assertEqual(test.relatedRequirements, [])
 
     def test_reconcile_preserves_valid_references_untouched(self):
         requirement_ids = {"FR-01", "FR-02"}
