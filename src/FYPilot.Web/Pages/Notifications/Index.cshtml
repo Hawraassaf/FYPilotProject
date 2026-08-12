@@ -569,7 +569,7 @@
                                 <i class="bi bi-clock"></i>
                                 <time class="notification-local-time"
                                       datetime="@notification.CreatedAtUtc.ToString("O")">
-                                    @notification.CreatedAtUtc.ToString("dd MMM yyyy, HH:mm") UTC
+                                    @notification.CreatedAtUtc.ToDisplayDateTime() UTC
                                 </time>
                             </span>
 

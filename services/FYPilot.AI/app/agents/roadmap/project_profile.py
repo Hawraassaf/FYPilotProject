@@ -72,6 +72,39 @@ _TYPE_KEYWORDS: dict[str, tuple[str, ...]] = {
 _DEFAULT_TYPE = "web"
 
 
+# ---------------------------------------------------------------------------
+# Confirmed web-application stack detection
+# ---------------------------------------------------------------------------
+#
+# Independent of _TYPE_KEYWORDS' project-type classification above (which
+# only distinguishes AI/mobile/IoT/etc. "flavors" and defaults every
+# unmatched project to "web") -- this specifically answers "does this
+# project have a CONFIRMED frontend and/or backend web-application
+# technology named in its own required-technologies text", which is what
+# actually justifies requiring dedicated web-application implementation
+# coverage (see application_implementation below). A pure ML/data-science
+# project with no such confirmed technology must never be required to
+# schedule a web-application phase merely because "web" is the type
+# default.
+_FRONTEND_WEB_TECH_KEYWORDS: tuple[str, ...] = (
+    "razor", "razor pages", "blazor", "react", "angular", "vue", "svelte",
+    "html", "css", "bootstrap", "tailwind", "next.js", "flutter web",
+)
+_BACKEND_WEB_TECH_KEYWORDS: tuple[str, ...] = (
+    "asp.net", "asp.net core", "fastapi", "django", "flask", "express",
+    "spring", "spring boot", "laravel", "nestjs", "node.js", "ruby on rails",
+)
+
+
+def _detect_web_app_stack(combined_text: str) -> bool:
+    """True only when a REAL frontend or backend web-application technology
+    is named in the project's own confirmed text -- never inferred from
+    generic words like "system"/"platform"/"application" alone."""
+    return lexicon.contains_any(combined_text, _FRONTEND_WEB_TECH_KEYWORDS) or lexicon.contains_any(
+        combined_text, _BACKEND_WEB_TECH_KEYWORDS
+    )
+
+
 def _detect_project_types(combined_text: str) -> tuple[str, ...]:
     matched = [
         project_type
@@ -184,15 +217,51 @@ LIFECYCLE_EVIDENCE_KEYWORDS: dict[str, tuple[str, ...]] = {
     "security_testing": ("security testing", "penetration test", "vulnerability", "security review"),
     "hardware_integration": ("hardware integration", "firmware", "sensor integration", "circuit"),
     "calibration_reliability": ("calibration", "reliability testing", "field testing", "stress test"),
+    # Deliberately DISTINCT from core_implementation's own generic
+    # ("implement", "develop", "build the", ...) evidence, which is a
+    # project-agnostic catch-all satisfied by ANY implementation-sounding
+    # work anywhere in the roadmap -- including AI/model-side work (e.g. an
+    # AI project's own "Implement inference wrapper" task). That generic
+    # match is exactly why a full-stack project's roadmap could claim
+    # core_implementation was "covered" while genuinely never scheduling
+    # any web-application work at all (the confirmed live defect). This
+    # category only counts evidence that is specifically about the
+    # user-facing application layer -- screens/pages, auth, persistence,
+    # web-framework-level controllers -- and is only made MANDATORY (see
+    # _lifecycle_for_profile) when a real frontend/backend web technology
+    # is actually confirmed for this project (see _detect_web_app_stack).
+    "application_implementation": (
+        "web application", "web app", "razor page", "razor pages", "user interface", "ui screen",
+        "frontend", "application backend", "authentication", "authorization",
+        "login page", "login screen", "registration page", "registration screen",
+        "persistence layer", "database implementation", "application persistence",
+        "endpoint", "controller", "user workflow", "application module",
+        "web page", "web screen", "crud", "user account", "session management",
+    ),
 }
 
 
 def _lifecycle_for_profile(
     project_types: tuple[str, ...],
     risks: frozenset[str],
+    has_web_app_stack: bool = False,
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
     mandatory = list(UNIVERSAL_MANDATORY_LIFECYCLE)
     optional: list[str] = []
+
+    # Only required when a REAL frontend/backend web technology is
+    # confirmed for this project (see _detect_web_app_stack) -- a pure
+    # ML/data-science project with no such confirmed technology never gains
+    # this category merely from the "web" project-type default. Inserted
+    # right after core_implementation (its natural position, same tier as
+    # the universal categories) rather than appended after every
+    # domain-specific extra below, for the same truncation-safety reason
+    # documented for safety_validation/data_governance_privacy: a category
+    # near the end of the list is the one most likely to be silently
+    # missing from a truncated provider response.
+    if has_web_app_stack:
+        insert_at = mandatory.index("core_implementation") + 1
+        mandatory.insert(insert_at, "application_implementation")
 
     is_data_ai = any(t in project_types for t in ("ai_ml", "nlp", "computer_vision", "data_science"))
 
@@ -330,6 +399,7 @@ class ProjectProfile:
     is_safety_sensitive: bool
     is_security_sensitive: bool
     difficulty_level: str = "medium"
+    has_web_app_stack: bool = False
 
 
 def build_profile(data: ProjectProfileInput) -> ProjectProfile:
@@ -349,7 +419,8 @@ def build_profile(data: ProjectProfileInput) -> ProjectProfile:
 
     project_types = _detect_project_types(combined_text)
     risks = _detect_risks(combined_text, len(missing_skills))
-    mandatory_lifecycle, optional_lifecycle = _lifecycle_for_profile(project_types, risks)
+    has_web_app_stack = _detect_web_app_stack(combined_text)
+    mandatory_lifecycle, optional_lifecycle = _lifecycle_for_profile(project_types, risks, has_web_app_stack)
     phase_min, phase_max = _phase_count_bounds(data.total_weeks, len(mandatory_lifecycle))
 
     ratings = list(data.skill_ratings.values()) if data.skill_ratings else []
@@ -369,6 +440,7 @@ def build_profile(data: ProjectProfileInput) -> ProjectProfile:
         is_safety_sensitive="medical_safety" in risks,
         is_security_sensitive="cybersecurity" in project_types or "auth_security" in risks,
         difficulty_level=(data.difficulty_level or "medium").strip().lower(),
+        has_web_app_stack=has_web_app_stack,
     )
 
 

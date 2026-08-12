@@ -5,6 +5,7 @@ using FYPilot.Application.DTOs;
 using FYPilot.Application.Interfaces;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
+using FYPilot.Infrastructure.Services;
 using FYPilot.Infrastructure.Services.Finalizers;
 using FYPilot.Web.Services.Notifications;
 using Microsoft.AspNetCore.Authorization;
@@ -740,29 +741,13 @@ public class IdeaComparisonModel(
              * idea. Keep the older IsSelected flags synchronized
              * so legacy pages and stored records cannot show two
              * selected ideas at the same time.
-             *
-             * Including previousIdeaId is important for legacy ideas
-             * whose GeneratedForProjectId was not populated.
              */
-            var relatedIdeas =
-                await db.ProjectIdeas
-                    .Where(item =>
-                        item.GeneratedForProjectId ==
-                            ProjectId ||
-                        item.Id == idea.Id ||
-                        (
-                            previousIdeaId.HasValue &&
-                            item.Id ==
-                                previousIdeaId.Value
-                        ))
-                    .ToListAsync(
-                        cancellationToken);
-
-            foreach (var relatedIdea in relatedIdeas)
-            {
-                relatedIdea.IsSelected =
-                    relatedIdea.Id == idea.Id;
-            }
+            await ProjectIdeaSelectionSync.SyncSelectedFlagAsync(
+                db,
+                ProjectId,
+                idea.Id,
+                previousIdeaId,
+                cancellationToken);
 
             if (alreadySelected)
             {

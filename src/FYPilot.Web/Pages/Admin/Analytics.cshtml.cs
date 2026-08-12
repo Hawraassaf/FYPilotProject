@@ -71,6 +71,13 @@ public class AnalyticsModel(ApplicationDbContext db) : PageModel
             .AsNoTracking()
             .ToListAsync();
 
+        var ideasById = ideas.ToDictionary(idea => idea.Id);
+
+        var projects = await db.Projects
+            .AsNoTracking()
+            .Where(p => p.ProjectIdeaId != null)
+            .ToListAsync();
+
         var assignments = await db.SupervisorAssignments
             .AsNoTracking()
             .ToListAsync();
@@ -200,13 +207,16 @@ public class AnalyticsModel(ApplicationDbContext db) : PageModel
                 return "high";
             }
 
-            // Use only the student's currently selected idea.
-            var selectedIdea = ideas
-                .Where(i =>
-                    i.UserId == studentId &&
-                    i.IsSelected)
-                .OrderByDescending(i => i.CreatedAt)
-                .FirstOrDefault();
+            // Use only the student's currently selected idea, resolved
+            // through the authoritative Project.ProjectIdeaId FK rather
+            // than the legacy per-row IsSelected flag (which can leave
+            // multiple ideas marked true after an idea is replaced).
+            var selectedIdea = projects
+                .Where(p => p.StudentId == studentId)
+                .OrderByDescending(p => p.UpdatedAt)
+                .Select(p =>
+                    ideasById.GetValueOrDefault(p.ProjectIdeaId!.Value))
+                .FirstOrDefault(idea => idea != null);
 
             // An assigned student without a selected project is high risk.
             if (selectedIdea == null)

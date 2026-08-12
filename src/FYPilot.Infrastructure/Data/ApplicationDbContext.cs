@@ -93,6 +93,12 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<SupervisorAssignment> SupervisorAssignments { get; set; }
     public DbSet<Notification> Notifications { get; set; }
 
+    // Supervisor Registration Requests -- pre-account Supervisor
+    // applications. No User/SupervisorProfile exists until an Admin
+    // approves the request (see SupervisorAssignments admin page).
+    public DbSet<SupervisorRegistrationRequest> SupervisorRegistrationRequests =>
+        Set<SupervisorRegistrationRequest>();
+
     // Google Calendar Integration
     public DbSet<GoogleCalendarToken> GoogleCalendarTokens => Set<GoogleCalendarToken>();
 
@@ -984,6 +990,112 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             entity.HasIndex(r => r.JobId)
                 .IsUnique()
                 .HasFilter("\"job_id\" IS NOT NULL");
+        });
+
+        modelBuilder.Entity<SupervisorRegistrationRequest>(entity =>
+        {
+            entity.ToTable("supervisor_registration_requests");
+
+            entity.HasKey(request => request.Id);
+
+            entity.Property(request => request.Id)
+                .HasColumnName("id");
+
+            entity.Property(request => request.FullName)
+                .HasColumnName("full_name")
+                .HasMaxLength(200)
+                .IsRequired();
+
+            entity.Property(request => request.Email)
+                .HasColumnName("email")
+                .HasMaxLength(256)
+                .IsRequired();
+
+            entity.Property(request => request.PasswordHash)
+                .HasColumnName("password_hash")
+                .HasMaxLength(200);
+
+            entity.Property(request => request.AcademicTitle)
+                .HasColumnName("academic_title")
+                .HasMaxLength(100);
+
+            entity.Property(request => request.University)
+                .HasColumnName("university")
+                .HasMaxLength(150);
+
+            entity.Property(request => request.Department)
+                .HasColumnName("department")
+                .HasMaxLength(150);
+
+            entity.Property(request => request.Specialization)
+                .HasColumnName("specialization")
+                .HasMaxLength(200);
+
+            entity.Property(request => request.ProfessionalProfileUrl)
+                .HasColumnName("professional_profile_url")
+                .HasMaxLength(300);
+
+            entity.Property(request => request.VerificationCodeHash)
+                .HasColumnName("verification_code_hash")
+                .HasMaxLength(100);
+
+            entity.Property(request => request.VerificationSentAtUtc)
+                .HasColumnName("verification_sent_at_utc");
+
+            entity.Property(request => request.VerificationExpiresAtUtc)
+                .HasColumnName("verification_expires_at_utc");
+
+            entity.Property(request => request.VerificationFailedAttemptCount)
+                .HasColumnName("verification_failed_attempt_count")
+                .HasDefaultValue(0);
+
+            entity.Property(request => request.Status)
+                .HasColumnName("status")
+                .HasMaxLength(30)
+                .HasDefaultValue(SupervisorRegistrationStatus.PendingEmail);
+
+            entity.Property(request => request.CreatedAtUtc)
+                .HasColumnName("created_at_utc");
+
+            entity.Property(request => request.VerifiedAtUtc)
+                .HasColumnName("verified_at_utc");
+
+            entity.Property(request => request.SubmittedAtUtc)
+                .HasColumnName("submitted_at_utc");
+
+            entity.Property(request => request.ReviewedAtUtc)
+                .HasColumnName("reviewed_at_utc");
+
+            entity.Property(request => request.ReviewedByAdminId)
+                .HasColumnName("reviewed_by_admin_id");
+
+            entity.Property(request => request.RejectionReason)
+                .HasColumnName("rejection_reason")
+                .HasMaxLength(500);
+
+            entity.HasOne(request => request.ReviewedByAdmin)
+                .WithMany()
+                .HasForeignKey(request => request.ReviewedByAdminId)
+                // Keep the application row and clear only the
+                // reviewing administrator reference if that admin
+                // account is later deleted.
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(request => request.Status);
+            entity.HasIndex(request => request.CreatedAtUtc);
+            entity.HasIndex(request => request.ReviewedByAdminId);
+
+            /*
+             * PostgreSQL partial unique index: at most one active
+             * application (not yet approved or rejected) can exist
+             * per email address. Approved/rejected rows remain as
+             * audit history and do not block a future reapplication.
+             */
+            entity.HasIndex(request => request.Email)
+                .IsUnique()
+                .HasFilter(
+                    "\"status\" IN "
+                    + "('pending_email', 'awaiting_details', 'pending_admin')");
         });
 
         modelBuilder.Entity<AiAgentJob>(entity =>

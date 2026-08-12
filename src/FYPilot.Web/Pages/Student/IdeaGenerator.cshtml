@@ -122,35 +122,6 @@
                               class="text-danger small"></span>
                     </div>
 
-                    <div class="idea2-skills-panel">
-                        <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
-                            <label class="mb-0">Assessed Skills Used</label>
-
-                            <a href="/Student/SkillAssessment">
-                                Update
-                            </a>
-                        </div>
-
-                        @if (Model.AssessedSkills.Any())
-                        {
-                            <div class="idea2-skill-cloud">
-                                @foreach (var skill in Model.AssessedSkills)
-                                {
-                                    <span>
-                                        @skill.SkillName
-                                        <b>@skill.Rating/5</b>
-                                    </span>
-                                }
-                            </div>
-                        }
-                        else
-                        {
-                            <div class="idea2-empty-skills">
-                                No assessed skills found.
-                            </div>
-                        }
-                    </div>
-                </div>
 
                 <div class="idea2-generate-footer">
                     <button type="submit" class="btn idea2-primary-btn w-100" @(Model.HasAssessedSkills ? "" : "disabled")>

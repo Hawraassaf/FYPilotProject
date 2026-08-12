@@ -306,7 +306,7 @@
 
                                     <span>
                                         <i class="bi bi-clock-history"></i>
-                                        @Model.State.GeneratedAt.ToLocalTime().ToString("dd MMM, HH:mm")
+                                        @Model.State.GeneratedAt.ToLocalTime().ToDisplayDateTime()
                                     </span>
                                 </div>
                             </div>

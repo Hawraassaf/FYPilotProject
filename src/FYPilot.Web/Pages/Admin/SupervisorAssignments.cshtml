@@ -878,9 +878,7 @@
                                             <span>Requested at</span>
 
                                             <strong>
-                                                @request.RequestedAt
-                                                .ToString(
-                                                "MMM d, yyyy · HH:mm")
+                                                @(request.RequestedAt.ToDisplayDateTime())
                                             </strong>
                                         </div>
 
@@ -1213,9 +1211,7 @@
 
                                 <small>
                                     Approved
-                                    @assignment.ApprovedAt
-                                    .ToString(
-                                    "MMM d, yyyy")
+                                    @(assignment.ApprovedAt.ToDisplayDate())
                                 </small>
                             </div>
 
@@ -1345,9 +1341,7 @@
                             </td>
 
                             <td>
-                                @item.RejectedAt
-                                .ToString(
-                                "MMM d, yyyy")
+                                @(item.RejectedAt.ToDisplayDate())
                             </td>
                         </tr>
                     }
@@ -1355,4 +1349,145 @@
             </table>
         </section>
     }
+
+    <section class="asa-table-wrap">
+        <div class="asa-table-head transfer-head">
+            <div>
+                <h2>Supervisor Registration Requests</h2>
+
+                <p>
+                    Review verified Supervisor applications and
+                    approve or reject each one. Approving creates
+                    the Supervisor account; rejecting never does.
+                </p>
+            </div>
+
+            <div class="asa-count-pill">
+                @Model.RegistrationRequests.Count pending
+            </div>
+        </div>
+
+        <div class="asa-panel-body">
+            @if (!Model.RegistrationRequests.Any())
+            {
+                <div class="asa-empty">
+                    <i class="bi bi-person-badge"></i>
+
+                    <div>
+                        No pending Supervisor registration
+                        requests right now.
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="asa-request-list">
+                    @foreach (var request
+                        in Model.RegistrationRequests)
+                    {
+                        <article class="asa-request-card">
+
+                            <div class="asa-request-top">
+                                <div>
+                                    <div class="asa-student-name">
+                                        @request.FullName
+                                    </div>
+
+                                    <div class="asa-subline">
+                                        @request.Email
+                                        · Submitted
+                                        @(request.SubmittedAt.ToDisplayDate())
+                                    </div>
+                                </div>
+
+                                <span class="asa-status-pill pending">
+                                    <i class="bi bi-hourglass-split"></i>
+                                    waiting admin approval
+                                </span>
+                            </div>
+
+                            <div class="asa-request-body">
+
+                                <div class="asa-info-grid">
+                                    <div class="asa-info-box">
+                                        <span>Academic title</span>
+                                        <strong>@request.AcademicTitle</strong>
+                                    </div>
+
+                                    <div class="asa-info-box">
+                                        <span>University / institution</span>
+                                        <strong>@request.University</strong>
+                                    </div>
+
+                                    <div class="asa-info-box">
+                                        <span>Department / faculty</span>
+                                        <strong>@request.Department</strong>
+                                    </div>
+
+                                    <div class="asa-info-box">
+                                        <span>Specialization / expertise</span>
+                                        <strong>@request.Specialization</strong>
+                                    </div>
+                                </div>
+
+                                @if (!string.IsNullOrWhiteSpace(
+                                    request.ProfessionalProfileUrl))
+                                {
+                                    <div class="asa-message">
+                                        <strong>Profile URL:</strong>
+                                        <a href="@request.ProfessionalProfileUrl"
+                                           target="_blank"
+                                           rel="noopener noreferrer">
+                                            @request.ProfessionalProfileUrl
+                                        </a>
+                                    </div>
+                                }
+
+                                <div class="asa-actions">
+                                    <form method="post"
+                                          class="asa-action-row reject-row">
+                                        <input type="hidden"
+                                               name="requestId"
+                                               value="@request.RequestId" />
+
+                                        <span class="asa-subline"
+                                              style="margin:0;">
+                                            Approve and create the
+                                            Supervisor account.
+                                        </span>
+
+                                        <button type="submit"
+                                                asp-page-handler="ApproveRegistration"
+                                                class="asa-btn primary">
+                                            <i class="bi bi-check-circle me-1"></i>
+                                            Approve
+                                        </button>
+                                    </form>
+
+                                    <form method="post"
+                                          class="asa-action-row reject-row">
+                                        <input type="hidden"
+                                               name="requestId"
+                                               value="@request.RequestId" />
+
+                                        <input type="text"
+                                               name="rejectionReason"
+                                               placeholder="Optional rejection note"
+                                               maxlength="500" />
+
+                                        <button type="submit"
+                                                asp-page-handler="RejectRegistration"
+                                                class="asa-btn danger">
+                                            <i class="bi bi-x-circle me-1"></i>
+                                            Reject
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </article>
+                    }
+                </div>
+            }
+        </div>
+    </section>
 </section>

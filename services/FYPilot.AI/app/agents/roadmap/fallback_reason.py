@@ -32,6 +32,7 @@ SCHEMA_INVALID = "schema_invalid"
 INSUFFICIENT_USABLE_PHASES = "insufficient_usable_phases"
 BLOCKED_CONTENT = "blocked_content"
 LIFECYCLE_COVERAGE_FAILED = "lifecycle_coverage_failed"
+DELIVERABLE_COVERAGE_FAILED = "deliverable_coverage_failed"
 
 # Category D: the candidate passed the Writer stage but failed later in the
 # shared review pipeline (reviewer/rewrite stage, not this agent).
@@ -64,6 +65,7 @@ _SAFE_MESSAGES: dict[str, str] = {
     INSUFFICIENT_USABLE_PHASES: "The AI proposed too few usable project phases.",
     BLOCKED_CONTENT: "The AI response was blocked by the content safety firewall.",
     LIFECYCLE_COVERAGE_FAILED: "The AI's phase plan was missing required project lifecycle coverage.",
+    DELIVERABLE_COVERAGE_FAILED: "The AI's phase plan promised a deliverable that no task actually produces.",
     REVIEWER_UNAVAILABLE: "The AI quality reviewer could not be reached in time.",
     SEMANTIC_REWRITE_FAILED: "A quality issue in the AI roadmap could not be corrected.",
     FINAL_REVIEW_FAILED: "The AI roadmap could not be verified after correction.",

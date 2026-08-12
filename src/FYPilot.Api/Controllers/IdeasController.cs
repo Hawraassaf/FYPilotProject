@@ -13,9 +13,36 @@ namespace FYPilot.Api.Controllers;
 [ApiController]
 [Route("api/ideas")]
 [Authorize]
-public class IdeasController(ApplicationDbContext db) : ControllerBase
+public class IdeasController(
+    ApplicationDbContext db,
+    IActiveProjectService activeProjectService) : ControllerBase
 {
     private int UserId => int.Parse(User.FindFirst("userId")!.Value);
+
+    /// <summary>
+    /// Resolves which project "the selected idea" means for this request.
+    /// Prefers an explicit projectId, and falls back to the student's
+    /// active project for older clients that do not send one yet.
+    /// </summary>
+    private async Task<int?> ResolveProjectIdAsync(
+        int? projectId,
+        CancellationToken cancellationToken)
+    {
+        if (projectId.HasValue)
+        {
+            var owned = await db.Projects
+                .AsNoTracking()
+                .AnyAsync(
+                    p => p.Id == projectId.Value && p.StudentId == UserId,
+                    cancellationToken);
+
+            return owned ? projectId : null;
+        }
+
+        return await activeProjectService.GetActiveProjectIdAsync(
+            UserId,
+            cancellationToken);
+    }
 
     private static ProjectIdeaResponse MapIdea(ProjectIdea i) => new(
         i.Id, i.Title, i.ProblemStatement, i.TargetUsers, i.WhyUseful,
@@ -43,9 +70,30 @@ public class IdeasController(ApplicationDbContext db) : ControllerBase
     }
 
     [HttpGet("selected")]
-    public async Task<IActionResult> GetSelected()
+    public async Task<IActionResult> GetSelected(
+        [FromQuery] int? projectId,
+        CancellationToken cancellationToken)
     {
-        var idea = await db.ProjectIdeas.FirstOrDefaultAsync(i => i.UserId == UserId && i.IsSelected);
+        /*
+         * Project.ProjectIdeaId is the authoritative selected idea.
+         * ProjectIdea.IsSelected is legacy-only and can have stale
+         * rows left true for ideas that are no longer official.
+         */
+        var resolvedProjectId = await ResolveProjectIdAsync(
+            projectId,
+            cancellationToken);
+
+        if (!resolvedProjectId.HasValue)
+        {
+            return Ok(null);
+        }
+
+        var idea = await db.Projects
+            .AsNoTracking()
+            .Where(p => p.Id == resolvedProjectId.Value)
+            .Select(p => p.ProjectIdea)
+            .FirstOrDefaultAsync(cancellationToken);
+
         if (idea == null) return Ok(null);
         return Ok(MapIdea(idea));
     }
@@ -108,15 +156,51 @@ public class IdeasController(ApplicationDbContext db) : ControllerBase
     }
 
     [HttpPost("{id}/select")]
-    public async Task<IActionResult> Select(int id)
+    public async Task<IActionResult> Select(
+        int id,
+        [FromQuery] int? projectId,
+        CancellationToken cancellationToken)
     {
-        var existing = await db.ProjectIdeas.Where(i => i.UserId == UserId && i.IsSelected).ToListAsync();
-        foreach (var e in existing) e.IsSelected = false;
+        var resolvedProjectId = await ResolveProjectIdAsync(
+            projectId,
+            cancellationToken);
 
-        var idea = await db.ProjectIdeas.FirstOrDefaultAsync(i => i.Id == id && i.UserId == UserId);
+        if (!resolvedProjectId.HasValue)
+        {
+            return BadRequest(
+                "A projectId is required to select an official idea.");
+        }
+
+        var idea = await db.ProjectIdeas.FirstOrDefaultAsync(
+            i => i.Id == id && i.UserId == UserId,
+            cancellationToken);
+
         if (idea == null) return NotFound();
-        idea.IsSelected = true;
-        await db.SaveChangesAsync();
+
+        var project = await db.Projects.FirstOrDefaultAsync(
+            p => p.Id == resolvedProjectId.Value && p.StudentId == UserId,
+            cancellationToken);
+
+        if (project == null) return NotFound();
+
+        var previousIdeaId = project.ProjectIdeaId;
+
+        /*
+         * Project.ProjectIdeaId is the authoritative selected idea,
+         * scoped to this project only -- selecting here must not affect
+         * another project owned by the same student.
+         */
+        project.ProjectIdeaId = idea.Id;
+        project.UpdatedAt = DateTime.UtcNow;
+
+        await ProjectIdeaSelectionSync.SyncSelectedFlagAsync(
+            db,
+            project.Id,
+            idea.Id,
+            previousIdeaId,
+            cancellationToken);
+
+        await db.SaveChangesAsync(cancellationToken);
         return Ok(MapIdea(idea));
     }
 

@@ -103,7 +103,7 @@
 }
 else
 {
-    <main class="roadmap-control">
+    <main class="roadmap-control" id="roadmap-print-root">
 
         @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
         {
@@ -143,7 +143,7 @@ else
                     </span>
                     <span class="roadmap-fallback-meta">
                         Attempted provider: @(Model.LatestReview!.GeneratorProvider ?? "none")
-                        &middot; Generated @Model.LatestReview.CreatedAt.ToString("g") UTC
+                        &middot; Generated @Model.LatestReview.CreatedAt.ToDisplayDateTime() UTC
                         &middot; Review status: @Model.LatestReview.Status
                     </span>
                 </div>
@@ -212,6 +212,16 @@ else
                     <i class="bi bi-fingerprint" aria-hidden="true"></i>
                     Project DNA
                 </a>
+
+                @if (Model.Phases.Any())
+                {
+                    <button type="button"
+                            class="btn roadmap-btn-secondary no-print"
+                            onclick="window.print()">
+                        <i class="bi bi-download" aria-hidden="true"></i>
+                        Download PDF
+                    </button>
+                }
             </div>
 
             @if (!Model.Phases.Any())
@@ -2865,6 +2875,78 @@ else
             .roadmap-loading-progress div {
                 animation: none !important;
                 transition: none !important;
+            }
+        }
+
+        @@media print {
+            @@page {
+                size: A4;
+                margin: 15mm;
+            }
+
+            html,
+            body {
+                height: auto !important;
+                min-height: 0 !important;
+            }
+
+                body * {
+                    visibility: hidden;
+                }
+
+            #roadmap-print-root,
+            #roadmap-print-root * {
+                visibility: visible;
+            }
+
+            #roadmap-print-root {
+                position: absolute;
+                inset: 0 auto auto 0;
+                width: 100%;
+                height: auto !important;
+                min-height: 0 !important;
+                background: #fff;
+            }
+
+            .no-print,
+            .roadmap-command-actions,
+            .roadmap-phase-nav,
+            .roadmap-detail-actions form,
+            .roadmap-launch-action,
+            .roadmap-gantt-legend {
+                display: none !important;
+            }
+
+            .roadmap-workspace {
+                display: block;
+            }
+
+            .roadmap-gantt-scroll {
+                overflow: visible;
+            }
+
+            .roadmap-gantt,
+            .roadmap-gantt-weeks {
+                width: 100% !important;
+            }
+
+            /* On screen only the selected phase's panel is shown (see
+               .roadmap-detail-panel / .is-active above) -- a printed
+               roadmap is only useful as a full plan, so every phase panel
+               is forced visible here with a page break between them. */
+            .roadmap-detail-panel {
+                display: block !important;
+                break-inside: avoid;
+                page-break-after: always;
+            }
+
+                .roadmap-detail-panel:last-child {
+                    page-break-after: auto;
+                }
+
+            .roadmap-gantt-bar,
+            .roadmap-gantt-label {
+                pointer-events: none;
             }
         }
     </style>

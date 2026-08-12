@@ -318,6 +318,16 @@
             }
         }
 
+        function shuffleRemainingSkills() {
+            // Only the not-yet-shown tail is reordered -- the skills already
+            // answered (indices <= currentIndex) keep their position so
+            // "Back" still lands on what the student actually just rated.
+            for (let i = skills.length - 1; i > currentIndex + 1; i--) {
+                const j = currentIndex + 1 + Math.floor(Math.random() * (i - currentIndex));
+                [skills[i], skills[j]] = [skills[j], skills[i]];
+            }
+        }
+
         function chooseRating(value) {
             const current = skills[currentIndex];
 
@@ -329,6 +339,8 @@
             });
 
             skipSkillBtn.classList.remove("active");
+
+            shuffleRemainingSkills();
         }
 
         function skipSkill() {

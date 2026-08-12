@@ -1360,7 +1360,7 @@
             var deletedWhen = project.DeletedAtUtc.HasValue
                 ? project.DeletedAtUtc.Value
                     .ToLocalTime()
-                    .ToString("dd MMM yyyy, hh:mm tt")
+                    .ToDisplayDateTime()
                 : "an unknown time";
 
             return $"Soft-deleted by {project.DeletedByName} on {deletedWhen}. "
@@ -1372,7 +1372,7 @@
             var archivedWhen = project.OwnerArchivedAtUtc.HasValue
                 ? project.OwnerArchivedAtUtc.Value
                     .ToLocalTime()
-                    .ToString("dd MMM yyyy, hh:mm tt")
+                    .ToDisplayDateTime()
                 : "an unknown time";
 
             return $"The project owner archived this project from their workspace on {archivedWhen}. "

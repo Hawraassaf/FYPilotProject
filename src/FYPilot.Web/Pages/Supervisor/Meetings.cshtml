@@ -433,7 +433,7 @@
                             @if (selected.LastGoogleSyncAt.HasValue)
                             {
                                 <p>
-                                    Last synced: @selected.LastGoogleSyncAt.Value.ToLocalTime().ToString("MMM d, yyyy • hh:mm tt")
+                                    Last synced: @selected.LastGoogleSyncAt.Value.ToLocalTime().ToDisplayDateTime()
                                 </p>
                             }
                         }
