@@ -2,6 +2,7 @@ using System.Net;
 using System.Security.Claims;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
+using FYPilot.Infrastructure.Services;
 using FYPilot.Web.Services.Notifications;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -14,6 +15,7 @@ namespace FYPilot.Web.Pages.Admin;
 public class SupervisorAssignmentsModel(
     ApplicationDbContext db,
     INotificationService notificationService,
+    IEmailSender emailSender,
     ILogger<SupervisorAssignmentsModel> logger)
     : PageModel
 {
@@ -28,6 +30,16 @@ public class SupervisorAssignmentsModel(
 
     public List<PendingAssignmentRow>
         PendingRequests
+    { get; private set; } = [];
+
+    /*
+     * Supervisor account APPLICATIONS -- a completely separate
+     * concern from the project-assignment requests above. These
+     * requests have no User until OnPostApproveRegistrationAsync
+     * creates one.
+     */
+    public List<SupervisorRegistrationRequestRow>
+        RegistrationRequests
     { get; private set; } = [];
 
     public List<SupervisorCapacityRow>
@@ -57,6 +69,295 @@ public class SupervisorAssignmentsModel(
     {
         await LoadAsync(
             cancellationToken);
+    }
+
+    public async Task<IActionResult>
+        OnPostApproveRegistrationAsync(
+            int requestId,
+            CancellationToken cancellationToken)
+    {
+        var adminId =
+            GetCurrentUserId();
+
+        await using var transaction =
+            await db.Database.BeginTransactionAsync(
+                cancellationToken);
+
+        User? createdUser = null;
+
+        try
+        {
+            var request =
+                await db.SupervisorRegistrationRequests
+                    .FirstOrDefaultAsync(
+                        item =>
+                            item.Id == requestId,
+                        cancellationToken);
+
+            if (!IsApprovable(request))
+            {
+                await transaction.RollbackAsync(
+                    cancellationToken);
+
+                ErrorMessage =
+                    "This supervisor application was already "
+                    + "processed or is incomplete.";
+
+                return RedirectToPage();
+            }
+
+            var emailTaken =
+                await db.Users.AnyAsync(
+                    user =>
+                        user.Email.ToLower() ==
+                            request!.Email.ToLower(),
+                    cancellationToken);
+
+            if (emailTaken)
+            {
+                await transaction.RollbackAsync(
+                    cancellationToken);
+
+                ErrorMessage =
+                    "An account with this email already exists. "
+                    + "The application could not be approved.";
+
+                return RedirectToPage();
+            }
+
+            createdUser = new User
+            {
+                Email = request!.Email,
+                FullName = request.FullName,
+                PasswordHash = request.PasswordHash!,
+                Role = "supervisor",
+                IsEmailVerified = true,
+                EmailVerifiedAtUtc = request.VerifiedAtUtc,
+                IsMainAdmin = false,
+                MustChangePassword = false
+            };
+
+            db.Users.Add(createdUser);
+
+            /*
+             * Save temporarily to generate the user ID, exactly like
+             * Register.cshtml.cs does for a normal registration.
+             */
+            await db.SaveChangesAsync(
+                cancellationToken);
+
+            db.SupervisorProfiles.Add(
+                new SupervisorProfile
+                {
+                    UserId = createdUser.Id,
+                    AcademicTitle = request.AcademicTitle,
+                    University = request.University,
+                    Department = request.Department,
+                    Specialization = request.Specialization,
+                    WebsiteUrl = request.ProfessionalProfileUrl,
+                    PreferredMeetingMode = "Online",
+                    UpdatedAt = DateTime.UtcNow
+                });
+
+            request.Status =
+                SupervisorRegistrationStatus.Approved;
+
+            request.ReviewedAtUtc =
+                DateTime.UtcNow;
+
+            request.ReviewedByAdminId =
+                adminId;
+
+            /*
+             * The real User now owns the credential -- do not keep a
+             * duplicate password hash around in the application row.
+             */
+            request.PasswordHash = null;
+            request.VerificationCodeHash = null;
+
+            await db.SaveChangesAsync(
+                cancellationToken);
+
+            await transaction.CommitAsync(
+                cancellationToken);
+        }
+        catch (DbUpdateException exception)
+        {
+            await transaction.RollbackAsync(
+                cancellationToken);
+
+            db.ChangeTracker.Clear();
+
+            logger.LogWarning(
+                exception,
+                "Could not approve supervisor registration "
+                + "request {RequestId}.",
+                requestId);
+
+            ErrorMessage =
+                "The supervisor application could not be "
+                + "approved. It may already have been processed.";
+
+            return RedirectToPage();
+        }
+
+        /*
+         * The database transaction already succeeded. A failed
+         * notification/email here must not roll back the account
+         * that was just created.
+         */
+        await TryNotifyAsync(
+            createdUser.Id,
+            "Your Supervisor Account Has Been Approved",
+            "Your FYPilot Supervisor registration has been "
+            + "approved. You can now sign in using the email and "
+            + "password you registered with.",
+            "supervisor_registration_approved",
+            "/Supervisor/Dashboard",
+            sendEmail:
+                true,
+            emailSubject:
+                "Your FYPilot Supervisor Account Has Been Approved",
+            emailHtmlBody:
+                BuildSupervisorApprovalEmail(
+                    createdUser.FullName),
+            projectId:
+                null,
+            cancellationToken:
+                cancellationToken);
+
+        SuccessMessage =
+            $"{createdUser.FullName} was approved and can now "
+            + "sign in as a Supervisor.";
+
+        return RedirectToPage();
+    }
+
+    public async Task<IActionResult>
+        OnPostRejectRegistrationAsync(
+            int requestId,
+            string? rejectionReason,
+            CancellationToken cancellationToken)
+    {
+        var adminId =
+            GetCurrentUserId();
+
+        var reason =
+            string.IsNullOrWhiteSpace(
+                rejectionReason)
+                ? "The application was not approved."
+                : rejectionReason.Trim();
+
+        SupervisorRegistrationRequest? request;
+
+        await using var transaction =
+            await db.Database.BeginTransactionAsync(
+                cancellationToken);
+
+        try
+        {
+            request =
+                await db.SupervisorRegistrationRequests
+                    .FirstOrDefaultAsync(
+                        item =>
+                            item.Id == requestId,
+                        cancellationToken);
+
+            if (request == null ||
+                request.Status !=
+                    SupervisorRegistrationStatus.PendingAdmin)
+            {
+                await transaction.RollbackAsync(
+                    cancellationToken);
+
+                ErrorMessage =
+                    "This supervisor application was already "
+                    + "processed or is unavailable.";
+
+                return RedirectToPage();
+            }
+
+            request.Status =
+                SupervisorRegistrationStatus.Rejected;
+
+            request.ReviewedAtUtc =
+                DateTime.UtcNow;
+
+            request.ReviewedByAdminId =
+                adminId;
+
+            request.RejectionReason =
+                reason;
+
+            /*
+             * No User was ever created for a rejected application --
+             * the sensitive temporary values are no longer needed.
+             */
+            request.PasswordHash = null;
+            request.VerificationCodeHash = null;
+
+            await db.SaveChangesAsync(
+                cancellationToken);
+
+            await transaction.CommitAsync(
+                cancellationToken);
+        }
+        catch (DbUpdateException exception)
+        {
+            await transaction.RollbackAsync(
+                cancellationToken);
+
+            db.ChangeTracker.Clear();
+
+            logger.LogWarning(
+                exception,
+                "Could not reject supervisor registration "
+                + "request {RequestId}.",
+                requestId);
+
+            ErrorMessage =
+                "The supervisor application could not be rejected.";
+
+            return RedirectToPage();
+        }
+
+        try
+        {
+            await emailSender.SendAsync(
+                request.Email,
+                "Supervisor Application Update",
+                BuildSupervisorRejectionEmail(
+                    request.FullName,
+                    reason));
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Could not send a rejection email for supervisor "
+                + "request {RequestId}.",
+                requestId);
+        }
+
+        SuccessMessage =
+            "The supervisor application was rejected.";
+
+        return RedirectToPage();
+    }
+
+    private static bool IsApprovable(
+        SupervisorRegistrationRequest? request)
+    {
+        return request != null &&
+            request.Status ==
+                SupervisorRegistrationStatus.PendingAdmin &&
+            request.VerifiedAtUtc != null &&
+            request.SubmittedAtUtc != null &&
+            !string.IsNullOrWhiteSpace(request.PasswordHash) &&
+            !string.IsNullOrWhiteSpace(request.AcademicTitle) &&
+            !string.IsNullOrWhiteSpace(request.University) &&
+            !string.IsNullOrWhiteSpace(request.Department) &&
+            !string.IsNullOrWhiteSpace(request.Specialization);
     }
 
     public async Task<IActionResult>
@@ -1216,6 +1517,52 @@ public class SupervisorAssignmentsModel(
                         supervisor =>
                             !supervisor.IsFull)
             };
+
+        var registrationEntities =
+            await db.SupervisorRegistrationRequests
+                .AsNoTracking()
+                .Where(request =>
+                    request.Status ==
+                        SupervisorRegistrationStatus.PendingAdmin)
+                .OrderBy(request =>
+                    request.SubmittedAtUtc)
+                .ToListAsync(
+                    cancellationToken);
+
+        RegistrationRequests =
+            registrationEntities
+                .Select(request =>
+                    new SupervisorRegistrationRequestRow
+                    {
+                        RequestId =
+                            request.Id,
+
+                        FullName =
+                            request.FullName,
+
+                        Email =
+                            request.Email,
+
+                        AcademicTitle =
+                            request.AcademicTitle ?? "",
+
+                        University =
+                            request.University ?? "",
+
+                        Department =
+                            request.Department ?? "",
+
+                        Specialization =
+                            request.Specialization ?? "",
+
+                        ProfessionalProfileUrl =
+                            request.ProfessionalProfileUrl,
+
+                        SubmittedAt =
+                            request.SubmittedAtUtc ??
+                            request.CreatedAtUtc
+                    })
+                .ToList();
     }
 
     private IQueryable<SupervisorAssignment>
@@ -2073,6 +2420,33 @@ public class SupervisorAssignmentsModel(
             + "schedule meetings for all active members.");
     }
 
+    private static string BuildSupervisorApprovalEmail(
+        string fullName)
+    {
+        return BuildEmail(
+            "Supervisor Account Approved",
+            fullName,
+            "Your <strong>FYPilot Supervisor</strong> registration "
+            + "has been approved.",
+            "Your account is now active using the email and "
+            + "password you entered during registration.",
+            "You can sign in now from the FYPilot login page.");
+    }
+
+    private static string BuildSupervisorRejectionEmail(
+        string fullName,
+        string reason)
+    {
+        return BuildEmail(
+            "Supervisor Application Update",
+            fullName,
+            "Your request to register as a FYPilot Supervisor "
+            + "was not approved.",
+            $"<strong>Note:</strong> {Encode(reason)}",
+            "Please contact the administration if you need "
+            + "additional information.");
+    }
+
     private static string BuildEmail(
         string heading,
         string recipientName,
@@ -2384,5 +2758,26 @@ public class SupervisorAssignmentsModel(
         public string AdminNote { get; set; } = "";
 
         public DateTime RejectedAt { get; set; }
+    }
+
+    public class SupervisorRegistrationRequestRow
+    {
+        public int RequestId { get; set; }
+
+        public string FullName { get; set; } = "";
+
+        public string Email { get; set; } = "";
+
+        public string AcademicTitle { get; set; } = "";
+
+        public string University { get; set; } = "";
+
+        public string Department { get; set; } = "";
+
+        public string Specialization { get; set; } = "";
+
+        public string? ProfessionalProfileUrl { get; set; }
+
+        public DateTime SubmittedAt { get; set; }
     }
 }

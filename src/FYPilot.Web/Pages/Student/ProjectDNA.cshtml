@@ -73,13 +73,15 @@
                     <span class="text-capitalize">@Model.Idea.DifficultyLevel</span>
                     <span>@Model.Idea.ExpectedDurationWeeks weeks</span>
 
-                    @if (Model.Idea.IsSelected)
-                    {
-                        <span class="pdna-selected-chip">
-                            <i class="bi bi-check-circle me-1"></i>
-                            Selected
-                        </span>
-                    }
+                    @* Model.Idea is always resolved through the project's
+                       authoritative ProjectIdeaId FK (see
+                       ProjectDNAModel.LoadPageDataAsync), so it is by
+                       definition the official idea -- the legacy
+                       IsSelected flag must not gate this chip. *@
+                    <span class="pdna-selected-chip">
+                        <i class="bi bi-check-circle me-1"></i>
+                        Selected
+                    </span>
                 </div>
 
                 <div class="pdna-summary-block">

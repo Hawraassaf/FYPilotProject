@@ -510,7 +510,7 @@
 
                             <div class="nova-activity-copy">
                                 <strong>@activity.Description</strong>
-                                <time>@activity.CreatedAtUtc.ToLocalTime().ToString("MMM d · h:mm tt")</time>
+                                <time>@activity.CreatedAtUtc.ToLocalTime().ToDisplayDateTime()</time>
                             </div>
                         </div>
                     }

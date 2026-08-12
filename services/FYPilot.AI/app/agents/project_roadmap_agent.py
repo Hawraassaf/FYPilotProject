@@ -31,7 +31,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 from app.agents import roadmap_scheduler
-from app.agents.roadmap import fallback_reason, project_profile, task_metadata, task_taxonomy
+from app.agents.roadmap import deliverable_coverage, fallback_reason, project_profile, task_metadata, task_taxonomy
 from app.agents.roadmap.lexicon import contains_any
 from app.agents.roadmap.project_profile import ProjectProfile, ProjectProfileInput
 from app.agents.roadmap.task_metadata import InternalTaskProposal
@@ -134,6 +134,24 @@ class RoadmapDeferredTask(BaseModel):
     priority: str = "optional"
 
 
+class RoadmapPhaseCapacityIssue(BaseModel):
+    """One phase whose OWN planned effort exceeds the capacity its OWN
+    scheduled span provides -- see capacity_scheduler.diagnose_phase_
+    capacity's docstring for the confirmed live defect this reports (a
+    103h phase clamped onto a single 20h-capacity week, invisible to the
+    whole-project scheduleFeasibility/utilizationPercentage figures alone
+    since those can look only marginally over capacity in aggregate)."""
+
+    phaseId: str
+    phaseName: str
+    durationWeeks: int
+    plannedHours: int
+    availableCapacityHours: int
+    utilizationPercentage: float
+    overloadHours: int
+    requiredMinWeeks: int
+
+
 class RoadmapPlanningSummary(BaseModel):
     totalWeeks: int
     teamSize: int
@@ -158,6 +176,10 @@ class RoadmapPlanningSummary(BaseModel):
     overloadHours: int = 0
     recommendedAdditionalWeeks: int = 0
     weeklyCapacity: list[RoadmapWeeklyCapacity] = Field(default_factory=list)
+    # Phase-LOCAL capacity check (Roadmap phase-capacity-validation batch).
+    # Defaulted so pre-existing candidates/tests without it still validate
+    # -- see RoadmapPhaseCapacityIssue's docstring.
+    phaseCapacityIssues: list[RoadmapPhaseCapacityIssue] = Field(default_factory=list)
 
 
 class ProjectRoadmapResponse(BaseModel):
@@ -247,6 +269,7 @@ _LIFECYCLE_LABELS: dict[str, str] = {
     "requirements_scope": "requirements and scope definition",
     "architecture_design": "architecture / database design",
     "core_implementation": "core feature implementation",
+    "application_implementation": "core web application implementation (screens, auth, persistence)",
     "integration": "backend-frontend / service integration",
     "testing_validation": "testing and validation",
     "documentation": "documentation",
@@ -268,7 +291,8 @@ _LIFECYCLE_LABELS: dict[str, str] = {
 # tolerated in moderation (keyword coverage is inherently imperfect) but not
 # if more than half of them are missing -- see _lifecycle_gap_is_blocking.
 _CORE_LIFECYCLE_CATEGORIES = {
-    "requirements_scope", "core_implementation", "testing_validation", "final_delivery",
+    "requirements_scope", "core_implementation", "application_implementation",
+    "testing_validation", "final_delivery",
 }
 
 
@@ -338,6 +362,12 @@ class ProjectRoadmapAgent:
         self.last_lifecycle_coverage_passed: bool = True
         self.last_missing_lifecycle_categories: list[str] = []
         self.last_blocked_term_tasks_dropped: int = 0
+        # Populated whenever diagnose_roadmap_deliverable_coverage finds a
+        # phase promising a technical artifact (e.g. "baseline urgency
+        # classifier") that no task in that phase plausibly produces --
+        # see app/agents/roadmap/deliverable_coverage.py.
+        self.last_deliverable_coverage_passed: bool = True
+        self.last_deliverable_coverage_issues: list[str] = []
 
         self.blocked_terms = [
             "react",
@@ -756,6 +786,40 @@ class ProjectRoadmapAgent:
                 "roadmap.lifecycle_gap_tolerated request_id=%s missing=%s", self.request_id, missing_mandatory,
             )
 
+        # A phase must not promise a deliverable (e.g. "baseline urgency
+        # classifier") that none of its own tasks plausibly produce -- see
+        # deliverable_coverage.py's module docstring for the confirmed live
+        # defect this closes. Checked after lifecycle coverage (a coarser,
+        # whole-roadmap signal) and before the plan is accepted, using the
+        # same debug-bypass knob as the lifecycle gate so both deterministic
+        # gates can be inspected together.
+        deliverable_issues = deliverable_coverage.diagnose_roadmap_deliverable_coverage(plan.phases)
+        self.last_deliverable_coverage_issues = [
+            f"{issue.phase_name}: '{issue.deliverable}'" for issue in deliverable_issues
+        ]
+
+        if _gate_disabled and deliverable_issues:
+            logger.warning(
+                "roadmap.deliverable_coverage_gate_DISABLED_bypassing_rejection request_id=%s issues=%s",
+                self.request_id, self.last_deliverable_coverage_issues,
+            )
+            self.last_deliverable_coverage_passed = False
+        elif deliverable_issues:
+            log_provider_output(schema_valid=True, semantic_valid=False)
+            self.last_error = (
+                "Roadmap plan promised a deliverable that no task actually produces: "
+                f"{'; '.join(self.last_deliverable_coverage_issues)}. Used fallback roadmap."
+            )
+            self.last_fallback_reason_code = fallback_reason.DELIVERABLE_COVERAGE_FAILED
+            self.last_deliverable_coverage_passed = False
+            logger.info(
+                "roadmap.deliverable_coverage_rejected request_id=%s issues=%s",
+                self.request_id, self.last_deliverable_coverage_issues,
+            )
+            return None
+        else:
+            self.last_deliverable_coverage_passed = True
+
         log_provider_output(schema_valid=True, semantic_valid=True)
         logger.info(
             "roadmap.gate_result request_id=%s usable_phase_count=%d lifecycle_coverage_passed=%s "
@@ -944,6 +1008,8 @@ Timeline:
 {lifecycle_lines}
   A plan that omits more than one of these areas will be automatically rejected and replaced with a generic, non-project-specific fallback roadmap -- so when in doubt, add another phase rather than skip or bury an area.
 - Give MORE weeks/effort to the phases that are hardest FOR THIS SPECIFIC PROJECT AND TEAM: complex core features, AI/data work, and areas where skills are missing. Give FEWER weeks to easy or routine phases.
+- Sequence work by TRUE technical prerequisites, not by lifecycle category label. Application-foundation work that has no real dependency on a trained/finalized AI model or on full end-to-end service integration -- project setup, authentication, core UI screens/pages, navigation, database persistence -- should be scheduled as soon as ITS OWN prerequisites (architecture and database design) are done, in an early-to-mid phase. Do not defer it to the final phase just because "the model" is still being built elsewhere -- they are independent workstreams. Reserve later phases for work that genuinely cannot start earlier (e.g. integrating a trained model artifact into a live service, end-to-end tests that need both the application and the service running, final validation/deployment/documentation).
+- Never let one terminal phase absorb most of the project's remaining work. If a phase's own tasks would clearly need more effort than its "weeks" weight can hold at this team's weekly capacity, either give that phase visibly more weeks or move genuinely independent tasks into an earlier phase that still has spare capacity -- do not silently pile everything left into the last phase.
 
 Phase design rules:
 - The phase structure must fit THIS project. Phase names must mention the project's actual features, data, or components, not generic labels like "Core Feature Development".
@@ -956,7 +1022,7 @@ Phase design rules:
 - 2 to 4 deliverables per phase, 0 to 4 skillsToLearn per phase.
 - riskWarning: one short sentence about the biggest risk of that phase for this team.
 - checkpoint: one short sentence describing what the supervisor should verify at the end of the phase.
-- Technology constraints: use ASP.NET Core Razor Pages, Python FastAPI, PostgreSQL, Bootstrap, JavaScript, and Ollama where relevant. Do not suggest React, Node.js, Flutter, AWS, Azure, Kubernetes, blockchain, Flask, Balsamiq, or Figma.
+- Technology constraints: use ASP.NET Core Razor Pages, Python FastAPI, PostgreSQL, Bootstrap, and JavaScript for the deployed application. Ollama may be used where relevant, but it is typically a DEVELOPMENT-time or data-generation tool (e.g. generating synthetic training data) rather than a live runtime component -- do not describe Ollama as part of the deployed/runtime architecture (e.g. in an architecture diagram or integration task for the LIVE system) unless this specific project's own required technologies genuinely call for it as a runtime service. Do not suggest React, Node.js, Flutter, AWS, Azure, Kubernetes, blockchain, Flask, Balsamiq, or Figma.
 
 Task fields -- the platform validates and clamps every number below against defensible per-type ranges before using it, so propose your honest best estimate rather than guessing conservatively:
 - localId: short id unique WITHIN this phase only, e.g. "T1", "T2".
@@ -1263,7 +1329,15 @@ Return exactly this JSON structure:
             return deliverables[:3]
 
         if deliverables:
-            return [f"Progress update: {deliverables[0]}"]
+            # roadmap_scheduler.PROGRESS_UPDATE_PREFIX (not a second literal
+            # here) -- RoadmapCandidateSchema revalidates every candidate,
+            # including this already-expanded public response, by rebuilding
+            # `phases` from THESE `weeks[]` (roadmap_scheduler._group_weeks_
+            # into_phases). Its own deliverable dedup only recognizes THIS
+            # exact prefix to collapse "Progress update: X" back onto plain
+            # "X" -- a drifted literal here would silently reintroduce the
+            # duplicate-deliverable defect that fix closes.
+            return [f"{roadmap_scheduler.PROGRESS_UPDATE_PREFIX}{deliverables[0]}"]
 
         return [f"Progress update on {phase['name']}"]
 

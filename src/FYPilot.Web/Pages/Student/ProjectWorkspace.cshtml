@@ -214,10 +214,9 @@
                                     </strong>
 
                                     <time>
-                                        @message.CreatedAtUtc
-                                        .ToLocalTime()
-                                        .ToString(
-                                        "MMM d, yyyy h:mm tt")
+                                        @(message.CreatedAtUtc
+                                            .ToLocalTime()
+                                            .ToDisplayDateTime())
                                     </time>
 
                                     @if (message.IsEdited &&

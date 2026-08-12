@@ -13,6 +13,7 @@ using FYPilot.Web.Services.Notifications;
 using FYPilot.Web.Services.Projects;
 using FYPilot.Web.Services.Supervisors;
 using FYPilot.Web.Services.EmailVerification;
+using FYPilot.Web.Services.SupervisorRegistration;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -211,6 +212,15 @@ builder.Services.AddScoped<
 builder.Services.AddScoped<
     IEmailVerificationService,
     EmailVerificationService>();
+
+// ── Supervisor Registration (pre-account applications) ──────────────────────────
+builder.Services.AddScoped<
+    ISupervisorApplicationVerificationService,
+    SupervisorApplicationVerificationService>();
+builder.Services.AddScoped<
+    ISupervisorApplicationTokenService,
+    SupervisorApplicationTokenService>();
+
 // ── Notifications + Supervisor Services ───────────────────────────────────────
 builder.Services.AddScoped<
     INotificationService,

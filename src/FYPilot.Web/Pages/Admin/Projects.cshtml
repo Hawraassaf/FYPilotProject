@@ -770,7 +770,7 @@
                                                 </div>
 
                                                 <time datetime="@activity.CreatedAtUtc.ToString("O")">
-                                                    @activity.CreatedAtUtc.ToLocalTime().ToString("dd MMM yyyy, h:mm tt")
+                                                    @activity.CreatedAtUtc.ToLocalTime().ToDisplayDateTime()
                                                 </time>
                                             </article>
                                         }

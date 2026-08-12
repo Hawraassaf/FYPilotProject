@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using FYPilot.Domain.Entities;
 using FYPilot.Infrastructure.Data;
 using FYPilot.Web.Services.EmailVerification;
+using FYPilot.Web.Services.SupervisorRegistration;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
@@ -11,6 +12,8 @@ namespace FYPilot.Web.Pages.Account;
 public class RegisterModel(
     ApplicationDbContext db,
     IEmailVerificationService emailVerificationService,
+    ISupervisorApplicationVerificationService supervisorVerificationService,
+    ISupervisorApplicationTokenService supervisorApplicationTokenService,
     ILogger<RegisterModel> logger)
     : PageModel
 {
@@ -83,6 +86,19 @@ public class RegisterModel(
         {
             ErrorMessage = "Invalid role.";
             return Page();
+        }
+
+        /*
+         * Supervisor registration is an application, not immediate
+         * account creation. No User and no SupervisorProfile are
+         * created here -- see HandleSupervisorRegistrationAsync.
+         */
+        if (role == "supervisor")
+        {
+            return await HandleSupervisorRegistrationAsync(
+                email,
+                fullName,
+                cancellationToken);
         }
 
         /*
@@ -165,43 +181,23 @@ public class RegisterModel(
             await db.SaveChangesAsync(
                 cancellationToken);
 
-            if (role == "student")
-            {
-                db.StudentProfiles.Add(
-                    new StudentProfile
-                    {
-                        UserId = createdUser.Id,
-                        Major = "Computer Science",
-                        Year = "3rd Year",
-                        ExperienceLevel = "beginner",
-                        AvailableHoursPerWeek = 20,
-                        TeamMembers = 1,
-                        TargetDifficulty = "intermediate"
-                    });
-            }
-            else
-            {
-                db.SupervisorProfiles.Add(
-                    new SupervisorProfile
-                    {
-                        UserId = createdUser.Id,
-                        Department = "Computer Science",
-                        Specialization =
-                            "General Software Engineering",
-                        ResearchAreas =
-                            "Software Engineering, Web Development, AI/Data Science",
-                        AcademicTitle = "Supervisor",
-                        Faculty = "Computer Science",
-                        University = "",
-                        OfficeLocation = "",
-                        OfficeHours = "",
-                        PreferredMeetingMode = "Online",
-                        Bio = "",
-                        LinkedInUrl = "",
-                        WebsiteUrl = "",
-                        UpdatedAt = DateTime.UtcNow
-                    });
-            }
+            /*
+             * Only "student" reaches this point -- the "supervisor"
+             * role branches to HandleSupervisorRegistrationAsync
+             * before this transaction begins and never creates a
+             * User or SupervisorProfile directly from registration.
+             */
+            db.StudentProfiles.Add(
+                new StudentProfile
+                {
+                    UserId = createdUser.Id,
+                    Major = "Computer Science",
+                    Year = "3rd Year",
+                    ExperienceLevel = "beginner",
+                    AvailableHoursPerWeek = 20,
+                    TeamMembers = 1,
+                    TargetDifficulty = "intermediate"
+                });
 
             await db.SaveChangesAsync(
                 cancellationToken);
@@ -336,6 +332,235 @@ public class RegisterModel(
                 TempData["Error"] =
                     "Your account was saved, but the verification "
                     + "email could not be delivered. "
+                    + "Use Resend Code on the verification page.";
+                break;
+
+            default:
+                TempData["Error"] =
+                    "The verification code could not be sent. "
+                    + "Use Resend Code on the verification page.";
+                break;
+        }
+    }
+
+    /*
+     * Supervisor registration is an application, not immediate
+     * account creation. No User and no SupervisorProfile exist until
+     * an Admin approves the request from the Supervisor Assignments
+     * admin page.
+     */
+    private async Task<IActionResult>
+        HandleSupervisorRegistrationAsync(
+            string email,
+            string fullName,
+            CancellationToken cancellationToken)
+    {
+        var existingUser =
+            await db.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    user => user.Email.ToLower() == email,
+                    cancellationToken);
+
+        if (existingUser != null)
+        {
+            ErrorMessage =
+                "An account with this email already exists. "
+                + "Please sign in instead.";
+
+            return Page();
+        }
+
+        var existingRequest =
+            await db.SupervisorRegistrationRequests
+                .AsNoTracking()
+                .Where(request =>
+                    request.Email.ToLower() == email &&
+                    SupervisorRegistrationStatus.ActiveStatuses
+                        .Contains(request.Status))
+                .OrderByDescending(request => request.CreatedAtUtc)
+                .FirstOrDefaultAsync(cancellationToken);
+
+        if (existingRequest != null)
+        {
+            return await ResumeExistingApplicationAsync(
+                existingRequest,
+                cancellationToken);
+        }
+
+        SupervisorRegistrationRequest? createdRequest;
+
+        try
+        {
+            createdRequest = new SupervisorRegistrationRequest
+            {
+                FullName = fullName,
+                Email = email,
+                PasswordHash =
+                    BCrypt.Net.BCrypt.HashPassword(
+                        Input.Password),
+                Status = SupervisorRegistrationStatus.PendingEmail,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+
+            db.SupervisorRegistrationRequests.Add(createdRequest);
+
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception)
+        {
+            db.ChangeTracker.Clear();
+
+            logger.LogWarning(
+                exception,
+                "Supervisor application could not be created for "
+                + "email {Email}.",
+                email);
+
+            ErrorMessage =
+                "Registration could not be completed. "
+                + "The email may already be registered. "
+                + "Please try again.";
+
+            return Page();
+        }
+
+        var sendResult =
+            await TrySendSupervisorVerificationCodeAsync(
+                createdRequest.Id,
+                cancellationToken);
+
+        SetSupervisorVerificationMessage(
+            sendResult,
+            isNewApplication: true);
+
+        /*
+         * No User exists, so there is nothing to sign in. The
+         * applicant continues using a protected, time-limited
+         * token instead of the request's raw integer id.
+         */
+        var token = supervisorApplicationTokenService.CreateToken(
+            createdRequest.Id,
+            SupervisorApplicationTokenPurpose.VerifyEmail);
+
+        return RedirectToPage(
+            "/Account/VerifySupervisorApplication",
+            new { token });
+    }
+
+    private async Task<IActionResult> ResumeExistingApplicationAsync(
+        SupervisorRegistrationRequest existingRequest,
+        CancellationToken cancellationToken)
+    {
+        if (existingRequest.Status ==
+            SupervisorRegistrationStatus.PendingEmail)
+        {
+            var resendResult =
+                await TrySendSupervisorVerificationCodeAsync(
+                    existingRequest.Id,
+                    cancellationToken);
+
+            SetSupervisorVerificationMessage(
+                resendResult,
+                isNewApplication: false);
+
+            var verifyToken =
+                supervisorApplicationTokenService.CreateToken(
+                    existingRequest.Id,
+                    SupervisorApplicationTokenPurpose.VerifyEmail);
+
+            return RedirectToPage(
+                "/Account/VerifySupervisorApplication",
+                new { token = verifyToken });
+        }
+
+        if (existingRequest.Status ==
+            SupervisorRegistrationStatus.AwaitingDetails)
+        {
+            TempData["Info"] =
+                "Your email is already verified. Please complete "
+                + "your Supervisor application details.";
+
+            var detailsToken =
+                supervisorApplicationTokenService.CreateToken(
+                    existingRequest.Id,
+                    SupervisorApplicationTokenPurpose
+                        .SupervisorDetails);
+
+            return RedirectToPage(
+                "/Account/SupervisorApplicationDetails",
+                new { token = detailsToken });
+        }
+
+        /*
+         * pending_admin -- already submitted and waiting for an
+         * Admin decision.
+         */
+        TempData["Info"] =
+            "You already submitted a Supervisor application. "
+            + "It is waiting for administrator review.";
+
+        return RedirectToPage(
+            "/Account/SupervisorApplicationPending");
+    }
+
+    private async Task<SendSupervisorVerificationResult>
+        TrySendSupervisorVerificationCodeAsync(
+            int requestId,
+            CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await supervisorVerificationService
+                .SendCodeAsync(
+                    requestId,
+                    cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                exception,
+                "Could not prepare a verification code for "
+                + "supervisor application {RequestId}.",
+                requestId);
+
+            return new SendSupervisorVerificationResult(
+                SendSupervisorVerificationStatus.DeliveryFailed);
+        }
+    }
+
+    private void SetSupervisorVerificationMessage(
+        SendSupervisorVerificationResult result,
+        bool isNewApplication)
+    {
+        switch (result.Status)
+        {
+            case SendSupervisorVerificationStatus.Sent:
+                TempData["Success"] =
+                    isNewApplication
+                        ? "Your Supervisor application was started. "
+                          + "We sent a six-digit verification code "
+                          + "to your email."
+                        : "We sent a new verification code "
+                          + "to your email.";
+                break;
+
+            case SendSupervisorVerificationStatus.CooldownActive:
+                TempData["Info"] =
+                    "A verification code was already sent. "
+                    + $"You can request another code in "
+                    + $"{result.RetryAfterSeconds} seconds.";
+                break;
+
+            case SendSupervisorVerificationStatus.AlreadyVerified:
+                TempData["Info"] =
+                    "This email address is already verified.";
+                break;
+
+            case SendSupervisorVerificationStatus.DeliveryFailed:
+                TempData["Error"] =
+                    "Your application was saved, but the "
+                    + "verification email could not be delivered. "
                     + "Use Resend Code on the verification page.";
                 break;
 

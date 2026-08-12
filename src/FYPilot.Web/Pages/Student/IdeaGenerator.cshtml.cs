@@ -802,6 +802,9 @@ public class IdeaGeneratorModel(
             var previousIdeaTitle =
                 project.ProjectIdea?.Title;
 
+            var replacingIdea =
+                previousIdeaId.HasValue;
+
             var now = DateTime.UtcNow;
 
             /*
@@ -821,10 +824,16 @@ public class IdeaGeneratorModel(
             }
 
             /*
-             * Preserve a title manually chosen by the user.
-             * Only replace an empty or automatic title.
+             * The official selected idea defines the project title
+             * (matches IdeaComparison.OnPostSelectAsync). On first
+             * selection, preserve a title manually chosen before any
+             * idea existed; once an idea has ever been attached, a
+             * replacement must always update the title too, or the
+             * Dashboard and project switcher keep showing the
+             * previous idea's name even after the switch succeeds.
              */
-            if (string.IsNullOrWhiteSpace(project.Title) ||
+            if (replacingIdea ||
+                string.IsNullOrWhiteSpace(project.Title) ||
                 string.Equals(
                     project.Title.Trim(),
                     "Untitled Project",
@@ -865,17 +874,21 @@ public class IdeaGeneratorModel(
             /*
              * Temporary compatibility for older pages.
              * Project.ProjectIdeaId remains the real source
-             * of truth for the current project.
+             * of truth for the current project. Sync scoped
+             * to this project only, so another project owned
+             * by the same student is never touched.
              */
-            idea.IsSelected = true;
+            await ProjectIdeaSelectionSync.SyncSelectedFlagAsync(
+                db,
+                ProjectId,
+                idea.Id,
+                previousIdeaId,
+                cancellationToken);
 
             var actorName =
                 User.FindFirst(
                     ClaimTypes.Name)?.Value
                 ?? "A project member";
-
-            var replacingIdea =
-                previousIdeaId.HasValue;
 
             db.ProjectActivities.Add(
                 new ProjectActivity

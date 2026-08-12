@@ -352,9 +352,9 @@
                                 <i class="bi bi-arrow-clockwise"></i>
 
                                 Updated
-                                @project.UpdatedAt
-                                .ToLocalTime()
-                                .ToString("MMM d")
+                                @(project.UpdatedAt
+                                    .ToLocalTime()
+                                    .ToDisplayDate())
                             </span>
                         </div>
 

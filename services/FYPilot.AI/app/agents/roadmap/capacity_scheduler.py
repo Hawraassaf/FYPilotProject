@@ -457,6 +457,72 @@ def member_allocations(task: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Per-phase local capacity diagnostic (confirmed live defect: a phase can
+# report an honest WHOLE-PROJECT utilization near 100% while one of its own
+# phases is individually impossible -- see this function's docstring).
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def diagnose_phase_capacity(
+    phases_out: list[dict[str, Any]],
+    team_size: int,
+    hours_per_week_per_member: int,
+) -> list[dict[str, Any]]:
+    """
+    Confirmed live defect this closes: a 12-task, 103-hour phase was
+    reported as "Week 16, Duration: 1 week" for a 1-person/20h-per-week
+    team -- 515% of that week's real capacity -- while the WHOLE-PROJECT
+    schedule (compute_feasibility, above) still read as only marginally
+    over capacity (326h planned / 320h capacity). That whole-project ledger
+    is accurate for the AGGREGATE, but says nothing about whether any ONE
+    phase's own planned effort could ever fit inside the specific week span
+    that phase actually ended up with -- which is exactly what happened
+    here: earlier phases left this phase's schedule_tasks() floor pinned to
+    the project's very last week, so every task past that point clamped
+    onto the same single week (see schedule_tasks' overflow-clamping
+    docstring) regardless of how much total slack existed earlier in the
+    timeline. No existing check (compute_feasibility is whole-project only;
+    nothing here was phase-local) could have caught that.
+
+    For each already-scheduled phase, compares its own planned task hours
+    against durationWeeks * team_size * hours_per_week_per_member -- the
+    capacity that phase's OWN scheduled span provides, taken in isolation.
+    Purely diagnostic: never mutates phases_out, never changes scheduling.
+    Returns one dict per OVERLOADED phase only (phases that fit their own
+    span are omitted, not listed as "ok").
+
+    requiredMinWeeks is how many weeks this phase's own workload would need
+    if it ran ALONE, sequentially, at the team's nominal weekly capacity --
+    ceil(plannedHours / (team_size * hours_per_week_per_member)) -- e.g.
+    ceil(103 / 20) = 6. This is a floor, not a schedule: it assumes no
+    dependency chain inside the phase forces even more weeks than that.
+    """
+    nominal_week_capacity = max(1, team_size * hours_per_week_per_member)
+    issues: list[dict[str, Any]] = []
+
+    for phase in phases_out:
+        planned_hours = sum(task["estimatedHours"] for task in phase["tasks"])
+        duration_weeks = max(1, phase["durationWeeks"])
+        available_capacity_hours = duration_weeks * nominal_week_capacity
+
+        if planned_hours <= available_capacity_hours:
+            continue
+
+        issues.append({
+            "phaseId": phase["phaseId"],
+            "phaseName": phase["name"],
+            "durationWeeks": duration_weeks,
+            "plannedHours": planned_hours,
+            "availableCapacityHours": available_capacity_hours,
+            "utilizationPercentage": round((planned_hours / available_capacity_hours) * 100, 1),
+            "overloadHours": planned_hours - available_capacity_hours,
+            "requiredMinWeeks": math.ceil(planned_hours / nominal_week_capacity),
+        })
+
+    return issues
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Feasibility (derived from the ACTUAL per-week ledger, not a hour-sum guess)
 # ─────────────────────────────────────────────────────────────────────────
 

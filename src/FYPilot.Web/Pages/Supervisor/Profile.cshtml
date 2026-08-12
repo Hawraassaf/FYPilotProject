@@ -293,7 +293,18 @@
                         <div class="profile-clean-row">
                             <div class="profile-clean-field">
                                 <label asp-for="Input.Specialization" class="form-label profile-label">Specialization</label>
-                                <input asp-for="Input.Specialization" class="form-control profile-control" placeholder="Example: AI, Software Engineering, Data Science" />
+                                <select asp-for="Input.Specialization" class="form-select profile-control">
+                                    <option value="">Select specialization</option>
+                                    <option value="General Software System">General Software System</option>
+                                    <option value="Web Development">Web Development</option>
+                                    <option value="AI/Data Science">AI/Data Science</option>
+                                    <option value="Mobile Development">Mobile Development</option>
+                                    <option value="Cybersecurity">Cybersecurity</option>
+                                    <option value="Healthcare Technology">Healthcare Technology</option>
+                                    <option value="FinTech">FinTech</option>
+                                    <option value="Education Technology">Education Technology</option>
+                                    <option value="IoT / Embedded">IoT / Embedded</option>
+                                </select>
                                 <span asp-validation-for="Input.Specialization" class="text-danger small"></span>
                             </div>
 

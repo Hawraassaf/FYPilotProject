@@ -1581,7 +1581,7 @@
                                                         <span>@notification.Message</span>
                                                         <small class="topbar-notification-time"
                                                                data-created-at="@notification.CreatedAt.ToString("O")">
-                                                            @notification.CreatedAt.ToString("dd MMM, HH:mm") UTC
+                                                            @notification.CreatedAt.ToDisplayDateTime() UTC
                                                         </small>
                                                     </span>
 

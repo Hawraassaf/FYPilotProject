@@ -28,6 +28,7 @@ from app.agents.project_roadmap_agent import (  # noqa: E402
     RoadmapDeferredTask,
     RoadmapMemberAllocation,
     RoadmapMemberWorkload,
+    RoadmapPhaseCapacityIssue,
     RoadmapPhaseSummary,
     RoadmapPlanningSummary,
     RoadmapTask,
@@ -582,7 +583,13 @@ class PublicContractStabilityTests(unittest.TestCase):
              "numberOfTasks", "workloadByMember", "warnings", "schedulingAssumptions",
              "scheduleFeasibility", "originalPlannedHours", "adjustedPlannedHours",
              "capacityHours", "deferredHours", "overloadHours",
-             "recommendedAdditionalWeeks", "weeklyCapacity"},
+             "recommendedAdditionalWeeks", "weeklyCapacity", "phaseCapacityIssues"},
+        )
+        self.assertEqual(
+            set(RoadmapPhaseCapacityIssue.model_fields.keys()),
+            {"phaseId", "phaseName", "durationWeeks", "plannedHours",
+             "availableCapacityHours", "utilizationPercentage", "overloadHours",
+             "requiredMinWeeks"},
         )
         self.assertEqual(
             set(RoadmapDeferredTask.model_fields.keys()),

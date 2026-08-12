@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
@@ -24,6 +25,8 @@ from app.llm_firewall.firewall import LlmFirewall
 from app.llm_firewall.models import FirewallVerdict
 from app.review import schema_validation
 from app.services.llm_provider import LLMResult
+
+logger = logging.getLogger("fypilot-llm-firewall")
 
 Stage = Literal["writer", "reviewer", "rewrite"]
 
@@ -121,6 +124,22 @@ def guarded_call(request: GuardedCallRequest, firewall: LlmFirewall) -> GuardedR
     )
 
     if output_verdict.has_blocking_finding():
+        # Previously silent past this point -- a caller only ever saw
+        # `blocked=True` (e.g. surfaced downstream as the generic
+        # "review_unavailable"/"reviewer_unavailable" status), with no way
+        # to tell WHICH firewall rule fired without re-running the exact
+        # same LLM call under a debugger. Logging the finding categories
+        # (never the raw candidate/output text itself -- these are the
+        # firewall's own short rule-violation labels, not model content)
+        # is what makes a live "why did this fall back" investigation
+        # actually possible after the fact.
+        blocking_rules = sorted({
+            finding.rule for finding in output_verdict.findings if finding.action == "block"
+        })
+        logger.warning(
+            "llm_firewall.output_blocked stage=%s provider=%s model=%s rules=%s",
+            request.stage, llm_result.provider, llm_result.model, blocking_rules,
+        )
         return GuardedResult(
             stage=request.stage,
             blocked=True,
@@ -132,7 +151,23 @@ def guarded_call(request: GuardedCallRequest, firewall: LlmFirewall) -> GuardedR
         )
 
     if request.schema is not None:
-        schema_ok, validated = schema_validation.validate(request.schema, candidate)
+        validation_result = schema_validation.validate_detailed(request.schema, candidate)
+        schema_ok, validated = validation_result.valid, validation_result.data
+        if not schema_ok:
+            # Same rationale as the firewall-block log above: this is the
+            # ONE place `guarded_call` ever discovers a Reviewer/Writer/
+            # Rewrite response didn't match its required schema -- and
+            # schema_validation.validate() (the wrapper this used to call)
+            # discards the compact Pydantic error list entirely, so the
+            # caller previously had no way to see WHY validation failed,
+            # only THAT it failed. Logs the compact error locations/types
+            # (schema_validation._compact_validation_errors' own output --
+            # already stripped of raw field values), never the candidate
+            # content itself.
+            logger.warning(
+                "llm_firewall.schema_invalid stage=%s provider=%s model=%s errors=%s",
+                request.stage, llm_result.provider, llm_result.model, validation_result.errors,
+            )
     else:
         schema_ok, validated = True, candidate
 

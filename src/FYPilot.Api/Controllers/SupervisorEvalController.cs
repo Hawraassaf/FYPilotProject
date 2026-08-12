@@ -87,10 +87,15 @@ public class SupervisorEvalController(ApplicationDbContext db) : ControllerBase
     {
         if (UserRole != "supervisor") return Forbid();
 
+        /*
+         * Project.ProjectIdeaId is the authoritative selected idea for
+         * a project; ProjectIdea.IsSelected is legacy-only and can have
+         * stale rows left true for ideas that are no longer official.
+         */
         var ideas = await db.ProjectIdeas
             .Include(i => i.User)
             .Include(i => i.FeasibilityReport)
-            .Where(i => i.IsSelected)
+            .Where(i => db.Projects.Any(p => p.ProjectIdeaId == i.Id))
             .ToListAsync();
 
         var evaluated = await db.SupervisorEvaluations

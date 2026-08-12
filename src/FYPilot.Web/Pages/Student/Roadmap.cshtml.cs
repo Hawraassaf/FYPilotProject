@@ -1090,11 +1090,64 @@ public class RoadmapModel(
             }
         }
 
+        // Phase-LOCAL capacity check -- independent of the whole-project
+        // scheduleFeasibility/utilization figures above, which can read as
+        // only marginally over capacity in aggregate while one individual
+        // phase is locally impossible (confirmed live defect: a 103h/132h
+        // phase reported as "1 week" for a 1-person/20h-per-week team is
+        // 500%+ of that week's real capacity even when the whole project
+        // reads as ~100-115%). Python's capacity_scheduler.
+        // diagnose_phase_capacity computes the equivalent warning at
+        // generation time, but this method recomputes WorkloadSummary from
+        // the PERSISTED phases on every page load, so that one-time warning
+        // never survives a reload -- this reproduces the same check here so
+        // it is never lost.
+        warnings.AddRange(DiagnosePhaseCapacityWarnings(phases, teamSize, hoursPerWeek));
+
         return new RoadmapWorkloadSummaryView(
             totalWeeks, teamSize, hoursPerWeek, totalCapacityHours,
             adjustedPlannedHours, utilization, workloadByMember, warnings,
             scheduleFeasibility, originalPlannedHours, adjustedPlannedHours,
             deferredHours, overloadHours, recommendedAdditionalWeeks);
+    }
+
+    /// <summary>
+    /// Mirrors capacity_scheduler.diagnose_phase_capacity on the Python
+    /// side: for each phase, compares its own planned task hours against
+    /// EstimatedWeeks * teamSize * hoursPerWeekPerMember -- the capacity
+    /// that phase's OWN span actually provides, taken in isolation. Purely
+    /// diagnostic: never mutates phases or EstimatedWeeks, never changes
+    /// scheduling. Yields nothing for phases that fit their own span.
+    /// </summary>
+    public static IEnumerable<string> DiagnosePhaseCapacityWarnings(
+        List<RoadmapPhase> phases,
+        int teamSize,
+        int hoursPerWeekPerMember
+    )
+    {
+        var nominalWeekCapacity = Math.Max(1, teamSize * hoursPerWeekPerMember);
+
+        foreach (var phase in phases)
+        {
+            var plannedHours = ParseTasks(phase.TasksJson).Sum(t => t.EstimatedHours ?? 0);
+            var durationWeeks = Math.Max(1, phase.EstimatedWeeks);
+            var availableCapacityHours = durationWeeks * nominalWeekCapacity;
+
+            if (plannedHours <= availableCapacityHours)
+            {
+                continue;
+            }
+
+            var utilizationPercentage = Math.Round(plannedHours * 100.0 / availableCapacityHours, 1);
+            var requiredMinWeeks = (int)Math.Ceiling(plannedHours / (double)nominalWeekCapacity);
+
+            yield return
+                $"Phase '{phase.Name}' cannot fit its {plannedHours}h of planned work into its own " +
+                $"scheduled {durationWeeks}-week span ({availableCapacityHours}h capacity at this team's " +
+                $"weekly rate, {utilizationPercentage}% utilization) -- it would need at least " +
+                $"{requiredMinWeeks} week(s) on its own. Consider moving genuinely independent tasks " +
+                "from this phase into an earlier phase with spare capacity, or giving it more weeks.";
+        }
     }
 
     private static ProjectRoadmapRequest BuildRoadmapRequest(

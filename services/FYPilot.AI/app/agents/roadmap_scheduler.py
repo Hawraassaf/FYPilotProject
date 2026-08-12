@@ -76,6 +76,21 @@ def get_task_metadata_registry() -> dict[str, Any]:
 MIN_TOTAL_WEEKS = 4
 MAX_TOTAL_WEEKS = 30
 
+# Single source of truth for the "Progress update: X" teaser text
+# project_roadmap_agent._week_deliverables applies to a phase's own first
+# deliverable on every non-final week of a multi-week phase, for the
+# PUBLIC per-week view only. Shared here (rather than duplicated as a
+# second literal) so _normalize_deliverable below can strip EXACTLY the
+# same prefix a Rewrite-pass revalidation might see reflected back in
+# `weeks[]` -- see RoadmapCandidateSchema._check_structural_invariants,
+# which rebuilds `phases` from the candidate's own `weeks[]` on every pass,
+# including the already-expanded public view. Without this normalization,
+# a multi-week phase's deliverables list would show the same artifact
+# twice -- once as "Progress update: X" (from an intermediate week) and
+# once as plain "X" (from the phase's own final week) -- the confirmed
+# live PDF defect this constant/normalization closes.
+PROGRESS_UPDATE_PREFIX = "Progress update: "
+
 # estimatedWorkingDays = ceil(estimatedHours / EFFECTIVE_HOURS_PER_DAY) --
 # one documented deterministic assumption, applied everywhere hours are
 # estimated so the two figures can never contradict each other.
@@ -266,6 +281,19 @@ def allocate_task_hours(
 # ─────────────────────────────────────────────────────────────────────────
 # Phase grouping (weeks -> phase groups, by consecutive matching phaseTitle)
 # ─────────────────────────────────────────────────────────────────────────
+
+
+def _normalize_deliverable(text: str) -> str:
+    """Strips PROGRESS_UPDATE_PREFIX (a no-op on any deliverable that never
+    carried it, e.g. the RAW per-phase deliverables list build_phases_and_
+    summary sees the FIRST time a plan is expanded -- see
+    project_roadmap_agent._expand_plan_to_weeks' seed_weeks, which are
+    built before any "Progress update" text exists). See PROGRESS_UPDATE_
+    PREFIX's own docstring for why this matters."""
+    stripped = text.strip()
+    if stripped.startswith(PROGRESS_UPDATE_PREFIX):
+        stripped = stripped[len(PROGRESS_UPDATE_PREFIX):].strip()
+    return stripped
 
 
 def _group_weeks_into_phases(weeks: list[dict]) -> list[dict]:
@@ -468,9 +496,15 @@ def build_phases_and_summary(
         start_week = min(task["startWeek"] for task in phase_tasks)
         end_week = max(task["endWeek"] for task in phase_tasks)
 
+        # dict.fromkeys on the NORMALIZED (prefix-stripped) string, not the
+        # raw one -- so "Progress update: X" and "X" collapse to the single
+        # entry "X" regardless of which happened to appear first in
+        # group["deliverables"], instead of surviving as two different-
+        # looking dict keys that both mean the same artifact.
         deduped_deliverables = list(dict.fromkeys(
-            d.strip() for d in group["deliverables"] if d and d.strip()
-        ))[:4]
+            _normalize_deliverable(d) for d in group["deliverables"] if d and d.strip()
+        ))
+        deduped_deliverables = [d for d in deduped_deliverables if d][:4]
 
         phases_out.append({
             "phaseId": phase_id,
@@ -569,6 +603,32 @@ def build_phases_and_summary(
                 "-- the timeline may be longer than necessary for this scope."
             )
 
+    # Phase-LOCAL capacity check -- independent of the whole-project
+    # `feasibility`/`utilization` figures above, which can read as only
+    # marginally over capacity in aggregate while one individual phase is
+    # locally impossible (a 103h phase clamped onto a single 20h-capacity
+    # week is 515% utilization for THAT phase even when the whole project
+    # is ~102%) -- see capacity_scheduler.diagnose_phase_capacity's
+    # docstring for the confirmed live defect this closes. Reported both as
+    # a structured field (phaseCapacityIssues, for callers/tests that need
+    # the numbers) and as a plain-language warning naming the specific
+    # phase, so "the estimated duration is longer than the target" is never
+    # shown without saying WHICH phase/task is responsible for that gap.
+    phase_capacity_issues = capacity_scheduler.diagnose_phase_capacity(
+        phases_out, team_size, hours_per_week_per_member,
+    )
+    for issue in phase_capacity_issues:
+        warnings.append(
+            f"Phase '{issue['phaseName']}' ({issue['phaseId']}) cannot fit its "
+            f"{issue['plannedHours']}h of planned work into its own scheduled "
+            f"{issue['durationWeeks']}-week span ({issue['availableCapacityHours']}h "
+            f"capacity at this team's weekly rate, {issue['utilizationPercentage']}% "
+            f"utilization) -- it would need at least {issue['requiredMinWeeks']} "
+            "week(s) on its own. Consider moving genuinely independent tasks from "
+            "this phase into an earlier phase with spare capacity, or giving it "
+            "more weeks."
+        )
+
     planning_summary = {
         "totalWeeks": total_weeks,
         "teamSize": team_size,
@@ -630,6 +690,7 @@ def build_phases_and_summary(
         "overloadHours": feasibility["overloadHours"],
         "recommendedAdditionalWeeks": feasibility["recommendedAdditionalWeeks"],
         "weeklyCapacity": weekly_capacity,
+        "phaseCapacityIssues": phase_capacity_issues,
     }
 
     return phases_out, planning_summary, deferred_tasks

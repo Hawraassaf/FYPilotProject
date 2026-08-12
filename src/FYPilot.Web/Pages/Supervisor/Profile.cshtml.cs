@@ -217,7 +217,7 @@ public class ProfileModel(ApplicationDbContext db, IWebHostEnvironment env) : Pa
                 UserId = userId,
                 AcademicTitle = "Supervisor",
                 Department = "Computer Science",
-                Specialization = "General Software Engineering",
+                Specialization = "General Software System",
                 ResearchAreas = "Software Engineering",
                 PreferredMeetingMode = "Online",
                 Bio = "",
