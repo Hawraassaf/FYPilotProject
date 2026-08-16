@@ -614,14 +614,23 @@ class OtherAgentsUnaffectedTests(unittest.TestCase):
         # duplicated narrowly here as a direct "16" proof for this specific
         # test file's completeness.
         self.assertEqual(get_agent_config("FypMentorAgent").max_total_seconds, 90.0)
-        # ProjectRoadmapAgent is intentionally 240.0, not 90.0 -- the
+        # ProjectRoadmapAgent is intentionally 540.0, not 90.0 -- the
         # Roadmap-only timeout adjustment (see registry.py's
         # ProjectRoadmapAgent.max_total_seconds and
-        # tests/test_roadmap_timeout_adjustment.py) raised it from 90s so
-        # DeepInfra's own 120s single-attempt cap can fit inside the
-        # Writer's budget alongside a Groq/Ollama fallback attempt.
-        self.assertEqual(get_agent_config("ProjectRoadmapAgent").max_total_seconds, 360.0)
-        self.assertEqual(get_agent_config("ProjectDNAAgent").max_total_seconds, 90.0)
+        # tests/test_roadmap_timeout_adjustment.py, whose module docstring
+        # has the full 90s -> 240s -> 360s -> 540s progression and
+        # rationale for each step) raised it from 90s so DeepInfra's own
+        # single-attempt cap can fit inside the Writer's budget alongside a
+        # Groq/Ollama fallback attempt, with enough total room for two
+        # consecutive slow-but-real provider timeouts during Reviewer/
+        # Rewrite to both still complete.
+        self.assertEqual(get_agent_config("ProjectRoadmapAgent").max_total_seconds, 540.0)
+        # ProjectDNAAgent is intentionally 150.0, not 90.0 -- a later,
+        # unrelated freeze-audit fix (see
+        # test_project_dna_writer_deadline.py's
+        # OtherAgentRegistryTimingUnchangedTests for the live-measured
+        # rationale), not something this SE Documentation task touched.
+        self.assertEqual(get_agent_config("ProjectDNAAgent").max_total_seconds, 150.0)
         self.assertEqual(get_agent_config("IdeaComparisonAgent").max_total_seconds, 45.0)
 
 

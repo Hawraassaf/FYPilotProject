@@ -69,6 +69,19 @@
         "over_capacity" => "is-over",
         _ => "is-neutral"
     };
+
+    string ShortText(string? value, int maxLength = 100)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "No additional details.";
+        }
+
+        var clean = value.Trim();
+        return clean.Length <= maxLength
+            ? clean
+            : clean[..Math.Max(0, maxLength - 1)].TrimEnd() + "…";
+    }
 }
 
 @if (Model.Idea == null)
@@ -78,24 +91,15 @@
             <div class="roadmap-empty-icon" aria-hidden="true">
                 <i class="bi bi-signpost-split"></i>
             </div>
-
             <div class="roadmap-eyebrow">Project planning</div>
             <h1 id="roadmap-empty-title">Choose a project idea first</h1>
-
-            <p>
-                Your roadmap is created from the selected idea, project difficulty, available weeks,
-                weekly capacity, and team size.
-            </p>
-
+            <p>Your roadmap is generated from your selected idea, target duration, team size, and weekly capacity.</p>
             <div class="roadmap-empty-actions">
                 <a class="btn roadmap-btn-primary" asp-page="/Student/IdeaComparison" asp-route-projectId="@Model.ProjectId">
-                    <i class="bi bi-check2-circle"></i>
-                    Choose an Idea
+                    <i class="bi bi-check2-circle"></i> Choose an Idea
                 </a>
-
                 <a class="btn roadmap-btn-secondary" asp-page="/Student/IdeaGenerator" asp-route-projectId="@Model.ProjectId">
-                    <i class="bi bi-stars"></i>
-                    Generate Ideas
+                    <i class="bi bi-stars"></i> Generate Ideas
                 </a>
             </div>
         </section>
@@ -104,22 +108,15 @@
 else
 {
     <main class="roadmap-control" id="roadmap-print-root">
-
         @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
         {
             <div class="roadmap-alert roadmap-alert-warning" role="alert">
-                <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+                <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
                 <span>@Model.ErrorMessage</span>
             </div>
         }
 
         @{
-            // Single source of truth for "was this really AI-generated" --
-            // see RoadmapModel.ClassifyRoadmapOutcome. Drives this banner
-            // AND the flash message shown right after generation (Roadmap.
-            // cshtml.cs's OnPostGenerateAsync), so the two can never show
-            // contradictory states (e.g. a green "generated successfully"
-            // toast alongside a red/amber "not AI-generated" banner).
             var roadmapOutcome = Model.LatestReview != null
                 ? FYPilot.Web.Pages.Student.RoadmapModel.ClassifyRoadmapOutcome(Model.LatestReview)
                 : null;
@@ -127,860 +124,615 @@ else
 
         @if (roadmapOutcome != null && roadmapOutcome.IsFallbackDisplayed)
         {
-            @* ClassifyRoadmapOutcome(AiOutputReview) only ever returns
-               Warning-styled outcomes when IsFallbackDisplayed is true
-               (ReviewUnavailable/ReviewRejected/ProviderFailure/
-               DeterministicFallback) -- Error is only reachable from the
-               response-based overload's InvalidResponse case, which has no
-               persisted AiOutputReview row to reach this banner at all. *@
             <div class="roadmap-alert roadmap-alert-fallback" role="status" aria-live="polite">
                 <i class="bi bi-cpu" aria-hidden="true"></i>
                 <div>
                     <strong>@roadmapOutcome.Title &mdash; not AI-generated</strong>
-                    <span>
-                        @roadmapOutcome.Message
-                        Regenerate once the AI service is available.
-                    </span>
-                    <span class="roadmap-fallback-meta">
-                        Attempted provider: @(Model.LatestReview!.GeneratorProvider ?? "none")
-                        &middot; Generated @Model.LatestReview.CreatedAt.ToDisplayDateTime() UTC
-                        &middot; Review status: @Model.LatestReview.Status
-                    </span>
+                    <span>@roadmapOutcome.Message Regenerate once the AI service is available.</span>
                 </div>
             </div>
         }
 
-        <header class="roadmap-command-header @(Model.Phases.Any() ? "" : "is-launch-state")">
-            <div class="roadmap-command-main">
-                <div class="roadmap-command-icon" aria-hidden="true">
-                    <i class="bi bi-kanban"></i>
-                </div>
+        <section class="rm-project-hero @(Model.Phases.Any() ? "" : "is-launch-state")">
+            <div class="rm-project-icon" aria-hidden="true">
+                <i class="bi bi-diagram-3"></i>
+            </div>
 
-                <div class="roadmap-command-copy">
-                    <div class="roadmap-eyebrow">Project Roadmap</div>
+            <div class="rm-project-main">
+                <div class="roadmap-eyebrow">Project roadmap</div>
+                <h1>@Model.Idea.Title</h1>
 
-                    <div class="roadmap-title-line">
-                        <h1>@Model.Idea.Title</h1>
-
-                        @if (Model.LatestReview != null)
-                        {
-                            var (badgeClass, badgeLabel) = Model.DescribeReview(Model.LatestReview);
-
-                            <span class="badge @badgeClass roadmap-review-badge"
-                                  title="@Model.LatestReview.DecisionReason">
-                                <i class="bi bi-shield-check" aria-hidden="true"></i>
-                                @badgeLabel
-                            </span>
-                        }
-                    </div>
-
-                    <div class="roadmap-project-meta">
-                        <span>@Model.Idea.Domain</span>
-                        <span class="text-capitalize">@Model.Idea.DifficultyLevel</span>
-                        <span>@totalWeeks weeks</span>
-                    </div>
+                <div class="rm-project-chips">
+                    <span><i class="bi bi-grid"></i>@Model.Idea.Domain</span>
+                    <span><i class="bi bi-people"></i>Team of @(Model.WorkloadSummary?.TeamSize ?? 1)</span>
+                    <span><i class="bi bi-calendar3"></i>@totalWeeks weeks</span>
+                    @if (estimatedTotalWeeks > totalWeeks)
+                    {
+                        <span class="is-estimate"><i class="bi bi-clock-history"></i>~@estimatedTotalWeeks wk est.</span>
+                    }
+                    @if (Model.LatestReview != null)
+                    {
+                        var (badgeClass, badgeLabel) = Model.DescribeReview(Model.LatestReview);
+                        <span class="rm-review-chip @badgeClass" title="@Model.LatestReview.DecisionReason">
+                            <i class="bi bi-shield-check"></i>@badgeLabel
+                        </span>
+                    }
                 </div>
             </div>
 
-            <div class="roadmap-command-actions">
+            <div class="rm-hero-actions no-print">
                 @if (Model.Phases.Any())
                 {
-                    <form method="post"
-                          asp-page-handler="Generate"
-                          id="rmGenerateForm">
-                        @Html.AntiForgeryToken()
-
-                        <input type="hidden"
-                               name="projectId"
-                               value="@Model.ProjectId" />
-
-                        <input type="hidden"
-                               name="ideaId"
-                               value="@Model.Idea.Id" />
-
-                        <button type="submit"
-                                class="btn roadmap-btn-secondary">
-                            <i class="bi bi-arrow-clockwise"
-                               aria-hidden="true"></i>
-                            Regenerate Roadmap
-                        </button>
-                    </form>
+                    <button type="button"
+                            id="rmDownloadPdfButton"
+                            class="btn roadmap-btn-secondary"
+                            data-pdf-filename="@(Model.Idea.Title) Roadmap.pdf">
+                        <i class="bi bi-file-earmark-arrow-down"></i>
+                        <span>Export PDF</span>
+                    </button>
                 }
 
                 <a href="/Student/ProjectDNA?projectId=@Model.ProjectId&amp;ideaId=@Model.Idea.Id"
                    class="btn roadmap-btn-secondary">
-                    <i class="bi bi-fingerprint" aria-hidden="true"></i>
+                    <i class="bi bi-fingerprint"></i>
                     Project DNA
                 </a>
 
                 @if (Model.Phases.Any())
                 {
-                    <button type="button"
-                            class="btn roadmap-btn-secondary no-print"
-                            onclick="window.print()">
-                        <i class="bi bi-download" aria-hidden="true"></i>
-                        Download PDF
-                    </button>
+                    <form method="post" asp-page-handler="Generate" id="rmGenerateForm">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="projectId" value="@Model.ProjectId" />
+                        <input type="hidden" name="ideaId" value="@Model.Idea.Id" />
+                        <button type="submit" class="btn roadmap-btn-primary">
+                            <i class="bi bi-arrow-clockwise"></i>
+                            Regenerate Roadmap
+                        </button>
+                    </form>
                 }
             </div>
 
-            @if (!Model.Phases.Any())
+            @if (Model.Phases.Any())
             {
-                <section class="roadmap-launch-section"
-                         aria-labelledby="roadmap-start-title">
-                    <div class="roadmap-start-copy">
-                        <div class="roadmap-start-icon"
-                             aria-hidden="true">
-                            <i class="bi bi-diagram-3"></i>
-                        </div>
-
-                        <div>
-                            <div class="roadmap-eyebrow">Ready to plan</div>
-
-                            <h2 id="roadmap-start-title">
-                                Generate a project-specific execution plan
-                            </h2>
-
-                            <p>
-                                FYPilot will create dynamic phases, estimate task effort,
-                                distribute team workload, check capacity, and review the
-                                final roadmap before showing it.
-                            </p>
-                        </div>
+                <div class="rm-project-progress">
+                    <div class="rm-progress-copy">
+                        <span><strong>@done</strong> of <strong>@total</strong> phases completed</span>
+                        <strong>@pct%</strong>
                     </div>
-
-                    <div class="roadmap-start-features"
-                         aria-label="Roadmap generation capabilities">
-                        <div>
-                            <i class="bi bi-calendar-range"></i>
-                            <span>Dynamic phase scheduling</span>
-                        </div>
-
-                        <div>
-                            <i class="bi bi-hourglass-split"></i>
-                            <span>Realistic effort estimates</span>
-                        </div>
-
-                        <div>
-                            <i class="bi bi-people"></i>
-                            <span>Team workload allocation</span>
-                        </div>
-
-                        <div>
-                            <i class="bi bi-speedometer2"></i>
-                            <span>Capacity validation</span>
-                        </div>
+                    <div class="rm-progress-track" aria-label="@pct percent complete">
+                        <div style="width:@pct%"></div>
                     </div>
-
-                    <form method="post"
-                          asp-page-handler="Generate"
-                          id="rmGenerateForm"
-                          class="roadmap-launch-action">
-                        @Html.AntiForgeryToken()
-
-                        <input type="hidden"
-                               name="projectId"
-                               value="@Model.ProjectId" />
-
-                        <input type="hidden"
-                               name="ideaId"
-                               value="@Model.Idea.Id" />
-
-                        <button type="submit"
-                                class="btn roadmap-btn-primary roadmap-btn-large">
-                            <i class="bi bi-magic"
-                               aria-hidden="true"></i>
-                            Generate AI Roadmap
-                        </button>
-
-                        <small>
-                            Generates, validates, reviews, and saves the complete plan.
-                        </small>
-                    </form>
-                </section>
+                </div>
             }
             else
             {
-                <div class="roadmap-header-progress"
-                     aria-label="@pct percent complete">
-                    <div class="roadmap-header-progress-copy">
-                        <span>@done of @total phases completed</span>
-                        <strong>@pct%</strong>
+                <div class="rm-launch-box">
+                    <div>
+                        <strong>Ready to build your execution plan</strong>
+                        <span>Generate phases, effort estimates, workload allocation, capacity checks, and AI review.</span>
                     </div>
-
-                    <div class="roadmap-progress-track">
-                        <div class="roadmap-progress-fill"
-                             style="width:@pct%"></div>
-                    </div>
+                    <form method="post" asp-page-handler="Generate" id="rmGenerateForm" class="rm-launch-form">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="projectId" value="@Model.ProjectId" />
+                        <input type="hidden" name="ideaId" value="@Model.Idea.Id" />
+                        <button type="submit" class="btn roadmap-btn-primary roadmap-btn-large">
+                            <i class="bi bi-magic"></i> Generate AI Roadmap
+                        </button>
+                    </form>
                 </div>
             }
-        </header>
+        </section>
 
         @if (Model.Phases.Any())
         {
-
             var summary = Model.WorkloadSummary;
 
-            <section class="roadmap-summary-strip" aria-label="Roadmap summary">
-                <div class="roadmap-summary-item">
-                    <span>Current phase</span>
-                    <strong>@(currentPhase?.Name ?? "All completed")</strong>
-                </div>
+            @if (summary != null)
+            {
+                <section class="rm-metrics-grid" aria-label="Project capacity summary">
+                    <article class="rm-metric-card rm-metric-emphasis @FeasibilityClass(summary.ScheduleFeasibility)">
+                        <div class="rm-metric-icon"><i class="bi bi-speedometer2"></i></div>
+                        <span class="rm-metric-label">Utilization</span>
+                        <strong class="rm-metric-value">@summary.UtilizationPercentage%</strong>
+                        <span class="rm-metric-pill @FeasibilityClass(summary.ScheduleFeasibility)">@FeasibilityLabel(summary.ScheduleFeasibility)</span>
+                        <div class="rm-mini-meter"><div style="width:@Math.Min(Math.Max(summary.UtilizationPercentage, 0), 100)%"></div></div>
+                    </article>
 
-                <div class="roadmap-summary-item">
-                    <span>Target duration</span>
-                    <strong>
-                        @totalWeeks weeks
-                        @if (estimatedTotalWeeks > totalWeeks)
-                        {
-                            <span class="roadmap-summary-estimate">~@estimatedTotalWeeks wk est.</span>
-                        }
-                    </strong>
-                </div>
+                    <article class="rm-metric-card">
+                        <div class="rm-metric-icon"><i class="bi bi-clock"></i></div>
+                        <span class="rm-metric-label">Adjusted plan</span>
+                        <strong class="rm-metric-value">@summary.AdjustedPlannedHours <small>h</small></strong>
+                        <span class="rm-metric-caption">Total workload</span>
+                    </article>
 
-                <div class="roadmap-summary-item">
-                    <span>Progress</span>
-                    <strong>@done / @total phases</strong>
-                </div>
+                    <article class="rm-metric-card">
+                        <div class="rm-metric-icon is-bright"><i class="bi bi-bar-chart-line"></i></div>
+                        <span class="rm-metric-label">Available capacity</span>
+                        <strong class="rm-metric-value rm-value-accent">@summary.TotalCapacityHours <small>h</small></strong>
+                        <span class="rm-metric-caption">Total capacity</span>
+                    </article>
 
-                <div class="roadmap-summary-item">
-                    <span>Team</span>
-                    <strong>@(summary?.TeamSize ?? 1) member(s)</strong>
-                </div>
+                    <article class="rm-metric-card">
+                        <div class="rm-metric-icon"><i class="bi bi-people"></i></div>
+                        <span class="rm-metric-label">Team size</span>
+                        <strong class="rm-metric-value">@summary.TeamSize</strong>
+                        <span class="rm-metric-caption">Member@(summary.TeamSize == 1 ? "" : "s")</span>
+                    </article>
 
-                <div class="roadmap-summary-item">
-                    <span>Planned effort</span>
-                    <strong>@(summary?.AdjustedPlannedHours ?? 0)h</strong>
-                </div>
+                    <article class="rm-metric-card">
+                        <div class="rm-metric-icon"><i class="bi bi-calendar-week"></i></div>
+                        <span class="rm-metric-label">Weekly capacity</span>
+                        <strong class="rm-metric-value rm-value-accent">@summary.HoursPerWeekPerMember <small>h</small></strong>
+                        <span class="rm-metric-caption">Per member</span>
+                    </article>
+                </section>
+            }
 
-                <div class="roadmap-summary-item">
-                    <span>Capacity</span>
-                    <strong>@(summary?.TotalCapacityHours ?? 0)h</strong>
-                </div>
-
-                <div class="roadmap-summary-item">
-                    <span>Utilization</span>
-                    <strong>@(summary?.UtilizationPercentage ?? 0)%</strong>
-                </div>
-
-                <div class="roadmap-summary-item roadmap-summary-feasibility">
-                    <span>Schedule</span>
-                    <strong class="roadmap-feasibility-pill @FeasibilityClass(summary?.ScheduleFeasibility)">
-                        @FeasibilityLabel(summary?.ScheduleFeasibility)
-                    </strong>
-                </div>
-            </section>
-
-            <section class="roadmap-workspace">
-                <aside class="roadmap-phase-nav" aria-label="Roadmap phases">
-                    <div class="roadmap-panel-heading">
+            <section class="rm-timeline-card" aria-labelledby="gantt-title">
+                <div class="rm-section-head">
+                    <div class="rm-section-title">
+                        <span class="rm-section-icon"><i class="bi bi-calendar3"></i></span>
                         <div>
-                            <span>Navigation</span>
-                            <h2>Project phases</h2>
+                            <span class="roadmap-eyebrow">Roadmap timeline</span>
+                            <h2 id="gantt-title">Weekly execution plan</h2>
                         </div>
-
-                        <span class="roadmap-count-badge">@mainTimeline.Count</span>
                     </div>
 
-                    <div class="roadmap-phase-list" role="tablist" aria-orientation="vertical">
+                    <div class="rm-timeline-legend" aria-label="Timeline legend">
+                        <span><i class="legend-dot current"></i>Current</span>
+                        <span><i class="legend-dot completed"></i>Completed</span>
+                        <span><i class="legend-dot upcoming"></i>Pending</span>
+                    </div>
+                </div>
+
+                <div class="rm-timeline-scroll">
+                    <div class="rm-timeline" style="--week-count:@totalWeeks;">
+                        <div class="rm-timeline-head rm-phase-head"># &nbsp;&nbsp; Phase</div>
+                        <div class="rm-week-heads" style="--week-count:@totalWeeks;">
+                            @for (var week = 1; week <= totalWeeks; week++)
+                            {
+                                <span>W@(week)</span>
+                            }
+                        </div>
+
                         @foreach (var entry in mainTimeline)
                         {
                             var phase = entry.Phase;
                             var phaseKey = Convert.ToString(phase.Id) ?? phase.PhaseNumber.ToString();
                             var duration = entry.WithinTargetEndWeek - entry.DisplayStartWeek + 1;
-                            var isSelected = selectedPhase != null &&
-                                Convert.ToString(selectedPhase.Id) == phaseKey;
+                            var tasks = FYPilot.Web.Pages.Student.RoadmapModel.ParseTasks(phase.TasksJson);
                             var stateClass = phase.IsCompleted
                                 ? "is-completed"
-                                : (currentPhase != null && Convert.ToString(currentPhase.Id) == phaseKey
-                                    ? "is-current"
-                                    : "is-upcoming");
+                                : (currentPhase != null && Convert.ToString(currentPhase.Id) == phaseKey ? "is-current" : "is-upcoming");
 
                             <button type="button"
-                                    class="roadmap-phase-tab @stateClass @(isSelected ? "is-selected" : "")"
+                                    class="rm-phase-label @stateClass"
                                     data-phase-select="@phaseKey"
-                                    role="tab"
-                                    aria-selected="@(isSelected ? "true" : "false")"
-                                    aria-controls="phase-panel-@phaseKey">
-                                <span class="roadmap-phase-tab-number">
+                                    aria-label="View details for @phase.Name">
+                                <span class="rm-phase-number">
                                     @if (phase.IsCompleted)
                                     {
-                                        <i class="bi bi-check-lg" aria-hidden="true"></i>
+                                        <i class="bi bi-check-lg"></i>
                                     }
                                     else
                                     {
                                         @phase.PhaseNumber
                                     }
                                 </span>
-
-                                <span class="roadmap-phase-tab-copy">
-                                    <strong>@phase.Name</strong>
-                                    <small>
-                                        Week @entry.DisplayStartWeek@(entry.WithinTargetEndWeek > entry.DisplayStartWeek ? $"–{entry.WithinTargetEndWeek}" : "")
-                                        · @duration week(s)
-                                        @if (entry.Status == FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.PartiallyBeyondTarget)
-                                        {
-                                            <span class="roadmap-overflow-badge">continues beyond target</span>
-                                        }
-                                    </small>
-                                </span>
-
-                                <i class="bi bi-chevron-right roadmap-phase-tab-arrow" aria-hidden="true"></i>
+                                <strong>@phase.Name</strong>
                             </button>
+
+                            <div class="rm-week-track" style="--week-count:@totalWeeks;">
+                                <button type="button"
+                                        class="rm-phase-bar @stateClass @(entry.Status == FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.PartiallyBeyondTarget ? "is-overflowing" : "")"
+                                        style="grid-column:@entry.DisplayStartWeek / span @duration;"
+                                        data-phase-select="@phaseKey"
+                                        title="@phase.Name: week @entry.DisplayStartWeek to @entry.WithinTargetEndWeek">
+                                    <span>@duration wk@(duration > 1 ? "s" : "")</span>
+                                    @if (tasks.Count > 0)
+                                    {
+                                        <small>· @tasks.Count task@(tasks.Count == 1 ? "" : "s")</small>
+                                    }
+                                </button>
+                            </div>
+                        }
+
+                        @if (overflowTimeline.Any())
+                        {
+                            <div class="rm-overflow-timeline-label">
+                                <span class="rm-phase-number"><i class="bi bi-signpost-split"></i></span>
+                                <strong>@overflowTimeline.Count phase@(overflowTimeline.Count == 1 ? "" : "s") beyond target</strong>
+                            </div>
+                            <div class="rm-overflow-timeline-track">
+                                <span><i class="bi bi-arrow-right"></i> Continues after week @totalWeeks</span>
+                            </div>
                         }
                     </div>
-                </aside>
+                </div>
+            </section>
 
-                <div class="roadmap-main-column">
-                    <section class="roadmap-gantt-card" aria-labelledby="gantt-title">
-                        <div class="roadmap-panel-heading roadmap-gantt-heading">
+            <section class="rm-overview-grid">
+                <article class="rm-current-card">
+                    <div class="rm-card-title-line">
+                        <div class="rm-section-title compact">
+                            <span class="rm-section-icon"><i class="bi bi-flag"></i></span>
                             <div>
-                                <span>Schedule</span>
-                                <h2 id="gantt-title">Weekly timeline</h2>
-                            </div>
-
-                            <div class="roadmap-gantt-legend" aria-label="Timeline legend">
-                                <span><i class="legend-dot completed"></i>Completed</span>
-                                <span><i class="legend-dot current"></i>Current</span>
-                                <span><i class="legend-dot upcoming"></i>Upcoming</span>
+                                <span class="roadmap-eyebrow">Current phase</span>
                             </div>
                         </div>
-
-                        <div class="roadmap-gantt-scroll">
-                            <div class="roadmap-gantt" style="--week-count:@totalWeeks;">
-                                <div class="roadmap-gantt-corner">Phase</div>
-
-                                <div class="roadmap-gantt-weeks" style="--week-count:@totalWeeks;">
-                                    @for (var week = 1; week <= totalWeeks; week++)
-                                    {
-                                        <div class="roadmap-gantt-week">W@(week)</div>
-                                    }
-                                </div>
-
-                                @foreach (var entry in mainTimeline)
-                                {
-                                    var phase = entry.Phase;
-                                    var phaseKey = Convert.ToString(phase.Id) ?? phase.PhaseNumber.ToString();
-                                    var duration = entry.WithinTargetEndWeek - entry.DisplayStartWeek + 1;
-                                    var tasks = FYPilot.Web.Pages.Student.RoadmapModel.ParseTasks(phase.TasksJson);
-                                    var stateClass = phase.IsCompleted
-                                        ? "is-completed"
-                                        : (currentPhase != null && Convert.ToString(currentPhase.Id) == phaseKey
-                                            ? "is-current"
-                                            : "is-upcoming");
-                                    var isPartial = entry.Status == FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.PartiallyBeyondTarget;
-
-                                    <button type="button"
-                                            class="roadmap-gantt-label"
-                                            data-phase-select="@phaseKey"
-                                            aria-label="Open @phase.Name">
-                                        <span>@phase.PhaseNumber</span>
-                                        <strong>@phase.Name</strong>
-                                    </button>
-
-                                    <div class="roadmap-gantt-track" style="--week-count:@totalWeeks;">
-                                        <button type="button"
-                                                class="roadmap-gantt-bar @stateClass @(isPartial ? "is-overflowing" : "")"
-                                                style="grid-column:@entry.DisplayStartWeek / span @duration;"
-                                                data-phase-select="@phaseKey"
-                                                title="@(phase.Name): week @entry.DisplayStartWeek to @entry.WithinTargetEndWeek@(isPartial ? " (continues beyond target duration)" : "")">
-                                            <strong>@duration wk@(isPartial ? "+" : "")</strong>
-                                            @if (duration >= 2)
-                                            {
-                                                <span>@tasks.Count task(s)</span>
-                                            }
-                                        </button>
-                                    </div>
-                                }
-                            </div>
-                        </div>
-                    </section>
-
-                    <section class="roadmap-details-card" aria-labelledby="phase-details-title">
-                        <div class="roadmap-panel-heading">
-                            <div>
-                                <span>Execution</span>
-                                <h2 id="phase-details-title">Selected phase details</h2>
-                            </div>
-                        </div>
-
-                        @foreach (var entry in mainTimeline)
+                        @if (currentPhase != null)
                         {
-                            var phase = entry.Phase;
-                            var phaseKey = Convert.ToString(phase.Id) ?? phase.PhaseNumber.ToString();
-                            var isSelected = selectedPhase != null &&
-                                Convert.ToString(selectedPhase.Id) == phaseKey;
-                            var tasks = FYPilot.Web.Pages.Student.RoadmapModel.ParseTasks(phase.TasksJson);
+                            <span class="rm-status-chip">In progress</span>
+                        }
+                        else
+                        {
+                            <span class="rm-status-chip">Completed</span>
+                        }
+                    </div>
 
-                            <article id="phase-panel-@phaseKey"
-                                     class="roadmap-detail-panel @(isSelected ? "is-active" : "")"
-                                     data-phase-panel="@phaseKey"
-                                     role="tabpanel"
-                                     aria-hidden="@(isSelected ? "false" : "true")">
+                    @if (currentPhase != null)
+                    {
+                        var currentEntry = timeline.FirstOrDefault(t => Convert.ToString(t.Phase.Id) == Convert.ToString(currentPhase.Id));
+                        var currentTasks = FYPilot.Web.Pages.Student.RoadmapModel.ParseTasks(currentPhase.TasksJson);
+                        var currentPhaseKey = Convert.ToString(currentPhase.Id) ?? currentPhase.PhaseNumber.ToString();
 
-                                <div class="roadmap-detail-header">
+                        <div class="rm-current-heading">
+                            <span class="rm-current-number">@currentPhase.PhaseNumber</span>
+                            <h3>@currentPhase.Name</h3>
+                        </div>
+
+                        <p>@currentPhase.Objective</p>
+
+                        <div class="rm-current-facts">
+                            <div>
+                                <span>Duration</span>
+                                <strong>@(currentEntry != null ? currentEntry.DisplayEndWeek - currentEntry.DisplayStartWeek + 1 : Math.Max(1, currentPhase.EstimatedWeeks)) week(s)</strong>
+                            </div>
+                            <div>
+                                <span>Tasks</span>
+                                <strong>@currentTasks.Count</strong>
+                            </div>
+                            <div>
+                                <span>Dependencies</span>
+                                <strong>@(string.IsNullOrWhiteSpace(currentPhase.Dependencies) ? "—" : currentPhase.Dependencies)</strong>
+                            </div>
+                        </div>
+
+                        <div class="rm-phase-progress-block">
+                            <div class="rm-phase-progress-copy">
+                                <span>Roadmap progress</span>
+                                <strong>@pct%</strong>
+                            </div>
+                            <div class="rm-progress-track"><div style="width:@pct%"></div></div>
+                        </div>
+
+                        <button type="button" class="rm-primary-wide" data-phase-select="@currentPhaseKey">
+                            <span>View phase details</span>
+                            <i class="bi bi-arrow-right"></i>
+                        </button>
+                    }
+                    else
+                    {
+                        <div class="rm-complete-state">
+                            <i class="bi bi-check2-circle"></i>
+                            <h3>Roadmap completed</h3>
+                            <p>Every scheduled phase has been marked as complete.</p>
+                        </div>
+                    }
+                </article>
+
+                <article class="rm-alert-card">
+                    <div class="rm-card-title-line">
+                        <div class="rm-section-title compact">
+                            <span class="rm-section-icon"><i class="bi bi-exclamation-triangle"></i></span>
+                            <div>
+                                <span class="roadmap-eyebrow">Project alerts</span>
+                            </div>
+                        </div>
+                        @{
+                            var alertCount = (summary?.Warnings.Count ?? 0)
+                                + ((summary != null && summary.ScheduleFeasibility == "over_capacity" && summary.RecommendedAdditionalWeeks > 0) ? 1 : 0);
+                        }
+                        @if (alertCount > 0)
+                        {
+                            <span class="rm-alert-count">@alertCount</span>
+                        }
+                    </div>
+
+                    <div class="rm-alert-list">
+                        @if (summary != null && summary.ScheduleFeasibility == "over_capacity" && summary.RecommendedAdditionalWeeks > 0)
+                        {
+                            <div class="rm-alert-row">
+                                <span class="rm-alert-icon"><i class="bi bi-info-circle"></i></span>
+                                <div>
+                                    <strong>Capacity needs attention</strong>
+                                    <p>Add approximately @summary.RecommendedAdditionalWeeks more week(s) or reduce mandatory scope.</p>
+                                </div>
+                                <i class="bi bi-chevron-right"></i>
+                            </div>
+                        }
+
+                        @if (summary != null)
+                        {
+                            @foreach (var warning in summary.Warnings.Take(3))
+                            {
+                                <div class="rm-alert-row">
+                                    <span class="rm-alert-icon"><i class="bi bi-exclamation-triangle"></i></span>
                                     <div>
-                                        <div class="roadmap-detail-kicker">
-                                            Phase @phase.PhaseNumber
-                                            <span>
-                                                Week @entry.DisplayStartWeek@(entry.WithinTargetEndWeek > entry.DisplayStartWeek ? $"–{entry.WithinTargetEndWeek}" : "")
-                                            </span>
-                                            @if (entry.Status == FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.PartiallyBeyondTarget)
+                                        <strong>Schedule risk</strong>
+                                        <p title="@warning">@ShortText(warning, 125)</p>
+                                    </div>
+                                    <i class="bi bi-chevron-right"></i>
+                                </div>
+                            }
+                        }
+
+                        @if (alertCount == 0)
+                        {
+                            <div class="rm-alert-empty">
+                                <i class="bi bi-check2-circle"></i>
+                                <span>No schedule alerts right now.</span>
+                            </div>
+                        }
+                    </div>
+                </article>
+
+                <article class="rm-workload-card rm-workload-compact">
+                    <div class="rm-card-title-line">
+                        <div class="rm-section-title compact">
+                            <span class="rm-section-icon"><i class="bi bi-people"></i></span>
+                            <div>
+                                <span class="roadmap-eyebrow">Team workload</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    @if (summary != null && summary.WorkloadByMember.Any())
+                    {
+                        <div class="rm-workload-list">
+                            @foreach (var member in summary.WorkloadByMember)
+                            {
+                                var memberWidth = Math.Min(Math.Max(member.UtilizationPercentage, 0), 100);
+                                <div class="rm-workload-row">
+                                    <div class="rm-workload-copy">
+                                        <strong>@member.Member</strong>
+                                        <span><b>@member.AssignedHours h</b> · @member.UtilizationPercentage%</span>
+                                    </div>
+                                    <div class="rm-workload-track"><div style="width:@memberWidth%"></div></div>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="rm-workload-empty">
+                            <i class="bi bi-people"></i>
+                            <span>No workload allocation available.</span>
+                        </div>
+                    }
+                </article>
+
+                <article class="rm-beyond-card">
+                    <div class="rm-card-title-line">
+                        <div class="rm-section-title compact">
+                            <span class="rm-section-icon"><i class="bi bi-signpost-split"></i></span>
+                            <div>
+                                <span class="roadmap-eyebrow">Beyond target duration</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    @if (overflowTimeline.Any())
+                    {
+                        <div class="rm-beyond-list">
+                            @foreach (var entry in overflowTimeline)
+                            {
+                                var phase = entry.Phase;
+                                var phaseHours = FYPilot.Web.Pages.Student.RoadmapModel.ParseTasks(phase.TasksJson).Sum(t => t.EstimatedHours ?? 0);
+                                <div class="rm-beyond-item">
+                                    <span class="rm-beyond-number">@phase.PhaseNumber</span>
+                                    <div class="rm-beyond-content">
+                                        <div class="rm-beyond-title">
+                                            <strong>@phase.Name</strong>
+                                            <span>Beyond target</span>
+                                        </div>
+                                        <p>@ShortText(phase.Objective, 130)</p>
+                                        <div class="rm-beyond-meta">
+                                            @if (entry.Status != FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.NeedsReview)
                                             {
-                                                <span class="roadmap-overflow-badge">continues beyond target</span>
+                                                <span><i class="bi bi-clock"></i>Week @entry.DisplayStartWeek@(entry.DisplayEndWeek > entry.DisplayStartWeek ? $"–{entry.DisplayEndWeek}" : "")</span>
+                                            }
+                                            @if (phaseHours > 0)
+                                            {
+                                                <span><i class="bi bi-hourglass-split"></i>@phaseHours h planned</span>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(phase.ExpectedOutput))
+                                            {
+                                                <span title="@phase.ExpectedOutput"><i class="bi bi-folder2"></i>@ShortText(phase.ExpectedOutput, 34)</span>
                                             }
                                         </div>
-
-                                        <h3>@phase.Name</h3>
-                                        <p>@phase.Objective</p>
-                                    </div>
-
-                                    <div class="roadmap-detail-actions">
-                                        @if (phase.IsCompleted)
-                                        {
-                                            <span class="roadmap-complete-badge">
-                                                <i class="bi bi-check-circle-fill"></i>
-                                                Completed
-                                            </span>
-                                        }
-                                        else
-                                        {
-                                            <form method="post" asp-page-handler="Complete">
-                                                @Html.AntiForgeryToken()
-                                                <input type="hidden"
-                                                       name="projectId"
-                                                       value="@Model.ProjectId" />
-                                                <input type="hidden" name="phaseId" value="@phase.Id" />
-                                                <input type="hidden" name="ideaId" value="@Model.Idea.Id" />
-
-                                                <button type="submit" class="btn roadmap-btn-success">
-                                                    <i class="bi bi-check2"></i>
-                                                    Mark phase done
-                                                </button>
-                                            </form>
-                                        }
                                     </div>
                                 </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="rm-beyond-empty">
+                            <i class="bi bi-check2-circle"></i>
+                            <span>All scheduled phases fit within the selected target duration.</span>
+                        </div>
+                    }
+                </article>
+            </section>
 
-                                <div class="roadmap-phase-facts">
-                                    <div>
-                                        <span>Duration</span>
-                                        <strong>@(entry.WithinTargetEndWeek - entry.DisplayStartWeek + 1) week(s)</strong>
-                                    </div>
+            <section class="rm-detail-section" aria-labelledby="phase-details-title">
+                <div class="rm-section-head">
+                    <div class="rm-section-title">
+                        <span class="rm-section-icon"><i class="bi bi-list-check"></i></span>
+                        <div>
+                            <span class="roadmap-eyebrow">Execution details</span>
+                            <h2 id="phase-details-title">Phase plan</h2>
+                        </div>
+                    </div>
+                    <span class="rm-detail-hint">Select any phase from the timeline</span>
+                </div>
 
-                                    <div>
-                                        <span>Tasks</span>
-                                        <strong>@tasks.Count</strong>
-                                    </div>
+                @foreach (var entry in mainTimeline)
+                {
+                    var phase = entry.Phase;
+                    var phaseKey = Convert.ToString(phase.Id) ?? phase.PhaseNumber.ToString();
+                    var isSelected = selectedPhase != null && Convert.ToString(selectedPhase.Id) == phaseKey;
+                    var tasks = FYPilot.Web.Pages.Student.RoadmapModel.ParseTasks(phase.TasksJson);
+                    var isLocked = !phase.IsCompleted && orderedPhases.Any(p => p.PhaseNumber < phase.PhaseNumber && !p.IsCompleted);
 
-                                    <div>
-                                        <span>Dependencies</span>
-                                        <strong>
-                                            @(string.IsNullOrWhiteSpace(phase.Dependencies)
-                                                ? "None"
-                                                : phase.Dependencies)
-                                        </strong>
-                                    </div>
+                    <article id="phase-panel-@phaseKey"
+                             class="rm-detail-panel @(isSelected ? "is-active" : "")"
+                             data-phase-panel="@phaseKey"
+                             role="tabpanel"
+                             aria-hidden="@(isSelected ? "false" : "true")">
+                        <div class="rm-detail-header">
+                            <div>
+                                <div class="rm-detail-kicker">
+                                    <span>Phase @phase.PhaseNumber</span>
+                                    <span>Week @entry.DisplayStartWeek@(entry.WithinTargetEndWeek > entry.DisplayStartWeek ? $"–{entry.WithinTargetEndWeek}" : "")</span>
                                 </div>
+                                <h3>@phase.Name</h3>
+                                <p>@phase.Objective</p>
+                            </div>
 
-                                @if (tasks.Any())
+                            <div class="rm-detail-action">
+                                @if (phase.IsCompleted)
                                 {
-                                    <div class="roadmap-task-table-wrap">
-                                        <table class="roadmap-task-table">
-                                            <thead>
-                                                <tr>
-                                                    <th scope="col">Task</th>
-                                                    <th scope="col">Effort</th>
-                                                    <th scope="col">Ownership</th>
-                                                    <th scope="col">Allocation</th>
-                                                    <th scope="col">Sequence</th>
-                                                </tr>
-                                            </thead>
-
-                                            <tbody>
-                                                @{
-                                                    var taskNumber = 0;
-                                                }
-
-                                                @foreach (var task in tasks)
-                                                {
-                                                    taskNumber++;
-
-                                                    <tr>
-                                                        <td data-label="Task">
-                                                            <div class="roadmap-task-title">
-                                                                <span>@taskNumber</span>
-                                                                <strong>@task.Title</strong>
-                                                            </div>
-                                                        </td>
-
-                                                        <td data-label="Effort">
-                                                            @(task.EstimatedHours.HasValue
-                                                                ? $"{task.EstimatedHours}h"
-                                                                : "Not specified")
-                                                        </td>
-
-                                                        <td data-label="Ownership">
-                                                            @if (task.AssignedMembers.Count > 0)
-                                                            {
-                                                                <div class="roadmap-owner-list">
-                                                                    @foreach (var member in task.AssignedMembers)
-                                                                    {
-                                                                        <span>@member</span>
-                                                                    }
-                                                                </div>
-                                                            }
-                                                            else
-                                                            {
-                                                                <span class="roadmap-muted">Unassigned</span>
-                                                            }
-                                                        </td>
-
-                                                        <td data-label="Allocation">
-                                                            @if (task.MemberAllocations.Count > 0)
-                                                            {
-                                                                <div class="roadmap-allocation-list">
-                                                                    @foreach (var allocation in task.MemberAllocations)
-                                                                    {
-                                                                        <span>
-                                                                            <strong>@allocation.MemberId</strong>
-                                                                            @allocation.AllocationPercentage%
-                                                                            · @allocation.AllocatedHours h
-                                                                        </span>
-                                                                    }
-                                                                </div>
-                                                            }
-                                                            else
-                                                            {
-                                                                <span class="roadmap-muted">Single-owner task</span>
-                                                            }
-                                                        </td>
-
-                                                        <td data-label="Sequence">
-                                                            <span class="roadmap-sequence-chip">Task @taskNumber</span>
-                                                        </td>
-                                                    </tr>
-                                                }
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                    <span class="rm-status-chip"><i class="bi bi-check2"></i>Completed</span>
+                                }
+                                else if (isLocked)
+                                {
+                                    <span class="rm-status-chip"><i class="bi bi-lock"></i>Finish earlier phases first</span>
                                 }
                                 else
                                 {
-                                    <div class="roadmap-inline-empty">
-                                        <i class="bi bi-list-check"></i>
-                                        No task details are available for this phase.
-                                    </div>
+                                    <form method="post" asp-page-handler="Complete">
+                                        @Html.AntiForgeryToken()
+                                        <input type="hidden" name="projectId" value="@Model.ProjectId" />
+                                        <input type="hidden" name="phaseId" value="@phase.Id" />
+                                        <input type="hidden" name="ideaId" value="@Model.Idea.Id" />
+                                        <button type="submit" class="btn roadmap-btn-primary">
+                                            <i class="bi bi-check2"></i> Mark phase done
+                                        </button>
+                                    </form>
                                 }
+                            </div>
+                        </div>
 
-                                <div class="roadmap-detail-grid">
-                                    @if (!string.IsNullOrWhiteSpace(phase.ExpectedOutput))
-                                    {
-                                        <section class="roadmap-info-box">
-                                            <div class="roadmap-info-icon">
-                                                <i class="bi bi-box-arrow-in-down"></i>
-                                            </div>
-                                            <div>
-                                                <span>Expected output</span>
-                                                <p>@phase.ExpectedOutput</p>
-                                            </div>
-                                        </section>
-                                    }
+                        <div class="rm-detail-facts">
+                            <div><span>Duration</span><strong>@(entry.WithinTargetEndWeek - entry.DisplayStartWeek + 1) week(s)</strong></div>
+                            <div><span>Tasks</span><strong>@tasks.Count</strong></div>
+                            <div><span>Dependencies</span><strong>@(string.IsNullOrWhiteSpace(phase.Dependencies) ? "None" : phase.Dependencies)</strong></div>
+                        </div>
 
-                                    @if (!string.IsNullOrWhiteSpace(phase.SuccessCriteria))
+                        @if (tasks.Any())
+                        {
+                            <div class="rm-task-table-wrap">
+                                <table class="rm-task-table">
+                                    <thead>
+                                        <tr><th>Task</th><th>Effort</th><th>Owner</th></tr>
+                                    </thead>
+                                    <tbody>
+                                    @{ var taskNumber = 0; }
+                                    @foreach (var task in tasks)
                                     {
-                                        <section class="roadmap-info-box">
-                                            <div class="roadmap-info-icon">
-                                                <i class="bi bi-bullseye"></i>
-                                            </div>
-                                            <div>
-                                                <span>Success criteria</span>
-                                                <p>@phase.SuccessCriteria</p>
-                                            </div>
-                                        </section>
+                                        taskNumber++;
+                                        <tr>
+                                            <td>
+                                                <div class="rm-task-title"><span>@taskNumber</span><strong>@task.Title</strong></div>
+                                            </td>
+                                            <td>@(task.EstimatedHours.HasValue ? $"{task.EstimatedHours}h" : "—")</td>
+                                            <td>
+                                                @if (task.MemberAllocations.Count > 0)
+                                                {
+                                                    <div class="rm-owner-list">
+                                                        @foreach (var allocation in task.MemberAllocations)
+                                                        {
+                                                            <span><strong>@allocation.MemberId</strong> @allocation.AllocationPercentage% · @allocation.AllocatedHours h</span>
+                                                        }
+                                                    </div>
+                                                }
+                                                else if (task.AssignedMembers.Count > 0)
+                                                {
+                                                    <div class="rm-owner-list">
+                                                        @foreach (var member in task.AssignedMembers) { <span>@member</span> }
+                                                    </div>
+                                                }
+                                                else
+                                                {
+                                                    <span class="rm-muted">Unassigned</span>
+                                                }
+                                            </td>
+                                        </tr>
                                     }
-
-                                    @if (!string.IsNullOrWhiteSpace(phase.Risks))
-                                    {
-                                        <section class="roadmap-info-box roadmap-info-risk">
-                                            <div class="roadmap-info-icon">
-                                                <i class="bi bi-exclamation-triangle"></i>
-                                            </div>
-                                            <div>
-                                                <span>Risk warning</span>
-                                                <p>@phase.Risks</p>
-                                            </div>
-                                        </section>
-                                    }
-                                </div>
-                            </article>
+                                    </tbody>
+                                </table>
+                            </div>
                         }
-                    </section>
-                </div>
 
-                <aside class="roadmap-capacity-panel">
-                    <section class="roadmap-side-section">
-                        <div class="roadmap-side-heading">
-                            <span>Current focus</span>
-                            <i class="bi bi-crosshair"></i>
-                        </div>
-
-                        <h3>@(currentPhase?.Name ?? "Roadmap completed")</h3>
-                        <p>
-                            @(currentPhase?.Objective
-                                ?? "All roadmap phases are marked as complete.")
-                        </p>
-
-                        <div class="roadmap-side-metric">
-                            <span>Remaining phases</span>
-                            <strong>@orderedPhases.Count(p => !p.IsCompleted)</strong>
-                        </div>
-                    </section>
-
-                    @if (summary != null)
-                    {
-                        <section class="roadmap-side-section">
-                            <div class="roadmap-side-heading">
-                                <span>Capacity</span>
-                                <i class="bi bi-speedometer2"></i>
-                            </div>
-
-                            <div class="roadmap-capacity-number">
-                                <strong>@summary.UtilizationPercentage%</strong>
-                                <span>utilization</span>
-                            </div>
-
-                            <div class="roadmap-meter">
-                                @{
-                                    var utilizationWidth = Math.Min(Math.Max(summary.UtilizationPercentage, 0), 100);
-                                }
-                                <div class="@FeasibilityClass(summary.ScheduleFeasibility)"
-                                     style="width:@utilizationWidth%"></div>
-                            </div>
-
-                            <dl class="roadmap-side-stats">
-                                <div>
-                                    <dt>Adjusted plan</dt>
-                                    <dd>@summary.AdjustedPlannedHours h</dd>
-                                </div>
-                                <div>
-                                    <dt>Available capacity</dt>
-                                    <dd>@summary.TotalCapacityHours h</dd>
-                                </div>
-                                <div>
-                                    <dt>Team size</dt>
-                                    <dd>@summary.TeamSize</dd>
-                                </div>
-                                <div>
-                                    <dt>Weekly/member</dt>
-                                    <dd>@summary.HoursPerWeekPerMember h</dd>
-                                </div>
-                            </dl>
-
-                            @if (summary.OriginalPlannedHours != summary.AdjustedPlannedHours)
+                        <div class="rm-detail-info-grid">
+                            @if (!string.IsNullOrWhiteSpace(phase.ExpectedOutput))
                             {
-                                <div class="roadmap-scope-adjustment">
-                                    <i class="bi bi-scissors"></i>
-                                    <span>
-                                        Scope adjusted from <strong>@summary.OriginalPlannedHours h</strong>
-                                        to <strong>@summary.AdjustedPlannedHours h</strong>.
-                                    </span>
+                                <div class="rm-info-card">
+                                    <span class="rm-info-icon"><i class="bi bi-box-arrow-in-down"></i></span>
+                                    <div><span>Expected output</span><p>@phase.ExpectedOutput</p></div>
                                 </div>
                             }
-                        </section>
-
-                        @if (summary.WorkloadByMember.Any())
-                        {
-                            <section class="roadmap-side-section">
-                                <div class="roadmap-side-heading">
-                                    <span>Team workload</span>
-                                    <i class="bi bi-people"></i>
+                            @if (!string.IsNullOrWhiteSpace(phase.SuccessCriteria))
+                            {
+                                <div class="rm-info-card">
+                                    <span class="rm-info-icon"><i class="bi bi-bullseye"></i></span>
+                                    <div><span>Success criteria</span><p>@phase.SuccessCriteria</p></div>
                                 </div>
-
-                                <div class="roadmap-member-load-list">
-                                    @foreach (var member in summary.WorkloadByMember)
-                                    {
-                                        var memberWidth = Math.Min(Math.Max(member.UtilizationPercentage, 0), 100);
-
-                                        <div class="roadmap-member-load">
-                                            <div class="roadmap-member-load-copy">
-                                                <strong>@member.Member</strong>
-                                                <span>@member.AssignedHours h · @member.UtilizationPercentage%</span>
-                                            </div>
-
-                                            <div class="roadmap-member-load-track">
-                                                <div style="width:@memberWidth%"></div>
-                                            </div>
-                                        </div>
-                                    }
+                            }
+                            @if (!string.IsNullOrWhiteSpace(phase.Risks))
+                            {
+                                <div class="rm-info-card rm-info-risk">
+                                    <span class="rm-info-icon"><i class="bi bi-exclamation-triangle"></i></span>
+                                    <div><span>Risk warning</span><p>@phase.Risks</p></div>
                                 </div>
-                            </section>
-                        }
-
-                        @if (summary.Warnings.Any() ||
-                             (summary.ScheduleFeasibility == "over_capacity" &&
-                              summary.RecommendedAdditionalWeeks > 0))
-                        {
-                            <section class="roadmap-side-section roadmap-warning-section">
-                                <div class="roadmap-side-heading">
-                                    <span>Schedule alerts</span>
-                                    <i class="bi bi-exclamation-triangle"></i>
-                                </div>
-
-                                @if (summary.ScheduleFeasibility == "over_capacity" &&
-                                     summary.RecommendedAdditionalWeeks > 0)
-                                {
-                                    <div class="roadmap-warning-item is-critical">
-                                        <i class="bi bi-calendar-plus"></i>
-                                        <span>
-                                            Add approximately
-                                            <strong>@summary.RecommendedAdditionalWeeks week(s)</strong>
-                                            or reduce mandatory scope.
-                                        </span>
-                                    </div>
-                                }
-
-                                @foreach (var warning in summary.Warnings)
-                                {
-                                    <div class="roadmap-warning-item">
-                                        <i class="bi bi-info-circle"></i>
-                                        <span>@warning</span>
-                                    </div>
-                                }
-                            </section>
-                        }
-                    }
-                </aside>
-            </section>
-
-            @if (overflowTimeline.Any())
-            {
-                <section class="roadmap-overflow-card" aria-labelledby="overflow-title">
-                    <div class="roadmap-panel-heading">
-                        <div>
-                            <span>Beyond target duration</span>
-                            <h2 id="overflow-title">Overflow scope</h2>
+                            }
                         </div>
-
-                        <span class="roadmap-count-badge">@overflowTimeline.Count</span>
-                    </div>
-
-                    <p class="roadmap-overflow-intro">
-                        Some work cannot fit within the selected target duration at the current capacity.
-                        These phases are shown as overflow scope rather than being incorrectly placed in the
-                        final target week.
-                    </p>
-
-                    <ol class="roadmap-overflow-list">
-                        @foreach (var entry in overflowTimeline)
-                        {
-                            var phase = entry.Phase;
-                            var phaseHours = FYPilot.Web.Pages.Student.RoadmapModel.ParseTasks(phase.TasksJson)
-                                .Sum(t => t.EstimatedHours ?? 0);
-
-                            string statusLabel = entry.Status switch
-                            {
-                                FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.PartiallyBeyondTarget => "Partially beyond target",
-                                FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.BeyondTarget => "Beyond target",
-                                _ => "Unscheduled / needs review",
-                            };
-
-                            string statusClass = entry.Status switch
-                            {
-                                FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.PartiallyBeyondTarget => "is-partial",
-                                FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.BeyondTarget => "is-beyond",
-                                _ => "is-needs-review",
-                            };
-
-                            <li class="roadmap-overflow-item">
-                                <div class="roadmap-overflow-order">@phase.PhaseNumber</div>
-
-                                <div class="roadmap-overflow-copy">
-                                    <div class="roadmap-overflow-name-line">
-                                        <strong>@phase.Name</strong>
-                                        <span class="roadmap-overflow-status @statusClass">@statusLabel</span>
-                                    </div>
-
-                                    @if (!string.IsNullOrWhiteSpace(phase.Objective))
-                                    {
-                                        <p>@phase.Objective</p>
-                                    }
-
-                                    <div class="roadmap-overflow-meta">
-                                        @if (entry.Status != FYPilot.Web.Pages.Student.RoadmapPhaseTimelineStatus.NeedsReview)
-                                        {
-                                            <span>
-                                                Estimated week @entry.DisplayStartWeek@(entry.DisplayEndWeek > entry.DisplayStartWeek ? $"–{entry.DisplayEndWeek}" : "")
-                                                (@(entry.DisplayEndWeek - entry.DisplayStartWeek + 1) week(s))
-                                            </span>
-                                        }
-                                        else
-                                        {
-                                            <span>No valid duration on record for this phase.</span>
-                                        }
-
-                                        @if (phaseHours > 0)
-                                        {
-                                            <span>@phaseHours h planned</span>
-                                        }
-
-                                        @if (!string.IsNullOrWhiteSpace(phase.ExpectedOutput))
-                                        {
-                                            <span>@phase.ExpectedOutput</span>
-                                        }
-                                    </div>
-                                </div>
-                            </li>
-                        }
-                    </ol>
-                </section>
-            }
+                    </article>
+                }
+            </section>
 
             @if (Model.DeferredTasks.Any())
             {
-                <section class="roadmap-deferred-card" aria-labelledby="deferred-title">
+                <section class="rm-deferred-card" aria-labelledby="deferred-title">
                     <details>
                         <summary>
-                            <span>
-                                <i class="bi bi-archive"></i>
-                                <strong id="deferred-title">Future Enhancements</strong>
-                                <small>Excluded from the current delivery plan</small>
-                            </span>
-
-                            <span class="roadmap-deferred-count">@Model.DeferredTasks.Count task(s)</span>
+                            <span><i class="bi bi-archive"></i><strong id="deferred-title">Future enhancements</strong><small>Excluded from the current delivery plan</small></span>
+                            <span>@Model.DeferredTasks.Count task(s)</span>
                         </summary>
-
-                        <div class="roadmap-deferred-table-wrap">
-                            <table class="roadmap-deferred-table">
-                                <thead>
-                                    <tr>
-                                        <th scope="col">Task</th>
-                                        <th scope="col">Original phase</th>
-                                        <th scope="col">Effort</th>
-                                        <th scope="col">Priority</th>
-                                        <th scope="col">Reason deferred</th>
-                                    </tr>
-                                </thead>
-
+                        <div class="rm-task-table-wrap deferred">
+                            <table class="rm-task-table">
+                                <thead><tr><th>Task</th><th>Original phase</th><th>Effort</th><th>Priority</th><th>Reason deferred</th></tr></thead>
                                 <tbody>
-                                    @foreach (var task in Model.DeferredTasks)
-                                    {
-                                        <tr>
-                                            <td data-label="Task"><strong>@task.Title</strong></td>
-                                            <td data-label="Original phase">@task.OriginalPhase</td>
-                                            <td data-label="Effort">@task.EstimatedHours h</td>
-                                            <td data-label="Priority">
-                                                <span class="roadmap-priority-chip">@task.Priority</span>
-                                            </td>
-                                            <td data-label="Reason">@task.ReasonDeferred</td>
-                                        </tr>
-                                    }
+                                @foreach (var task in Model.DeferredTasks)
+                                {
+                                    <tr>
+                                        <td><strong>@task.Title</strong></td>
+                                        <td>@task.OriginalPhase</td>
+                                        <td>@task.EstimatedHours h</td>
+                                        <td>@task.Priority</td>
+                                        <td>@task.ReasonDeferred</td>
+                                    </tr>
+                                }
                                 </tbody>
                             </table>
                         </div>
                     </details>
                 </section>
             }
+
+
         }
 
         <div class="roadmap-loading-overlay d-none"
@@ -991,41 +743,19 @@ else
             <div class="roadmap-loading-panel">
                 <div class="roadmap-loading-top">
                     <div class="roadmap-loading-spinner" aria-hidden="true"></div>
-
                     <div>
                         <div class="roadmap-eyebrow">AI processing</div>
                         <h2>Building your project roadmap</h2>
-                        <p>
-                            Keep this page open while FYPilot generates, schedules, validates, and reviews the plan.
-                        </p>
+                        <p>Keep this page open while FYPilot generates, schedules, validates, and reviews the plan.</p>
                     </div>
                 </div>
-
-                <div class="roadmap-loading-progress">
-                    <div></div>
-                </div>
-
+                <div class="roadmap-loading-progress"><div></div></div>
                 <ol class="roadmap-loading-steps">
-                    <li class="is-active">
-                        <i class="bi bi-folder2-open"></i>
-                        Reading project context
-                    </li>
-                    <li>
-                        <i class="bi bi-diagram-3"></i>
-                        Generating project-specific phases
-                    </li>
-                    <li>
-                        <i class="bi bi-hourglass-split"></i>
-                        Estimating tasks and effort
-                    </li>
-                    <li>
-                        <i class="bi bi-people"></i>
-                        Allocating team workload
-                    </li>
-                    <li>
-                        <i class="bi bi-shield-check"></i>
-                        Reviewing roadmap quality
-                    </li>
+                    <li class="is-active"><i class="bi bi-folder2-open"></i>Reading project context</li>
+                    <li><i class="bi bi-diagram-3"></i>Generating project-specific phases</li>
+                    <li><i class="bi bi-hourglass-split"></i>Estimating tasks and effort</li>
+                    <li><i class="bi bi-people"></i>Allocating team workload</li>
+                    <li><i class="bi bi-shield-check"></i>Reviewing roadmap quality</li>
                 </ol>
             </div>
         </div>
@@ -1033,1926 +763,1090 @@ else
 }
 
 @section Head {
-    <style>
-        :root {
-            --roadmap-navy: #28385E;
-            --roadmap-navy-2: #405577;
-            --roadmap-blue: #516C8D;
-            --roadmap-blue-soft: #edf3f9;
-            --roadmap-surface: #ffffff;
-            --roadmap-bg: #f4f6f9;
-            --roadmap-border: #e2e7ee;
-            --roadmap-muted: #667085;
-            --roadmap-text: #182230;
-            --roadmap-success: #198754;
-            --roadmap-success-soft: #eaf7f0;
-            --roadmap-warning: #b7791f;
-            --roadmap-warning-soft: #fff7e6;
-            --roadmap-danger: #c24141;
-            --roadmap-danger-soft: #fff0f0;
-            --roadmap-radius: 18px;
-        }
-
-        .roadmap-control,
-        .roadmap-empty-page {
-            color: var(--roadmap-text);
-            background: var(--roadmap-bg);
-        }
-
-        .roadmap-control {
-            display: grid;
-            gap: 1rem;
-            padding-bottom: 2rem;
-        }
-
-        .roadmap-empty-page {
-            min-height: calc(100vh - 170px);
-            display: grid;
-            place-items: center;
-            padding: 1.25rem;
-        }
-
-        .roadmap-empty-card {
-            width: min(620px, 100%);
-            padding: clamp(1.5rem, 4vw, 2.5rem);
-            text-align: center;
-            background: var(--roadmap-surface);
-            border: 1px solid var(--roadmap-border);
-            border-radius: 24px;
-            box-shadow: 0 18px 46px rgba(31, 47, 77, .08);
-        }
-
-        .roadmap-empty-icon,
-        .roadmap-start-icon,
-        .roadmap-command-icon {
-            display: grid;
-            place-items: center;
-            color: var(--roadmap-navy);
-            background: var(--roadmap-blue-soft);
-        }
-
-        .roadmap-empty-icon {
-            width: 68px;
-            height: 68px;
-            margin: 0 auto 1rem;
-            border-radius: 20px;
-            font-size: 1.7rem;
-        }
-
-        .roadmap-eyebrow {
-            color: var(--roadmap-blue);
-            font-size: .72rem;
-            font-weight: 800;
-            letter-spacing: .13em;
-            text-transform: uppercase;
-        }
-
-        .roadmap-empty-card h1,
-        .roadmap-start-panel h2,
-        .roadmap-launch-section h2,
-        .roadmap-command-header h1,
-        .roadmap-panel-heading h2,
-        .roadmap-detail-panel h3,
-        .roadmap-capacity-panel h3,
-        .roadmap-loading-panel h2 {
-            color: var(--roadmap-navy);
-            letter-spacing: -.025em;
-        }
-
-        .roadmap-empty-card h1 {
-            margin: .4rem 0 .7rem;
-            font-size: clamp(1.75rem, 4vw, 2.35rem);
-            font-weight: 800;
-        }
-
-        .roadmap-empty-card p {
-            max-width: 500px;
-            margin: 0 auto;
-            color: var(--roadmap-muted);
-            line-height: 1.7;
-        }
-
-        .roadmap-empty-actions,
-        .roadmap-command-actions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: .65rem;
-        }
-
-        .roadmap-empty-actions {
-            justify-content: center;
-            margin-top: 1.35rem;
-        }
-
-        .roadmap-btn-primary,
-        .roadmap-btn-secondary,
-        .roadmap-btn-success {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: .45rem;
-            min-height: 42px;
-            border-radius: 11px;
-            padding: .62rem .9rem;
-            font-size: .82rem;
-            font-weight: 750;
-            box-shadow: none !important;
-        }
-
-        .roadmap-btn-primary {
-            color: #fff !important;
-            background: var(--roadmap-navy) !important;
-            border: 1px solid var(--roadmap-navy) !important;
-        }
-
-            .roadmap-btn-primary:hover {
-                background: var(--roadmap-navy-2) !important;
-                border-color: var(--roadmap-navy-2) !important;
-            }
-
-        .roadmap-btn-secondary {
-            color: var(--roadmap-navy) !important;
-            background: #fff !important;
-            border: 1px solid var(--roadmap-border) !important;
-        }
-
-            .roadmap-btn-secondary:hover {
-                background: var(--roadmap-blue-soft) !important;
-                border-color: #cfd9e5 !important;
-            }
-
-        .roadmap-btn-success {
-            color: #fff !important;
-            background: var(--roadmap-success) !important;
-            border: 1px solid var(--roadmap-success) !important;
-        }
-
-        .roadmap-btn-large {
-            min-height: 48px;
-            padding-inline: 1.2rem;
-        }
-
-        .roadmap-alert {
-            display: flex;
-            align-items: flex-start;
-            gap: .65rem;
-            padding: .85rem 1rem;
-            border-radius: 12px;
-            font-size: .9rem;
-        }
-
-        .roadmap-alert-warning {
-            color: #7a5411;
-            background: var(--roadmap-warning-soft);
-            border: 1px solid #f1d69e;
-        }
-
-        .roadmap-alert-fallback {
-            align-items: flex-start;
-            color: #7a5411;
-            background: var(--roadmap-warning-soft);
-            border: 1px solid #f1d69e;
-        }
-
-            .roadmap-alert-fallback > div {
-                display: grid;
-                gap: .3rem;
-            }
-
-            .roadmap-alert-fallback strong {
-                color: #6f551e;
-            }
-
-        .roadmap-fallback-meta {
-            color: #8a6a1f;
-            font-size: .74rem;
-        }
-
-        .roadmap-command-header,
-        .roadmap-start-panel,
-        .roadmap-summary-strip,
-        .roadmap-phase-nav,
-        .roadmap-gantt-card,
-        .roadmap-details-card,
-        .roadmap-capacity-panel,
-        .roadmap-deferred-card {
-            background: var(--roadmap-surface);
-            border: 1px solid var(--roadmap-border);
-            box-shadow: 0 8px 24px rgba(31, 47, 77, .045);
-        }
-
-        .roadmap-command-header {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
-            gap: 1rem 1.5rem;
-            padding: 1.15rem 1.25rem;
-            border-radius: var(--roadmap-radius);
-        }
-
-        .roadmap-command-main {
-            display: flex;
-            align-items: flex-start;
-            gap: .9rem;
-            min-width: 0;
-        }
-
-        .roadmap-command-icon {
-            flex: 0 0 auto;
-            width: 44px;
-            height: 44px;
-            border-radius: 13px;
-            font-size: 1.2rem;
-        }
-
-        .roadmap-command-copy {
-            min-width: 0;
-        }
-
-        .roadmap-title-line {
-            display: flex;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: .65rem;
-            margin-top: .15rem;
-        }
-
-            .roadmap-title-line h1 {
-                min-width: 0;
-                margin: 0;
-                font-size: clamp(1.3rem, 2.2vw, 1.85rem);
-                font-weight: 800;
-                overflow-wrap: anywhere;
-            }
-
-        .roadmap-review-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: .3rem;
-            border-radius: 999px;
-            font-size: .7rem;
-        }
-
-        .roadmap-project-meta {
-            display: flex;
-            flex-wrap: wrap;
-            gap: .4rem;
-            margin-top: .5rem;
-        }
-
-            .roadmap-project-meta span {
-                padding: .27rem .52rem;
-                color: #526071;
-                background: #f6f8fa;
-                border: 1px solid var(--roadmap-border);
-                border-radius: 999px;
-                font-size: .72rem;
-                font-weight: 700;
-            }
-
-        .roadmap-command-actions {
-            justify-content: flex-end;
-            align-items: flex-start;
-        }
-
-        .roadmap-header-progress {
-            grid-column: 1 / -1;
-        }
-
-        .roadmap-header-progress-copy {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: .35rem;
-            color: var(--roadmap-muted);
-            font-size: .75rem;
-        }
-
-            .roadmap-header-progress-copy strong {
-                color: var(--roadmap-navy);
-            }
-
-        .roadmap-progress-track,
-        .roadmap-meter,
-        .roadmap-member-load-track {
-            overflow: hidden;
-            background: #edf0f4;
-            border-radius: 999px;
-        }
-
-        .roadmap-progress-track {
-            height: 6px;
-        }
-
-        .roadmap-progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, var(--roadmap-navy), var(--roadmap-blue));
-            border-radius: inherit;
-            transition: width .25s ease;
-        }
-
-        .roadmap-command-header.is-launch-state {
-            grid-template-columns: minmax(0, 1fr) auto;
-        }
-
-        .roadmap-launch-section {
-            grid-column: 1 / -1;
-            display: grid;
-            grid-template-columns: minmax(0, 1.2fr) minmax(290px, .8fr) minmax(210px, auto);
-            align-items: center;
-            gap: 1.25rem;
-            margin-top: .15rem;
-            padding: 1.1rem;
-            border: 1px solid #dbe4ee;
-            border-radius: 15px;
-            background: radial-gradient( circle at 100% 0, rgba(81, 108, 141, .10), transparent 34%), linear-gradient( 135deg, #f8fafc 0%, #f2f6fa 100%);
-        }
-
-            .roadmap-launch-section h2 {
-                margin: .2rem 0 .4rem;
-                font-size: clamp(1.25rem, 2vw, 1.72rem);
-                font-weight: 800;
-            }
-
-            .roadmap-launch-section p {
-                max-width: 760px;
-                margin: 0;
-                color: var(--roadmap-muted);
-                line-height: 1.6;
-            }
-
-        .roadmap-launch-action {
-            display: grid;
-            justify-items: stretch;
-            gap: .45rem;
-            min-width: 210px;
-        }
-
-            .roadmap-launch-action .roadmap-btn-large {
-                width: 100%;
-                min-height: 50px;
-                white-space: nowrap;
-            }
-
-            .roadmap-launch-action small {
-                max-width: 230px;
-                color: var(--roadmap-muted);
-                font-size: .67rem;
-                line-height: 1.4;
-                text-align: center;
-            }
-
-        .roadmap-start-panel {
-            display: grid;
-            grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr) auto;
-            align-items: center;
-            gap: 1.5rem;
-            padding: clamp(1.25rem, 3vw, 2rem);
-            border-radius: var(--roadmap-radius);
-        }
-
-        .roadmap-start-copy {
-            display: flex;
-            align-items: flex-start;
-            gap: 1rem;
-        }
-
-        .roadmap-start-icon {
-            flex: 0 0 auto;
-            width: 50px;
-            height: 50px;
-            border-radius: 15px;
-            font-size: 1.3rem;
-        }
-
-        .roadmap-start-panel h2 {
-            margin: .2rem 0 .45rem;
-            font-size: clamp(1.35rem, 2.4vw, 1.9rem);
-            font-weight: 800;
-        }
-
-        .roadmap-start-panel p {
-            margin: 0;
-            color: var(--roadmap-muted);
-            line-height: 1.65;
-        }
-
-        .roadmap-start-features {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: .55rem;
-        }
-
-            .roadmap-start-features div {
-                display: flex;
-                align-items: center;
-                gap: .45rem;
-                padding: .65rem .7rem;
-                color: #435066;
-                background: #f7f9fb;
-                border: 1px solid var(--roadmap-border);
-                border-radius: 11px;
-                font-size: .76rem;
-                font-weight: 700;
-            }
-
-            .roadmap-start-features i {
-                color: var(--roadmap-blue);
-            }
-
-        .roadmap-summary-strip {
-            display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-            overflow: hidden;
-            border-radius: 15px;
-        }
-
-        .roadmap-summary-item {
-            min-width: 0;
-            padding: .9rem 1rem;
-            border-right: 1px solid var(--roadmap-border);
-            border-bottom: 1px solid var(--roadmap-border);
-        }
-
-            .roadmap-summary-item:nth-child(4n) {
-                border-right: 0;
-            }
-
-            .roadmap-summary-item:nth-last-child(-n + 4) {
-                border-bottom: 0;
-            }
-
-            .roadmap-summary-item span {
-                display: block;
-                margin-bottom: .25rem;
-                color: var(--roadmap-muted);
-                font-size: .68rem;
-                font-weight: 700;
-                text-transform: uppercase;
-                letter-spacing: .04em;
-            }
-
-            .roadmap-summary-item strong {
-                display: -webkit-box;
-                color: var(--roadmap-text);
-                font-size: .84rem;
-                line-height: 1.35;
-                white-space: normal;
-                overflow: hidden;
-                -webkit-box-orient: vertical;
-                -webkit-line-clamp: 2;
-            }
-
-        .roadmap-summary-estimate {
-            display: block;
-            overflow: visible;
-            color: #8a5c12;
-            font-size: .66rem;
-            font-weight: 700;
-            white-space: nowrap;
-        }
-
-        .roadmap-feasibility-pill {
-            width: fit-content;
-            max-width: 100%;
-            padding: .3rem .5rem;
-            border-radius: 999px;
-            font-size: .68rem !important;
-            text-transform: none !important;
-            white-space: normal !important;
-        }
-
-            .roadmap-feasibility-pill.is-feasible,
-            .roadmap-meter > .is-feasible {
-                color: #157347;
-                background: var(--roadmap-success-soft);
-            }
-
-            .roadmap-feasibility-pill.is-adjusted,
-            .roadmap-meter > .is-adjusted {
-                color: #8a5c12;
-                background: var(--roadmap-warning-soft);
-            }
-
-            .roadmap-feasibility-pill.is-over,
-            .roadmap-meter > .is-over {
-                color: #a83232;
-                background: var(--roadmap-danger-soft);
-            }
-
-            .roadmap-feasibility-pill.is-neutral,
-            .roadmap-meter > .is-neutral {
-                color: #5f6b7b;
-                background: #eef1f5;
-            }
-
-        .roadmap-workspace {
-            display: grid;
-            grid-template-columns: minmax(245px, 285px) minmax(0, 1fr);
-            align-items: start;
-            gap: 1rem;
-            min-width: 0;
-        }
-
-        .roadmap-workspace > *,
-        .roadmap-main-column,
-        .roadmap-gantt-card,
-        .roadmap-gantt-scroll {
-            min-width: 0;
-            max-width: 100%;
-        }
-
-        .roadmap-phase-nav,
-        .roadmap-gantt-card,
-        .roadmap-details-card,
-        .roadmap-capacity-panel {
-            border-radius: var(--roadmap-radius);
-        }
-
-        .roadmap-phase-nav {
-            position: sticky;
-            top: 1rem;
-            display: flex;
-            flex-direction: column;
-            max-height: calc(100vh - 2rem);
-            min-width: 0;
-            overflow: hidden;
-        }
-
-        .roadmap-panel-heading {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 1rem;
-            padding: 1rem 1.05rem;
-            border-bottom: 1px solid var(--roadmap-border);
-        }
-
-            .roadmap-panel-heading span {
-                color: var(--roadmap-blue);
-                font-size: .66rem;
-                font-weight: 800;
-                letter-spacing: .1em;
-                text-transform: uppercase;
-            }
-
-            .roadmap-panel-heading h2 {
-                margin: .1rem 0 0;
-                font-size: .98rem;
-                font-weight: 800;
-            }
-
-        .roadmap-count-badge,
-        .roadmap-deferred-count {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-width: 27px;
-            padding: .25rem .5rem;
-            color: var(--roadmap-navy) !important;
-            background: var(--roadmap-blue-soft);
-            border-radius: 999px;
-            font-size: .7rem !important;
-            letter-spacing: 0 !important;
-            text-transform: none !important;
-        }
-
-        .roadmap-phase-list {
-            display: grid;
-            min-height: 0;
-            padding: .45rem;
-            overflow-y: auto;
-            overscroll-behavior: contain;
-            scrollbar-gutter: stable;
-        }
-
-        .roadmap-phase-list::-webkit-scrollbar,
-        .roadmap-gantt-scroll::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
-
-        .roadmap-phase-list::-webkit-scrollbar-thumb,
-        .roadmap-gantt-scroll::-webkit-scrollbar-thumb {
-            background: #b9c5d4;
-            border-radius: 999px;
-        }
-
-        .roadmap-phase-tab {
-            width: 100%;
-            display: grid;
-            grid-template-columns: auto minmax(0, 1fr) auto;
-            align-items: center;
-            gap: .65rem;
-            padding: .72rem .65rem;
-            color: inherit;
-            text-align: left;
-            background: transparent;
-            border: 1px solid transparent;
-            border-radius: 11px;
-            cursor: pointer;
-        }
-
-            .roadmap-phase-tab:hover,
-            .roadmap-phase-tab.is-selected {
-                background: var(--roadmap-blue-soft);
-                border-color: #d9e4ef;
-            }
-
-            .roadmap-phase-tab.is-current {
-                box-shadow: inset 3px 0 0 var(--roadmap-blue);
-            }
-
-        .roadmap-phase-tab-number {
-            width: 29px;
-            height: 29px;
-            display: grid;
-            place-items: center;
-            color: var(--roadmap-muted);
-            background: #f1f3f6;
-            border-radius: 9px;
-            font-size: .74rem;
-            font-weight: 800;
-        }
-
-        .roadmap-phase-tab.is-completed .roadmap-phase-tab-number {
-            color: var(--roadmap-success);
-            background: var(--roadmap-success-soft);
-        }
-
-        .roadmap-phase-tab.is-current .roadmap-phase-tab-number {
-            color: #fff;
-            background: var(--roadmap-blue);
-        }
-
-        .roadmap-phase-tab-copy {
-            min-width: 0;
-        }
-
-            .roadmap-phase-tab-copy strong,
-            .roadmap-phase-tab-copy small {
-                display: block;
-            }
-
-            .roadmap-phase-tab-copy strong {
-                font-size: .78rem;
-                overflow-wrap: anywhere;
-            }
-
-            .roadmap-phase-tab-copy small {
-                margin-top: .16rem;
-                color: var(--roadmap-muted);
-                font-size: .66rem;
-            }
-
-        .roadmap-phase-tab-arrow {
-            color: #98a2b3;
-            font-size: .75rem;
-        }
-
-        .roadmap-main-column {
-            min-width: 0;
-            display: grid;
-            gap: 1rem;
-        }
-
-        .roadmap-gantt-heading {
-            flex-wrap: wrap;
-        }
-
-        .roadmap-gantt-legend {
-            display: flex;
-            flex-wrap: wrap;
-            gap: .75rem;
-        }
-
-            .roadmap-gantt-legend span {
-                display: inline-flex;
-                align-items: center;
-                gap: .32rem;
-                color: var(--roadmap-muted);
-                font-size: .66rem;
-                font-weight: 700;
-                letter-spacing: 0;
-                text-transform: none;
-            }
-
-        .legend-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-        }
-
-            .legend-dot.completed {
-                background: var(--roadmap-success);
-            }
-
-            .legend-dot.current {
-                background: var(--roadmap-blue);
-            }
-
-            .legend-dot.upcoming {
-                background: #c8ced7;
-            }
-
-        .roadmap-gantt-scroll {
-            width: 100%;
-            max-width: 100%;
-            overflow-x: auto;
-            overflow-y: hidden;
-            overscroll-behavior-inline: contain;
-            padding: .9rem;
-        }
-
-        .roadmap-gantt {
-            min-width: max(820px, calc(var(--week-count) * 44px + 210px));
-            display: grid;
-            grid-template-columns: 210px minmax(0, 1fr);
-            align-items: stretch;
-            border: 1px solid var(--roadmap-border);
-            border-radius: 12px;
-            overflow: hidden;
-        }
-
-        .roadmap-gantt-corner {
-            display: flex;
-            align-items: center;
-            padding: .65rem .75rem;
-            color: var(--roadmap-muted);
-            background: #f7f9fb;
-            border-right: 1px solid var(--roadmap-border);
-            border-bottom: 1px solid var(--roadmap-border);
-            font-size: .66rem;
-            font-weight: 800;
-            text-transform: uppercase;
-        }
-
-        .roadmap-gantt-weeks {
-            display: grid;
-            grid-template-columns: repeat(var(--week-count), minmax(42px, 1fr));
-            background: #f7f9fb;
-            border-bottom: 1px solid var(--roadmap-border);
-        }
-
-        .roadmap-gantt-week {
-            display: grid;
-            place-items: center;
-            min-height: 38px;
-            color: var(--roadmap-muted);
-            border-right: 1px solid var(--roadmap-border);
-            font-size: .62rem;
-            font-weight: 800;
-        }
-
-            .roadmap-gantt-week:last-child {
-                border-right: 0;
-            }
-
-        .roadmap-gantt-label {
-            display: grid;
-            grid-template-columns: auto minmax(0, 1fr);
-            align-items: center;
-            gap: .5rem;
-            min-height: 48px;
-            padding: .55rem .65rem;
-            color: inherit;
-            text-align: left;
-            background: #fff;
-            border: 0;
-            border-right: 1px solid var(--roadmap-border);
-            border-bottom: 1px solid var(--roadmap-border);
-            cursor: pointer;
-        }
-
-            .roadmap-gantt-label span {
-                width: 24px;
-                height: 24px;
-                display: grid;
-                place-items: center;
-                color: var(--roadmap-navy);
-                background: var(--roadmap-blue-soft);
-                border-radius: 7px;
-                font-size: .65rem;
-                font-weight: 800;
-            }
-
-            .roadmap-gantt-label strong {
-                font-size: .7rem;
-                line-height: 1.25;
-                overflow-wrap: anywhere;
-            }
-
-        .roadmap-gantt-track {
-            position: relative;
-            display: grid;
-            grid-template-columns: repeat(var(--week-count), minmax(42px, 1fr));
-            align-items: center;
-            min-height: 48px;
-            background-image: repeating-linear-gradient( to right, transparent, transparent calc((100% / var(--week-count)) - 1px), var(--roadmap-border) calc((100% / var(--week-count)) - 1px), var(--roadmap-border) calc(100% / var(--week-count)) );
-            border-bottom: 1px solid var(--roadmap-border);
-        }
-
-        .roadmap-gantt-bar {
-            min-width: 0;
-            height: 32px;
-            margin: 0 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: .4rem;
-            padding: 0 .55rem;
-            color: #fff;
-            background: #a8b1bd;
-            border: 0;
-            border-radius: 8px;
-            cursor: pointer;
-            overflow: hidden;
-        }
-
-            .roadmap-gantt-bar strong,
-            .roadmap-gantt-bar span {
-                white-space: nowrap;
-                font-size: .62rem;
-            }
-
-            .roadmap-gantt-bar.is-completed {
-                background: var(--roadmap-success);
-            }
-
-            .roadmap-gantt-bar.is-current {
-                background: var(--roadmap-blue);
-            }
-
-            .roadmap-gantt-bar.is-upcoming {
-                color: #435066;
-                background: #dfe4ea;
-            }
-
-        .roadmap-details-card {
-            overflow: hidden;
-        }
-
-        .roadmap-detail-panel {
-            display: none;
-            padding: 1.05rem;
-        }
-
-            .roadmap-detail-panel.is-active {
-                display: block;
-            }
-
-        .roadmap-detail-header {
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            gap: 1rem;
-            padding-bottom: 1rem;
-            border-bottom: 1px solid var(--roadmap-border);
-        }
-
-        .roadmap-detail-kicker {
-            display: flex;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: .45rem;
-            color: var(--roadmap-blue);
-            font-size: .7rem;
-            font-weight: 800;
-            text-transform: uppercase;
-        }
-
-            .roadmap-detail-kicker span {
-                padding: .18rem .4rem;
-                color: var(--roadmap-muted);
-                background: #f4f6f8;
-                border-radius: 999px;
-                font-size: .62rem;
-                text-transform: none;
-            }
-
-        .roadmap-detail-panel h3 {
-            margin: .25rem 0 .35rem;
-            font-size: clamp(1.2rem, 2vw, 1.55rem);
-            font-weight: 800;
-        }
-
-        .roadmap-detail-panel > .roadmap-detail-header p {
-            max-width: 720px;
-            margin: 0;
-            color: var(--roadmap-muted);
-            line-height: 1.6;
-        }
-
-        .roadmap-complete-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: .35rem;
-            padding: .5rem .65rem;
-            color: var(--roadmap-success);
-            background: var(--roadmap-success-soft);
-            border-radius: 10px;
-            font-size: .76rem;
-            font-weight: 800;
-        }
-
-        .roadmap-phase-facts {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: .6rem;
-            margin: 1rem 0;
-        }
-
-            .roadmap-phase-facts div {
-                min-width: 0;
-                padding: .7rem .75rem;
-                background: #f7f9fb;
-                border: 1px solid var(--roadmap-border);
-                border-radius: 11px;
-            }
-
-            .roadmap-phase-facts span,
-            .roadmap-info-box span {
-                display: block;
-                margin-bottom: .2rem;
-                color: var(--roadmap-muted);
-                font-size: .66rem;
-                font-weight: 800;
-                text-transform: uppercase;
-            }
-
-            .roadmap-phase-facts strong {
-                display: block;
-                font-size: .76rem;
-                overflow-wrap: anywhere;
-            }
-
-        .roadmap-task-table-wrap,
-        .roadmap-deferred-table-wrap {
-            overflow-x: auto;
-            border: 1px solid var(--roadmap-border);
-            border-radius: 12px;
-        }
-
-        .roadmap-task-table,
-        .roadmap-deferred-table {
-            width: 100%;
-            min-width: 760px;
-            border-collapse: collapse;
-        }
-
-            .roadmap-task-table th,
-            .roadmap-task-table td,
-            .roadmap-deferred-table th,
-            .roadmap-deferred-table td {
-                padding: .7rem .75rem;
-                text-align: left;
-                vertical-align: top;
-                border-bottom: 1px solid var(--roadmap-border);
-            }
-
-            .roadmap-task-table th,
-            .roadmap-deferred-table th {
-                color: var(--roadmap-muted);
-                background: #f7f9fb;
-                font-size: .65rem;
-                font-weight: 800;
-                text-transform: uppercase;
-                letter-spacing: .04em;
-            }
-
-            .roadmap-task-table td,
-            .roadmap-deferred-table td {
-                font-size: .73rem;
-                line-height: 1.45;
-            }
-
-            .roadmap-task-table tr:last-child td,
-            .roadmap-deferred-table tr:last-child td {
-                border-bottom: 0;
-            }
-
-        .roadmap-task-title {
-            display: flex;
-            align-items: flex-start;
-            gap: .45rem;
-        }
-
-            .roadmap-task-title > span {
-                flex: 0 0 auto;
-                width: 22px;
-                height: 22px;
-                display: grid;
-                place-items: center;
-                color: var(--roadmap-navy);
-                background: var(--roadmap-blue-soft);
-                border-radius: 6px;
-                font-size: .62rem;
-                font-weight: 800;
-            }
-
-        .roadmap-owner-list,
-        .roadmap-allocation-list {
-            display: flex;
-            flex-wrap: wrap;
-            gap: .3rem;
-        }
-
-            .roadmap-owner-list span,
-            .roadmap-sequence-chip,
-            .roadmap-priority-chip {
-                display: inline-flex;
-                width: fit-content;
-                padding: .23rem .38rem;
-                color: #40506a;
-                background: #eef2f6;
-                border-radius: 999px;
-                font-size: .62rem;
-                font-weight: 750;
-            }
-
-        .roadmap-allocation-list {
-            display: grid;
-        }
-
-            .roadmap-allocation-list span {
-                color: var(--roadmap-muted);
-                font-size: .68rem;
-            }
-
-        .roadmap-muted {
-            color: var(--roadmap-muted);
-        }
-
-        .roadmap-inline-empty {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: .5rem;
-            min-height: 100px;
-            color: var(--roadmap-muted);
-            background: #f8fafb;
-            border: 1px dashed #cfd7e2;
-            border-radius: 12px;
-            font-size: .78rem;
-        }
-
-        .roadmap-detail-grid {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: .7rem;
-            margin-top: 1rem;
-        }
-
-        .roadmap-info-box {
-            display: flex;
-            align-items: flex-start;
-            gap: .65rem;
-            padding: .8rem;
-            background: #f8fafb;
-            border: 1px solid var(--roadmap-border);
-            border-radius: 12px;
-        }
-
-        .roadmap-info-icon {
-            flex: 0 0 auto;
-            width: 31px;
-            height: 31px;
-            display: grid;
-            place-items: center;
-            color: var(--roadmap-blue);
-            background: var(--roadmap-blue-soft);
-            border-radius: 9px;
-        }
-
-        .roadmap-info-box p {
-            margin: 0;
-            color: #4a5667;
-            font-size: .74rem;
-            line-height: 1.55;
-        }
-
-        .roadmap-info-risk {
-            background: #fff9f1;
-            border-color: #f1dcc0;
-        }
-
-            .roadmap-info-risk .roadmap-info-icon {
-                color: var(--roadmap-warning);
-                background: var(--roadmap-warning-soft);
-            }
-
-        .roadmap-capacity-panel {
-            position: static;
-            grid-column: 1 / -1;
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            overflow: hidden;
-        }
-
-        .roadmap-side-section {
-            min-width: 0;
-            padding: 1rem;
-            border-right: 1px solid var(--roadmap-border);
-            border-bottom: 0;
-        }
-
-            .roadmap-side-section:last-child {
-                border-right: 0;
-            }
-
-        .roadmap-side-heading {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: .75rem;
-            color: var(--roadmap-blue);
-        }
-
-            .roadmap-side-heading span {
-                font-size: .68rem;
-                font-weight: 800;
-                letter-spacing: .08em;
-                text-transform: uppercase;
-            }
-
-        .roadmap-capacity-panel h3 {
-            margin: 0 0 .35rem;
-            font-size: .98rem;
-            font-weight: 800;
-        }
-
-        .roadmap-capacity-panel p {
-            margin: 0;
-            color: var(--roadmap-muted);
-            font-size: .74rem;
-            line-height: 1.55;
-        }
-
-        .roadmap-side-metric {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-top: .8rem;
-            padding-top: .7rem;
-            border-top: 1px solid var(--roadmap-border);
-            font-size: .73rem;
-        }
-
-        .roadmap-capacity-number {
-            display: flex;
-            align-items: baseline;
-            gap: .35rem;
-        }
-
-            .roadmap-capacity-number strong {
-                color: var(--roadmap-navy);
-                font-size: 1.7rem;
-                line-height: 1;
-            }
-
-            .roadmap-capacity-number span {
-                color: var(--roadmap-muted);
-                font-size: .72rem;
-            }
-
-        .roadmap-meter {
-            height: 7px;
-            margin: .65rem 0 .8rem;
-        }
-
-            .roadmap-meter > div {
-                height: 100%;
-                border-radius: inherit;
-            }
-
-            .roadmap-meter > .is-feasible {
-                background: var(--roadmap-success);
-            }
-
-            .roadmap-meter > .is-adjusted {
-                background: var(--roadmap-warning);
-            }
-
-            .roadmap-meter > .is-over {
-                background: var(--roadmap-danger);
-            }
-
-            .roadmap-meter > .is-neutral {
-                background: #98a2b3;
-            }
-
-        .roadmap-side-stats {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: .5rem;
-            margin: 0;
-        }
-
-            .roadmap-side-stats div {
-                padding: .55rem;
-                background: #f7f9fb;
-                border: 1px solid var(--roadmap-border);
-                border-radius: 9px;
-            }
-
-            .roadmap-side-stats dt {
-                color: var(--roadmap-muted);
-                font-size: .61rem;
-                font-weight: 700;
-            }
-
-            .roadmap-side-stats dd {
-                margin: .12rem 0 0;
-                font-size: .73rem;
-                font-weight: 800;
-            }
-
-        .roadmap-scope-adjustment {
-            display: flex;
-            align-items: flex-start;
-            gap: .45rem;
-            margin-top: .7rem;
-            padding: .55rem;
-            color: #7a5411;
-            background: var(--roadmap-warning-soft);
-            border-radius: 9px;
-            font-size: .69rem;
-            line-height: 1.45;
-        }
-
-        .roadmap-member-load-list {
-            display: grid;
-            gap: .65rem;
-        }
-
-        .roadmap-member-load-copy {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: .5rem;
-            margin-bottom: .28rem;
-        }
-
-            .roadmap-member-load-copy strong {
-                font-size: .72rem;
-            }
-
-            .roadmap-member-load-copy span {
-                color: var(--roadmap-muted);
-                font-size: .64rem;
-            }
-
-        .roadmap-member-load-track {
-            height: 6px;
-        }
-
-            .roadmap-member-load-track div {
-                height: 100%;
-                background: var(--roadmap-blue);
-                border-radius: inherit;
-            }
-
-        .roadmap-warning-section {
-            background: #fffdfa;
-        }
-
-        .roadmap-warning-item {
-            display: flex;
-            align-items: flex-start;
-            gap: .45rem;
-            padding: .55rem 0;
-            color: #6f551e;
-            border-bottom: 1px solid #f1e6cf;
-            font-size: .69rem;
-            line-height: 1.45;
-        }
-
-            .roadmap-warning-item:last-child {
-                padding-bottom: 0;
-                border-bottom: 0;
-            }
-
-            .roadmap-warning-item.is-critical {
-                color: #a83232;
-            }
-
-        .roadmap-overflow-badge {
-            display: inline-flex;
-            width: fit-content;
-            padding: .12rem .4rem;
-            color: #8a5c12;
-            background: var(--roadmap-warning-soft);
-            border-radius: 999px;
-            font-size: .6rem;
-            font-weight: 800;
-            text-transform: none;
-            letter-spacing: 0;
-        }
-
-        .roadmap-gantt-bar.is-overflowing {
-            box-shadow: inset 0 0 0 2px var(--roadmap-warning);
-        }
-
-        .roadmap-overflow-card {
-            background: var(--roadmap-surface);
-            border: 1px solid var(--roadmap-border);
-            border-radius: var(--roadmap-radius);
-            box-shadow: 0 8px 24px rgba(31, 47, 77, .045);
-        }
-
-        .roadmap-overflow-intro {
-            margin: 0;
-            padding: .85rem 1.1rem 0;
-            color: var(--roadmap-muted);
-            font-size: .78rem;
-            line-height: 1.6;
-        }
-
-        .roadmap-overflow-list {
-            display: grid;
-            gap: .65rem;
-            margin: 0;
-            padding: 1rem 1.1rem;
-            list-style: none;
-        }
-
-        .roadmap-overflow-item {
-            display: grid;
-            grid-template-columns: auto minmax(0, 1fr);
-            gap: .75rem;
-            padding: .8rem;
-            background: #fffaf0;
-            border: 1px solid #f1dcc0;
-            border-radius: 12px;
-        }
-
-        .roadmap-overflow-order {
-            width: 26px;
-            height: 26px;
-            display: grid;
-            place-items: center;
-            color: var(--roadmap-warning);
-            background: var(--roadmap-warning-soft);
-            border-radius: 8px;
-            font-size: .72rem;
-            font-weight: 800;
-        }
-
-        .roadmap-overflow-copy {
-            min-width: 0;
-            display: grid;
-            gap: .3rem;
-        }
-
-        .roadmap-overflow-name-line {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: .5rem;
-        }
-
-            .roadmap-overflow-name-line strong {
-                font-size: .84rem;
-            }
-
-        .roadmap-overflow-status {
-            padding: .18rem .5rem;
-            border-radius: 999px;
-            font-size: .64rem;
-            font-weight: 800;
-            text-transform: uppercase;
-        }
-
-            .roadmap-overflow-status.is-partial {
-                color: #8a5c12;
-                background: var(--roadmap-warning-soft);
-            }
-
-            .roadmap-overflow-status.is-beyond {
-                color: #a83232;
-                background: var(--roadmap-danger-soft);
-            }
-
-            .roadmap-overflow-status.is-needs-review {
-                color: #5f6b7b;
-                background: #eef1f5;
-            }
-
-        .roadmap-overflow-copy p {
-            margin: 0;
-            color: #6f551e;
-            font-size: .74rem;
-            line-height: 1.5;
-        }
-
-        .roadmap-overflow-meta {
-            display: flex;
-            flex-wrap: wrap;
-            gap: .5rem .8rem;
-            color: #8a6a1f;
-            font-size: .7rem;
-        }
-
-        .roadmap-deferred-card {
-            overflow: hidden;
-            border-radius: var(--roadmap-radius);
-        }
-
-            .roadmap-deferred-card details > summary {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 1rem;
-                padding: 1rem 1.1rem;
-                cursor: pointer;
-                list-style: none;
-            }
-
-                .roadmap-deferred-card details > summary::-webkit-details-marker {
-                    display: none;
-                }
-
-            .roadmap-deferred-card summary > span:first-child {
-                display: flex;
-                align-items: center;
-                flex-wrap: wrap;
-                gap: .45rem;
-            }
-
-            .roadmap-deferred-card summary i {
-                color: var(--roadmap-blue);
-            }
-
-            .roadmap-deferred-card summary strong {
-                font-size: .9rem;
-            }
-
-            .roadmap-deferred-card summary small {
-                color: var(--roadmap-muted);
-                font-size: .7rem;
-            }
-
-        .roadmap-deferred-table-wrap {
-            margin: 0 1rem 1rem;
-        }
-
-        .roadmap-priority-chip {
-            text-transform: capitalize;
-        }
-
-        .roadmap-loading-overlay {
-            position: fixed;
-            inset: 0;
-            z-index: 2000;
-            display: grid;
-            place-items: center;
-            padding: 1rem;
-            background: rgba(40, 56, 94, .42);
-            backdrop-filter: blur(5px);
-        }
-
-        .roadmap-loading-panel {
-            width: min(620px, 100%);
-            padding: 1.25rem;
-            background: #fff;
-            border: 1px solid var(--roadmap-border);
-            border-radius: 18px;
-            box-shadow: 0 24px 70px rgba(40, 56, 94, .20);
-        }
-
-        .roadmap-loading-top {
-            display: flex;
-            align-items: flex-start;
-            gap: .9rem;
-        }
-
-        .roadmap-loading-spinner {
-            flex: 0 0 auto;
-            width: 38px;
-            height: 38px;
-            border: 4px solid #e4e9ef;
-            border-top-color: var(--roadmap-blue);
-            border-radius: 50%;
-            animation: roadmapSpin .8s linear infinite;
-        }
-
-        .roadmap-loading-panel h2 {
-            margin: .15rem 0 .25rem;
-            font-size: 1.2rem;
-            font-weight: 800;
-        }
-
-        .roadmap-loading-panel p {
-            margin: 0;
-            color: var(--roadmap-muted);
-            font-size: .78rem;
-            line-height: 1.5;
-        }
-
-        .roadmap-loading-progress {
-            height: 6px;
-            margin: 1rem 0;
-            overflow: hidden;
-            background: #edf1f5;
-            border-radius: 999px;
-        }
-
-            .roadmap-loading-progress div {
-                width: 38%;
-                height: 100%;
-                background: linear-gradient(90deg, var(--roadmap-navy), var(--roadmap-blue));
-                border-radius: inherit;
-                animation: roadmapLoading 1.5s ease-in-out infinite;
-            }
-
-        .roadmap-loading-steps {
-            display: grid;
-            gap: .35rem;
-            margin: 0;
-            padding: 0;
-            list-style: none;
-        }
-
-            .roadmap-loading-steps li {
-                display: flex;
-                align-items: center;
-                gap: .5rem;
-                padding: .55rem .65rem;
-                color: var(--roadmap-muted);
-                background: #f8fafb;
-                border: 1px solid transparent;
-                border-radius: 9px;
-                font-size: .73rem;
-            }
-
-                .roadmap-loading-steps li.is-active {
-                    color: var(--roadmap-navy);
-                    background: var(--roadmap-blue-soft);
-                    border-color: #d8e3ef;
-                    font-weight: 800;
-                }
-
-        @@keyframes roadmapSpin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
-
-        @@keyframes roadmapLoading {
-            0% {
-                transform: translateX(-105%);
-            }
-
-            100% {
-                transform: translateX(270%);
-            }
-        }
-
-        .roadmap-phase-tab:focus-visible,
-        .roadmap-gantt-label:focus-visible,
-        .roadmap-gantt-bar:focus-visible,
-        .roadmap-btn-primary:focus-visible,
-        .roadmap-btn-secondary:focus-visible,
-        .roadmap-btn-success:focus-visible,
-        .roadmap-deferred-card summary:focus-visible {
-            outline: 3px solid rgba(85, 121, 166, .35);
-            outline-offset: 2px;
-        }
-
-        @@media (max-width: 1280px) {
-            .roadmap-summary-strip {
-                grid-template-columns: repeat(4, minmax(0, 1fr));
-            }
-
-            .roadmap-summary-item:nth-child(4) {
-                border-right: 0;
-            }
-
-            .roadmap-summary-item:nth-child(-n + 4) {
-                border-bottom: 1px solid var(--roadmap-border);
-            }
-
-            .roadmap-workspace {
-                grid-template-columns: minmax(225px, 260px) minmax(0, 1fr);
-            }
-
-            .roadmap-capacity-panel {
-                grid-column: 1 / -1;
-                grid-template-columns: repeat(3, minmax(0, 1fr));
-            }
-
-            .roadmap-side-section {
-                border-right: 1px solid var(--roadmap-border);
-                border-bottom: 0;
-            }
-
-                .roadmap-side-section:last-child {
-                    border-right: 0;
-                }
-        }
-
-        @@media (max-width: 980px) {
-            .roadmap-command-header {
-                grid-template-columns: 1fr;
-            }
-
-            .roadmap-command-actions {
-                justify-content: flex-start;
-            }
-
-            .roadmap-start-panel,
-            .roadmap-launch-section {
-                grid-template-columns: 1fr;
-            }
-
-            .roadmap-launch-action {
-                width: 100%;
-                min-width: 0;
-            }
-
-                .roadmap-launch-action small {
-                    max-width: none;
-                    text-align: left;
-                }
-
-            .roadmap-workspace {
-                grid-template-columns: 1fr;
-            }
-
-            .roadmap-phase-nav {
-                position: static;
-                max-height: none;
-                overflow-x: auto;
-            }
-
-            .roadmap-phase-list {
-                grid-auto-flow: column;
-                grid-auto-columns: minmax(220px, 1fr);
-                overflow-x: auto;
-            }
-
-            .roadmap-capacity-panel {
-                grid-column: auto;
-            }
-
-            .roadmap-detail-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        @@media (max-width: 740px) {
-            .roadmap-control {
-                gap: .75rem;
-            }
-
-            .roadmap-command-header,
-            .roadmap-start-panel {
-                padding: 1rem;
-            }
-
-            .roadmap-command-main {
-                align-items: flex-start;
-            }
-
-            .roadmap-command-icon {
-                width: 40px;
-                height: 40px;
-            }
-
-            .roadmap-command-actions {
-                display: grid;
-                grid-template-columns: 1fr;
-            }
-
-                .roadmap-command-actions form,
-                .roadmap-command-actions .btn {
-                    width: 100%;
-                }
-
-            .roadmap-summary-strip {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-            }
-
-            .roadmap-summary-item {
-                border-right: 1px solid var(--roadmap-border) !important;
-                border-bottom: 1px solid var(--roadmap-border);
-            }
-
-                .roadmap-summary-item:nth-child(even) {
-                    border-right: 0 !important;
-                }
-
-                .roadmap-summary-item:nth-last-child(-n + 2) {
-                    border-bottom: 0;
-                }
-
-            .roadmap-start-copy {
-                display: grid;
-            }
-
-            .roadmap-start-features {
-                grid-template-columns: 1fr;
-            }
-
-            .roadmap-phase-facts {
-                grid-template-columns: 1fr;
-            }
-
-            .roadmap-detail-header {
-                display: grid;
-            }
-
-            .roadmap-detail-actions .btn,
-            .roadmap-detail-actions form {
-                width: 100%;
-            }
-
-            .roadmap-task-table-wrap,
-            .roadmap-deferred-table-wrap {
-                overflow: visible;
-                border: 0;
-            }
-
-            .roadmap-task-table,
-            .roadmap-task-table thead,
-            .roadmap-task-table tbody,
-            .roadmap-task-table tr,
-            .roadmap-task-table th,
-            .roadmap-task-table td,
-            .roadmap-deferred-table,
-            .roadmap-deferred-table thead,
-            .roadmap-deferred-table tbody,
-            .roadmap-deferred-table tr,
-            .roadmap-deferred-table th,
-            .roadmap-deferred-table td {
-                display: block;
-                width: 100%;
-                min-width: 0;
-            }
-
-                .roadmap-task-table thead,
-                .roadmap-deferred-table thead {
-                    position: absolute;
-                    width: 1px;
-                    height: 1px;
-                    overflow: hidden;
-                    clip: rect(0, 0, 0, 0);
-                }
-
-                .roadmap-task-table tr,
-                .roadmap-deferred-table tr {
-                    margin-bottom: .65rem;
-                    padding: .75rem;
-                    background: #fff;
-                    border: 1px solid var(--roadmap-border);
-                    border-radius: 11px;
-                }
-
-                .roadmap-task-table td,
-                .roadmap-deferred-table td {
-                    display: grid;
-                    grid-template-columns: 105px minmax(0, 1fr);
-                    gap: .55rem;
-                    padding: .42rem 0;
-                    border: 0;
-                }
-
-                    .roadmap-task-table td::before,
-                    .roadmap-deferred-table td::before {
-                        content: attr(data-label);
-                        color: var(--roadmap-muted);
-                        font-size: .64rem;
-                        font-weight: 800;
-                        text-transform: uppercase;
-                    }
-
-            .roadmap-capacity-panel {
-                display: block;
-            }
-
-            .roadmap-side-section {
-                border-right: 0;
-                border-bottom: 1px solid var(--roadmap-border);
-            }
-
-                .roadmap-side-section:last-child {
-                    border-bottom: 0;
-                }
-        }
-
-        @@media (min-width: 1900px) {
-            .roadmap-workspace {
-                grid-template-columns: minmax(245px, 285px) minmax(0, 1fr) minmax(290px, 330px);
-            }
-
-            .roadmap-capacity-panel {
-                position: sticky;
-                top: 1rem;
-                grid-column: auto;
-                display: block;
-                max-height: calc(100vh - 2rem);
-                overflow-y: auto;
-            }
-
-            .roadmap-side-section {
-                border-right: 0;
-                border-bottom: 1px solid var(--roadmap-border);
-            }
-
-            .roadmap-side-section:last-child {
-                border-bottom: 0;
-            }
-        }
-
-        @@media (prefers-reduced-motion: reduce) {
-            *,
-            *::before,
-            *::after {
-                scroll-behavior: auto !important;
-            }
-
-            .roadmap-progress-fill,
-            .roadmap-loading-spinner,
-            .roadmap-loading-progress div {
-                animation: none !important;
-                transition: none !important;
-            }
-        }
-
-        @@media print {
-            @@page {
-                size: A4;
-                margin: 15mm;
-            }
-
-            html,
-            body {
-                height: auto !important;
-                min-height: 0 !important;
-            }
-
-                body * {
-                    visibility: hidden;
-                }
-
-            #roadmap-print-root,
-            #roadmap-print-root * {
-                visibility: visible;
-            }
-
-            #roadmap-print-root {
-                position: absolute;
-                inset: 0 auto auto 0;
-                width: 100%;
-                height: auto !important;
-                min-height: 0 !important;
-                background: #fff;
-            }
-
-            .no-print,
-            .roadmap-command-actions,
-            .roadmap-phase-nav,
-            .roadmap-detail-actions form,
-            .roadmap-launch-action,
-            .roadmap-gantt-legend {
-                display: none !important;
-            }
-
-            .roadmap-workspace {
-                display: block;
-            }
-
-            .roadmap-gantt-scroll {
-                overflow: visible;
-            }
-
-            .roadmap-gantt,
-            .roadmap-gantt-weeks {
-                width: 100% !important;
-            }
-
-            /* On screen only the selected phase's panel is shown (see
-               .roadmap-detail-panel / .is-active above) -- a printed
-               roadmap is only useful as a full plan, so every phase panel
-               is forced visible here with a page break between them. */
-            .roadmap-detail-panel {
-                display: block !important;
-                break-inside: avoid;
-                page-break-after: always;
-            }
-
-                .roadmap-detail-panel:last-child {
-                    page-break-after: auto;
-                }
-
-            .roadmap-gantt-bar,
-            .roadmap-gantt-label {
-                pointer-events: none;
-            }
-        }
-    </style>
+<style>
+    :root {
+        --rm-navy-950: #071a38;
+        --rm-navy-900: #0a2854;
+        --rm-navy-800: #12396f;
+        --rm-navy-700: #1f4d86;
+        --rm-blue-600: #356fb4;
+        --rm-blue-500: #4e82c1;
+        --rm-blue-300: #9db9dc;
+        --rm-blue-100: #eaf2fb;
+        --rm-blue-050: #f5f8fc;
+        --rm-ink: #10213a;
+        --rm-muted: #66768a;
+        --rm-line: #dfe7f0;
+        --rm-line-strong: #ced9e6;
+        --rm-surface: #ffffff;
+        --rm-bg: #f4f7fb;
+        --rm-indigo: #58699d;
+        --rm-shadow: 0 10px 28px rgba(13, 42, 83, .055);
+        --rm-shadow-hover: 0 16px 36px rgba(13, 42, 83, .10);
+        --rm-radius: 16px;
+    }
+
+    .roadmap-control,
+    .roadmap-empty-page {
+        color: var(--rm-ink);
+        background: var(--rm-bg);
+    }
+
+    .roadmap-control {
+        width: min(100%, 1560px);
+        margin: 0 auto;
+        display: grid;
+        gap: 1rem;
+        padding: .25rem 0 2rem;
+    }
+
+    .roadmap-empty-page {
+        min-height: calc(100vh - 160px);
+        display: grid;
+        place-items: center;
+        padding: 1.2rem;
+    }
+
+    .roadmap-empty-card {
+        width: min(620px, 100%);
+        padding: 2.2rem;
+        text-align: center;
+        background: #fff;
+        border: 1px solid var(--rm-line);
+        border-radius: 22px;
+        box-shadow: var(--rm-shadow);
+    }
+
+    .roadmap-empty-icon {
+        width: 64px;
+        height: 64px;
+        margin: 0 auto 1rem;
+        display: grid;
+        place-items: center;
+        color: #fff;
+        background: linear-gradient(145deg, var(--rm-navy-900), var(--rm-navy-700));
+        border-radius: 18px;
+        font-size: 1.55rem;
+    }
+
+    .roadmap-empty-card h1 {
+        margin: .35rem 0 .6rem;
+        color: var(--rm-navy-950);
+        font-weight: 850;
+        letter-spacing: -.035em;
+    }
+
+    .roadmap-empty-card p {
+        max-width: 500px;
+        margin: 0 auto;
+        color: var(--rm-muted);
+        line-height: 1.65;
+    }
+
+    .roadmap-empty-actions {
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: .65rem;
+        margin-top: 1.25rem;
+    }
+
+    .roadmap-eyebrow {
+        color: var(--rm-blue-600);
+        font-size: .68rem;
+        font-weight: 850;
+        letter-spacing: .115em;
+        text-transform: uppercase;
+    }
+
+    .roadmap-btn-primary,
+    .roadmap-btn-secondary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: .45rem;
+        min-height: 42px;
+        padding: .62rem .92rem;
+        border-radius: 10px;
+        font-size: .78rem;
+        font-weight: 780;
+        box-shadow: none !important;
+        transition: .18s ease;
+    }
+
+    .roadmap-btn-primary {
+        color: #fff !important;
+        background: linear-gradient(135deg, var(--rm-navy-900), var(--rm-navy-800)) !important;
+        border: 1px solid var(--rm-navy-900) !important;
+    }
+
+    .roadmap-btn-primary:hover {
+        transform: translateY(-1px);
+        background: var(--rm-navy-700) !important;
+    }
+
+    .roadmap-btn-secondary {
+        color: var(--rm-navy-900) !important;
+        background: #fff !important;
+        border: 1px solid var(--rm-line-strong) !important;
+    }
+
+    .roadmap-btn-secondary:hover {
+        color: var(--rm-navy-950) !important;
+        background: var(--rm-blue-050) !important;
+        border-color: var(--rm-blue-300) !important;
+        transform: translateY(-1px);
+    }
+
+    .roadmap-btn-large { min-height: 48px; padding-inline: 1.2rem; }
+
+    .roadmap-alert {
+        display: flex;
+        align-items: flex-start;
+        gap: .65rem;
+        padding: .85rem 1rem;
+        color: var(--rm-navy-900);
+        background: #eef4fb;
+        border: 1px solid #cddbeb;
+        border-left: 4px solid var(--rm-blue-600);
+        border-radius: 12px;
+        font-size: .82rem;
+    }
+
+    .roadmap-alert-fallback > div { display: grid; gap: .22rem; }
+
+    .rm-hero-actions {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        align-items: flex-start;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+        gap: .5rem;
+        padding-top: .05rem;
+    }
+
+    .rm-hero-actions form {
+        margin: 0;
+    }
+
+    .rm-hero-actions .roadmap-btn-primary,
+    .rm-hero-actions .roadmap-btn-secondary {
+        min-height: 40px;
+        padding: .56rem .82rem;
+        white-space: nowrap;
+    }
+
+    .rm-project-hero,
+    .rm-timeline-card,
+    .rm-current-card,
+    .rm-alert-card,
+    .rm-beyond-card,
+    .rm-workload-card,
+    .rm-detail-section,
+    .rm-deferred-card {
+        background: var(--rm-surface);
+        border: 1px solid var(--rm-line);
+        border-radius: var(--rm-radius);
+        box-shadow: var(--rm-shadow);
+    }
+
+    .rm-project-hero {
+        position: relative;
+        display: grid;
+        grid-template-columns: auto minmax(0,1fr) auto;
+        gap: .9rem 1.15rem;
+        padding: 1.1rem 1.2rem 1rem;
+        overflow: hidden;
+    }
+
+    .rm-project-hero::after {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto auto;
+        width: 240px;
+        height: 150px;
+        pointer-events: none;
+        background: radial-gradient(circle at 100% 0%, rgba(78,130,193,.11), transparent 68%);
+    }
+
+    .rm-project-icon {
+        width: 70px;
+        height: 70px;
+        display: grid;
+        place-items: center;
+        color: #fff;
+        background: linear-gradient(145deg, var(--rm-navy-900), var(--rm-navy-700));
+        border: 1px solid rgba(255,255,255,.12);
+        border-radius: 18px;
+        box-shadow: 0 10px 24px rgba(10,40,84,.16);
+        font-size: 1.6rem;
+    }
+
+    .rm-project-main { min-width: 0; padding-top: .15rem; }
+
+    .rm-project-main h1 {
+        margin: .18rem 0 .6rem;
+        color: var(--rm-navy-950);
+        font-size: clamp(1.5rem, 2.25vw, 2.08rem);
+        font-weight: 860;
+        letter-spacing: -.04em;
+        line-height: 1.08;
+        overflow-wrap: anywhere;
+    }
+
+    .rm-project-chips {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: .42rem;
+    }
+
+    .rm-project-chips > span {
+        display: inline-flex;
+        align-items: center;
+        gap: .34rem;
+        padding: .32rem .58rem;
+        color: #41536d;
+        background: #f6f8fb;
+        border: 1px solid var(--rm-line);
+        border-radius: 999px;
+        font-size: .7rem;
+        font-weight: 730;
+    }
+
+    .rm-project-chips > span:first-child {
+        color: var(--rm-navy-800);
+        background: var(--rm-blue-100);
+        border-color: #d6e4f4;
+    }
+
+    .rm-project-chips .is-estimate {
+        color: var(--rm-indigo);
+        background: #f1f3fb;
+        border-color: #dde2f1;
+    }
+
+    .rm-review-chip { color: var(--rm-navy-800) !important; background: #edf2f8 !important; }
+
+    .rm-project-progress {
+        grid-column: 1 / -1;
+        margin-top: .15rem;
+    }
+
+    .rm-progress-copy,
+    .rm-phase-progress-copy {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: .36rem;
+        color: var(--rm-muted);
+        font-size: .72rem;
+    }
+
+    .rm-progress-copy strong,
+    .rm-phase-progress-copy strong { color: var(--rm-navy-950); }
+
+    .rm-progress-track,
+    .rm-workload-track,
+    .rm-mini-meter {
+        overflow: hidden;
+        background: #eaf0f6;
+        border-radius: 999px;
+    }
+
+    .rm-progress-track { height: 7px; }
+
+    .rm-progress-track > div,
+    .rm-workload-track > div,
+    .rm-mini-meter > div {
+        height: 100%;
+        background: linear-gradient(90deg, var(--rm-navy-900), var(--rm-blue-500));
+        border-radius: inherit;
+    }
+
+    .rm-launch-box {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-top: .3rem;
+        padding: .9rem 1rem;
+        background: linear-gradient(135deg, #f6f9fd, #eef4fb);
+        border: 1px solid #d9e5f2;
+        border-radius: 12px;
+    }
+
+    .rm-launch-box > div { display: grid; gap: .2rem; }
+    .rm-launch-box strong { color: var(--rm-navy-950); }
+    .rm-launch-box span { color: var(--rm-muted); font-size: .75rem; }
+
+    .rm-metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: .65rem;
+    }
+
+    .rm-metric-card {
+        position: relative;
+        min-width: 0;
+        min-height: 146px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: .82rem .72rem;
+        text-align: center;
+        background: #fff;
+        border: 1px solid var(--rm-line);
+        border-radius: 14px;
+        box-shadow: 0 6px 20px rgba(13,42,83,.035);
+        transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+    }
+
+    .rm-metric-card:hover {
+        transform: translateY(-3px);
+        border-color: #bfd0e4;
+        box-shadow: var(--rm-shadow-hover);
+    }
+
+    .rm-metric-emphasis {
+        background: linear-gradient(180deg, #ffffff 0%, #f7faff 100%);
+        border-color: #c9d7e8;
+    }
+
+    .rm-metric-icon {
+        width: 31px;
+        height: 31px;
+        margin-bottom: .4rem;
+        display: grid;
+        place-items: center;
+        color: var(--rm-navy-800);
+        background: var(--rm-blue-050);
+        border: 1px solid var(--rm-line);
+        border-radius: 10px;
+        font-size: .88rem;
+    }
+
+    .rm-metric-icon.is-bright { color: var(--rm-blue-600); background: var(--rm-blue-100); }
+
+    .rm-metric-label {
+        color: var(--rm-navy-700);
+        font-size: .62rem;
+        font-weight: 850;
+        letter-spacing: .055em;
+        text-transform: uppercase;
+    }
+
+    .rm-metric-value {
+        margin-top: .38rem;
+        color: var(--rm-navy-950);
+        font-size: clamp(1.42rem, 1.95vw, 1.82rem);
+        font-weight: 850;
+        line-height: 1;
+        letter-spacing: -.035em;
+    }
+
+    .rm-metric-value small { font-size: .6em; font-weight: 700; color: #495b72; }
+    .rm-value-accent { color: var(--rm-blue-600); }
+
+    .rm-metric-caption {
+        margin-top: .38rem;
+        color: var(--rm-muted);
+        font-size: .64rem;
+        font-weight: 650;
+    }
+
+    .rm-metric-pill {
+        margin-top: .48rem;
+        padding: .24rem .48rem;
+        color: var(--rm-navy-800);
+        background: var(--rm-blue-100);
+        border-radius: 999px;
+        font-size: .61rem;
+        font-weight: 800;
+    }
+
+    .rm-mini-meter {
+        width: 82%;
+        height: 4px;
+        margin-top: .6rem;
+    }
+
+    .rm-section-head,
+    .rm-card-title-line {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+
+    .rm-section-head {
+        padding: .9rem 1rem;
+        border-bottom: 1px solid var(--rm-line);
+    }
+
+    .rm-section-title {
+        display: flex;
+        align-items: center;
+        gap: .65rem;
+        min-width: 0;
+    }
+
+    .rm-section-title.compact { gap: .55rem; }
+
+    .rm-section-icon {
+        flex: 0 0 auto;
+        width: 34px;
+        height: 34px;
+        display: grid;
+        place-items: center;
+        color: var(--rm-blue-600);
+        background: #f3f7fc;
+        border: 1px solid var(--rm-line);
+        border-radius: 10px;
+    }
+
+    .rm-section-title h2 {
+        margin: .05rem 0 0;
+        color: var(--rm-navy-950);
+        font-size: .95rem;
+        font-weight: 830;
+        letter-spacing: -.02em;
+    }
+
+    .rm-timeline-legend {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: .75rem;
+        color: var(--rm-muted);
+        font-size: .67rem;
+        font-weight: 680;
+    }
+
+    .rm-timeline-legend span { display: inline-flex; align-items: center; gap: .32rem; }
+
+    .legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .legend-dot.current { background: var(--rm-navy-900); }
+    .legend-dot.completed { background: var(--rm-blue-500); }
+    .legend-dot.upcoming { background: #cfd9e5; }
+
+    .rm-timeline-scroll {
+        width: 100%;
+        overflow-x: auto;
+        padding: .85rem;
+        scrollbar-gutter: stable;
+    }
+
+    .rm-timeline-scroll::-webkit-scrollbar { height: 8px; }
+    .rm-timeline-scroll::-webkit-scrollbar-thumb { background: #b9c7d8; border-radius: 999px; }
+
+    .rm-timeline {
+        min-width: max(1080px, calc(var(--week-count) * 48px + 300px));
+        display: grid;
+        grid-template-columns: 300px minmax(0, 1fr);
+        border: 1px solid var(--rm-line);
+        border-radius: 11px;
+        overflow: hidden;
+    }
+
+    .rm-timeline-head,
+    .rm-week-heads {
+        min-height: 38px;
+        background: #f8fafc;
+        border-bottom: 1px solid var(--rm-line);
+    }
+
+    .rm-phase-head {
+        display: flex;
+        align-items: center;
+        padding: 0 .7rem;
+        color: var(--rm-muted);
+        border-right: 1px solid var(--rm-line);
+        font-size: .64rem;
+        font-weight: 830;
+        text-transform: uppercase;
+    }
+
+    .rm-week-heads {
+        display: grid;
+        grid-template-columns: repeat(var(--week-count), minmax(46px, 1fr));
+    }
+
+    .rm-week-heads span {
+        display: grid;
+        place-items: center;
+        color: #53657b;
+        border-right: 1px solid var(--rm-line);
+        font-size: .61rem;
+        font-weight: 800;
+    }
+
+    .rm-week-heads span:last-child { border-right: 0; }
+
+    .rm-phase-label {
+        min-height: 50px;
+        display: grid;
+        grid-template-columns: 28px minmax(0,1fr);
+        align-items: center;
+        gap: .55rem;
+        padding: .5rem .7rem;
+        color: inherit;
+        text-align: left;
+        background: #fff;
+        border: 0;
+        border-right: 1px solid var(--rm-line);
+        border-bottom: 1px solid var(--rm-line);
+        cursor: pointer;
+        transition: background .18s ease;
+    }
+
+    .rm-phase-label:hover { background: #f7fafe; }
+    .rm-phase-label.is-current { box-shadow: inset 3px 0 0 var(--rm-navy-800); }
+
+    .rm-phase-number {
+        width: 26px;
+        height: 26px;
+        display: grid;
+        place-items: center;
+        color: var(--rm-navy-800);
+        background: #eef3f8;
+        border-radius: 8px;
+        font-size: .65rem;
+        font-weight: 850;
+    }
+
+    .rm-phase-label strong {
+        font-size: .68rem;
+        line-height: 1.25;
+        overflow-wrap: anywhere;
+    }
+
+    .rm-week-track {
+        position: relative;
+        min-height: 50px;
+        display: grid;
+        grid-template-columns: repeat(var(--week-count), minmax(46px, 1fr));
+        align-items: center;
+        border-bottom: 1px solid var(--rm-line);
+        background-image: repeating-linear-gradient(to right, transparent, transparent calc((100% / var(--week-count)) - 1px), var(--rm-line) calc((100% / var(--week-count)) - 1px), var(--rm-line) calc(100% / var(--week-count)));
+    }
+
+    .rm-phase-bar {
+        min-width: 0;
+        height: 30px;
+        margin: 0 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: .2rem;
+        padding: 0 .45rem;
+        color: #53657b;
+        background: #dfe6ee;
+        border: 0;
+        border-radius: 8px;
+        cursor: pointer;
+        overflow: hidden;
+        white-space: nowrap;
+        font-size: .62rem;
+        font-weight: 750;
+        transition: transform .18s ease, box-shadow .18s ease;
+    }
+
+    .rm-phase-bar:hover { transform: translateY(-1px); box-shadow: 0 5px 12px rgba(12,42,82,.12); }
+    .rm-phase-bar.is-current { color: #fff; background: linear-gradient(135deg, var(--rm-navy-900), var(--rm-navy-700)); }
+    .rm-phase-bar.is-completed { color: #fff; background: linear-gradient(135deg, var(--rm-blue-600), var(--rm-blue-500)); }
+    .rm-phase-bar.is-upcoming { background: #dfe6ee; }
+    .rm-phase-bar.is-overflowing { box-shadow: inset 0 0 0 2px var(--rm-indigo); }
+
+    .rm-overflow-timeline-label {
+        display: grid;
+        grid-template-columns: 28px minmax(0,1fr);
+        align-items: center;
+        gap: .55rem;
+        min-height: 46px;
+        padding: .5rem .7rem;
+        color: var(--rm-indigo);
+        background: #f7f8fc;
+        border-right: 1px solid var(--rm-line);
+    }
+
+    .rm-overflow-timeline-label strong { font-size: .67rem; }
+
+    .rm-overflow-timeline-track {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        min-height: 46px;
+        padding: 0 .75rem;
+        color: var(--rm-indigo);
+        background: linear-gradient(90deg, #fff, #f4f6fb);
+        font-size: .67rem;
+        font-weight: 750;
+    }
+
+    .rm-overview-grid {
+        display: grid;
+        grid-template-columns: minmax(300px, .92fr) minmax(0, 1.25fr);
+        grid-template-areas:
+            "current alerts"
+            "workload beyond";
+        gap: .85rem;
+        align-items: stretch;
+    }
+
+    .rm-current-card { grid-area: current; }
+    .rm-alert-card { grid-area: alerts; }
+    .rm-workload-card { grid-area: workload; }
+    .rm-beyond-card { grid-area: beyond; }
+
+    .rm-current-card,
+    .rm-alert-card,
+    .rm-beyond-card,
+    .rm-workload-card {
+        height: 100%;
+        padding: 1rem;
+    }
+
+    .rm-current-card {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .rm-card-title-line { margin-bottom: .8rem; }
+
+    .rm-status-chip,
+    .rm-alert-count {
+        display: inline-flex;
+        align-items: center;
+        gap: .3rem;
+        padding: .28rem .5rem;
+        color: var(--rm-navy-800);
+        background: var(--rm-blue-100);
+        border-radius: 999px;
+        font-size: .61rem;
+        font-weight: 800;
+    }
+
+    .rm-alert-count {
+        min-width: 22px;
+        height: 22px;
+        justify-content: center;
+        padding: 0 .35rem;
+        color: #fff;
+        background: var(--rm-navy-800);
+    }
+
+    .rm-current-heading {
+        display: flex;
+        align-items: center;
+        gap: .7rem;
+    }
+
+    .rm-current-number {
+        flex: 0 0 auto;
+        width: 38px;
+        height: 38px;
+        display: grid;
+        place-items: center;
+        color: #fff;
+        background: var(--rm-navy-900);
+        border-radius: 50%;
+        font-weight: 850;
+    }
+
+    .rm-current-heading h3 {
+        margin: 0;
+        color: var(--rm-navy-950);
+        font-size: 1rem;
+        font-weight: 830;
+        line-height: 1.3;
+    }
+
+    .rm-current-card > p {
+        margin: .75rem 0 0;
+        color: var(--rm-muted);
+        font-size: .74rem;
+        line-height: 1.55;
+    }
+
+    .rm-current-facts {
+        display: grid;
+        grid-template-columns: repeat(3,minmax(0,1fr));
+        margin-top: .9rem;
+        padding: .8rem 0;
+        border-top: 1px solid var(--rm-line);
+        border-bottom: 1px solid var(--rm-line);
+    }
+
+    .rm-current-facts div { padding: 0 .7rem; border-right: 1px solid var(--rm-line); }
+    .rm-current-facts div:first-child { padding-left: 0; }
+    .rm-current-facts div:last-child { padding-right: 0; border-right: 0; }
+    .rm-current-facts span { display: block; color: var(--rm-blue-600); font-size: .58rem; font-weight: 830; text-transform: uppercase; }
+    .rm-current-facts strong { display: block; margin-top: .2rem; color: var(--rm-navy-950); font-size: .72rem; overflow-wrap:anywhere; }
+
+    .rm-phase-progress-block { margin-top: .85rem; }
+
+    .rm-primary-wide {
+        width: 100%;
+        min-height: 42px;
+        margin-top: auto;
+        transform: translateY(.05rem);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 .85rem;
+        color: #fff;
+        background: linear-gradient(135deg, var(--rm-navy-900), var(--rm-navy-800));
+        border: 0;
+        border-radius: 9px;
+        font-size: .72rem;
+        font-weight: 780;
+        cursor: pointer;
+    }
+
+    .rm-complete-state { padding: 1.2rem 0 .5rem; text-align:center; color:var(--rm-muted); }
+    .rm-complete-state i { font-size:1.8rem; color:var(--rm-blue-600); }
+    .rm-complete-state h3 { margin:.4rem 0 .2rem; color:var(--rm-navy-950); }
+    .rm-complete-state p { margin:0; font-size:.74rem; }
+
+    .rm-alert-list { display:grid; gap:.55rem; }
+
+    .rm-alert-row {
+        display: grid;
+        grid-template-columns: auto minmax(0,1fr) auto;
+        align-items: center;
+        gap: .65rem;
+        padding: .7rem;
+        background: #f8fafc;
+        border: 1px solid var(--rm-line);
+        border-left: 3px solid var(--rm-blue-500);
+        border-radius: 10px;
+    }
+
+    .rm-alert-row > i { color:#90a1b6; font-size:.68rem; }
+
+    .rm-alert-icon {
+        width: 30px;
+        height: 30px;
+        display: grid;
+        place-items: center;
+        color: var(--rm-blue-600);
+        background: var(--rm-blue-100);
+        border-radius: 9px;
+    }
+
+    .rm-alert-row strong { display:block; color:var(--rm-navy-950); font-size:.72rem; }
+    .rm-alert-row p { margin:.14rem 0 0; color:var(--rm-muted); font-size:.67rem; line-height:1.4; }
+    .rm-alert-empty { display:flex; align-items:center; gap:.45rem; color:var(--rm-muted); font-size:.72rem; padding:.6rem; }
+    .rm-alert-empty i { color:var(--rm-blue-600); }
+
+    .rm-beyond-card { background: linear-gradient(180deg,#fff,#fafbfe); border-color:#d9dfec; }
+    .rm-beyond-list { display:grid; gap:.6rem; }
+
+    .rm-beyond-item {
+        display:grid;
+        grid-template-columns:auto minmax(0,1fr);
+        gap:.7rem;
+        padding:.72rem;
+        background:#fff;
+        border:1px solid #dce3ee;
+        border-left:3px solid var(--rm-indigo);
+        border-radius:10px;
+    }
+
+    .rm-beyond-number {
+        width:34px;
+        height:34px;
+        display:grid;
+        place-items:center;
+        color:var(--rm-indigo);
+        background:#f0f2fa;
+        border-radius:9px;
+        font-size:.72rem;
+        font-weight:850;
+    }
+
+    .rm-beyond-content { min-width:0; }
+    .rm-beyond-title { display:flex; align-items:center; justify-content:space-between; gap:.6rem; }
+    .rm-beyond-title strong { color:var(--rm-navy-950); font-size:.72rem; }
+    .rm-beyond-title span { flex:0 0 auto; padding:.22rem .42rem; color:var(--rm-indigo); background:#eef0f8; border-radius:999px; font-size:.58rem; font-weight:800; }
+    .rm-beyond-content p { margin:.2rem 0 .45rem; color:var(--rm-muted); font-size:.66rem; line-height:1.4; }
+
+    .rm-beyond-meta { display:flex; flex-wrap:wrap; gap:.35rem .7rem; }
+    .rm-beyond-meta span { display:inline-flex; align-items:center; gap:.28rem; color:#52647a; font-size:.61rem; font-weight:700; }
+    .rm-beyond-meta i { color:var(--rm-blue-600); }
+
+    .rm-workload-card {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+    }
+
+    .rm-workload-compact .rm-card-title-line {
+        margin-bottom: .55rem;
+    }
+
+    .rm-workload-list {
+        display: grid;
+        gap: .55rem;
+        margin-top: auto;
+        margin-bottom: auto;
+    }
+
+    .rm-workload-row {
+        display: grid;
+        gap: .32rem;
+        min-width: 0;
+    }
+
+    .rm-workload-copy {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: .65rem;
+        min-width: 0;
+    }
+
+    .rm-workload-copy strong {
+        color: var(--rm-navy-950);
+        font-size: .69rem;
+        white-space: nowrap;
+    }
+
+    .rm-workload-copy span {
+        color: var(--rm-muted);
+        font-size: .62rem;
+        white-space: nowrap;
+    }
+
+    .rm-workload-copy b {
+        color: var(--rm-navy-800);
+        font-size: .63rem;
+    }
+
+    .rm-workload-track {
+        height: 5px;
+    }
+
+    .rm-workload-empty,
+    .rm-beyond-empty {
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+        min-height: 72px;
+        color: var(--rm-muted);
+        font-size: .68rem;
+    }
+
+    .rm-workload-empty i,
+    .rm-beyond-empty i {
+        color: var(--rm-blue-600);
+        font-size: 1rem;
+    }
+
+    .rm-detail-hint { color:var(--rm-muted); font-size:.66rem; }
+    .rm-detail-panel { display:none; padding:1rem; }
+    .rm-detail-panel.is-active { display:block; }
+
+    .rm-detail-header { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; padding-bottom:.9rem; border-bottom:1px solid var(--rm-line); }
+    .rm-detail-kicker { display:flex; flex-wrap:wrap; gap:.35rem; }
+    .rm-detail-kicker span { padding:.22rem .45rem; color:var(--rm-blue-600); background:var(--rm-blue-050); border-radius:999px; font-size:.6rem; font-weight:800; text-transform:uppercase; }
+    .rm-detail-header h3 { margin:.35rem 0 .25rem; color:var(--rm-navy-950); font-size:1.25rem; font-weight:850; letter-spacing:-.025em; }
+    .rm-detail-header p { max-width:760px; margin:0; color:var(--rm-muted); font-size:.75rem; line-height:1.55; }
+
+    .rm-detail-facts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.55rem; margin:.85rem 0; }
+    .rm-detail-facts div { padding:.65rem .7rem; background:#f8fafc; border:1px solid var(--rm-line); border-radius:10px; }
+    .rm-detail-facts span { display:block; color:var(--rm-blue-600); font-size:.58rem; font-weight:850; text-transform:uppercase; }
+    .rm-detail-facts strong { display:block; margin-top:.18rem; font-size:.72rem; overflow-wrap:anywhere; }
+
+    .rm-task-table-wrap { overflow-x:auto; border:1px solid var(--rm-line); border-radius:11px; }
+    .rm-task-table { width:100%; min-width:620px; border-collapse:collapse; }
+    .rm-task-table th, .rm-task-table td { padding:.68rem .72rem; text-align:left; vertical-align:top; border-bottom:1px solid var(--rm-line); }
+    .rm-task-table th { color:#607187; background:#f7f9fc; font-size:.61rem; font-weight:850; text-transform:uppercase; }
+    .rm-task-table td { font-size:.7rem; line-height:1.45; }
+    .rm-task-table tr:last-child td { border-bottom:0; }
+
+    .rm-task-title { display:flex; align-items:flex-start; gap:.45rem; }
+    .rm-task-title > span { flex:0 0 auto; width:23px; height:23px; display:grid; place-items:center; color:var(--rm-navy-800); background:var(--rm-blue-100); border-radius:7px; font-size:.61rem; font-weight:850; }
+    .rm-owner-list { display:grid; gap:.15rem; color:var(--rm-muted); font-size:.65rem; }
+    .rm-muted { color:var(--rm-muted); }
+
+    .rm-detail-info-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.6rem; margin-top:.8rem; }
+    .rm-info-card { display:flex; align-items:flex-start; gap:.6rem; padding:.72rem; background:#f8fafc; border:1px solid var(--rm-line); border-radius:10px; }
+    .rm-info-icon { flex:0 0 auto; width:30px; height:30px; display:grid; place-items:center; color:var(--rm-blue-600); background:var(--rm-blue-100); border-radius:8px; }
+    .rm-info-card > div > span { display:block; margin-bottom:.18rem; color:var(--rm-blue-600); font-size:.58rem; font-weight:850; text-transform:uppercase; }
+    .rm-info-card p { margin:0; color:var(--rm-muted); font-size:.68rem; line-height:1.5; }
+    .rm-info-risk { background:#f7f8fc; border-color:#dce2ef; }
+    .rm-info-risk .rm-info-icon { color:var(--rm-indigo); background:#eef0f8; }
+
+    .rm-deferred-card { overflow:hidden; }
+    .rm-deferred-card summary { display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:.9rem 1rem; cursor:pointer; list-style:none; }
+    .rm-deferred-card summary::-webkit-details-marker { display:none; }
+    .rm-deferred-card summary > span:first-child { display:flex; align-items:center; flex-wrap:wrap; gap:.45rem; }
+    .rm-deferred-card summary i { color:var(--rm-blue-600); }
+    .rm-deferred-card summary strong { color:var(--rm-navy-950); font-size:.82rem; }
+    .rm-deferred-card summary small { color:var(--rm-muted); font-size:.65rem; }
+    .rm-deferred-card summary > span:last-child { color:var(--rm-navy-800); background:var(--rm-blue-100); border-radius:999px; padding:.25rem .5rem; font-size:.63rem; font-weight:800; }
+    .rm-task-table-wrap.deferred { margin:0 .9rem .9rem; }
+
+
+    .roadmap-loading-overlay {
+        position:fixed;
+        inset:0;
+        z-index:2000;
+        display:grid;
+        place-items:center;
+        padding:1rem;
+        background:rgba(7,26,56,.48);
+        backdrop-filter:blur(6px);
+    }
+
+    .roadmap-loading-panel {
+        width:min(620px,100%);
+        padding:1.2rem;
+        background:#fff;
+        border:1px solid var(--rm-line);
+        border-radius:18px;
+        box-shadow:0 26px 70px rgba(7,26,56,.25);
+    }
+
+    .roadmap-loading-top { display:flex; align-items:flex-start; gap:.8rem; }
+    .roadmap-loading-spinner { flex:0 0 auto; width:38px; height:38px; border:4px solid #e3eaf3; border-top-color:var(--rm-blue-600); border-radius:50%; animation:roadmapSpin .8s linear infinite; }
+    .roadmap-loading-panel h2 { margin:.12rem 0 .25rem; color:var(--rm-navy-950); font-size:1.15rem; }
+    .roadmap-loading-panel p { margin:0; color:var(--rm-muted); font-size:.75rem; line-height:1.5; }
+    .roadmap-loading-progress { height:6px; margin:1rem 0; overflow:hidden; background:#eaf0f6; border-radius:999px; }
+    .roadmap-loading-progress div { width:38%; height:100%; background:linear-gradient(90deg,var(--rm-navy-900),var(--rm-blue-500)); border-radius:inherit; animation:roadmapLoading 1.5s ease-in-out infinite; }
+    .roadmap-loading-steps { display:grid; gap:.35rem; margin:0; padding:0; list-style:none; }
+    .roadmap-loading-steps li { display:flex; align-items:center; gap:.5rem; padding:.52rem .62rem; color:var(--rm-muted); background:#f8fafc; border:1px solid transparent; border-radius:9px; font-size:.7rem; }
+    .roadmap-loading-steps li.is-active { color:var(--rm-navy-900); background:var(--rm-blue-100); border-color:#d6e3f1; font-weight:800; }
+
+    @@keyframes roadmapSpin { to { transform:rotate(360deg); } }
+    @@keyframes roadmapLoading { 0% { transform:translateX(-105%); } 100% { transform:translateX(270%); } }
+
+    button:focus-visible,
+    a:focus-visible,
+    summary:focus-visible {
+        outline:3px solid rgba(78,130,193,.35);
+        outline-offset:2px;
+    }
+
+    @@media (max-width: 1180px) {
+        .rm-metrics-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
+        .rm-overview-grid {
+            grid-template-columns: 1fr;
+            grid-template-areas:
+                "current"
+                "alerts"
+                "workload"
+                "beyond";
+        }
+    }
+
+    @@media (max-width: 820px) {
+        .roadmap-control { padding-inline:.1rem; }
+        .rm-project-hero { grid-template-columns:auto minmax(0,1fr); }
+        .rm-hero-actions { grid-column:1 / -1; justify-content:flex-start; padding-top:.25rem; }
+        .rm-project-icon { width:58px; height:58px; border-radius:15px; }
+        .rm-metrics-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .rm-detail-info-grid { grid-template-columns:1fr; }
+    }
+
+    @@media (max-width: 600px) {
+        .rm-project-hero { grid-template-columns:1fr; }
+        .rm-hero-actions { display:grid; grid-template-columns:1fr; width:100%; }
+        .rm-hero-actions form, .rm-hero-actions .btn { width:100%; }
+        .rm-metrics-grid { grid-template-columns:1fr; }
+        .rm-metric-card { min-height:136px; }
+        .rm-current-facts, .rm-detail-facts { grid-template-columns:1fr; gap:.4rem; }
+        .rm-current-facts div { padding:.45rem 0; border-right:0; border-bottom:1px solid var(--rm-line); }
+        .rm-current-facts div:last-child { border-bottom:0; }
+        .rm-detail-header { display:grid; }
+        .rm-workload-copy { align-items:flex-start; }
+    }
+
+    @@media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { scroll-behavior:auto !important; }
+        .rm-metric-card, .rm-phase-bar, .roadmap-btn-primary, .roadmap-btn-secondary { transition:none !important; }
+        .roadmap-loading-spinner, .roadmap-loading-progress div { animation:none !important; }
+    }
+
+    @@media print {
+        @@page { size:A4; margin:12mm; }
+        html, body { height:auto !important; min-height:0 !important; }
+        body * { visibility:hidden; }
+        #roadmap-print-root, #roadmap-print-root * { visibility:visible; }
+        #roadmap-print-root { position:absolute; inset:0 auto auto 0; width:100%; background:#fff; }
+        .no-print, .rm-hero-actions, .rm-detail-action form { display:none !important; }
+        .roadmap-control { gap:.65rem; background:#fff; }
+        .rm-project-hero, .rm-timeline-card, .rm-current-card, .rm-alert-card, .rm-beyond-card, .rm-workload-card, .rm-detail-section { box-shadow:none !important; break-inside:avoid; }
+        .rm-metrics-grid { grid-template-columns:repeat(5,minmax(0,1fr)); gap:.4rem; }
+        .rm-metric-card { min-height:120px; padding:.6rem; }
+        .rm-timeline-scroll { overflow:visible; padding:.45rem; }
+        .rm-timeline { min-width:0 !important; width:100% !important; grid-template-columns:220px minmax(0,1fr); }
+        .rm-week-heads, .rm-week-track { grid-template-columns:repeat(var(--week-count), minmax(0,1fr)); }
+        .rm-detail-panel { display:block !important; break-inside:avoid; page-break-after:always; }
+        .rm-detail-panel:last-child { page-break-after:auto; }
+
+        /* Confirmed live defect: .rm-task-table-wrap's on-screen horizontal
+           scrollbar (needed because .rm-task-table has min-width:620px for
+           5 columns -- Task/Effort/Ownership/Allocation/Sequence) clips
+           everything past whatever fits without scrolling. html2canvas
+           (the PDF export engine, see the "Download PDF" script below)
+           cannot capture content hidden by a scrollable container's own
+           clip region -- it only renders what's visible without scrolling,
+           so every exported PDF showed the Task column only, with Effort/
+           Ownership/Allocation/Sequence silently missing. Forcing the
+           table to its natural (unclipped) width here is what the Gantt's
+           own .rm-timeline-scroll override above already does for the
+           identical reason. */
+        .rm-task-table-wrap { overflow-x:visible !important; }
+        .rm-task-table { min-width:0 !important; max-width:700px; width:100%; table-layout:fixed; }
+    }
+
+    body.roadmap-pdf-exporting .no-print,
+    body.roadmap-pdf-exporting .rm-hero-actions,
+    body.roadmap-pdf-exporting .rm-detail-action form { display:none !important; }
+
+    body.roadmap-pdf-exporting .roadmap-control { background:#fff; }
+    body.roadmap-pdf-exporting .rm-timeline-scroll { overflow:visible; }
+    body.roadmap-pdf-exporting .rm-detail-panel { display:block !important; break-inside:avoid; page-break-after:always; }
+    body.roadmap-pdf-exporting .rm-detail-panel:last-child { page-break-after:auto; }
+
+    /* THE fix that actually matters for the "Download PDF" button: html2pdf.js
+       captures the DOM via html2canvas using plain screen-media CSS (it does
+       NOT apply @@media print rules), toggling this roadmap-pdf-exporting
+       class beforehand -- see the click handler below. The @@media print
+       block above only covers the window.print() fallback path (used only
+       if html2pdf.js itself fails to load/throws), so it alone was never
+       enough to fix the real export. Same root cause/fix as the Gantt's
+       .rm-timeline-scroll override two lines up: .rm-task-table-wrap's
+       on-screen horizontal scrollbar clips the Effort/Ownership/Allocation/
+       Sequence columns, and html2canvas cannot capture content hidden by a
+       scrollable container's clip region.
+
+       max-width:700px (NOT width:100%!important) is deliberate -- a
+       confirmed second-order live defect: letting the table grow to 100%
+       of its (otherwise unconstrained once the scrollbar is gone) parent
+       made root.scrollWidth balloon far past a normal page width. The
+       click handler below reads that scrollWidth and feeds it to
+       html2canvas as windowWidth/width so the table has room to lay out
+       without wrapping -- but simulating THAT WIDE a virtual browser
+       window shifted the whole page's layout sideways (sidebar/content
+       positioning), producing a left-clipped, seam-shifted export instead
+       of a merely-narrow one. Capping the table to a fixed, print-safe
+       width keeps root.scrollWidth close to the page's normal width, so
+       that windowWidth logic goes back to computing a sane value. */
+    body.roadmap-pdf-exporting .rm-task-table-wrap { overflow-x:visible !important; }
+    body.roadmap-pdf-exporting .rm-task-table { min-width:0 !important; max-width:700px; width:100%; table-layout:fixed; }
+</style>
 }
-
 @section Scripts {
+    <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
+
     <script>
         (function () {
             const phaseButtons = document.querySelectorAll("[data-phase-select]");
@@ -3113,6 +2007,92 @@ else
                         timerId = null;
                     }
                 });
+        })();
+
+        (function () {
+            const button = document.getElementById("rmDownloadPdfButton");
+            const root = document.getElementById("roadmap-print-root");
+
+            if (!button || !root) {
+                return;
+            }
+
+            const label = button.querySelector("span");
+            const defaultLabel = label ? label.textContent : "Download PDF";
+
+            button.addEventListener("click", function () {
+                if (button.disabled) {
+                    return;
+                }
+
+                // No native browser Print dialog is used for this export --
+                // html2pdf renders the page straight to a PDF file client-side,
+                // so there is no "Headers and footers" option to turn off and
+                // no page URL/date/title ever gets stamped into the download.
+                if (typeof html2pdf === "undefined") {
+                    window.print();
+                    return;
+                }
+
+                button.disabled = true;
+                if (label) {
+                    label.textContent = "Preparing PDF...";
+                }
+
+                document.body.classList.add("roadmap-pdf-exporting");
+
+                const filename = button.getAttribute("data-pdf-filename") || "Roadmap.pdf";
+
+                // Confirmed live defect: html2canvas captures at the
+                // browser's CURRENT viewport width by default -- removing
+                // the .rm-timeline-scroll/.rm-task-table-wrap scrollbars
+                // above (roadmap-pdf-exporting class) lets their content
+                // grow to its full natural width, but html2canvas still
+                // only "sees" whatever fits in the existing viewport,
+                // silently cropping everything past it (the title, metric
+                // cards, and every task-table column past Effort all cut
+                // off at the same right-edge point in every export).
+                // root.scrollWidth is read AFTER the class above already
+                // widened the layout, so it reflects the TRUE full content
+                // width; passing that as both windowWidth (so html2canvas's
+                // internal layout pass has room to lay out that width
+                // without wrapping/hiding anything) and width (so the
+                // output canvas itself actually spans it, not just the
+                // viewport) makes the capture include everything, which
+                // html2pdf.js then scales down to fit the A4 page width.
+                const captureWidth = root.scrollWidth;
+
+                const options = {
+                    margin: 10,
+                    filename: filename,
+                    image: { type: "jpeg", quality: 0.97 },
+                    html2canvas: {
+                        scale: 2,
+                        useCORS: true,
+                        backgroundColor: "#ffffff",
+                        windowWidth: captureWidth,
+                        width: captureWidth
+                    },
+                    jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+                    pagebreak: { mode: ["css", "legacy"] }
+                };
+
+                html2pdf()
+                    .set(options)
+                    .from(root)
+                    .save()
+                    .catch(function (error) {
+                        console.warn("PDF export failed, falling back to browser print.", error);
+                        window.print();
+                    })
+                    .finally(function () {
+                        document.body.classList.remove("roadmap-pdf-exporting");
+                        button.disabled = false;
+                        if (label) {
+                            label.textContent = defaultLabel;
+                        }
+                    });
+            });
         })();
     </script>
 }

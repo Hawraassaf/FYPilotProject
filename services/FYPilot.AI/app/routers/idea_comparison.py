@@ -379,10 +379,26 @@ def compare_generated_ideas(
 
     usable = review_status not in ("provider_unavailable", "firewall_blocked", "review_rejected")
 
+    # PipelineResult's own validator requires usable=False to carry an
+    # EMPTY output (see app/review/models.py) -- every agent going through
+    # the shared ReviewPipeline already satisfies this (pipeline.py's
+    # _result() helper does), but this endpoint builds its own
+    # PipelineResult by hand and was passing the real `comparison` dict
+    # (by this point always non-empty -- either the writer's candidate or
+    # agent.build_safe_fallback()'s own non-empty template) regardless of
+    # `usable`. Live-reproduced as an unhandled 500 (a pydantic
+    # ValidationError bubbling out of the route) whenever review_status
+    # landed on any of the three "not usable" values above -- e.g. when
+    # IdeaComparisonAgent.compare()'s own internal repetition-retry gives
+    # up and falls back internally (review_status then stays at its
+    # "provider_unavailable" default, comparison holds the fallback's
+    # non-empty dict). This `review` field only ever describes the
+    # separate top-level "comparison" key below for display purposes, so
+    # emptying it here changes no other behavior.
     review_result = PipelineResult(
         status=review_status,  # type: ignore[arg-type]
         usable=usable,
-        output=comparison,
+        output=comparison if usable else {},
         reviewUnavailable=review_status == "review_unavailable",
         warning=review_warning,
         reviewerFindings=reviewer_findings,

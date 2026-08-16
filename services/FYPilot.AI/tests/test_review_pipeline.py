@@ -590,7 +590,23 @@ class ReviewPipelineTests(unittest.TestCase):
         self.assertTrue(result.usable)
         self.assertEqual(result.attempts, 2)
 
-    def test_non_critical_issue_survives_rewrite_limit_is_unresolved(self):
+    def test_high_severity_blocking_issue_surviving_rewrite_limit_ships_with_honest_warning(self):
+        # Was "...is_unresolved" with a generic "Non-critical issues
+        # remained" warning: a "high" (not "critical") severity blocking
+        # issue that survived the rewrite budget shipped anyway, but the
+        # warning text didn't say what was actually wrong. Live-confirmed on
+        # SE Documentation as a real defect (a reviewer-flagged material
+        # contradiction shipped to the student with no useful explanation).
+        # A stricter fix (reject the whole candidate on ANY surviving
+        # blocking issue, not just critical) was tried and reverted: for a
+        # first-time generation with no previously accepted version to fall
+        # back to, discarding the entire document over one high-severity
+        # issue is worse for a live demo than showing it with a specific,
+        # honest caveat -- a deliberate product decision. Only a genuinely
+        # CRITICAL surviving issue still rejects outright (see the next
+        # test). This test asserts the current behavior: ships as
+        # "unresolved"/usable=True, with the warning naming the real
+        # severity/category/field/description instead of a generic phrase.
         pipeline = _make_pipeline(
             reviewer_results=[
                 _reviewer_ok(issues=[_issue(severity="high", requires_correction=True, category="contradiction")]),
@@ -606,14 +622,46 @@ class ReviewPipelineTests(unittest.TestCase):
         )
         self.assertEqual(result.status, "unresolved")
         self.assertTrue(result.usable)
+        self.assertEqual(result.output, {"reply": "Still imperfect."})
+        self.assertIn("high", result.warning)
+        self.assertIn("contradiction", result.warning)
 
-    def test_critical_issue_survives_rewrite_limit_falls_back_to_earlier_safe_version(self):
+    def test_critical_blocking_issue_surviving_rewrite_limit_is_still_rejected(self):
         pipeline = _make_pipeline(
             reviewer_results=[
-                # v1: non-critical but still material -- triggers the one
-                # allowed rewrite. v2: critical AND material -- exhausts the
-                # rewrite budget while still blocking, so the pipeline must
-                # fall back to v1.
+                _reviewer_ok(issues=[_issue(severity="critical", requires_correction=True, category="contradiction")]),
+                _reviewer_ok(issues=[_issue(severity="critical", requires_correction=True, category="contradiction")]),
+            ],
+            rewrite_results=[_ok({"reply": "Still imperfect."})],
+            config=_config(max_rewrites=1),
+        )
+        result = pipeline.run(
+            lambda: _ok({"reply": "Weak answer."}),
+            _context(),
+            writer_trusted_parts={}, writer_untrusted_parts={},
+        )
+        self.assertEqual(result.status, "rejected")
+        self.assertFalse(result.usable)
+
+    def test_critical_issue_survives_rewrite_limit_with_only_a_blocking_earlier_version_is_unusable(self):
+        """
+        CORRECTNESS FIX regression guard: v1 has its OWN confirmed blocking
+        finding (high severity + material category "contradiction" ->
+        requiresCorrection=True -- see ReviewDecisionEngine._is_blocking).
+        v1 is NOT a "safe earlier version" merely because it isn't literally
+        severity="critical" -- the Reviewer explicitly flagged it as
+        requiring correction. Previously, last_reviewed_noncritical_candidate
+        was gated on has_critical alone (severity=="critical" only), so v1
+        could silently escape here as if it had been verified safe, just
+        because v2 (the rewrite meant to fix v1) turned out worse (a
+        genuinely critical issue) and burned the only rewrite attempt. Fixed
+        to gate on decision.requiresRewrite instead -- see pipeline.py's
+        review loop. With NO version that was ever actually clear of
+        blocking issues, this must be unusable, not silently fall back to a
+        flagged one.
+        """
+        pipeline = _make_pipeline(
+            reviewer_results=[
                 _reviewer_ok(issues=[_issue(severity="high", requires_correction=True, category="contradiction")]),
                 _reviewer_ok(issues=[_issue(severity="critical", requires_correction=True, category="contradiction")]),
             ],
@@ -621,14 +669,13 @@ class ReviewPipelineTests(unittest.TestCase):
             config=_config(max_rewrites=1),
         )
         result = pipeline.run(
-            lambda: _ok({"reply": "v1 with a minor problem."}),
+            lambda: _ok({"reply": "v1 with a blocking problem."}),
             _context(),
             writer_trusted_parts={}, writer_untrusted_parts={},
         )
         self.assertEqual(result.status, "rejected")
-        self.assertTrue(result.usable)
-        # Must show v1 (the last version WITHOUT a critical issue), never v2.
-        self.assertEqual(result.output["reply"], "v1 with a minor problem.")
+        self.assertFalse(result.usable)
+        self.assertEqual(result.output, {})
 
     def test_critical_issue_with_no_earlier_safe_version_is_unusable(self):
         pipeline = _make_pipeline(
@@ -676,31 +723,66 @@ class ReviewPipelineTests(unittest.TestCase):
         self.assertEqual(len(result.decision.warningIssues), 1)
         self.assertEqual(result.reviewerFindings.issues[0].category, "quality")
 
-    def test_reviewer_failure_after_a_material_rewrite_returns_last_reviewed_version(self):
-        # Type 4 -- v1 has a genuinely material, non-critical finding (high
-        # severity + contradiction), which DOES trigger the one allowed
-        # rewrite -> RewriteAgent produces v2 -> the Reviewer call on v2
-        # fails -> pipeline must return v1 (the last successfully reviewed,
-        # non-critical version), not the unreviewed v2, and the later
-        # failure must stay visible via status/warning.
+    def test_reviewer_failure_after_a_blocking_rewrite_never_returns_the_flagged_original(self):
+        """
+        CORRECTNESS FIX regression guard (see the previous test's docstring
+        for the same root cause). v1 has its OWN confirmed blocking finding
+        (high severity + contradiction) -- it was reviewed and REJECTED, not
+        approved, even though the pipeline went on to attempt one rewrite.
+        RewriteAgent produces v2; the Reviewer call ON v2 then fails as a
+        pure infrastructure error (Reviewer unavailable, never actually
+        reviewed v2's content at all).
+
+        This is genuinely CASE A ("Reviewer could not review"), about v2 --
+        NOT a case where v1's known rejection should reappear. Under
+        allow_unreviewed_output=True, the pipeline MAY return v2 (the
+        rewritten candidate -- structurally valid, firewall-passed, simply
+        never reviewed), honestly labeled review_unavailable. It must NEVER
+        return v1 -- v1 is a version the Reviewer explicitly rejected, and
+        "the rewrite meant to fix it happened to run before the infra
+        failure" does not retroactively make v1 safe.
+        """
         pipeline = _make_pipeline(
             reviewer_results=[
                 _reviewer_ok(issues=[_issue(severity="high", requires_correction=True, category="contradiction")]),
                 _fail("reviewer down"),
             ],
             rewrite_results=[_ok({"reply": "v2 unreviewed"})],
-            config=_config(max_rewrites=1),
+            config=_config(max_rewrites=1, allow_unreviewed_output=True),
         )
         result = pipeline.run(
-            lambda: _ok({"reply": "v1 reviewed"}),
+            lambda: _ok({"reply": "v1 reviewed and rejected"}),
             _context(),
             writer_trusted_parts={}, writer_untrusted_parts={},
         )
         self.assertEqual(result.status, "review_unavailable")
         self.assertTrue(result.usable)
         self.assertTrue(result.reviewUnavailable)
-        self.assertEqual(result.output["reply"], "v1 reviewed")
-        self.assertIn("could not be verified", result.warning)
+        # Must be v2 (unreviewed, but never rejected) -- never v1 (reviewed
+        # AND explicitly rejected).
+        self.assertEqual(result.output["reply"], "v2 unreviewed")
+        self.assertIn("semantic review could not be completed", result.warning)
+
+    def test_reviewer_failure_after_a_blocking_rewrite_with_review_disabled_is_unusable(self):
+        """Same scenario as above, but allow_unreviewed_output=False (the
+        default, and FypMentorAgent's prior setting) -- v1 must still never
+        escape, and now neither may the unreviewed v2."""
+        pipeline = _make_pipeline(
+            reviewer_results=[
+                _reviewer_ok(issues=[_issue(severity="high", requires_correction=True, category="contradiction")]),
+                _fail("reviewer down"),
+            ],
+            rewrite_results=[_ok({"reply": "v2 unreviewed"})],
+            config=_config(max_rewrites=1, allow_unreviewed_output=False),
+        )
+        result = pipeline.run(
+            lambda: _ok({"reply": "v1 reviewed and rejected"}),
+            _context(),
+            writer_trusted_parts={}, writer_untrusted_parts={},
+        )
+        self.assertEqual(result.status, "review_unavailable")
+        self.assertFalse(result.usable)
+        self.assertEqual(result.output, {})
 
     def test_reviewer_failure_on_first_attempt_default_config_is_unusable(self):
         pipeline = _make_pipeline(reviewer_results=[_fail("reviewer down")], config=_config(allow_unreviewed_output=False))
@@ -1660,7 +1742,16 @@ class IdeaGenerationRegistryTests(unittest.TestCase):
         config = get_agent_config("ProjectIdeaAgent")
         self.assertEqual(config.max_rewrites, 1)
         self.assertEqual(config.url_mode, "no_urls_allowed")
-        self.assertFalse(config.allow_unreviewed_output)
+        # True (changed from False) as part of the pre-freeze production-
+        # hardening pass -- the same review-POLICY fix already applied to
+        # FypMentorAgent/SEDocumentationAgent: a Reviewer transport failure,
+        # timeout, or malformed JSON is not evidence the Writer's own
+        # candidate is invalid, and by the time it's eligible here it has
+        # already passed both firewall passes and full schema validation.
+        # See registry.py's ProjectIdeaAgent entry and
+        # tests/test_review_unavailable_preserves_output.py for the
+        # dedicated regression coverage.
+        self.assertTrue(config.allow_unreviewed_output)
         self.assertIn("ideas", config.mandatory_fields)
         self.assertTrue(config.extra_rubric.strip())
         self.assertIs(config.schema, IdeaGenerationCandidateSchema)
@@ -2042,7 +2133,18 @@ class MarketFootprintRegistryTests(unittest.TestCase):
         config = get_agent_config("MarketFootprintAgent")
         self.assertEqual(config.max_rewrites, 1)
         self.assertEqual(config.url_mode, "source_metadata_only")
-        self.assertFalse(config.allow_unreviewed_output)
+        # True (changed from False) as part of the "Regional Demand
+        # Footprint" pre-freeze hardening pass -- the same review-POLICY
+        # fix already applied to FypMentorAgent/SEDocumentationAgent/
+        # ProjectIdeaAgent: a Reviewer transport failure, timeout, or
+        # malformed JSON is not evidence the Writer's own candidate is
+        # invalid, and by the time it's eligible here it has already passed
+        # both firewall passes (source_metadata_only, now backed by the
+        # Gap 1 URL-stripping fix in market_footprint_agent.py) and full
+        # schema validation. See
+        # tests/test_market_footprint_review_policy.py for the dedicated
+        # end-to-end regression coverage.
+        self.assertTrue(config.allow_unreviewed_output)
         self.assertIn("bestLaunchMarket", config.mandatory_fields)
         self.assertIn("strategicRecommendation", config.mandatory_fields)
         self.assertTrue(config.extra_rubric.strip())

@@ -18,6 +18,7 @@ public class Project
     [Column("supervisor_id")] public int? SupervisorId { get; set; }
     [Column("supervisor_assignment_status")] public string SupervisorAssignmentStatus { get; set; } ="unassigned";
     [Column("project_idea_id")] public int? ProjectIdeaId { get; set; }
+    [Column("is_title_custom")] public bool IsTitleCustom { get; set; }
 
     [Range(1, 3)]
     [Column("maximum_members")] public int MaximumMembers { get; set; } = 3;

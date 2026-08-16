@@ -37,6 +37,8 @@ public class ProjectDNAModel(
 
     public bool LlmUsed { get; private set; }
     public string? Source { get; private set; }
+    public string? Provider { get; private set; }
+    public string? ModelUsed { get; private set; }
     public string? ErrorMessage { get; private set; }
 
     /// <summary>
@@ -62,6 +64,29 @@ public class ProjectDNAModel(
     };
 
     public record RiskItem(string Category, string Level, string Description, string Mitigation);
+
+    public string DescribeSource()
+    {
+        if (!LlmUsed)
+        {
+            return "Fallback Engine";
+        }
+
+        var providerLabel = Provider?.ToLowerInvariant() switch
+        {
+            "deepinfra" => "DeepInfra",
+            "groq" => "Groq",
+            "ollama" => "Ollama",
+            "gemini" => "Gemini",
+            "anthropic" => "Anthropic",
+            null or "" => Source ?? "AI Agent",
+            _ => Provider,
+        };
+
+        return string.IsNullOrWhiteSpace(ModelUsed)
+            ? $"{providerLabel} Agent"
+            : $"{providerLabel} Agent ({ModelUsed})";
+    }
 
     public async Task<IActionResult> OnGetAsync(
         int? ideaId,
@@ -137,6 +162,8 @@ public class ProjectDNAModel(
             Analysis = response.Analysis;
             LlmUsed = response.LlmUsed;
             Source = response.Source;
+            Provider = response.Provider;
+            ModelUsed = response.ModelUsed;
 
             ApplyAiAnalysis(
                 response.Analysis);
@@ -281,6 +308,8 @@ public class ProjectDNAModel(
         Analysis = null;
         LlmUsed = false;
         Source = null;
+        Provider = null;
+        ModelUsed = null;
 
         /*
          * Reload the latest saved DNA analysis so it survives
@@ -318,6 +347,12 @@ public class ProjectDNAModel(
 
                     Source =
                         savedAnalysis.Source;
+
+                    Provider =
+                        savedAnalysis.Provider;
+
+                    ModelUsed =
+                        savedAnalysis.ModelUsed;
 
                     if (Analysis != null)
                     {

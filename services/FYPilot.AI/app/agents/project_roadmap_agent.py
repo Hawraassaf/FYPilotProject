@@ -325,6 +325,12 @@ class ProjectRoadmapAgent:
     Documentation.
     """
 
+    # See generate()'s content-gate retry loop docstring: raised from 1 to 2
+    # (3 total attempts) 2026-08-16 after live testing showed a single retry
+    # wasn't enough headroom against deliverable_coverage's literal-wording
+    # sensitivity for an otherwise-correct, complete plan.
+    _MAX_CONTENT_GATE_RETRIES = 2
+
     def __init__(self):
         # Own tier (not "high") so its Ollama fallback leg can use a
         # roadmap-specific timeout (ROADMAP_OLLAMA_TIMEOUT_SECONDS, default
@@ -462,6 +468,51 @@ class ProjectRoadmapAgent:
 
         plan = self._try_generate_phase_plan(request, total_weeks, profile, deadline=deadline)
 
+        # Up to _MAX_CONTENT_GATE_RETRIES fresh, independent generation
+        # attempts (never a targeted "fix only these phases" rewrite) when
+        # an attempt was discarded purely for failing a deterministic
+        # CONTENT gate (lifecycle/deliverable coverage: the LLM answered
+        # successfully, but the plan itself had a structural gap, e.g. a
+        # phase promising a deliverable no task produces). Raised from a
+        # single retry to _MAX_CONTENT_GATE_RETRIES after live testing
+        # 2026-08-16 showed a genuinely complete, otherwise-correct 14-phase
+        # medical/AI plan discarded to the generic fallback template twice
+        # in a row on two DIFFERENT single-deliverable wording mismatches
+        # each time -- one retry wasn't enough headroom for a gate this
+        # sensitive to exact phrasing (see deliverable_coverage.py's
+        # docstring on why it's literal-word-stem matching, not semantic
+        # understanding). Each attempt is independently and freshly
+        # generated, so a mismatch in attempt N has no bearing on whether
+        # attempt N+1 repeats it. Deliberately NOT retried for
+        # transport/timeout/schema-invalid failures (fallback_reason values
+        # other than the two checked below) -- those indicate the provider
+        # itself struggled, so an immediate retry would likely just repeat
+        # the same failure while spending more of the shared deadline
+        # budget for no benefit; PROVIDER_TIMEOUT/WRITER_DEADLINE_EXCEEDED
+        # in particular are exactly the failures a retry could make worse.
+        for _ in range(self._MAX_CONTENT_GATE_RETRIES):
+            if not (
+                (plan is None or not plan.phases)
+                and self.last_fallback_reason_code in (
+                    fallback_reason.LIFECYCLE_COVERAGE_FAILED,
+                    fallback_reason.DELIVERABLE_COVERAGE_FAILED,
+                )
+                and (
+                    deadline is None
+                    or (deadline - time.monotonic()) >= ProviderChain._MIN_SECONDS_PER_PROVIDER_ATTEMPT
+                )
+            ):
+                break
+
+            logger.info(
+                "roadmap.content_gate_retry request_id=%s previous_reason=%s",
+                self.request_id, self.last_fallback_reason_code,
+            )
+            retry_plan = self._try_generate_phase_plan(request, total_weeks, profile, deadline=deadline)
+            if retry_plan is not None and retry_plan.phases:
+                plan = retry_plan
+                break
+
         if plan is not None and plan.phases:
             try:
                 response = self._expand_plan_to_weeks(request, plan, total_weeks, profile)
@@ -580,8 +631,21 @@ class ProjectRoadmapAgent:
         response for a 13-phase advanced AI/medical plan before this
         existed, which a fixed-budget repair request then couldn't fix
         either (see DeepInfraProvider._repair_json_with_provider).
+
+        The *1.5 factor reuses _repair_max_tokens' own empirically-proven
+        safety margin (see its docstring in llm_provider.py) rather than a
+        fresh guess: live-observed 2026-08-16, a 14-phase medical/AI plan
+        truncated at the un-multiplied budget (14100 tokens, stop_reason=
+        max_tokens) on every single attempt, forcing a truncate-then-repair
+        round trip (an extra ~90-100s provider call) EVERY time -- while
+        that same plan's repair call, requesting 14100*1.5=21150 tokens,
+        consistently finished cleanly (stop_reason=end_turn, well under its
+        budget). Applying that already-validated 1.5x directly to the
+        FIRST request lets most plans finish in one call instead of two.
+        Cap raised from 16000 to 28000 to accommodate the larger scaled
+        values without clipping them back down to the old, too-small cap.
         """
-        return max(3000, min(16000, 1500 + profile.phase_count_max * 900))
+        return max(3000, min(28000, int((1500 + profile.phase_count_max * 900) * 1.5)))
 
     def _classify_generation_failure(
         self,

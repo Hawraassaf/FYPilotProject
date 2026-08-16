@@ -24,11 +24,32 @@ _SEVERITY_RANK: dict[Severity, int] = {
 # "quality" and "consistency" are deliberately advisory here. A serious
 # factual inconsistency should be classified by the Reviewer as
 # "contradiction" or "project_alignment".
+#
+# exclusion_violation / prompt_injection_misuse / fabricated_score /
+# repetitive_or_generic_comparison: added after a freeze audit found that
+# several agents' own extra_rubric text (registry.py's
+# _IDEA_GENERATION_EXTRA_RUBRIC, _IDEA_COMPARISON_EXTRA_RUBRIC) explicitly
+# instructs the Reviewer to emit these exact category strings at
+# severity="critical" for genuinely material problems -- an idea that
+# duplicates an admin-excluded prior project, a successful prompt-injection
+# override of the review process itself, a comparison whose stated reason
+# just restates saved percentage scores, or a comparison that is repetitive/
+# generic rather than idea-specific -- but this engine (the SAME shared
+# ReviewDecisionEngine every agent's ReviewPipeline uses) had never been
+# updated to recognize them, so even a critical, requiresCorrection=true
+# finding in one of these categories always fell through as a mere warning.
+# ReviewerIssue.category is a plain str (not a Pydantic enum), so a
+# per-agent extra_rubric is always free to introduce new category names;
+# this allowlist must be kept in sync with any rubric that does.
 _MATERIAL_BLOCKING_CATEGORIES = {
     "unsupported_claim",
     "contradiction",
     "missing_mandatory_content",
     "project_alignment",
+    "exclusion_violation",
+    "prompt_injection_misuse",
+    "fabricated_score",
+    "repetitive_or_generic_comparison",
 }
 
 

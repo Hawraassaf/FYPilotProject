@@ -184,8 +184,8 @@ public class IdeaGeneratorModel(
         [Required(ErrorMessage = "Target difficulty is required.")]
         public string TargetDifficulty { get; set; } = "intermediate";
 
-        [Range(1, 60, ErrorMessage = "Available hours must be between 1 and 60.")]
-        public int AvailableHours { get; set; } = 20;
+        [Range(4, 20, ErrorMessage = "Duration must be between 4 and 20 weeks.")]
+        public int TargetWeeks { get; set; } = 16;
 
     }
 
@@ -825,21 +825,16 @@ public class IdeaGeneratorModel(
 
             /*
              * The official selected idea defines the project title
-             * (matches IdeaComparison.OnPostSelectAsync). On first
-             * selection, preserve a title manually chosen before any
-             * idea existed; once an idea has ever been attached, a
-             * replacement must always update the title too, or the
-             * Dashboard and project switcher keep showing the
-             * previous idea's name even after the switch succeeds.
+             * (matches IdeaComparison.OnPostSelectAsync). The very
+             * first idea ever attached always claims the title, even
+             * over a name the student picked beforehand. After that,
+             * a manual rename (IsTitleCustom) is respected and future
+             * idea replacements no longer touch the title.
              */
-            if (replacingIdea ||
-                string.IsNullOrWhiteSpace(project.Title) ||
-                string.Equals(
-                    project.Title.Trim(),
-                    "Untitled Project",
-                    StringComparison.OrdinalIgnoreCase))
+            if (!replacingIdea || !project.IsTitleCustom)
             {
                 project.Title = idea.Title;
+                project.IsTitleCustom = false;
             }
 
             if (string.IsNullOrWhiteSpace(
@@ -1334,6 +1329,25 @@ public class IdeaGeneratorModel(
         var major = Input.Major.Trim();
         var preferredDomain = Input.PreferredDomain.Trim();
 
+        // Available hours/week is no longer a per-generation choice on this
+        // form (see InputModel.TargetWeeks's docstring -- the student picks
+        // the project TIMELINE directly instead, and everything downstream
+        // is scoped/justified against that). The AI service's profile
+        // still wants a real hours/week figure for its own prompt context,
+        // so it's read silently from the student's saved profile instead
+        // of asking again here -- the same source Roadmap generation
+        // already uses independently.
+        var studentProfile = await db.StudentProfiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                item => item.UserId == UserId(),
+                cancellationToken);
+
+        var availableHoursPerWeek =
+            studentProfile == null || studentProfile.AvailableHoursPerWeek <= 0
+                ? 20
+                : studentProfile.AvailableHoursPerWeek;
+
         // Idea Generation Knowledge Base -- a retrieval failure here must
         // never fail idea generation itself; AdminIdeaContextService
         // already catches and logs internally, returning an empty context
@@ -1358,7 +1372,7 @@ public class IdeaGeneratorModel(
             PreferredDomain: preferredDomain,
             TargetDifficulty: Input.TargetDifficulty.Trim().ToLowerInvariant(),
             PreferredStack: "ASP.NET Core Razor Pages, Python FastAPI, PostgreSQL",
-            AvailableHoursPerWeek: Input.AvailableHours,
+            AvailableHoursPerWeek: availableHoursPerWeek,
             TeamMembers: Math.Clamp(
                 CurrentProject?.MaximumMembers ?? 1,
                 1,
@@ -1376,6 +1390,7 @@ public class IdeaGeneratorModel(
                 .ToList()
         )
         {
+            TargetWeeks = Input.TargetWeeks,
             AdminContext = hasAdminContext ? adminContext : null,
         };
     }
@@ -1605,12 +1620,7 @@ public class IdeaGeneratorModel(
                     profile.TargetDifficulty)
                     ? "intermediate"
                     : profile.TargetDifficulty
-                        .ToLowerInvariant(),
-
-            AvailableHours =
-                profile.AvailableHoursPerWeek <= 0
-                    ? 20
-                    : profile.AvailableHoursPerWeek
+                        .ToLowerInvariant()
         };
     }
 

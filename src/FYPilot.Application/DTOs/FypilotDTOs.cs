@@ -73,6 +73,13 @@ public record GenerateIdeasRequest(
     List<GenerateIdeaSkillDto> Skills
 )
 {
+    // Student's own direct timeline choice from the Idea Generator form
+    // (min 4 / max 20 weeks) -- init-only body property, not a positional
+    // parameter, so existing `new GenerateIdeasRequest(...)` call sites
+    // keep working unchanged and default to null (ProjectIdeaAgent's
+    // difficulty/hours-based formula) when not supplied.
+    public int? TargetWeeks { get; init; }
+
     // Idea Generation Knowledge Base (see AdminIdeaContextService) --
     // init-only body property, not a positional parameter, so existing
     // `new GenerateIdeasRequest(...)` call sites keep working unchanged and

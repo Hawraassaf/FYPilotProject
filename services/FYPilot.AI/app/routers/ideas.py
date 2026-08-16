@@ -578,7 +578,21 @@ def _build_profile(body: Dict[str, Any]) -> StudentProfile:
         ],
         regenerate=regenerate,
         adminContext=_build_admin_context(body),
+        targetWeeks=_target_weeks(body),
     )
+
+
+def _target_weeks(body: Dict[str, Any]) -> int | None:
+    """None when the caller didn't send one -- ProjectIdeaAgent's
+    _estimate_duration formula is used instead. Clamped to [4, 20] here as a
+    defensive server-side floor/ceiling even though the Idea Generator's own
+    form field already enforces the same range."""
+    raw = _get(body, "TargetWeeks", "targetWeeks", default=None)
+
+    if raw is None:
+        return None
+
+    return _safe_int(raw, default=16, minimum=4, maximum=20)
 
 
 def _source_name(
@@ -618,8 +632,35 @@ def _response_to_dict(
     admin_context_blocked: bool = False,
     fallback_reason_code: str | None = None,
     fallback_reason_message: str | None = None,
+    usable: bool = True,
 ):
-    llm_used = bool(getattr(agent, "last_llm_used", False))
+    # `usable` is ReviewPipeline's own verdict on whether `ideas` (the batch
+    # actually being returned below) is the real, reviewed Writer candidate
+    # (True) or the generic, deterministic build_safe_fallback() templates
+    # the caller substitutes whenever the pipeline rejects/discards that
+    # candidate -- e.g. firewall_blocked, schema_invalid, rejected, or
+    # review_unavailable with no earlier verified version (see
+    # generate_ideas()'s `if result.usable: ... else: ideas_payload =
+    # agent.build_safe_fallback(profile)["ideas"]`).
+    #
+    # `agent.last_llm_used`/`last_search_used`/`last_sources` are set the
+    # moment generate_ideas() runs a real search/generation attempt --
+    # UNCONDITIONALLY, regardless of whether the pipeline later discards
+    # that candidate (e.g. a leaked URL tripping the no_urls_allowed output
+    # firewall AFTER a successful, real, search-grounded generation). Reading
+    # them directly here would let a DISCARDED attempt's telemetry describe
+    # the DIFFERENT, generic template ideas actually being returned --
+    # llmUsed=true, groundedInLiveData=true, and real sources, sitting next
+    # to hardcoded fallback ideas that have nothing to do with them.
+    #
+    # `llm_used`/`source`/`grounded` below are gated on `usable` because
+    # their entire purpose is to describe the RETURNED `ideas` -- unlike the
+    # raw search-telemetry fields further down (searchUsed/searchFailed/
+    # searchProvider/sources/...), which stay exactly as agent state reports
+    # regardless of `usable`: that's legitimate diagnostic telemetry about
+    # what the search step itself did, useful for understanding why a
+    # grounded attempt still got rejected, and must never be removed.
+    llm_used = bool(getattr(agent, "last_llm_used", False)) and usable
 
     # Provider/model used to create the structured idea JSON.
     provider = getattr(agent, "last_provider", None)
@@ -633,7 +674,7 @@ def _response_to_dict(
     search_error = getattr(agent, "last_search_error", None)
 
     sources = list(getattr(agent, "last_sources", []) or [])
-    grounded = bool(search_used and sources)
+    grounded = usable and bool(search_used and sources)
 
     # Firewall status for the retrieved-evidence scan (see ProjectIdeaAgent
     # .generate_ideas()). Response metadata only -- NOT persisted anywhere
@@ -793,6 +834,7 @@ def generate_ideas(body: Dict[str, Any]):
             admin_context_blocked=admin_context_blocked,
             fallback_reason_code=fallback_reason_code,
             fallback_reason_message=fallback_reason_message,
+            usable=result.usable,
         )
 
     except Exception as ex:

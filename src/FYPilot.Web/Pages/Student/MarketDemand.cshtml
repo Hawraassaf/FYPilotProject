@@ -384,6 +384,77 @@
         transform: none;
     }
 
+    .md-loading-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 1050;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        background: rgba(8, 20, 38, .55);
+        backdrop-filter: blur(2px);
+    }
+
+    .md-loading-overlay.is-active {
+        display: flex;
+    }
+
+    .md-loading-card {
+        width: 100%;
+        max-width: 420px;
+        padding: 30px 28px 26px;
+        border-radius: var(--md-radius-lg);
+        background: var(--md-white);
+        box-shadow: var(--md-shadow-hover);
+        text-align: center;
+    }
+
+    .md-spinner {
+        width: 56px;
+        height: 56px;
+        margin: 0 auto 18px;
+        border-radius: 50%;
+        border: 5px solid var(--md-navy-150);
+        border-top-color: var(--md-navy-700);
+        animation: md-spin 900ms linear infinite;
+    }
+
+    @@keyframes md-spin {
+        to { transform: rotate(360deg); }
+    }
+
+    .md-loading-title {
+        margin: 0 0 6px;
+        color: var(--md-navy-950);
+        font-size: 1.05rem;
+        font-weight: 900;
+    }
+
+    .md-loading-status {
+        min-height: 20px;
+        margin: 0 0 14px;
+        color: var(--md-muted);
+        font-size: .84rem;
+    }
+
+    .md-loading-meta {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding-top: 14px;
+        border-top: 1px solid var(--md-border);
+        color: var(--md-navy-500);
+        font-size: .74rem;
+        font-weight: 700;
+        letter-spacing: .02em;
+    }
+
+    .md-loading-elapsed {
+        font-variant-numeric: tabular-nums;
+    }
+
     .md-overview-grid {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -570,6 +641,14 @@
         color: var(--md-muted);
         font-size: .78rem;
         line-height: 1.45;
+    }
+
+    .md-generated-at {
+        display: block;
+        margin-top: 2px;
+        color: var(--md-muted);
+        opacity: .75;
+        font-size: .72rem;
     }
 
     .md-story {
@@ -1229,6 +1308,24 @@
                     </span>
                 </button>
             </form>
+
+            <div class="md-loading-overlay"
+                 id="marketAnalysisOverlay"
+                 role="status"
+                 aria-live="polite">
+                <div class="md-loading-card">
+                    <div class="md-spinner" aria-hidden="true"></div>
+                    <h2 class="md-loading-title">Analyzing market demand</h2>
+                    <p class="md-loading-status" id="marketAnalysisStatus">
+                        Searching the web for current evidence&hellip;
+                    </p>
+                    <div class="md-loading-meta">
+                        <span>Elapsed <span class="md-loading-elapsed" id="marketAnalysisElapsed">0:00</span></span>
+                        <span aria-hidden="true">&middot;</span>
+                        <span>Usually takes 30&ndash;120 seconds</span>
+                    </div>
+                </div>
+            </div>
         }
 
         @if (!Model.UserIdeas.Any())
@@ -1325,7 +1422,12 @@
                     <div class="md-panel-head">
                         <div>
                             <h3>Executive market narrative</h3>
-                            <p>The three explanations that matter most in your project defense.</p>
+                            <p>
+                                The three explanations that matter most in your project defense.
+                                <span class="md-generated-at">
+                                    Generated @analysis.AnalyzedAt.ToLocalTime().ToString("MMM d, yyyy")
+                                </span>
+                            </p>
                         </div>
                         <span class="md-pill">@analysis.CountryContext</span>
                     </div>
@@ -1629,14 +1731,94 @@
             const button = document.getElementById("analyzeButton");
             const buttonText = document.getElementById("analyzeButtonText");
             const buttonIcon = document.getElementById("analyzeButtonIcon");
+            const overlay = document.getElementById("marketAnalysisOverlay");
+            const overlayStatus = document.getElementById("marketAnalysisStatus");
+            const overlayElapsed = document.getElementById("marketAnalysisElapsed");
+
+            // Real-world timing (measured live against the actual AI service):
+            // a request typically takes 30-120 seconds -- Brave/Groq search,
+            // then DeepInfra/Groq/Ollama generation, then a semantic review
+            // pass. This is a standard full-page form POST (no AJAX), so
+            // there is no real server progress to report; these messages are
+            // paced to roughly match each stage's typical duration so the
+            // page doesn't look frozen during a wait this long.
+            const statusMessages = [
+                { atSeconds: 0, text: "Searching the web for current evidence…" },
+                { atSeconds: 12, text: "Scoring source credibility and relevance…" },
+                { atSeconds: 24, text: "Drafting the market analysis…" },
+                { atSeconds: 45, text: "Running the quality review pass…" },
+                { atSeconds: 75, text: "Finishing up—almost there…" },
+            ];
+
+            let elapsedTimerId = null;
+
+            function formatElapsed(totalSeconds) {
+                const minutes = Math.floor(totalSeconds / 60);
+                const seconds = totalSeconds % 60;
+                return minutes + ":" + String(seconds).padStart(2, "0");
+            }
+
+            function startLoadingOverlay() {
+                if (!overlay) {
+                    return;
+                }
+
+                overlay.classList.add("is-active");
+
+                let elapsedSeconds = 0;
+                if (overlayElapsed) {
+                    overlayElapsed.textContent = formatElapsed(elapsedSeconds);
+                }
+                elapsedTimerId = window.setInterval(() => {
+                    elapsedSeconds += 1;
+                    if (overlayElapsed) {
+                        overlayElapsed.textContent = formatElapsed(elapsedSeconds);
+                    }
+
+                    if (overlayStatus) {
+                        const due = statusMessages
+                            .filter((entry) => entry.atSeconds <= elapsedSeconds)
+                            .pop();
+                        if (due) {
+                            overlayStatus.textContent = due.text;
+                        }
+                    }
+                }, 1000);
+            }
+
+            function resetLoadingOverlay() {
+                if (elapsedTimerId !== null) {
+                    window.clearInterval(elapsedTimerId);
+                    elapsedTimerId = null;
+                }
+                if (overlay) {
+                    overlay.classList.remove("is-active");
+                }
+                if (button) {
+                    button.disabled = false;
+                }
+            }
 
             if (form && button && buttonText && buttonIcon) {
                 form.addEventListener("submit", () => {
                     button.disabled = true;
                     buttonText.textContent = "Analyzing market...";
                     buttonIcon.className = "bi bi-arrow-repeat";
+                    startLoadingOverlay();
                 });
             }
+
+            // Safety reset: if the student navigates back to this page from
+            // the browser's back/forward cache (bfcache), the overlay and
+            // disabled button must not still be showing from the PREVIOUS
+            // submission -- the page in bfcache is frozen exactly as it was
+            // mid-request, so without this the form would look permanently
+            // stuck on a fresh visit.
+            window.addEventListener("pageshow", (event) => {
+                if (event.persisted) {
+                    resetLoadingOverlay();
+                }
+            });
 
             const breakdown = @Html.Raw(Model.BreakdownJson);
             const canvas = document.getElementById("breakdownChart");

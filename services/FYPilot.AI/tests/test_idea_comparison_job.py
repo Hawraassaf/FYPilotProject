@@ -300,7 +300,10 @@ def _make_fake_generate_json(*, writer_data, reviewer_data_sequence, rewrite_dat
     """
     state = {"reviewer_calls": 0}
 
-    def fake_generate_json(self, prompt, *, use_search=False, max_tokens=None, deadline=None, reporter=None):
+    def fake_generate_json(
+        self, prompt, *, use_search=False, max_tokens=None, deadline=None, reporter=None,
+        cap_timeout_to_deadline=False, **_ignored_kwargs,
+    ):
         if "independent quality reviewer" in prompt:
             index = min(state["reviewer_calls"], len(reviewer_data_sequence) - 1)
             state["reviewer_calls"] += 1

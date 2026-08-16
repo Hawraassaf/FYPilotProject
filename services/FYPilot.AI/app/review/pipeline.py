@@ -31,6 +31,7 @@ from typing import Any, Callable
 
 from app.llm_firewall.firewall import LlmFirewall
 from app.llm_firewall.guard import GuardedCallRequest, GuardedResult, guarded_call, output_hash
+from app.llm_firewall.rules.url_policy import strip_urls_from_narrative_fields
 from app.review.context import ReviewContext
 from app.review.models import AttemptRecord, PipelineResult, ReviewerFindings, ReviewerIssue, RewriteDecision
 from app.review.registry import AgentReviewConfig, get_agent_config
@@ -338,12 +339,54 @@ class ReviewPipeline:
                 )
 
             findings = ReviewerFindings.model_validate(reviewer_result.output)
-            has_critical = any(issue.severity == "critical" for issue in findings.issues)
-
-            if not has_critical:
-                state.last_reviewed_noncritical_candidate = (version, findings)
-
             decision = self.decision_engine.decide(findings, schema_ok=True)
+
+            # CORRECTNESS FIX: this must be gated on decision.requiresRewrite,
+            # never on has_critical alone. has_critical only checks for
+            # severity=="critical" -- a "high"-severity blocking finding
+            # (material category, requiresCorrection=True -- see
+            # ReviewDecisionEngine._is_blocking) sets requiresRewrite=True
+            # while has_critical stays False. Every fallback method below
+            # (_review_unavailable_result, _rejected_result,
+            # _schema_invalid_result, _firewall_blocked_result) treats
+            # last_reviewed_noncritical_candidate as a SAFE, already-verified
+            # candidate and returns it as usable=True with wording like
+            # "showing the last verified answer" -- with the old has_critical-
+            # only condition, a version the Reviewer had JUST flagged as
+            # requiring correction (just not at critical severity) could be
+            # stored here and then silently escape as "verified" if the
+            # rewrite meant to fix it then failed, timed out, or was firewall-
+            # blocked. requiresRewrite is the actual, complete signal for
+            # "the Reviewer found nothing that needs fixing" -- gating on it
+            # instead means this fallback can only ever hold a candidate with
+            # zero blocking issues (at most non-blocking warnings), matching
+            # what every caller of it already assumes. This is a shared-
+            # pipeline correctness fix (this class is used by every agent,
+            # not just FypMentorAgent) with no config/behavior change for any
+            # agent's registry entry -- it only tightens which candidate an
+            # already-existing fallback path is allowed to substitute in.
+            if not decision.requiresRewrite:
+                state.last_reviewed_noncritical_candidate = (version, findings)
+            else:
+                # SECOND HALF of the same correctness fix: this exact
+                # `version` was JUST reviewed and found to require a
+                # rewrite -- it must stop being eligible for the
+                # allow_unreviewed_output fallback in
+                # _review_unavailable_result (that branch exists for a
+                # candidate that was NEVER reviewed at all, e.g. the
+                # Reviewer call itself failed -- not for one that WAS
+                # reviewed and rejected). Without this, a Reviewer that
+                # successfully found a CRITICAL/blocking issue on `version`,
+                # immediately followed by the corrective rewrite call itself
+                # failing/timing out, would still return `version` --
+                # exactly the version just rejected -- via
+                # last_structurally_valid_candidate, mislabeled
+                # "review_unavailable" / "passed structural checks". A
+                # subsequent SUCCESSFUL rewrite re-populates this field with
+                # the new candidate before the next Reviewer call (see the
+                # rewrite-success path below); a rewrite FAILURE simply
+                # leaves it cleared, so nothing rejected can resurface.
+                state.last_structurally_valid_candidate = None
 
             record = self._mark_candidate_reviewed(
                 history,
@@ -367,14 +410,51 @@ class ReviewPipeline:
                 )
 
             if semantic_rewrites >= self.config.max_semantic_rewrites:
-                if has_critical:
+                # Reject the ENTIRE candidate only when a genuinely critical
+                # blocking issue survives the one allowed rewrite -- a
+                # deliberate product decision: discarding a whole document
+                # (SE Documentation, Roadmap, ...) over a single surviving
+                # "high" (not "critical") issue is worse for a live demo
+                # than showing it with an honest, specific caveat,
+                # especially for a first-time generation with no previously
+                # accepted version to fall back to.
+                #
+                # This DOES still fix the real defect a freeze audit found
+                # live on SE Documentation: a surviving "high"-severity
+                # material "contradiction" used to ship with the wording
+                # "Non-critical issues remained after the maximum number of
+                # rewrites" -- technically true (it wasn't "critical") but
+                # misleading about what was actually wrong. The fix here is
+                # honesty at the warning-text level, not blanket rejection:
+                # the warning below always names the real severity/category/
+                # description of the surviving issue(s) instead of the old
+                # generic "non-critical" phrase, so a reviewer of this
+                # output can actually tell what's still unresolved.
+                blocking_issues = decision.blockingIssues or []
+                has_critical_blocking = any(
+                    issue.severity == "critical" for issue in blocking_issues
+                )
+
+                if has_critical_blocking:
                     return self._rejected_result(state, review_run_id, history, attempt, findings, decision)
 
                 record.kept = True
+                if blocking_issues:
+                    worst = blocking_issues[0]
+                    issue_summary = (
+                        f'{worst.severity} {worst.category} on "{worst.affectedField}": '
+                        f"{worst.description}"
+                    )
+                else:
+                    issue_summary = "a reviewer-flagged issue"
                 return self._result(
                     "unresolved", usable=True, output=version,
                     reviewer_findings=findings, decision=decision,
-                    warning="Non-critical issues remained after the maximum number of rewrites.",
+                    warning=(
+                        "A reviewer-flagged issue remained after the maximum number of "
+                        f"rewrites and is shown as-is rather than discarding the whole "
+                        f"result: {issue_summary}"
+                    ),
                     review_run_id=review_run_id, history=history, attempts=attempt + 1,
                 )
 
@@ -533,6 +613,23 @@ class ReviewPipeline:
                     raw_rewritten,
                     decision.blockingIssues,
                 )
+
+                # Freeze-audit fix: apply_scoped_rewrite merges the
+                # rewritten candidate in verbatim for every agent except
+                # SEDocumentationAgent (see its own docstring), with no
+                # re-run of each agent's own Writer-time narrative-field
+                # URL stripping. For url_mode="source_metadata_only" (Market
+                # Footprint, Market Needs, Mentor Chat -- see registry.py),
+                # the output firewall's url check only blocks a URL that
+                # does NOT match an already-verified real source; it has no
+                # concept of which field a URL landed in, so a rewrite that
+                # echoes a genuinely real, allowed source URL into a
+                # narrative field (e.g. a recommendation paragraph) was
+                # never caught. Every other url_mode either blocks any URL
+                # outright regardless of field (so this gap doesn't apply)
+                # or isn't currently used by any agent.
+                if self.config.url_mode == "source_metadata_only":
+                    version = strip_urls_from_narrative_fields(version)
 
             # The provider returned a schema-valid complete object, but the
             # deterministic scoped merge restores untouched sections. Re-run

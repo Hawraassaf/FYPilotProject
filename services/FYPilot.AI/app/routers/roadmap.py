@@ -15,7 +15,9 @@ ollamaError, ollamaRawPreview, generatedAt, message) is preserved exactly;
 only the new "review" key is added.
 """
 
+import dataclasses
 import logging
+import os
 import time
 import uuid
 from datetime import datetime
@@ -27,11 +29,47 @@ from app.agents.project_roadmap_agent import ProjectRoadmapAgent, ProjectRoadmap
 from app.agents.roadmap import fallback_reason
 from app.review.context import ReviewContext
 from app.review.pipeline import ReviewPipeline
+from app.review.registry import get_agent_config
 from app.review.response import build_review_response
+from app.services.llm_provider import LLMResult
 
 router = APIRouter(tags=["Project Roadmap"])
 
 logger = logging.getLogger("fypilot-roadmap-router")
+
+
+class _SemanticReviewDisabledReviewerAgent:
+    """
+    TEMPORARY debug bypass (ROADMAP_SEMANTIC_REVIEW_DISABLED=1) -- makes the
+    Reviewer stage report itself unavailable immediately, with no real
+    provider call, instead of actually attempting (and potentially waiting
+    on/timing out) a real semantic review. Unset/remove before relying on
+    the output as fully reviewed: nothing about the semantic quality of the
+    roadmap's wording (unsupported claims, contradictions) is checked while
+    this is on -- only the deterministic gates already run inside
+    ProjectRoadmapAgent.generate() (lifecycle coverage, deliverable
+    coverage, schema/capacity validation) still apply, unaffected by this
+    flag, since they run before ReviewPipeline is ever invoked.
+
+    Deliberately returns ok=False (never raises, never fabricates an
+    "approved" verdict) so guarded_call correctly marks this as
+    provider_failed -- the SAME honest "review_unavailable"/"structural_
+    only" labeling path already used when a real Reviewer call genuinely
+    fails. Requires allow_unreviewed_output=True on the config passed to
+    ReviewPipeline to actually ship the result (see the router below, which
+    overrides ProjectRoadmapAgent's normal allow_unreviewed_output=False
+    only for the duration of this flag).
+    """
+
+    def analyze(self, *args: Any, **kwargs: Any) -> LLMResult:
+        return LLMResult(
+            ok=False,
+            provider="none",
+            model=None,
+            text="",
+            data=None,
+            error="Semantic review temporarily disabled via ROADMAP_SEMANTIC_REVIEW_DISABLED.",
+        )
 
 # Reserved for the semantic Reviewer / one structural repair / one semantic
 # rewrite / final re-review -- the Writer must never consume this. Mirrors
@@ -136,12 +174,43 @@ def generate_project_roadmap(request: ProjectRoadmapRequest):
     agent = ProjectRoadmapAgent()
     agent.request_id = request_id
     context = _build_review_context(request)
+
+    # TEMPORARY debug bypass -- see _SemanticReviewDisabledReviewerAgent's
+    # docstring. allow_unreviewed_output is overridden to True ONLY for this
+    # one pipeline instance (a config copy, via dataclasses.replace -- the
+    # shared registry entry itself, and every other agent, is untouched) so
+    # the Writer's candidate -- which has already passed the firewall,
+    # schema validation, and every deterministic gate inside
+    # ProjectRoadmapAgent.generate() -- ships as usable=True, honestly
+    # labeled "review_unavailable"/structural_only, instead of being
+    # discarded for the generic fallback the way a real Reviewer outage
+    # would be under this agent's normal (and still default) False setting.
+    semantic_review_disabled = os.getenv(
+        "ROADMAP_SEMANTIC_REVIEW_DISABLED", "",
+    ).strip().lower() in ("1", "true", "yes")
+
     # Reviewer/Rewrite tier must match the Writer's own tier (see
     # ReviewPipeline's constructor docstring) -- was "high" while the Writer
     # (ProjectRoadmapAgent) already used "roadmap"; fixed to "roadmap" so
     # Reviewer/Rewrite get both the cheap model and Roadmap's own tuned
     # DeepInfra/Ollama timeouts instead of the generic defaults.
-    pipeline = ReviewPipeline("ProjectRoadmapAgent", tier="roadmap")
+    if semantic_review_disabled:
+        logger.warning(
+            "roadmap.semantic_review_DISABLED_bypassing_reviewer request_id=%s -- "
+            "shipping the Writer's candidate unreviewed (deterministic gates still apply).",
+            request_id,
+        )
+        pipeline = ReviewPipeline(
+            "ProjectRoadmapAgent",
+            tier="roadmap",
+            reviewer_agent=_SemanticReviewDisabledReviewerAgent(),
+            config=dataclasses.replace(
+                get_agent_config("ProjectRoadmapAgent"),
+                allow_unreviewed_output=True,
+            ),
+        )
+    else:
+        pipeline = ReviewPipeline("ProjectRoadmapAgent", tier="roadmap")
 
     # ONE absolute monotonic deadline, computed here from the registry's
     # max_total_seconds (90s) -- passed UNCHANGED to ReviewPipeline (schema/

@@ -1,6 +1,6 @@
 """
-Tests for the Roadmap-only timeout adjustment (90s -> 240s -> 360s total
-budget).
+Tests for the Roadmap-only timeout adjustment (90s -> 240s -> 360s -> 540s
+total budget).
 
 Root cause / intent this covers: the Roadmap pipeline's original 90s total
 budget could not fit DeepInfra's own single-attempt cap
@@ -8,21 +8,31 @@ budget could not fit DeepInfra's own single-attempt cap
 a Groq/Ollama fallback after it -- see routers/roadmap.py's
 _SEMANTIC_REVIEW_RESERVE_SECONDS docstring. A first pass raised the total to
 240s / DeepInfra cap to 120s, which was still observed live cutting DeepInfra
-off mid-response. This batch raises the total to 360s (registry.py's
+off mid-response. A second pass raised the total to 360s (registry.py's
 ProjectRoadmapAgent.max_total_seconds) and the DeepInfra single-attempt cap
 to 280s (further raised from an intermediate 240s after switching the
 roadmap tier's model to Claude Sonnet 5, which needed more than 240s to
-finish a full detailed 13-phase plan), keeps the review reserve at 60s,
-which makes the effective Writer budget 300s -- large enough for DeepInfra's
-full 280s attempt PLUS ~20s left over for a Groq/Ollama fallback attempt
-(narrow, but Groq was independently rate-limited during this testing
-anyway), all still clamped against the same
-absolute Writer deadline. DeepInfra remains the paid primary provider (never
-disabled/reordered) and the provider order (DeepInfra -> Groq -> Ollama) is
-unchanged. These tests also cover the misleading "transport=success" log
-line that used to print even when the whole provider cascade returned no
-usable output, and confirm every OTHER agent's max_total_seconds is
-untouched by this change.
+finish a full detailed 13-phase plan), keeping the review reserve at 60s
+(effective Writer budget 300s).
+
+This batch raises the total again, 360s -> 540s: live-observed a genuine
+(non-retry-storm, already-fixed-separately) case where a rewrite attempt hit
+Anthropic's own ~120s timeout, the DeepInfra fallback attempt then ALSO hit
+~116s before timing out, and those two consecutive real provider slowdowns
+alone consumed nearly the entire remaining 360s budget after a ~105s Writer
+call. 540s keeps a 60s safety margin under the .NET side's HttpClient.Timeout
+for this endpoint (AiServiceClient.cs's shared 600s _http client) while
+giving real headroom for two slow-but-real provider attempts during
+Reviewer/Rewrite to both complete instead of racing the deadline. The review
+reserve itself stays 60s (a FLOOR guaranteeing the Writer can never consume
+the entire budget, not a ceiling on how much time Reviewer/Rewrite actually
+get -- see registry.py's ProjectRoadmapAgent comment), so the effective
+Writer budget is now 480s. DeepInfra remains the paid primary provider
+(never disabled/reordered) and the provider order (Anthropic -> DeepInfra ->
+Groq -> Ollama) is unchanged. These tests also cover the misleading
+"transport=success" log line that used to print even when the whole
+provider cascade returned no usable output, and confirm every OTHER agent's
+max_total_seconds is untouched by this change.
 
 No real network calls, no real sleeps -- fake providers only, wired into the
 REAL (unmodified) ProviderChain so its own timeout/clamping logic runs for
@@ -75,30 +85,30 @@ def _fake_request() -> ProjectRoadmapRequest:
 
 
 # ---------------------------------------------------------------------------
-# Test 1: the 360s / 300s / 60s timing contract
+# Test 1: the 540s / 480s / 60s timing contract
 # ---------------------------------------------------------------------------
 
 
 class RoadmapTimingContractTests(unittest.TestCase):
-    def test_registry_total_budget_is_360_seconds(self):
+    def test_registry_total_budget_is_540_seconds(self):
         config = get_agent_config("ProjectRoadmapAgent")
-        self.assertEqual(config.max_total_seconds, 360.0)
+        self.assertEqual(config.max_total_seconds, 540.0)
 
     def test_review_reserve_is_60_seconds(self):
         self.assertEqual(roadmap_router._SEMANTIC_REVIEW_RESERVE_SECONDS, 60.0)
 
-    def test_effective_writer_budget_is_300_seconds(self):
+    def test_effective_writer_budget_is_480_seconds(self):
         config = get_agent_config("ProjectRoadmapAgent")
         writer_budget = config.max_total_seconds - roadmap_router._SEMANTIC_REVIEW_RESERVE_SECONDS
-        self.assertEqual(writer_budget, 300.0)
+        self.assertEqual(writer_budget, 480.0)
 
-    def test_router_derives_writer_deadline_from_the_360_60_split(self):
+    def test_router_derives_writer_deadline_from_the_540_60_split(self):
         started = time.monotonic()
         global_deadline = started + get_agent_config("ProjectRoadmapAgent").max_total_seconds
         writer_deadline = global_deadline - roadmap_router._SEMANTIC_REVIEW_RESERVE_SECONDS
 
-        self.assertAlmostEqual(writer_deadline - started, 300.0, delta=0.05)
-        self.assertAlmostEqual(global_deadline - started, 360.0, delta=0.05)
+        self.assertAlmostEqual(writer_deadline - started, 480.0, delta=0.05)
+        self.assertAlmostEqual(global_deadline - started, 540.0, delta=0.05)
 
 
 # ---------------------------------------------------------------------------
@@ -111,20 +121,24 @@ class DeepInfraAttemptCapTests(unittest.TestCase):
         timing = _deepinfra_timing_for_tier("roadmap")
         self.assertEqual(timing["timeout_seconds"], 280.0)
 
-    def test_280s_deepinfra_cap_fits_inside_the_300s_writer_budget_with_room_for_fallback(self):
+    def test_280s_deepinfra_cap_fits_inside_the_480s_writer_budget_with_room_for_fallback(self):
         # Raised from 240s -> 280s after live testing showed Claude Sonnet 5
         # (the "roadmap" tier's model as of the Sonnet switch) sometimes
-        # needs more than 240s to finish a full detailed 13-phase plan --
-        # narrows the Groq/Ollama fallback window to 20s, accepted because a
-        # slow-but-complete Sonnet candidate is worth more than fallback
-        # headroom for a provider (Groq) that was, at the time, already
-        # exhausting its own daily rate limit independent of this timing.
-        writer_budget = 300.0
+        # needs more than 240s to finish a full detailed 13-phase plan.
+        # writer_budget itself was later raised 300.0 -> 480.0 (the total
+        # 360s -> 540s change, module docstring above) -- the fallback
+        # window this margin describes is no longer the narrow 20s it used
+        # to be (accepted at the time because Groq was independently
+        # exhausting its own daily rate limit); it's now a comfortable 200s,
+        # which is exactly the live-observed gap (two consecutive real
+        # provider timeouts nearly exhausting the old, narrower budget) this
+        # retune exists to close.
+        writer_budget = 480.0
         deepinfra_cap = _deepinfra_timing_for_tier("roadmap")["timeout_seconds"]
         remaining_for_fallback = writer_budget - deepinfra_cap
 
         self.assertLess(deepinfra_cap, writer_budget)
-        self.assertAlmostEqual(remaining_for_fallback, 20.0, delta=0.5)
+        self.assertAlmostEqual(remaining_for_fallback, 200.0, delta=0.5)
 
 
 # ---------------------------------------------------------------------------
@@ -212,13 +226,13 @@ class _FakeProvider:
 
 
 class FallbackAvailabilityTests(unittest.TestCase):
-    def test_groq_fallback_still_starts_after_deepinfra_fails_within_the_300s_writer_budget(self):
+    def test_groq_fallback_still_starts_after_deepinfra_fails_within_the_writer_budget(self):
         deepinfra = _FakeProvider("fake-deepinfra", ok=False)
         groq = _FakeProvider("fake-groq", ok=True)
         agent = ProjectRoadmapAgent()
         agent.provider_chain = ProviderChain(providers=[deepinfra, groq])
 
-        writer_deadline = time.monotonic() + 300.0
+        writer_deadline = time.monotonic() + 480.0
         agent.generate(_fake_request(), deadline=writer_deadline)
 
         self.assertEqual(deepinfra.call_count, 1)
@@ -233,14 +247,24 @@ class FallbackAvailabilityTests(unittest.TestCase):
 
 
 class ProviderOrderTests(unittest.TestCase):
-    def test_roadmap_tier_provider_chain_order_is_anthropic_deepinfra_groq_ollama(self):
-        # Anthropic (direct API) was prepended ahead of DeepInfra after live
-        # testing showed DeepInfra's Claude-proxy path truncating long
-        # responses -- see AnthropicProvider's docstring and ProviderChain's
-        # "roadmap"/"se_documentation"-only wiring.
+    def test_roadmap_tier_provider_chain_order_is_anthropic_groq_deepinfra_ollama(self):
+        # Anthropic (direct API) leads -- a brief Groq-first experiment was
+        # reverted after live testing showed gpt-oss-120b failing the
+        # deliverable-coverage content gate on every attempt (2/2 full
+        # requests, 4/4 individual attempts), falling through to the
+        # deterministic fallback template every time despite much faster
+        # per-call latency than Claude. See ProviderChain.__init__'s
+        # "roadmap"-only comment.
+        #
+        # Groq before DeepInfra (steps 1/2) is still "roadmap"-only: the
+        # student has a paid Groq subscription with full gpt-oss-120b
+        # access, so Groq is tried for its speed ahead of DeepInfra as the
+        # backup leg. "se_documentation" (unaffected by either change)
+        # still keeps DeepInfra before Groq -- see AnthropicProvider's
+        # docstring for why that tier prepends Anthropic at all.
         chain = ProviderChain(tier="roadmap")
         names = [type(p).__name__ for p in chain.providers]
-        self.assertEqual(names, ["AnthropicProvider", "DeepInfraProvider", "GroqProvider", "OllamaProvider"])
+        self.assertEqual(names, ["AnthropicProvider", "GroqProvider", "DeepInfraProvider", "OllamaProvider"])
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +302,11 @@ class OtherAgentsUnchangedTests(unittest.TestCase):
             "FypMentorAgent": 90.0,
             "SEDocumentationAgent": 1200.0,
             "ProjectIdeaAgent": 120.0,
-            "ProjectDNAAgent": 90.0,
+            # 90.0 -> 150.0: a later, unrelated freeze-audit fix (see
+            # test_project_dna_writer_deadline.py's
+            # OtherAgentRegistryTimingUnchangedTests for the live-measured
+            # rationale) -- not something this roadmap-tuning task touched.
+            "ProjectDNAAgent": 150.0,
             "IdeaComparisonAgent": 45.0,
             "MarketFootprintAgent": 150.0,
             "MarketNeedsAgent": 120.0,

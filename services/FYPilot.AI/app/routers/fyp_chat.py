@@ -220,6 +220,10 @@ def fyp_chat(request: FypMentorRequest):
             "searchFailed": False,
             "searchFirewallBlocked": False,
             "searchFirewallFlags": [],
+            "searchIntent": None,
+            "searchQuery": None,
+            "searchQuality": None,
+            "searchClassificationSource": None,
             "sources": [],
             "review": empty_review_response(
                 "Trivial exchange answered directly; not sent to an LLM or the review pipeline."
@@ -298,6 +302,15 @@ def fyp_chat(request: FypMentorRequest):
         "searchFailed": mentor_agent.last_search_failed,
         "searchFirewallBlocked": mentor_agent.last_search_firewall_blocked,
         "searchFirewallFlags": mentor_agent.last_search_firewall_flags,
+        # Search-planning diagnostics (see mentor_search_planner.py) --
+        # additive fields for observability/debugging; not yet surfaced in
+        # the .NET UI (FypMentorServiceResponse would need matching
+        # properties first). Safe to add: unknown JSON properties are
+        # ignored by the .NET side's case-insensitive deserializer.
+        "searchIntent": mentor_agent.last_search_intent,
+        "searchQuery": mentor_agent.last_search_query,
+        "searchQuality": mentor_agent.last_search_quality,
+        "searchClassificationSource": mentor_agent.last_search_classification_source,
         # Structured, backend-validated sources -- never LLM-authored. The
         # model no longer writes citations into suggestedNextActions (see
         # fyp_mentor_agent.py's prompt); the UI renders this list directly.
