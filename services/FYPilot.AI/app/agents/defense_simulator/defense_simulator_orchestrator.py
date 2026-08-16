@@ -215,9 +215,11 @@ class DefenseSimulatorOrchestrator:
         feedback_summary = self._clean_text(raw.get("feedbackSummary", ""))
         feedback_summary = self._clean_unverified_project_claims(feedback_summary)
 
+        cleaned_score = self._clean_score(raw.get("score", 0))
+
         return {
-            "score": self._clean_score(raw.get("score", 0)),
-            "level": self._clean_level(raw.get("level", "")),
+            "score": cleaned_score,
+            "level": self._score_to_level(cleaned_score),
             "strengths": strengths,
             "missingPoints": missing_points,
             "improvedAnswer": improved_answer,
@@ -232,6 +234,8 @@ class DefenseSimulatorOrchestrator:
     def generate_questions_candidate(
         self,
         request: GenerateDefenseQuestionsRequest,
+        *,
+        deadline: float | None = None,
     ) -> LLMResult | None:
         """
         Writer-stage entry point for ReviewPipeline. Reuses generate_questions()'s
@@ -239,13 +243,19 @@ class DefenseSimulatorOrchestrator:
         difficulty coercion, sequential DQ-NN ids, count padding) rather than
         duplicating it, then wraps the result as an LLMResult.
 
+        ``deadline``, when supplied, is forwarded to
+        DefenseQuestionAgent.generate_questions so the provider cascade's
+        per-attempt timeout is clamped to the real remaining budget instead
+        of always running at its full configured timeout -- see
+        routers/defense_simulator.py's writer_deadline.
+
         Returns None -- signaling "no real provider output" to guarded_call,
         which the pipeline maps to status="provider_unavailable" -- whenever
         the LLM call itself failed (no questions dict returned at all), since
         in that case there is no real candidate to review; the router should
         use build_safe_questions_fallback() directly instead.
         """
-        raw = self.question_agent.generate_questions(request)
+        raw = self.question_agent.generate_questions(request, deadline=deadline)
         questions = self._clean_questions(raw, request)
         llm_used = bool(raw and raw.get("questions"))
 
@@ -276,11 +286,17 @@ class DefenseSimulatorOrchestrator:
     def generate_evaluation_candidate(
         self,
         request: EvaluateDefenseAnswerRequest,
+        *,
+        deadline: float | None = None,
     ) -> LLMResult | None:
         """
         Writer-stage entry point for ReviewPipeline. Reuses the evaluator's
         LLM call + the same deterministic cleanup evaluate_answer() applies
         (_clean_evaluation_fields), then wraps the result as an LLMResult.
+
+        ``deadline``, when supplied, is forwarded to
+        DefenseEvaluatorAgent.evaluate_answer -- same pattern as
+        generate_questions_candidate above.
 
         Returns None -- signaling "no real provider output" to guarded_call,
         which the pipeline maps to status="provider_unavailable" -- whenever
@@ -288,7 +304,7 @@ class DefenseSimulatorOrchestrator:
         candidate to review; the router should use
         build_safe_evaluation_fallback() directly instead.
         """
-        raw = self.evaluator_agent.evaluate_answer(request)
+        raw = self.evaluator_agent.evaluate_answer(request, deadline=deadline)
 
         if not raw:
             return None
@@ -696,17 +712,17 @@ class DefenseSimulatorOrchestrator:
 
         return cleaned.strip()
 
-    def _clean_level(self, value: Any) -> str:
-        text = self._clean_text(value)
-
-        valid = {"Excellent", "Very Good", "Good", "Average", "Weak"}
-
-        if text in valid:
-            return text
-
-        return self._score_to_level(self._clean_score(value))
-
     def _score_to_level(self, score: int) -> str:
+        # The router documents this mapping as always computed
+        # deterministically, never written by the LLM (routers/
+        # defense_simulator.py). This used to be _clean_level(), which
+        # trusted the LLM's own proposed level string verbatim whenever it
+        # happened to be one of the 5 valid enum values -- a well-formed
+        # but internally inconsistent label (e.g. score=95, level="Average")
+        # passed through unchanged, contradicting that documented
+        # invariant. The raw "level" field from the LLM's JSON is no longer
+        # read at all; _clean_evaluation_fields now always derives it from
+        # the already-cleaned score via this method.
         if score >= 90:
             return "Excellent"
         if score >= 80:

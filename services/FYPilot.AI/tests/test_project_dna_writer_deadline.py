@@ -460,8 +460,14 @@ class WriterDeadlineReserveTests(unittest.TestCase):
         pipeline = captured_pipeline[0]
 
         # Test 1: exactly one global deadline, from the real registry budget.
+        # 90.0 -> 150.0: raised after a freeze-audit live test measured a
+        # real 4-call DeepInfra sequence (Writer -> Reviewer -> Rewrite ->
+        # re-Reviewer) needing ~91s, timing out 1s past the old 90s budget
+        # and discarding an already-generated, valid, personalized analysis
+        # for the generic fallback (allow_unreviewed_output=False here) --
+        # see registry.py's ProjectDNAAgent max_total_seconds comment.
         self.assertIsNotNone(pipeline.captured_global_deadline)
-        self.assertEqual(pipeline.config.max_total_seconds, 90.0)
+        self.assertEqual(pipeline.config.max_total_seconds, 150.0)
 
         # Test 4: the Writer deadline reached ProjectDNAAgent.
         self.assertIsNotNone(agent_instance.captured_writer_deadline)
@@ -793,19 +799,24 @@ class SuccessfulReviewedOutputProvenanceUnchangedTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Test 3: the Writer's effective budget is ~65s (90s total - 25s reserve).
+# Test 3: the Writer's effective budget is ~125s (150s total - 25s reserve).
 # ---------------------------------------------------------------------------
 
 
 class WriterEffectiveBudgetTests(unittest.TestCase):
-    def test_writer_effective_budget_is_approximately_65_seconds(self):
+    def test_writer_effective_budget_is_approximately_125_seconds(self):
+        # 65.0 -> 125.0 follows ProjectDNAAgent's registry max_total_seconds
+        # 90.0 -> 150.0 change (see WriterDeadlineReserveTests above for
+        # why) -- the reserve itself (_WRITER_TIME_RESERVE_SECONDS) is
+        # unchanged, so the Writer simply gets the same +60s the total
+        # budget grew by.
         pipeline = ReviewPipeline("ProjectDNAAgent")
         global_deadline = time.monotonic() + pipeline.config.max_total_seconds
         writer_deadline = global_deadline - dna_router._WRITER_TIME_RESERVE_SECONDS
 
         writer_budget = writer_deadline - time.monotonic()
 
-        self.assertAlmostEqual(writer_budget, 65.0, delta=0.5)
+        self.assertAlmostEqual(writer_budget, 125.0, delta=0.5)
 
 
 # ---------------------------------------------------------------------------
@@ -878,8 +889,14 @@ class OtherAgentRegistryTimingUnchangedTests(unittest.TestCase):
         # Values match the budgets documented inline in registry.py/roadmap.py
         # at the time this task started -- this only guards against an
         # accidental edit to a shared file, not a deliberate future retune.
-        self.assertEqual(get_agent_config("ProjectDNAAgent").max_total_seconds, 90.0)
-        self.assertEqual(get_agent_config("ProjectRoadmapAgent").max_total_seconds, 360.0)
+        # ProjectDNAAgent's own 90.0 -> 150.0 IS one such deliberate later
+        # retune (see WriterDeadlineReserveTests above) -- updated here to
+        # match, not a case of this guard catching an accidental edit.
+        self.assertEqual(get_agent_config("ProjectDNAAgent").max_total_seconds, 150.0)
+        # ProjectRoadmapAgent's own 360.0 -> 540.0 is another such later,
+        # unrelated retune (see test_roadmap_timeout_adjustment.py's
+        # OtherAgentsUnchangedTests for the live-measured rationale).
+        self.assertEqual(get_agent_config("ProjectRoadmapAgent").max_total_seconds, 540.0)
         self.assertEqual(get_agent_config("SEDocumentationAgent").max_total_seconds, 1200.0)
 
 

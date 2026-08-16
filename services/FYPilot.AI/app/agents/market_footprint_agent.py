@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from app.llm_firewall.firewall import LlmFirewall
+from app.llm_firewall.rules.url_policy import strip_urls
 from app.models.market_footprint_models import (
     FootprintSourceItem,
     MarketFootprintRequest,
@@ -57,7 +58,7 @@ class MarketFootprintAgent:
 
     Design (mirrors MarketNeedsAgent's safety rules):
     - Step 1 uses Groq Compound Mini for a small dedicated web search.
-    - Step 2 uses Groq llama-3.3-70b-versatile first to produce strict JSON.
+    - Step 2 uses Groq openai/gpt-oss-120b first to produce strict JSON.
     - Real source URLs are read only from ProviderChain tool metadata,
       never trusted from model-generated JSON.
     - The seventh dimension (evidenceStrength) and every region's
@@ -542,7 +543,7 @@ class MarketFootprintAgent:
                     competitionPressure=competition_pressure_label(
                         breakdown.competition_gap
                     ),
-                    evidenceSummary=self._text(
+                    evidenceSummary=self._narrative_text(
                         raw_region.get("evidenceSummary"), maximum=600
                     ),
                     scoreBreakdown=breakdown,
@@ -597,14 +598,14 @@ class MarketFootprintAgent:
             bestLaunchReason=(
                 best_region_result.evidence_summary
                 if best_region_result and best_region_result.evidence_summary
-                else self._text(data.get("bestLaunchReason"), maximum=600)
+                else self._narrative_text(data.get("bestLaunchReason"), maximum=600)
             ),
             expansionPath=expansion_path,
-            whyDemanded=self._string_list(data.get("whyDemanded"), maximum=3),
-            strategicRecommendation=self._text(
+            whyDemanded=self._narrative_string_list(data.get("whyDemanded"), maximum=3),
+            strategicRecommendation=self._narrative_text(
                 data.get("strategicRecommendation"), maximum=1200
             ),
-            limitations=self._string_list(data.get("limitations"), maximum=4),
+            limitations=self._narrative_string_list(data.get("limitations"), maximum=4),
             regions=region_results,
             sources=all_sources,
             analyzedAt=datetime.now(timezone.utc),
@@ -841,7 +842,17 @@ Return ONLY valid JSON in exactly this structure:
 
                 score = max(score, similarity)
 
-            if score >= 0.55:
+            # Lowered from 0.55 -- observed live consistently leaving only a
+            # single (sometimes zero) matched source per region for
+            # niche/regional topics, which then drags evidenceStrength and
+            # confidence down purely from search-coverage scarcity rather
+            # than genuine irrelevance (see calculate_evidence_strength /
+            # calculate_region_confidence_score in market_footprint_scoring.py,
+            # both keyed directly off matched_source_count). Region-name
+            # substring matches still contribute their own 0.35 floor above,
+            # so this only recovers sources with a genuine (if partial)
+            # title/topic overlap -- not an unrelated result.
+            if score >= 0.40:
                 ranked.append((score, source))
 
         ranked.sort(
@@ -878,15 +889,31 @@ Return ONLY valid JSON in exactly this structure:
             seen.add(normalized_url)
 
             domain = self._domain(url)
-            publisher = self._text(item.get("publisher"), default=domain, maximum=250)
-            snippet = self._text(
-                item.get("snippet") or item.get("relevance"), maximum=800
+
+            # Deterministic URL-stripping safety net (Gap 1, Carrier A) --
+            # title/publisher/relevance are REAL, uncontrolled web content
+            # read directly from Brave/Groq search results, never
+            # LLM-generated. A source's own snippet routinely embeds a
+            # SECOND, unrelated URL ("read more at https://...") that was
+            # never in allowed_source_metadata (which only ever contains
+            # each source's own canonical `url`) -- the same Carrier-A
+            # defect MarketNeedsAgent already fixed for itself (see
+            # market_needs_agent.py's _strip_urls/_narrative_text). `url`
+            # itself is NEVER stripped -- it must remain the real, exact,
+            # verified source link the student sees as evidence.
+            publisher = strip_urls(
+                self._text(item.get("publisher"), default=domain, maximum=250)
+            )
+            snippet = strip_urls(
+                self._text(item.get("snippet") or item.get("relevance"), maximum=800)
             )
 
             results.append(
                 FootprintSourceItem(
-                    title=self._text(
-                        item.get("title"), default=publisher or domain, maximum=300
+                    title=strip_urls(
+                        self._text(
+                            item.get("title"), default=publisher or domain, maximum=300
+                        )
                     ),
                     url=url,
                     publisher=publisher,
@@ -940,6 +967,36 @@ Return ONLY valid JSON in exactly this structure:
     def _text(value: object, default: str = "", maximum: int = 2000) -> str:
         text = str(value or default).strip()
         return text[:maximum]
+
+    # =========================================================================
+    # URL stripping -- deterministic firewall safety net (Gap 1, Carrier B)
+    # =========================================================================
+    #
+    # Every field the Writer LLM directly authors (evidenceSummary,
+    # bestLaunchReason, strategicRecommendation, whyDemanded, limitations)
+    # must never carry a URL through to the candidate: url_mode=
+    # "source_metadata_only" (registry.py's MarketFootprintAgent entry)
+    # blocks the ENTIRE three-region analysis the instant one URL-shaped
+    # string appears that isn't an exact match to a verified source's own
+    # canonical url. _format_sources_for_prompt embeds each source's real
+    # URL directly into the Writer's prompt ("URL: {source.url}"), and
+    # unlike ProjectIdeaAgent's prompt, this agent's prompt never explicitly
+    # tells the model to keep URLs out of these fields -- so this
+    # deterministic stripping is the only real guarantee, exactly mirroring
+    # MarketNeedsAgent's own _narrative_text/_narrative_string_list
+    # (reusing the SAME shared app.llm_firewall.rules.url_policy.strip_urls
+    # helper rather than a third regex implementation).
+    @staticmethod
+    def _narrative_text(value: object, default: str = "", maximum: int = 2000) -> str:
+        return strip_urls(MarketFootprintAgent._text(value, default=default, maximum=maximum))
+
+    def _narrative_string_list(self, value: object, *, maximum: int) -> list[str]:
+        return [
+            item for item in (
+                strip_urls(text) for text in self._string_list(value, maximum=maximum)
+            )
+            if item
+        ]
 
     @staticmethod
     def _normalize_text(value: object) -> str:

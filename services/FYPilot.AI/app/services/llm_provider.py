@@ -13,8 +13,9 @@ GENERATION chain (ProviderChain.providers, used by generate_json/generate_text):
    - Default model: meta-llama/Llama-3.3-70B-Instruct
 
 2. GroqProvider
-   - Normal mode: llama-3.3-70b-versatile (this is the generation fallback --
-     NOT groq/compound-mini, which is search-only, see below)
+   - Normal mode: openai/gpt-oss-120b (this is the generation fallback --
+     NOT groq/compound-mini, which is search-only, see below). Was
+     llama-3.3-70b-versatile until Groq decommissioned it 2026-08-16.
 
 3. OllamaProvider
    - Local fallback using qwen2.5-coder:7b by default
@@ -721,6 +722,7 @@ class DeepInfraProvider(BaseProvider):
                     temperature=0.2,
                     max_tokens=effective_max_tokens,
                     reporter=reporter,
+                    timeout_override=effective_timeout if writer_budget_seconds is not None else None,
                 )
                 finish_reason = None
             else:
@@ -791,6 +793,7 @@ class DeepInfraProvider(BaseProvider):
                         repair_fn=(
                             (lambda candidate, error: self._repair_json_with_provider(
                                 candidate, error, schema_description, max_tokens=_repair_max_tokens(effective_max_tokens),
+                                timeout_override=max(0.0, min(self.timeout_seconds, remaining_after_wait)),
                             ))
                             if schema_description else None
                         ),
@@ -831,6 +834,7 @@ class DeepInfraProvider(BaseProvider):
             repair_fn=(
                 (lambda candidate, error: self._repair_json_with_provider(
                     candidate, error, schema_description, max_tokens=_repair_max_tokens(effective_max_tokens),
+                    timeout_override=effective_timeout if writer_budget_seconds is not None else None,
                 ))
                 if schema_description else None
             ),
@@ -897,7 +901,7 @@ class DeepInfraProvider(BaseProvider):
 
     def _repair_json_with_provider(
         self, malformed_text: str, parse_error: str, schema_description: str | None,
-        max_tokens: int = 2200,
+        max_tokens: int = 2200, timeout_override: float | None = None,
     ) -> str | None:
         """
         ONE additional low-temperature request asking this SAME provider to
@@ -911,9 +915,16 @@ class DeepInfraProvider(BaseProvider):
         than the original budget would just be truncated again by a repair
         call capped at a smaller budget -- observed live against a large
         roadmap phase plan before this parameter existed.
+
+        `timeout_override`, when supplied by the caller (generate_json's own
+        already-computed effective_timeout), bounds this repair request the
+        same way the primary request was bounded -- previously this call
+        always used self.timeout_seconds in full (up to 280s for "roadmap"),
+        regardless of how little of the pipeline's deadline actually
+        remained when a malformed response triggered this repair.
         """
         try:
-            response = self._client().chat.completions.create(
+            response = self._client(timeout_override=timeout_override).chat.completions.create(
                 model=self.model,
                 temperature=0,
                 max_tokens=max(max_tokens, 2200),
@@ -936,6 +947,7 @@ class DeepInfraProvider(BaseProvider):
         temperature: float,
         max_tokens: int,
         reporter: "ProgressReporter",
+        timeout_override: float | None = None,
     ) -> str:
         """
         Real token streaming (OpenAI-compatible SDK, stream=True) -- called
@@ -948,8 +960,16 @@ class DeepInfraProvider(BaseProvider):
         never an in-flight one aborted mid-stream). The one and only source
         of the reported token count is the stream's own final usage chunk
         (stream_options include_usage) -- never estimated from max_tokens.
+
+        `timeout_override`, when supplied by the caller (generate_json's own
+        already-computed effective_timeout), bounds this streaming request
+        the same way the non-streaming _chat_completion_text branch already
+        is -- previously this call always used self.timeout_seconds in
+        full, so a call made with a live ProgressReporter silently lost
+        cap_timeout_to_deadline's clamping regardless of how little Writer
+        budget actually remained.
         """
-        stream = self._client().chat.completions.create(
+        stream = self._client(timeout_override=timeout_override).chat.completions.create(
             model=self.model,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -1302,7 +1322,8 @@ class GroqProvider(BaseProvider):
     Primary cloud provider.
 
     use_search=False:
-        Uses GROQ_MODEL, default llama-3.3-70b-versatile.
+        Uses GROQ_MODEL, default openai/gpt-oss-120b (Groq decommissioned
+        llama-3.3-70b-versatile on 2026-08-16).
 
     use_search=True:
         Uses GROQ_SEARCH_MODEL, default groq/compound-mini.
@@ -1328,7 +1349,7 @@ class GroqProvider(BaseProvider):
 
         self.model = os.getenv(
             "GROQ_MODEL",
-            "llama-3.3-70b-versatile",
+            "openai/gpt-oss-120b",
         )
 
         self.search_model = os.getenv(
@@ -1438,15 +1459,17 @@ class GroqProvider(BaseProvider):
 
     def _repair_json_with_provider(
         self, malformed_text: str, parse_error: str, schema_description: str | None,
-        max_tokens: int = 2200,
+        max_tokens: int = 2200, timeout_override: float | None = None,
     ) -> str | None:
         """Same contract as DeepInfraProvider._repair_json_with_provider --
         ONE low-temperature JSON-syntax-only repair request, never raises,
         never re-runs the full generation prompt. `max_tokens` must be at
         least the original request's budget (see DeepInfraProvider's own
-        docstring for why)."""
+        docstring for why). `timeout_override`, when supplied, bounds this
+        repair request the same way the primary request was bounded -- see
+        DeepInfraProvider._repair_json_with_provider's docstring."""
         try:
-            client = self._client()
+            client = self._client(timeout_override=timeout_override)
             response = client.chat.completions.create(
                 model=self.model,
                 temperature=0,
@@ -1667,6 +1690,7 @@ class GroqProvider(BaseProvider):
             repair_fn=(
                 (lambda candidate, error: self._repair_json_with_provider(
                     candidate, error, schema_description, max_tokens=_repair_max_tokens(effective_max_tokens),
+                    timeout_override=effective_timeout if writer_budget_seconds is not None else None,
                 ))
                 if schema_description and not use_search else None
             ),
@@ -1841,19 +1865,26 @@ class AnthropicProvider(BaseProvider):
 
         `deadline` is OPTIONAL (an absolute time.monotonic() timestamp, same
         convention as ReviewPipeline.run's `deadline` -- see that method's
-        docstring) purely for the repair-attempt telemetry below: it lets
-        llm_provider.anthropic_repair_usage report how much of the caller's
-        overall wall-clock budget remained when this repair request started
-        and finished, without this method making any timeout/scheduling
-        decision of its own. None (the default, every existing caller before
-        this parameter existed) simply omits that reading rather than
-        guessing a budget.
+        docstring). Besides driving the repair-attempt telemetry below (how
+        much of the caller's overall wall-clock budget remained when this
+        repair request started and finished), it now also bounds the actual
+        request timeout the same way DeepInfraProvider/GroqProvider's repair
+        methods do: min(self.timeout_seconds, time left until deadline) --
+        previously this parameter was only ever read for logging, so a
+        repair request could still run for this provider's full configured
+        timeout (up to 280s) even with almost no pipeline budget left. None
+        (the default, every existing caller before this parameter existed)
+        falls back to self.timeout_seconds unchanged.
         """
         requested_max_tokens = max(max_tokens, 2200)
         start = time.monotonic()
         remaining_at_start = None if deadline is None else round(deadline - start, 1)
+        effective_timeout = (
+            None if deadline is None
+            else max(0.0, min(self.timeout_seconds, deadline - start))
+        )
         try:
-            response = self._client().messages.create(
+            response = self._client(timeout_override=effective_timeout).messages.create(
                 model=self.model,
                 # No `temperature` -- Claude Sonnet 5 rejects it with a 400
                 # ("temperature is deprecated for this model"), observed live.
@@ -2290,6 +2321,7 @@ class OllamaProvider(BaseProvider):
             repair_fn=(
                 (lambda candidate, error: self._repair_json_with_provider(
                     candidate, error, schema_description, max_tokens=max_tokens,
+                    timeout_override=effective_timeout if writer_budget_seconds is not None else None,
                 ))
                 if schema_description else None
             ),
@@ -2312,14 +2344,17 @@ class OllamaProvider(BaseProvider):
 
     def _repair_json_with_provider(
         self, malformed_text: str, parse_error: str, schema_description: str | None,
-        max_tokens: int | None = None,
+        max_tokens: int | None = None, timeout_override: float | None = None,
     ) -> str | None:
         """Same contract as DeepInfraProvider._repair_json_with_provider.
         Ollama's /api/generate has no separate system-message slot, so the
         repair instruction is prepended directly to the single prompt
         field. `max_tokens` mirrors the original request's budget (see
         DeepInfraProvider's own docstring for why) via the same
-        num_ctx/num_predict scaling generate_json itself uses."""
+        num_ctx/num_predict scaling generate_json itself uses.
+        `timeout_override`, when supplied, bounds this repair request the
+        same way the primary request was bounded -- see
+        DeepInfraProvider._repair_json_with_provider's docstring."""
         try:
             repair_prompt = (
                 f"{_JSON_REPAIR_SYSTEM_PROMPT}\n\n"
@@ -2337,6 +2372,7 @@ class OllamaProvider(BaseProvider):
                 options=repair_options,
                 extra_body={"format": "json"},
                 reporter=None,
+                timeout_override=timeout_override,
             )
             return text or None
         except Exception as ex:
@@ -2594,6 +2630,74 @@ _DEEPINFRA_TIER_TIMING: dict[str, dict[str, float | int]] = {
     # should fail fast into the Groq leg once, not have the SDK silently
     # retry (and re-pay for) the same slow call 2 more times first.
     "se_documentation": {"timeout_seconds": None, "max_retries": 0},  # resolved by _deepinfra_timing_for_tier
+    # "mentor" was previously ABSENT from this dict entirely, which meant
+    # DeepInfraProvider(max_retries=None, ...) let the openai SDK's own
+    # default (max_retries=2) apply for every one of Writer/Reviewer/Rewrite
+    # in the Mentor Chat pipeline (all three build a ProviderChain(tier=
+    # "mentor") -- see ReviewPipeline.__init__ and fyp_mentor_agent.py).
+    # Observed LIVE on an unmocked /fyp-chat call: a single Writer
+    # generate_json() call took ~69s (the configured 60s DEEPINFRA_TIMEOUT_
+    # SECONDS timeout, THEN a "Retrying request..." SDK log, THEN a second
+    # attempt) against a 65s Writer budget -- the request only survived
+    # because the retry happened to land on the Writer stage (which at
+    # least clamps its per-attempt timeout via cap_timeout_to_deadline) and
+    # not on the Reviewer/Rewrite stages (which did not, until this same
+    # fix -- see reviewer_agent.py/rewrite_agent.py). timeout_seconds stays
+    # None (DeepInfraProvider's own DEEPINFRA_TIMEOUT_SECONDS default, 60s)
+    # -- the bug was never the per-attempt duration, only the SDK silently
+    # multiplying it. Any retry-on-genuine-failure behavior Mentor Chat
+    # wants belongs to ProviderChain's own explicit provider-to-provider
+    # cascade (DeepInfra -> Groq -> Ollama), never to a hidden SDK loop
+    # inside a single provider.
+    "mentor": {"timeout_seconds": None, "max_retries": 0},
+    # Idea Generator ("high" tier -- anthropic/claude-opus-4-8 via DeepInfra,
+    # used by ProjectIdeaAgent's Writer AND its own ReviewPipeline("high")
+    # Reviewer/Rewrite stages, see project_idea_agent.py/routers/ideas.py).
+    # Previously ABSENT from this dict entirely -- the exact same root cause
+    # already fixed above for "mentor"/below for "standard": DeepInfraProvider
+    # (max_retries=None) let the openai SDK's own default (max_retries=2)
+    # apply on top of ProviderChain's own explicit DeepInfra->Groq->Ollama
+    # cascade. This tier is especially exposed to that risk: the Writer's
+    # ~90s budget (120s total - 30s review reserve, routers/ideas.py's
+    # _WRITER_TIME_RESERVE_SECONDS) is already shared across TWO sequential
+    # calls (search then generation) before this provider is even reached,
+    # and the Reviewer/Rewrite stages afterward share the SAME "high" tier
+    # with only the ~30s review reserve left -- a silently-tripled single
+    # DeepInfra attempt could alone exceed either remaining budget.
+    # timeout_seconds stays None (DeepInfraProvider's own DEEPINFRA_TIMEOUT_
+    # SECONDS default, 60s) -- consistent with "mentor"/"standard" above,
+    # and every deadline-aware caller here already opts into
+    # cap_timeout_to_deadline=True (project_idea_agent.py's generate_ideas,
+    # reviewer_agent.py, rewrite_agent.py), which further clamps the actual
+    # per-attempt timeout to whatever budget is left; only the hidden
+    # SDK-level retry multiplier is removed here.
+    "high": {"timeout_seconds": None, "max_retries": 0},
+    # Same root cause as "mentor" above, confirmed live for Market Demand
+    # specifically (services/FYPilot.AI/tests/test_market_needs_timeout_
+    # hardening.py): MarketNeedsAgent's own ProviderChain() and
+    # ReviewPipeline("MarketNeedsAgent")'s Reviewer/Rewrite ProviderChain
+    # both default to tier="standard" (no explicit tier is passed by either
+    # market_needs_agent.py or ReviewPipeline.__init__'s default), and
+    # "standard" had no entry here at all -- so every one of its three LLM
+    # stages (Writer/Reviewer/Rewrite) let the openai/groq SDKs' own default
+    # retry count (2) apply on top of ProviderChain's own explicit
+    # provider-to-provider cascade, exactly the same silent-multiplication
+    # risk already fixed for "mentor". "standard" is also the DEFAULT tier
+    # (ProviderChain(tier: str = "standard")), so this additionally protects
+    # every other agent that never specifies a tier -- a strictly wider fix
+    # than Market Demand alone, but the same fix, made for the same reason.
+    # timeout_seconds stays None (each provider's own configured default) --
+    # only the hidden retry multiplier is removed.
+    "standard": {"timeout_seconds": None, "max_retries": 0},
+    # Same root cause and same fix as "mentor"/"high"/"standard" above --
+    # "light" (Defense Simulator's question-generation and answer-evaluation
+    # agents, the only two consumers of this tier) was missed by the same
+    # hardening pass that covered every other tier. DeepInfraProvider(
+    # max_retries=None, ...) let the openai SDK's own default (2) apply here
+    # too. timeout_seconds stays None (DeepInfraProvider's own
+    # DEEPINFRA_TIMEOUT_SECONDS default, 60s); only the hidden retry
+    # multiplier is removed.
+    "light": {"timeout_seconds": None, "max_retries": 0},
 }
 
 # Same rationale as _DEEPINFRA_TIER_TIMING, for the Groq fallback leg.
@@ -2629,6 +2733,33 @@ _GROQ_TIER_TIMING: dict[str, dict[str, float | int]] = {
     # vars), so this is purely about keeping a fallback attempt fast, not
     # about the Reviewer's bigger primary model.
     "comparison_review": {"timeout_seconds": 6.0, "max_retries": 0},
+    # Same root cause and same fix as _DEEPINFRA_TIER_TIMING["mentor"] above
+    # -- GroqProvider(max_retries=None, ...) previously let the groq SDK's
+    # own default retry count apply for Mentor Chat's Groq fallback leg
+    # (generation) and its Groq Compound search leg alike. timeout_seconds
+    # stays None (GroqProvider's own GROQ_TIMEOUT_SECONDS default, 60s);
+    # only the hidden retry multiplier is removed.
+    "mentor": {"timeout_seconds": None, "max_retries": 0},
+    # See _DEEPINFRA_TIER_TIMING["high"]'s comment -- same fix, same
+    # reasoning, for the Groq fallback leg of Idea Generator's Writer/
+    # Reviewer/Rewrite stages. timeout_seconds stays None (GroqProvider's
+    # own GROQ_TIMEOUT_SECONDS default, 60s); only the hidden retry
+    # multiplier is removed.
+    "high": {"timeout_seconds": None, "max_retries": 0},
+    # See _DEEPINFRA_TIER_TIMING["standard"]'s comment -- same fix, same
+    # reasoning, for the Groq fallback leg of the default tier.
+    "standard": {"timeout_seconds": None, "max_retries": 0},
+    # See _DEEPINFRA_TIER_TIMING["light"]'s comment -- same fix, same
+    # reasoning, for the Groq fallback leg of Defense Simulator's tier.
+    "light": {"timeout_seconds": None, "max_retries": 0},
+    # "roadmap"/"se_documentation" had their DeepInfra leg fixed with an
+    # explicit max_retries=0 entry above but the parallel Groq FALLBACK leg
+    # for these two tiers was missed by the same pass -- GroqProvider(
+    # max_retries=None, ...) let the groq SDK's own default (2) apply here,
+    # so a single Groq fallback attempt could take up to 3x its configured
+    # 60s timeout instead of failing fast into the next (Ollama) leg.
+    "roadmap": {"timeout_seconds": None, "max_retries": 0},
+    "se_documentation": {"timeout_seconds": None, "max_retries": 0},
 }
 
 # Same rationale again, for the final local-Ollama fallback leg. Its
@@ -2715,6 +2846,13 @@ class ProviderChain:
     fallback. GeminiProvider is intentionally excluded from the default
     chain -- pass providers explicitly to include it.
 
+    Exception: tier == "se_documentation" prepends Anthropic (direct API)
+    as step 0, ahead of DeepInfra.
+
+    Exception: tier == "roadmap" prepends Anthropic as step 0 (same as
+    "se_documentation") AND swaps step 1/2 (Groq before DeepInfra) -- see
+    the "roadmap"-only comment in __init__ for why.
+
     `tier` selects the DeepInfra model ("high" / "standard" / "light" /
     "mentor", see _DEEPINFRA_TIER_DEFAULTS) and is ignored if `providers`
     is passed explicitly. Brave is never part of this chain -- it has no
@@ -2750,22 +2888,50 @@ class ProviderChain:
         # False and generate_json fails fast with a clear "key is missing"
         # error, so the cascade falls straight through to DeepInfra exactly
         # as before -- this is safe to leave wired in even without a key set.
+        # max_retries=0: same fix, same reasoning as _DEEPINFRA_TIER_TIMING/
+        # _GROQ_TIER_TIMING elsewhere in this module -- AnthropicProvider had
+        # no tier-timing mechanism of its own, so it was entirely missed by
+        # that hardening pass. anthropic SDK defaults max_retries=2, and this
+        # provider is FIRST in the chain: a single silent retry storm here
+        # (up to 3x its own timeout_seconds) can consume this agent's entire
+        # pipeline budget before DeepInfra/Groq/Ollama fallback, or the
+        # Reviewer/Rewrite stages (which build their own identically-tiered
+        # ProviderChain), ever get a real chance to run.
         anthropic_providers = (
-            [AnthropicProvider()] if tier in ("roadmap", "se_documentation") else []
+            [AnthropicProvider(max_retries=0)] if tier in ("roadmap", "se_documentation") else []
         )
 
-        self.providers = providers or anthropic_providers + [
-            DeepInfraProvider(
-                model=_deepinfra_model_for_tier(tier),
-                max_retries=deepinfra_timing.get("max_retries"),
-                timeout_seconds=deepinfra_timing.get("timeout_seconds"),
-            ),
-            GroqProvider(
-                max_retries=groq_timing.get("max_retries"),
-                timeout_seconds=groq_timing.get("timeout_seconds"),
-            ),
-            OllamaProvider(timeout_seconds=ollama_timing.get("timeout_seconds")),
-        ]
+        deepinfra_provider = DeepInfraProvider(
+            model=_deepinfra_model_for_tier(tier),
+            max_retries=deepinfra_timing.get("max_retries"),
+            timeout_seconds=deepinfra_timing.get("timeout_seconds"),
+        )
+        groq_provider = GroqProvider(
+            max_retries=groq_timing.get("max_retries"),
+            timeout_seconds=groq_timing.get("timeout_seconds"),
+        )
+        ollama_provider = OllamaProvider(timeout_seconds=ollama_timing.get("timeout_seconds"))
+
+        # "roadmap" only: Groq before DeepInfra -- the student has a paid
+        # Groq subscription with full gpt-oss-120b access (no free-tier rate
+        # limiting for them either), so Groq is tried for its speed before
+        # DeepInfra. REVERTED from a brief Groq-FIRST (ahead of Anthropic)
+        # experiment: live testing showed gpt-oss-120b failing the
+        # deliverable-coverage content gate on every attempt (2/2 full
+        # requests, 4/4 individual attempts, each exhausting the one
+        # content-gate retry) and falling through to the deterministic
+        # fallback template every time -- i.e. zero AI-generated roadmaps
+        # despite gpt-oss-120b's much faster per-call latency (~25s vs
+        # Claude's 90-120s+). Claude stays first for reliability; Groq is
+        # still tried ahead of DeepInfra as the speed-optimized backup.
+        # Every other tier (se_documentation, standard, etc.) keeps
+        # DeepInfra before Groq exactly as before -- see the class
+        # docstring's GENERATION chain, which still describes that order.
+        cloud_providers = (
+            [groq_provider, deepinfra_provider] if tier == "roadmap" else [deepinfra_provider, groq_provider]
+        )
+
+        self.providers = providers or anthropic_providers + cloud_providers + [ollama_provider]
 
         self.search_providers = search_providers or [
             BraveSearchProvider(),

@@ -701,6 +701,7 @@ public class MyProjectsModel(
             }
 
             project.Title = cleanTitle;
+            project.IsTitleCustom = true;
             project.UpdatedAt = DateTime.UtcNow;
 
             db.ProjectActivities.Add(

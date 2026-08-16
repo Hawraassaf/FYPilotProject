@@ -769,25 +769,34 @@ class LegacyFakeCompatibilityTests(unittest.TestCase):
 
 
 class MarketFootprintUnaffectedTests(unittest.TestCase):
-    def test_defense_simulator_orchestrator_signature_is_unaffected(self):
+    def test_defense_simulator_orchestrator_now_threads_a_deadline(self):
         # MarketFootprintAgent is no longer a valid "unaffected agent"
         # example -- a separate task (see
         # tests/test_market_footprint_writer_deadline.py) gave it the
         # identical deadline/writer_deadline propagation this test file is
-        # proving for Market Demand. Defense Simulator remains a genuinely
-        # untouched agent for this assertion.
+        # proving for Market Demand. Defense Simulator was ALSO a genuinely
+        # untouched agent when this assertion was first written -- a
+        # separate, later freeze-audit fix (FYP-016) closed that gap: its
+        # Writer stage previously received no deadline at all (a
+        # zero-argument lambda around a zero-argument agent method), so a
+        # DeepInfra/Groq retry storm on the "light" tier could silently
+        # consume the entire pipeline budget with no deadline-aware
+        # safeguard ever engaging. This now asserts the fixed, intentional
+        # state instead of the absence that used to be true.
         import inspect as _inspect
         from app.agents.defense_simulator.defense_simulator_orchestrator import (
             DefenseSimulatorOrchestrator,
         )
 
         sig = _inspect.signature(DefenseSimulatorOrchestrator.generate_questions_candidate)
-        self.assertNotIn("deadline", sig.parameters)
+        self.assertIn("deadline", sig.parameters)
 
-    def test_defense_simulator_router_has_no_writer_deadline_reserve_constant(self):
+    def test_defense_simulator_router_now_has_a_writer_deadline_reserve_constant(self):
+        # See test_defense_simulator_orchestrator_now_threads_a_deadline
+        # above for why this flipped from assertFalse to assertTrue.
         from app.routers import defense_simulator as defense_simulator_router
 
-        self.assertFalse(hasattr(defense_simulator_router, "_WRITER_TIME_RESERVE_SECONDS"))
+        self.assertTrue(hasattr(defense_simulator_router, "_WRITER_TIME_RESERVE_SECONDS"))
 
 
 if __name__ == "__main__":

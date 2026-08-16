@@ -825,13 +825,19 @@ class NoDirectProviderBypassTests(unittest.TestCase):
 
 
 class OtherAgentsUnaffectedTests(unittest.TestCase):
-    def test_defense_simulator_orchestrator_signature_is_unaffected(self):
+    def test_defense_simulator_orchestrator_now_threads_a_deadline(self):
+        # Defense Simulator was a genuinely untouched agent when this
+        # assertion was first written -- a later, separate freeze-audit fix
+        # (FYP-016) closed a real gap here: its Writer stage previously
+        # received no deadline at all. See the identical note in
+        # tests/test_market_demand_writer_deadline.py for the full history;
+        # this now asserts the fixed, intentional state.
         from app.agents.defense_simulator.defense_simulator_orchestrator import (
             DefenseSimulatorOrchestrator,
         )
 
         sig = inspect.signature(DefenseSimulatorOrchestrator.generate_questions_candidate)
-        self.assertNotIn("deadline", sig.parameters)
+        self.assertIn("deadline", sig.parameters)
 
 
 if __name__ == "__main__":

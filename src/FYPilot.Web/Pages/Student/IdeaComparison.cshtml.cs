@@ -788,11 +788,18 @@ public class IdeaComparisonModel(
             }
 
             /*
-             * The official selected idea defines the project title.
-             * When the owner replaces the idea, update the title used
-             * by the Dashboard and project switcher immediately.
+             * The official selected idea defines the project title
+             * (matches IdeaGenerator.OnPostSelectAsync). The very
+             * first idea ever attached always claims the title, even
+             * over a name the student picked beforehand. After that,
+             * a manual rename (IsTitleCustom) is respected and future
+             * idea replacements no longer touch the title.
              */
-            project.Title = idea.Title;
+            if (!previousIdeaId.HasValue || !project.IsTitleCustom)
+            {
+                project.Title = idea.Title;
+                project.IsTitleCustom = false;
+            }
 
             if (string.IsNullOrWhiteSpace(
                     project.Description))

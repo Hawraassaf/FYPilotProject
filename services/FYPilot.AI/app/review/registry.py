@@ -1114,13 +1114,53 @@ class MarketFootprintCandidateSchema(MarketFootprintResponse):
 
 _MARKET_NEEDS_EXTRA_RUBRIC = """
 MARKET NEEDS-SPECIFIC REVIEW CRITERIA (in addition to the standard criteria above):
-- Do NOT suggest changing demandScore, confidenceScore, or any scoreBreakdown
-  dimension -- these are computed deterministically, never written by the LLM.
+- Do NOT suggest changing demandScore or confidenceScore -- both are computed
+  deterministically (a fixed Python weighted average / real source-count
+  formula), never written by the LLM.
+- DO scrutinize each scoreBreakdown dimension (problemEvidence, marketFit,
+  universityValue, competitionOpportunity, technologyMomentum): these values
+  ARE proposed by the LLM, not computed deterministically -- demandScore is
+  only a deterministic average OF them, so an implausible or unsupported
+  category score (e.g. a high problemEvidence score resting on weak or few
+  sources) is exactly the kind of claim this review should flag as
+  "unsupported_claim", the same as any other number stated without
+  sufficient evidence.
 - Do NOT suggest changing sources -- these are matched deterministically from
   real search results, never authored by the LLM.
 - Unsupported claims: flag (category "unsupported_claim") any statistic,
-  market size, revenue figure, or user count not explicitly present in the
-  verified search evidence.
+  market size, revenue figure, CAGR, or user count not explicitly present in
+  the verified search evidence provided to the Writer. A number is only
+  supported if the retrieved evidence block itself states it (or a value
+  close enough to be the same figure) -- never treat two different numbers
+  from two different sources as interchangeable, and never treat a number
+  the Writer's own reasoning derived (e.g. combining/extrapolating figures
+  from separate sources) as if it were directly reported.
+- Confidence-vs-evidence proportionality: flag (category "unsupported_claim")
+  any statistic or market-size figure stated as a plain, unqualified fact
+  (e.g. "The market will reach $X") when confidenceScore/confidenceLevel in
+  the trusted structural context is "low" and fewer than 2 verified sources
+  support it -- language like "estimates suggest" or "available industry
+  data suggests" is required in that case. When confidenceLevel is "high"
+  and the exact figure appears in a verified source, stating it plainly is
+  correct and must NOT be flagged merely for containing a number.
+- Geographic honesty: flag (category "contradiction", severity "high") any
+  claim that presents global or non-regional evidence as if it specifically
+  describes the requested countryContext (e.g. narrative text implying
+  "Lebanon" or "MENA" market conditions when the cited/available evidence is
+  global-only, or the retrieved evidence's sources are not about that
+  region). If no region-specific evidence was retrieved, the response must
+  say so plainly (e.g. "no Lebanon-specific evidence was found; based on
+  global/MENA data instead") rather than silently implying local validation.
+- Competitor/similar-solution grounding: flag (category "unsupported_claim")
+  any entry in similarSolutions naming a specific company, product, or
+  platform that is not mentioned anywhere in the verified search evidence
+  provided to the Writer -- a similar-solution claim must be traceable to a
+  retrieved source, never invented from general knowledge.
+- Project specificity: flag (category "quality") any narrative (
+  lebaneseMarketFit, universityValue, recommendation) that only restates
+  generic industry-wide growth ("the AI market is growing") without
+  connecting it to why it matters for THIS project's specific problem,
+  users, or technology category.
 - Technology alignment: flag (category "project_alignment") any mention of
   a technology outside the project's actual stack.
 """
@@ -1293,7 +1333,31 @@ AGENT_REGISTRY: dict[str, AgentReviewConfig] = {
         # since -- unlike the Market agents -- Mentor Chat's search happens
         # lazily inside chat() itself rather than up front in the router.
         url_mode="source_metadata_only",
-        allow_unreviewed_output=False,
+        # True (changed from False): a genuine REVIEW-POLICY defect, kept
+        # deliberately separate from the provider-reliability fix elsewhere
+        # in this change (see llm_provider.py's "mentor" tier timing entries
+        # and reviewer_agent.py/rewrite_agent.py's cap_timeout_to_deadline
+        # wiring, which reduce how OFTEN the Reviewer stage fails/times out
+        # in the first place). Even with reliable providers, the Reviewer
+        # stage can still occasionally be genuinely unavailable (every
+        # mentor-tier provider down at once, or a malformed Reviewer
+        # response) -- until now, that discarded the Writer's own candidate
+        # answer even though it had ALREADY passed both the input and output
+        # LlmFirewall passes AND full schema validation (see pipeline.py's
+        # state.last_structurally_valid_candidate, set immediately after the
+        # Writer stage, before the Reviewer ever runs), replacing it with a
+        # generic templated fallback instead. This does not weaken the
+        # Reviewer's own rejection rubric in any way -- ReviewDecisionEngine
+        # is completely unaffected, and a genuinely blocking issue the
+        # Reviewer DID detect still rejects/rewrites exactly as before; this
+        # only changes what happens when the Reviewer never produced a
+        # verdict at all. Matches SEDocumentationAgent's existing precedent
+        # below (same flag, same rationale), and the .NET UI already has a
+        # dedicated "review_unavailable" badge ("Not semantically reviewed")
+        # for exactly this status -- see MentorChat.cshtml.cs's
+        # DescribeReview -- so this was always a supported, honestly-labeled
+        # path the Mentor agent simply hadn't opted into.
+        allow_unreviewed_output=True,
         known_risky_claims=_MENTOR_KNOWN_RISKY_CLAIMS,
         mandatory_fields=["reply"],
         max_total_seconds=90.0,
@@ -1305,14 +1369,30 @@ AGENT_REGISTRY: dict[str, AgentReviewConfig] = {
         allow_unreviewed_output=False,
         known_risky_claims=_ROADMAP_KNOWN_RISKY_CLAIMS,
         mandatory_fields=["roadmapTitle", "teamStrategy", "finalAdvice"],
-        # Raised 90s -> 240s -> 360s (Roadmap-only timing adjustments): DeepInfra
-        # remains the paid primary provider and is allowed its full 240s
-        # single-attempt cap (ROADMAP_DEEPINFRA_TIMEOUT_SECONDS) even under a
-        # deadline (see routers/roadmap.py's _SEMANTIC_REVIEW_RESERVE_SECONDS
-        # = 60.0, which derives the 300s Writer budget = 360s - 60s), with
-        # ~60s of the Writer's own budget still reserved for a Groq/Ollama
-        # fallback attempt after DeepInfra.
-        max_total_seconds=360.0,
+        # Raised 90s -> 240s -> 360s -> 540s (Roadmap-only timing
+        # adjustments). The 540s step: live-observed a genuine (non-retry-
+        # storm) case where Anthropic's rewrite attempt ran its full
+        # configured ~120s before timing out, DeepInfra's fallback attempt
+        # then ALSO ran ~116s before timing out, and the two consecutive
+        # real provider slowdowns alone consumed nearly the whole remaining
+        # budget after a ~105s Writer call -- correct deadline-capping
+        # behavior (not a retry-storm bug, already fixed separately), just
+        # not enough total room for two genuinely slow providers back to
+        # back on one request. 540s keeps a 60s safety margin under the
+        # .NET side's HttpClient.Timeout for this endpoint (AiServiceClient.cs's
+        # shared 600s _http client, NOT the dedicated 1260s SE Documentation
+        # one) -- raising this value further requires raising that .NET
+        # timeout too, since HttpClient.Timeout is a hard ceiling .NET will
+        # abandon the connection at regardless of what Python is still doing.
+        # DeepInfra remains the paid primary provider and is allowed its
+        # full 240s single-attempt cap (ROADMAP_DEEPINFRA_TIMEOUT_SECONDS)
+        # even under a deadline (see routers/roadmap.py's
+        # _SEMANTIC_REVIEW_RESERVE_SECONDS = 60.0, a FLOOR guaranteeing the
+        # Writer can never consume the entire budget -- the Reviewer/Rewrite
+        # stage actually receives whatever's left beyond the Writer's real
+        # usage via cap_timeout_to_deadline, not a hard 60s ceiling of its
+        # own).
+        max_total_seconds=540.0,
         extra_rubric=_ROADMAP_EXTRA_RUBRIC,
     ),
     "SEDocumentationAgent": AgentReviewConfig(
@@ -1352,7 +1432,38 @@ AGENT_REGISTRY: dict[str, AgentReviewConfig] = {
         schema=IdeaGenerationCandidateSchema,
         max_rewrites=1,
         url_mode="no_urls_allowed",
-        allow_unreviewed_output=False,
+        # True (changed from False): the same genuine REVIEW-POLICY defect
+        # already fixed for FypMentorAgent/SEDocumentationAgent above (see
+        # FypMentorAgent's entry for the full rationale), applied here for
+        # the same reason. A Reviewer transport failure, timeout, or
+        # malformed Reviewer JSON is not evidence that the Writer's own
+        # candidate is invalid -- by the time state.last_structurally_valid_
+        # candidate is ever set (pipeline.py's run()), that candidate has
+        # ALREADY passed both the input and output LlmFirewall passes
+        # (including the no_urls_allowed check above -- unaffected by this
+        # flag either way) AND full IdeaGenerationCandidateSchema validation
+        # (exactly 4 ideas, no duplicate titles). Idea Generator's Writer
+        # stage is also the most exposed to a transient Reviewer outage of
+        # any agent using this flag: its Reviewer/Rewrite calls share the
+        # SAME "high" tier as the Writer (see llm_provider.py's
+        # _DEEPINFRA_TIER_TIMING["high"]) inside only a ~30s reserve
+        # (routers/ideas.py's _WRITER_TIME_RESERVE_SECONDS) carved out of
+        # the 120s total budget, after the Writer's own two sequential
+        # calls (search then generation) may have already used most of the
+        # remaining time. Without this flag, that single narrow window
+        # closing was enough to discard a real, personalized, live-search-
+        # grounded 4-idea batch for the generic hardcoded
+        # _fallback_raw_ideas() templates. This does not weaken
+        # ReviewDecisionEngine's actual rejection rubric in any way -- a
+        # Reviewer that DOES run and finds a genuine blocking issue still
+        # rejects/rewrites exactly as before; this only changes what
+        # happens when the Reviewer never produced a verdict at all. The
+        # API's outputReviewLevel ("structural_only" in this case, see
+        # pipeline.py's _output_review_level) and status
+        # ("review_unavailable") already exist specifically to label this
+        # case honestly -- routers/ideas.py never claims a Reviewer
+        # approved something it did not review.
+        allow_unreviewed_output=True,
         known_risky_claims=_IDEA_GENERATION_KNOWN_RISKY_CLAIMS,
         mandatory_fields=["ideas"],
         # Writer stage does a live search call plus a generation call before
@@ -1368,15 +1479,30 @@ AGENT_REGISTRY: dict[str, AgentReviewConfig] = {
         url_mode="no_urls_allowed",
         # False (unlike SE Documentation, which sets this True to cover a
         # 7-call/960s generation budget where a Reviewer timeout is a real
-        # risk). DNA's single-call, 90s budget doesn't share that risk
-        # profile, and this agent's rubric explicitly checks for
-        # skill-rating contradictions -- unreviewed output could show a
-        # contradictory analysis undetected, so it should never be shown
-        # without at least one successful semantic review.
+        # risk). This agent's rubric explicitly checks for skill-rating
+        # contradictions -- unreviewed output could show a contradictory
+        # analysis undetected, so it should never be shown without at least
+        # one successful semantic review. That makes the budget itself the
+        # only thing standing between a real reviewed analysis and the
+        # generic deterministic fallback -- see max_total_seconds below.
         allow_unreviewed_output=False,
         known_risky_claims=_DNA_KNOWN_RISKY_CLAIMS,
         mandatory_fields=["projectDNAType", "summary"],
-        max_total_seconds=90.0,
+        # Raised 90s -> 150s. The "DNA's single-call budget doesn't share
+        # SE Documentation's multi-call timeout risk" assumption that
+        # justified 90s turned out to be wrong live: measured end-to-end,
+        # a request needing one semantic rewrite ran Writer (~24s) ->
+        # Reviewer (~36s) -> Rewrite (~20s) -> re-Reviewer (timed out at
+        # ~91s, 1s past the 90s budget) -- a genuine 4-call DeepInfra
+        # sequence on the "standard" tier, not the single call the old
+        # budget assumed. Because allow_unreviewed_output=False here (by
+        # design, see above), that timeout didn't just run long -- it threw
+        # away an already-generated, real, personalized analysis for the
+        # generic template, for no reason other than running out of clock.
+        # 150s gives the same 4-call sequence real headroom (~150 - 24 =
+        # 126s left for Reviewer/Rewrite/re-Reviewer against a measured
+        # ~92s realistic total for those three calls).
+        max_total_seconds=150.0,
         extra_rubric=_DNA_EXTRA_RUBRIC,
     ),
     "IdeaComparisonAgent": AgentReviewConfig(
@@ -1434,7 +1560,27 @@ AGENT_REGISTRY: dict[str, AgentReviewConfig] = {
         # allowed_source_metadata with exactly those verified sources
         # before calling ReviewPipeline -- see market_footprint.py.
         url_mode="source_metadata_only",
-        allow_unreviewed_output=False,
+        # True (changed from False): the same review-POLICY fix already
+        # applied to FypMentorAgent/SEDocumentationAgent/ProjectIdeaAgent
+        # (see those entries for the full rationale). A Reviewer transport
+        # failure, timeout, or malformed Reviewer JSON is not evidence that
+        # the Writer's own candidate is invalid -- by the time
+        # state.last_structurally_valid_candidate is ever set (pipeline.py's
+        # run()), that candidate has ALREADY passed both the input and
+        # output LlmFirewall passes (including the source_metadata_only
+        # check above, now backed by the Gap 1 URL-stripping fix in
+        # market_footprint_agent.py) AND full MarketFootprintCandidateSchema
+        # validation (exactly the 3 required regions, every sourceUrl
+        # referenced by a region actually present in the verified sources
+        # list). This does not weaken ReviewDecisionEngine's actual
+        # rejection rubric in any way -- a Reviewer that DOES run and finds
+        # a genuine blocking issue still rejects/rewrites exactly as before;
+        # this only changes what happens when the Reviewer never produced a
+        # verdict at all. The API's outputReviewLevel ("structural_only" in
+        # this case, see pipeline.py's _output_review_level) and status
+        # ("review_unavailable") already exist specifically to label this
+        # case honestly.
+        allow_unreviewed_output=True,
         known_risky_claims=_MARKET_KNOWN_RISKY_CLAIMS,
         mandatory_fields=["bestLaunchMarket", "strategicRecommendation"],
         # Writer stage does 2 sequential calls (search, then generation)

@@ -78,11 +78,26 @@ _GENERIC_DELIVERABLE_STEMS: frozenset[str] = frozenset(_stem(w) for w in _GENERI
 # producer (see _ARTIFACT_CLASS_STEMS) -- a deliverable that matches none
 # of these still gets the plain distinguishing-stem overlap check with no
 # further restriction.
+#
+# "report" is checked BEFORE "model" -- confirmed live defect: "Model
+# evaluation report" contains the bare word "model", so with "model"
+# checked first it matched THAT class (via its single-word "model"
+# keyword) before ever reaching "report"'s far more specific multi-word
+# "evaluation report" phrase. That misclassification pushed a plain report
+# deliverable into "model"'s stricter, non-holistic matching path (see
+# _HOLISTIC_ARTIFACT_CLASSES below), making it fail deliverable coverage
+# whenever the LLM's own evaluation task happened to be worded in a way
+# that didn't also satisfy "model"'s combined topic-overlap +
+# producing-stem check -- observed rejecting a legitimate "Model
+# evaluation report" deliverable multiple times live. "report"'s keywords
+# are all specific enough (2-3 word phrases) that checking them first
+# cannot misclassify a genuine model-artifact deliverable, which never
+# contains those exact phrases.
 _ARTIFACT_CLASS_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("report", ("test report", "evaluation report", "evaluation results", "performance report")),
     ("model", ("model", "classifier", "classification", "predictor")),
     ("database", ("database", "schema", "ddl", "migration")),
     ("deployment", ("deployment", "container", "docker image", "release build", "package for submission")),
-    ("report", ("test report", "evaluation report", "evaluation results", "performance report")),
     ("service", ("api", "service", "endpoint", "microservice")),
     ("application", ("web application", "web app", "module", "screen", "page", "user interface", "dashboard")),
 )

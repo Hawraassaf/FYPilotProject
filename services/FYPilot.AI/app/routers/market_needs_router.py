@@ -63,9 +63,16 @@ def _build_review_context(request: MarketNeedsRequest) -> ReviewContext:
         agent_name="MarketNeedsAgent",
         trusted_system_instructions=(
             "MarketNeedsAgent: validates current market demand for a final "
-            "year project idea, grounded in live web research. The demand "
-            "score and score breakdown are always computed "
-            "deterministically, never written by the LLM."
+            "year project idea, grounded in live web research. The final "
+            "demand score is always computed deterministically (a fixed "
+            "Python weighted average of the score breakdown), and the "
+            "confidence score is always computed deterministically from "
+            "real source/domain counts -- neither is written by the LLM. "
+            "The per-category score breakdown values themselves (the "
+            "inputs the demand score is averaged from) ARE proposed by the "
+            "LLM, not computed deterministically: apply the same scrutiny "
+            "to whether each category score is actually supported by the "
+            "evidence as to any other claim in this output."
         ),
         trusted_structural_context=trusted_structural_context,
         untrusted_project_text=untrusted_project_text,

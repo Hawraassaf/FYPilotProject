@@ -492,7 +492,9 @@ public class RoadmapModel(
         var profile = await db.StudentProfiles
             .FirstOrDefaultAsync(p => p.UserId == userId);
 
-        var request = BuildRoadmapRequest(Idea, profile, studentSkills);
+        var teamSize = await GetActiveTeamSizeAsync(ProjectId);
+
+        var request = BuildRoadmapRequest(Idea, profile, teamSize, studentSkills);
 
         // Correlation id for this .NET-side attempt -- logged alongside every
         // failure branch below so a support/debug session can find the
@@ -572,6 +574,35 @@ public class RoadmapModel(
         if (response?.Roadmap == null)
         {
             ErrorMessage = "AI roadmap could not be generated. Make sure the Python AI service is running.";
+            return Page();
+        }
+
+        // The AI service can respond successfully (HTTP 200, Roadmap is
+        // non-null) while still only returning its generic deterministic
+        // fallback template -- e.g. every real provider timed out, or the
+        // Reviewer never completed in time (FallbackUsed=true / LlmUsed=
+        // false; see routers/roadmap.py's outputOrigin/fallbackUsed
+        // derivation). The catch blocks above already protect the existing
+        // roadmap against a fully failed AI call ("Your previous roadmap,
+        // if any, has been kept") -- this is the SAME protection for a
+        // call that succeeded at the HTTP level but produced nothing
+        // better than what's already saved. Without this check, every such
+        // regeneration attempt silently overwrote a real, previously
+        // AI-generated roadmap with the generic template even though
+        // nothing "failed" from the caller's point of view.
+        if (response.FallbackUsed)
+        {
+            logger.LogWarning(
+                "Roadmap generation for idea {IdeaId} returned only the fallback template "
+                    + "(reason: {FallbackReasonCode}) -- keeping the existing saved roadmap, if any "
+                    + "(correlation {CorrelationId}).",
+                Idea.Id,
+                response.FallbackReasonCode,
+                correlationId);
+
+            ErrorMessage = response.FallbackReasonMessage is { Length: > 0 }
+                ? $"AI roadmap generation did not produce a usable result ({response.FallbackReasonMessage}). Your previous roadmap, if any, has been kept. Please try again."
+                : "AI roadmap generation did not produce a usable result. Your previous roadmap, if any, has been kept. Please try again.";
             return Page();
         }
 
@@ -725,6 +756,40 @@ public class RoadmapModel(
                 });
         }
 
+        var orderedPhases = Phases.OrderBy(p => p.PhaseNumber).ToList();
+        var targetPhase = orderedPhases.FirstOrDefault(p => p.Id == phaseId);
+
+        if (targetPhase == null)
+        {
+            TempData["Error"] =
+                "This roadmap phase was not found or does not belong to your account.";
+
+            return RedirectToPage(new
+            {
+                projectId = ProjectId,
+                ideaId = Idea.Id
+            });
+        }
+
+        // Phases must be completed in order -- a later phase can only be
+        // marked done once every earlier-numbered phase already is. Checked
+        // server-side (not just hidden in the UI) since this is a POST
+        // handler reachable directly.
+        var hasIncompletePriorPhase = orderedPhases
+            .Any(p => p.PhaseNumber < targetPhase.PhaseNumber && !p.IsCompleted);
+
+        if (hasIncompletePriorPhase)
+        {
+            TempData["Error"] =
+                "Complete the earlier phases first before marking this one as done.";
+
+            return RedirectToPage(new
+            {
+                projectId = ProjectId,
+                ideaId = Idea.Id
+            });
+        }
+
         var updatedRows = await db.RoadmapPhases
             .Where(p =>
                 p.Id == phaseId &&
@@ -863,8 +928,39 @@ public class RoadmapModel(
                 .AsNoTracking()
                 .FirstOrDefaultAsync(p => p.UserId == userId);
 
-            WorkloadSummary = ComputeWorkloadSummary(Idea, profile, Phases, DeferredTasks);
+            var teamSize = await GetActiveTeamSizeAsync(ProjectId);
+
+            WorkloadSummary = ComputeWorkloadSummary(Idea, profile, teamSize, Phases, DeferredTasks);
         }
+    }
+
+    /// <summary>
+    /// Confirmed live defect: capacity/scheduling previously used
+    /// StudentProfile.TeamMembers -- a generic per-student planning field
+    /// that defaults to 1 and has no relationship to any specific project's
+    /// real roster -- instead of the actual project's assigned team. A
+    /// 2-person project's Roadmap always showed "Team of 1", scheduled
+    /// every task onto a single member, and (since the weekly capacity
+    /// formula and the aggregate utilization % both used the same wrong
+    /// team_size=1) produced an internally-consistent-looking but wrong
+    /// picture: a plausible aggregate utilization number alongside tasks
+    /// pushed beyond the project's target duration, because real capacity
+    /// was silently halved. Mirrors the exact "active member" definition
+    /// already used for project capacity checks elsewhere (see
+    /// MyProjects.cshtml.cs's activeMembersCount) -- Status == "active",
+    /// not IsArchived/LeftAt/RemovedAtUtc filtered, since those already
+    /// imply Status != "active" in practice but are not double-checked
+    /// here to stay consistent with the existing pattern.
+    /// </summary>
+    private async Task<int> GetActiveTeamSizeAsync(int projectId)
+    {
+        var activeMembersCount = await db.ProjectMembers
+            .AsNoTracking()
+            .CountAsync(member =>
+                member.ProjectId == projectId &&
+                member.Status == "active");
+
+        return Math.Max(1, activeMembersCount);
     }
 
     /// <summary>
@@ -996,11 +1092,12 @@ public class RoadmapModel(
     private static RoadmapWorkloadSummaryView ComputeWorkloadSummary(
         ProjectIdea idea,
         StudentProfile? profile,
+        int teamSize,
         List<RoadmapPhase> phases,
         List<RoadmapDeferredTaskView> deferredTasks
     )
     {
-        var teamSize = Math.Max(1, profile?.TeamMembers ?? 1);
+        teamSize = Math.Max(1, teamSize);
         var hoursPerWeek = Math.Max(1, profile?.AvailableHoursPerWeek ?? 10);
         var totalWeeks = Math.Max(1, idea.ExpectedDurationWeeks > 0 ? idea.ExpectedDurationWeeks : 10);
 
@@ -1153,6 +1250,7 @@ public class RoadmapModel(
     private static ProjectRoadmapRequest BuildRoadmapRequest(
         ProjectIdea idea,
         StudentProfile? profile,
+        int teamSize,
         List<StudentSkill> studentSkills
     )
     {
@@ -1185,7 +1283,7 @@ public class RoadmapModel(
             ExpectedDurationWeeks: expectedWeeks,
             Domain: idea.Domain,
             FinalDeliverables: idea.FinalDeliverables,
-            TeamSize: profile?.TeamMembers ?? 1,
+            TeamSize: Math.Max(1, teamSize),
             AvailableHoursPerWeek: profile?.AvailableHoursPerWeek ?? 10,
             StudentSkills: skillNames,
             SkillRatings: skillRatings

@@ -410,6 +410,10 @@ class IdeaComparisonAgent:
     ) -> tuple[dict[str, Any] | None, str | None, str | None, str | None]:
         prompt = self._build_prompt(request, feedback_idea_ids=feedback_idea_ids)
 
+        extra_kwargs: dict[str, Any] = {}
+        if deadline is not None:
+            extra_kwargs["cap_timeout_to_deadline"] = True
+
         try:
             result = self.provider_chain.generate_json(
                 prompt,
@@ -417,6 +421,7 @@ class IdeaComparisonAgent:
                 max_tokens=self._max_tokens_for(request),
                 deadline=deadline,
                 reporter=reporter,
+                **extra_kwargs,
             )
         except Exception as ex:
             logger.exception("Idea comparison generation failed.")

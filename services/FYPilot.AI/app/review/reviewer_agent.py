@@ -14,6 +14,7 @@ project text, and the conversation history are always presented as DATA in
 this prompt -- explicitly marked as such -- never as instructions.
 """
 
+import inspect
 import json
 from typing import TYPE_CHECKING, Any
 
@@ -22,6 +23,26 @@ from app.services.llm_provider import LLMResult, ProviderChain
 
 if TYPE_CHECKING:
     from app.jobs.reporter import ProgressReporter
+
+
+def _accepts_keyword(callable_obj: Any, keyword: str) -> bool:
+    """
+    Mirrors app.review.pipeline._accepts_keyword / app.services.llm_provider.
+    _accepts_keyword (duplicated here, not imported, to keep this module's
+    dependency surface unchanged) -- lets an older/minimal provider_chain
+    test double (e.g. idea_comparison_worker's job-path fakes, which predate
+    cap_timeout_to_deadline) keep working unchanged, while a real
+    ProviderChain (or an updated fake) gets the deadline-capping behavior.
+    """
+    try:
+        parameters = inspect.signature(callable_obj).parameters.values()
+    except (TypeError, ValueError):
+        return True
+
+    return any(
+        parameter.name == keyword or parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
 
 
 class ReviewerAgent:
@@ -134,4 +155,19 @@ Return exactly this JSON structure:
             mandatory_fields=mandatory_fields or [],
             extra_rubric=extra_rubric,
         )
-        return self.provider_chain.generate_json(prompt, use_search=False, deadline=deadline, reporter=reporter)
+        # cap_timeout_to_deadline=True: without this, `deadline` only decided
+        # whether to START the next fallback provider -- it never shortened
+        # an individual provider's own configured request timeout (DeepInfra/
+        # Groq default to 60s regardless of how little pipeline budget
+        # actually remained). Confirmed live: a Reviewer call built on this
+        # same "mentor" tier had no deadline-aware timeout clamping at all,
+        # unlike the Writer stage (see fyp_mentor_agent.py's chat(), which
+        # already opted in). This only ever SHORTENS the per-attempt timeout
+        # (never lengthens it -- see ProviderChain.generate_json's docstring),
+        # so it is safe for every agent that reaches this shared stage, not
+        # just Mentor Chat.
+        kwargs: dict[str, Any] = {"use_search": False, "deadline": deadline, "reporter": reporter}
+        if deadline is not None and _accepts_keyword(self.provider_chain.generate_json, "cap_timeout_to_deadline"):
+            kwargs["cap_timeout_to_deadline"] = True
+
+        return self.provider_chain.generate_json(prompt, **kwargs)

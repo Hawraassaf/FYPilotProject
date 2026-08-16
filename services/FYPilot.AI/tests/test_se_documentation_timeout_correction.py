@@ -320,21 +320,30 @@ def test_all_sections_timing_out_produces_writer_budget_exceeded_not_a_disguised
 
 def test_other_agents_registry_deadlines_are_unchanged():
     assert get_agent_config("FypMentorAgent").max_total_seconds == 90.0
-    # ProjectRoadmapAgent is intentionally 360.0 now (raised 90s -> 240s ->
-    # 360s across successive Roadmap-only timeout adjustments -- see
+    # ProjectRoadmapAgent is intentionally 540.0 now (raised 90s -> 240s ->
+    # 360s -> 540s across successive Roadmap-only timeout adjustments -- see
     # registry.py's own comment trail on this field and
     # tests/test_roadmap_timeout_adjustment.py, the authoritative test for
-    # this progression, which already expects 360.0).
-    assert get_agent_config("ProjectRoadmapAgent").max_total_seconds == 360.0
+    # this progression, which already expects 540.0).
+    assert get_agent_config("ProjectRoadmapAgent").max_total_seconds == 540.0
     assert get_agent_config("ProjectIdeaAgent").max_total_seconds == 120.0
-    assert get_agent_config("ProjectDNAAgent").max_total_seconds == 90.0
+    # ProjectDNAAgent is intentionally 150.0, not 90.0 -- a later, unrelated
+    # freeze-audit fix (see test_project_dna_writer_deadline.py's
+    # OtherAgentRegistryTimingUnchangedTests for the live-measured
+    # rationale), not something this SE Documentation task touched.
+    assert get_agent_config("ProjectDNAAgent").max_total_seconds == 150.0
     assert get_agent_config("IdeaComparisonAgent").max_total_seconds == 45.0
 
 
 def test_other_deepinfra_tiers_are_unchanged():
-    # "standard" (market needs, project DNA, market footprint): still no
-    # override -- DeepInfraProvider's own 60s/SDK-default-retries apply.
-    assert _deepinfra_timing_for_tier("standard") == {}
+    # "standard" (market needs, project DNA, market footprint): a later,
+    # unrelated freeze-audit fix (llm_provider.py's _DEEPINFRA_TIER_TIMING
+    # "standard" entry) closed the same SDK-default-retry-multiplication bug
+    # already fixed here for "mentor"/"high" -- "standard" is also the
+    # DEFAULT tier, so this now protects every agent that never specifies
+    # one. timeout_seconds stays None (each provider's own default); only
+    # the hidden retry multiplier (max_retries=0) was added.
+    assert _deepinfra_timing_for_tier("standard") == {"timeout_seconds": None, "max_retries": 0}
     # "high" (Project Roadmap, Idea Generator): untouched.
     assert _deepinfra_model_for_tier("high") == "anthropic/claude-opus-4-8"
     # "roadmap": intentionally 280.0 now (raised alongside the registry

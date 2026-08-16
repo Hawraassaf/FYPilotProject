@@ -21,7 +21,16 @@ class DefenseEvaluatorAgent:
         self.last_provider: Optional[str] = None
         self.last_model_used: Optional[str] = None
 
-    def evaluate_answer(self, request: Any) -> Dict[str, Any]:
+    def evaluate_answer(
+        self, request: Any, *, deadline: float | None = None,
+    ) -> Dict[str, Any]:
+        """
+        ``deadline``, when supplied, is an absolute time.monotonic() cutoff
+        for this Writer call -- see routers/defense_simulator.py's
+        writer_deadline. Forwarded to generate_json's ``deadline``/
+        ``cap_timeout_to_deadline`` kwargs, same pattern as
+        DefenseQuestionAgent.generate_questions.
+        """
         self.last_error = None
         self.last_raw_response = None
         self.last_provider = None
@@ -29,8 +38,14 @@ class DefenseEvaluatorAgent:
 
         prompt = self._build_prompt(request)
 
+        extra_kwargs: Dict[str, Any] = {}
+        if deadline is not None:
+            extra_kwargs["cap_timeout_to_deadline"] = True
+
         try:
-            result = self.provider_chain.generate_json(prompt, use_search=False)
+            result = self.provider_chain.generate_json(
+                prompt, use_search=False, deadline=deadline, **extra_kwargs,
+            )
 
             self.last_provider = (
                 result.provider if result.provider != "none" else None

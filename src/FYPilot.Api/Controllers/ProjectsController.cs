@@ -191,6 +191,7 @@ public class ProjectsController(
         if (request.Title != null)
         {
             project.Title = request.Title.Trim();
+            project.IsTitleCustom = true;
         }
 
         if (request.Description != null)

@@ -179,6 +179,10 @@ class _CapturingAgent:
         self.last_search_firewall_blocked = False
         self.last_search_firewall_flags: list = []
         self.last_fallback_reason_code: str | None = None
+        self.last_search_intent: str | None = None
+        self.last_search_query: str | None = None
+        self.last_search_quality: str | None = None
+        self.last_search_classification_source: str | None = None
         self.captured_writer_deadline: float | None | str = "not called"
 
     def try_short_circuit_answer(self, request):
@@ -254,7 +258,17 @@ class RouterGlobalDeadlineTests(unittest.TestCase):
 
 
 class ProviderDeadlinePropagationTests(unittest.TestCase):
-    def test_provider_receives_writer_budget_seconds_no_greater_than_remaining_deadline(self):
+    # search_planner.classify_search_intent_via_ai patched out below: this
+    # class tests the WRITER's own generation-provider-cascade deadline math
+    # in isolation, a distinct concern from search-intent classification
+    # (see test_mentor_ai_search_fallback_integration.py for that). Without
+    # this, _ORDINARY_MESSAGE (deliberately chosen to not match the
+    # deterministic classifier either) would also trigger the AI fallback's
+    # OWN extra generate_json call against these same fake providers,
+    # shifting call_count by one and coupling an unrelated feature into
+    # these assertions.
+    @patch("app.agents.fyp_mentor_agent.classify_search_intent_via_ai", return_value=None)
+    def test_provider_receives_writer_budget_seconds_no_greater_than_remaining_deadline(self, _mock_ai_fallback):
         provider = _FakeProvider("fake-deepinfra")
         agent = _agent_with_fake_providers(provider)
 
@@ -266,7 +280,8 @@ class ProviderDeadlinePropagationTests(unittest.TestCase):
         self.assertLessEqual(provider.received_writer_budget_seconds, 12.0)
         self.assertGreater(provider.received_writer_budget_seconds, 12.0 - 2.0)  # test-overhead margin
 
-    def test_no_deadline_means_no_writer_budget_forwarded(self):
+    @patch("app.agents.fyp_mentor_agent.classify_search_intent_via_ai", return_value=None)
+    def test_no_deadline_means_no_writer_budget_forwarded(self, _mock_ai_fallback):
         provider = _FakeProvider("fake-deepinfra")
         agent = _agent_with_fake_providers(provider)
 
@@ -357,7 +372,8 @@ class FallbackProviderSkippingTests(unittest.TestCase):
 
 
 class FallbackProviderRunsWithEnoughTimeTests(unittest.TestCase):
-    def test_second_provider_runs_when_first_fails_and_time_remains(self):
+    @patch("app.agents.fyp_mentor_agent.classify_search_intent_via_ai", return_value=None)
+    def test_second_provider_runs_when_first_fails_and_time_remains(self, _mock_ai_fallback):
         first = _FakeProvider("fake-first", ok=False)
         second = _FakeProvider("fake-second", ok=True)
         agent = _agent_with_fake_providers(first, second)
@@ -572,7 +588,8 @@ class BackwardCompatibilityTests(unittest.TestCase):
         self.assertEqual(names, ["DeepInfraProvider", "GroqProvider", "OllamaProvider"])
 
     # Test 19: retry counts remain unchanged.
-    def test_no_extra_generation_attempts_are_added_beyond_the_configured_providers(self):
+    @patch("app.agents.fyp_mentor_agent.classify_search_intent_via_ai", return_value=None)
+    def test_no_extra_generation_attempts_are_added_beyond_the_configured_providers(self, _mock_ai_fallback):
         first = _FakeProvider("fake-first", ok=False)
         second = _FakeProvider("fake-second", ok=False)
         agent = _agent_with_fake_providers(first, second)
@@ -589,7 +606,8 @@ class BackwardCompatibilityTests(unittest.TestCase):
 
 
 class LegacyProviderChainCompatibilityTests(unittest.TestCase):
-    def test_old_style_provider_chain_without_deadline_support_still_works(self):
+    @patch("app.agents.fyp_mentor_agent.classify_search_intent_via_ai", return_value=None)
+    def test_old_style_provider_chain_without_deadline_support_still_works(self, _mock_ai_fallback):
         class _StrictLegacyProviderChain:
             """Matches the PRE-deadline generate_json/search_web signatures
             exactly -- neither accepts `deadline`. Proves that supplying a

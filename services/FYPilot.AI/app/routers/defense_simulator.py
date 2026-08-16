@@ -1,3 +1,4 @@
+import time
 from datetime import datetime
 from typing import Any, Dict
 
@@ -14,6 +15,18 @@ from app.review.pipeline import ReviewPipeline
 from app.review.response import build_review_response
 
 router = APIRouter(tags=["Defense Simulator"])
+
+# Reserved for the Reviewer/Rewrite stages, mirroring Mentor Chat's
+# identical split (routers/fyp_chat.py's _WRITER_TIME_RESERVE_SECONDS =
+# 25.0 out of the same 90s max_total_seconds registry budget both
+# DefenseQuestionAgent and DefenseEvaluatorAgent share). Previously this
+# router never computed a deadline at all -- the Writer closure passed to
+# pipeline.run() was a zero-argument lambda around a zero-argument agent
+# method, so guarded_call's deadline-detection check never found a
+# ``deadline`` parameter to thread through, and the Writer stage's
+# DeepInfra/Groq calls ran with no deadline and no cap_timeout_to_deadline
+# clamping at all -- every other router in this service threads one.
+_WRITER_TIME_RESERVE_SECONDS = 25.0
 
 
 def _build_questions_review_context(request: GenerateDefenseQuestionsRequest) -> ReviewContext:
@@ -126,11 +139,16 @@ def generate_defense_questions(
     orchestrator = DefenseSimulatorOrchestrator()
     context = _build_questions_review_context(request)
     pipeline = ReviewPipeline("DefenseQuestionAgent", tier="light")
+
+    global_deadline = time.monotonic() + pipeline.config.max_total_seconds
+    writer_deadline = global_deadline - _WRITER_TIME_RESERVE_SECONDS
+
     result = pipeline.run(
-        lambda: orchestrator.generate_questions_candidate(request),
+        lambda: orchestrator.generate_questions_candidate(request, deadline=writer_deadline),
         context,
         writer_trusted_parts=context.trusted_text_fields(),
         writer_untrusted_parts=context.untrusted_text_fields(),
+        deadline=global_deadline,
     )
 
     if result.usable:
@@ -162,11 +180,16 @@ def evaluate_defense_answer(
     orchestrator = DefenseSimulatorOrchestrator()
     context = _build_evaluation_review_context(request)
     pipeline = ReviewPipeline("DefenseEvaluatorAgent", tier="light")
+
+    global_deadline = time.monotonic() + pipeline.config.max_total_seconds
+    writer_deadline = global_deadline - _WRITER_TIME_RESERVE_SECONDS
+
     result = pipeline.run(
-        lambda: orchestrator.generate_evaluation_candidate(request),
+        lambda: orchestrator.generate_evaluation_candidate(request, deadline=writer_deadline),
         context,
         writer_trusted_parts=context.trusted_text_fields(),
         writer_untrusted_parts=context.untrusted_text_fields(),
+        deadline=global_deadline,
     )
 
     if result.usable:

@@ -191,6 +191,19 @@ public class IdeasController(
          * another project owned by the same student.
          */
         project.ProjectIdeaId = idea.Id;
+
+        /*
+         * The official selected idea defines the project title
+         * (matches IdeaGenerator/IdeaComparison OnPostSelectAsync).
+         * The first idea ever attached always claims the title; after
+         * that, a manual rename (IsTitleCustom) is respected.
+         */
+        if (!previousIdeaId.HasValue || !project.IsTitleCustom)
+        {
+            project.Title = idea.Title;
+            project.IsTitleCustom = false;
+        }
+
         project.UpdatedAt = DateTime.UtcNow;
 
         await ProjectIdeaSelectionSync.SyncSelectedFlagAsync(

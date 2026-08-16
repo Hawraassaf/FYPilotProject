@@ -18,69 +18,9 @@
         .Where(idea => !Model.LatestBatchIdeaIds.Contains(idea.Id))
         .ToList();
 
-    var metricDefinitions = new[]
-    {
-        new
-        {
-            Key = "feasibility",
-            Label = "Feasibility",
-            Icon = "bar-chart-line",
-            Description = "How achievable the idea is for your skills, resources and project context."
-        },
-        new
-        {
-            Key = "innovation",
-            Label = "Innovation",
-            Icon = "lightbulb",
-            Description = "How original and differentiated the idea is."
-        },
-        new
-        {
-            Key = "market",
-            Label = "Market Demand",
-            Icon = "shop",
-            Description = "How useful and relevant the idea is for real users and the market."
-        },
-        new
-        {
-            Key = "overall",
-            Label = "Overall",
-            Icon = "award",
-            Description = "The rounded average of the evaluated generated scores."
-        }
-    };
 
     var scorecardsByIdea = Model.Scorecards.ToDictionary(card => card.IdeaId);
 
-    var comparisonData = ideas.Select(idea =>
-    {
-        scorecardsByIdea.TryGetValue(idea.Id, out var scorecard);
-
-        var feasibility = scorecard?.Cards
-            .FirstOrDefault(card => card.Key == "feasibility")?.Score;
-
-        var innovation = scorecard?.Cards
-            .FirstOrDefault(card => card.Key == "innovation")?.Score;
-
-        var market = scorecard?.Cards
-            .FirstOrDefault(card => card.Key == "market")?.Score;
-
-        return new
-        {
-            id = idea.Id,
-            title = idea.Title,
-            domain = idea.Domain,
-            difficulty = idea.DifficultyLevel,
-            selected = selectedIdeaId == idea.Id,
-            scores = new Dictionary<string, int?>
-            {
-                ["feasibility"] = feasibility,
-                ["innovation"] = innovation,
-                ["market"] = market,
-                ["overall"] = scorecard?.OverallScore
-            }
-        };
-    }).ToList();
 }
 
 @if (!ideas.Any())
@@ -716,245 +656,6 @@ else
             </section>
         }
 
-        <section class="ui-panel matrix-panel">
-            <div class="ui-panel-heading matrix-heading">
-                <div class="step-heading">
-                    <span class="step-number">2</span>
-                    <div>
-                        <span class="ui-eyebrow">Compare saved evidence</span>
-                        <h2>Choose what matters most</h2>
-                        <p>
-                            Turn metrics on or off. The recommendation below updates instantly
-                            using only saved Idea Generator percentages.
-                        </p>
-                    </div>
-                </div>
-
-                <button type="button"
-                        class="text-action reset-action"
-                        id="ic3ResetMetrics">
-                    <i class="bi bi-arrow-counterclockwise"></i>
-                    Reset metrics
-                </button>
-            </div>
-
-            <div class="metric-toolbar">
-                <div class="metric-tabs" id="ic3MetricTabs">
-                    @foreach (var metric in metricDefinitions)
-                    {
-                        var active = metric.Key is "feasibility" or "innovation";
-
-                        <button type="button"
-                                class="metric-tab @(active ? "active" : "")"
-                                data-metric="@metric.Key"
-                                title="@metric.Description">
-                            <span>
-                                <i class="bi bi-@metric.Icon"></i>
-                            </span>
-                            <strong>@metric.Label</strong>
-                            <i class="bi bi-check-circle-fill metric-check"></i>
-                        </button>
-                    }
-                </div>
-
-                <div class="selected-metrics" id="ic3SelectedSummary">
-                    Showing: <strong>Feasibility</strong> and <strong>Innovation</strong>
-                </div>
-            </div>
-
-            <div class="score-matrix-shell">
-                <table class="score-matrix">
-                    <thead>
-                        <tr>
-                            <th class="idea-column">Idea</th>
-
-                            @foreach (var metric in metricDefinitions)
-                            {
-                                var visible = metric.Key is "feasibility" or "innovation";
-
-                                <th class="metric-column @(visible ? "" : "ic-hidden")"
-                                    data-metric-column="@metric.Key">
-                                    <i class="bi bi-@metric.Icon"></i>
-                                    @metric.Label
-                                </th>
-                            }
-
-                            <th class="action-column">Decision</th>
-                        </tr>
-                    </thead>
-
-                    <tbody>
-                        @for (var i = 0; i < ideas.Count; i++)
-                        {
-                            var idea = ideas[i];
-                            var isSelected = selectedIdeaId == idea.Id;
-
-                            scorecardsByIdea.TryGetValue(idea.Id, out var ideaScorecard);
-
-                            <tr class="idea-matrix-row @(isSelected ? "selected" : "")"
-                                data-idea-row="@idea.Id">
-
-                                <td class="idea-cell">
-                                    <div class="idea-index">@(i + 1)</div>
-
-                                    <div>
-                                        <div class="idea-cell-title">
-                                            <h3>@idea.Title</h3>
-
-                                            @if (isSelected)
-                                            {
-                                                <span class="official-pill">
-                                                    <i class="bi bi-check-circle-fill"></i>
-                                                    Official
-                                                </span>
-                                            }
-                                        </div>
-
-                                        <div class="idea-cell-meta">
-                                            <span>
-                                                <i class="bi bi-grid"></i>
-                                                @(string.IsNullOrWhiteSpace(idea.Domain)
-                                                    ? "General"
-                                                    : idea.Domain)
-                                            </span>
-                                            <span>
-                                                <i class="bi bi-speedometer2"></i>
-                                                @idea.DifficultyLevel
-                                            </span>
-
-                                            @if (ideaScorecard?.IsLegacyScoring == true)
-                                            {
-                                                <span class="legacy-pill"
-                                                      title="This idea was generated using the previous scoring method.">
-                                                    Previous score version
-                                                </span>
-                                            }
-                                        </div>
-                                    </div>
-                                </td>
-
-                                @foreach (var metric in metricDefinitions)
-                                {
-                                    var visible = metric.Key is "feasibility" or "innovation";
-
-                                    int? score;
-                                    string label;
-                                    string reason;
-                                    string source;
-
-                                    if (metric.Key == "overall")
-                                    {
-                                        score = ideaScorecard?.OverallScore;
-                                        label = ideaScorecard?.OverallLabel ?? "Not evaluated";
-                                        source = "FYPilot saved-score average";
-
-                                        reason = score.HasValue
-                                            ? ideaScorecard?.OverallPartialNote
-                                                ?? "Rounded average of the saved Innovation, Feasibility and Market Demand scores."
-                                            : "Not enough evaluated scores are saved for this idea.";
-                                    }
-                                    else
-                                    {
-                                        var storedScore = ideaScorecard?.Cards
-                                            .FirstOrDefault(card => card.Key == metric.Key);
-
-                                        score = storedScore?.Score;
-                                        label = storedScore?.Label ?? "Not evaluated";
-                                        reason = storedScore?.Reason
-                                            ?? "This score was not evaluated for this idea.";
-                                        source = "Idea Generator";
-                                    }
-
-                                    <td class="score-cell @(visible ? "" : "ic-hidden")"
-                                        data-metric-cell="@metric.Key"
-                                        data-score="@(score?.ToString() ?? "")">
-
-                                        <div class="score-cell-card">
-                                            <div class="score-cell-top">
-                                                <strong>
-                                                    @(score.HasValue ? $"{score}%" : "—")
-                                                </strong>
-                                                <span>@label</span>
-                                            </div>
-
-                                            <div class="metric-track metric-track-light">
-                                                <span style="width:@(score ?? 0)%"></span>
-                                            </div>
-
-                                            <details class="score-explainer">
-                                                <summary>
-                                                    Why this score?
-                                                    <i class="bi bi-chevron-down"></i>
-                                                </summary>
-                                                <div>
-                                                    <small>Source</small>
-                                                    <strong>@source</strong>
-                                                    <p>@reason</p>
-                                                </div>
-                                            </details>
-                                        </div>
-                                    </td>
-                                }
-
-                                <td class="decision-cell">
-                                    <form method="post" asp-page-handler="Select">
-                                        @Html.AntiForgeryToken()
-                                        <input type="hidden" name="projectId" value="@Model.ProjectId" />
-                                        <input type="hidden" name="ideaId" value="@idea.Id" />
-
-                                        <button type="submit"
-                                                class="decision-btn @(isSelected ? "selected" : "")"
-                                                disabled="@(isSelected ? "disabled" : null)">
-                                            @if (isSelected)
-                                            {
-                                                <i class="bi bi-check-circle-fill"></i>
-                                                <span>Selected</span>
-                                            }
-                                            else
-                                            {
-                                                <i class="bi bi-circle"></i>
-                                                <span>Select</span>
-                                            }
-                                        </button>
-                                    </form>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-
-            <div class="metric-recommendation">
-                <div class="metric-recommendation-icon">
-                    <i class="bi bi-sliders2"></i>
-                </div>
-
-                <div class="metric-recommendation-copy">
-                    <span class="ui-eyebrow">Best match for selected metrics</span>
-                    <h3 id="ic3RecommendedTitle">Calculating best match…</h3>
-                    <p id="ic3RecommendedText">
-                        The result updates as you change the active metrics.
-                    </p>
-                </div>
-
-                <form method="post"
-                      asp-page-handler="Select"
-                      class="metric-recommendation-action">
-                    @Html.AntiForgeryToken()
-                    <input type="hidden" name="projectId" value="@Model.ProjectId" />
-                    <input type="hidden"
-                           name="ideaId"
-                           id="ic3RecommendedIdeaId"
-                           value="@ideas.First().Id" />
-
-                    <button type="submit"
-                            class="ui-btn ui-btn-primary">
-                        <i class="bi bi-check2-circle"></i>
-                        Select recommended
-                    </button>
-                </form>
-            </div>
-        </section>
     </main>
 }
 
@@ -3052,175 +2753,675 @@ else
             background: #EEF2F6 !important;
         }
 
+
+        /* =========================================================
+           STEP 2 REDESIGN — compact decision list
+           Replaces the dense score-card matrix visually.
+           ========================================================= */
+
+        .comparison-redesign-panel {
+            overflow: hidden;
+        }
+
+        .comparison-redesign-panel .matrix-heading {
+            margin-bottom: 1rem;
+        }
+
+        .priority-panel {
+            display: grid;
+            grid-template-columns: minmax(250px, .9fr) minmax(420px, 1.35fr);
+            gap: .8rem 1.25rem;
+            align-items: center;
+            padding: 1rem;
+            border: 1px solid #DEE5ED;
+            border-radius: 16px;
+            background: #F8FAFC;
+        }
+
+        .priority-copy h3 {
+            margin: 0;
+            color: #111827;
+            font-size: 1rem;
+            font-weight: 800;
+            letter-spacing: -.02em;
+        }
+
+        .priority-copy p {
+            max-width: 560px;
+            margin: .3rem 0 0;
+            color: #64748B;
+            font-size: .7rem;
+            line-height: 1.5;
+        }
+
+        .priority-controls {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: .55rem;
+        }
+
+        .priority-pills {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+            gap: .45rem;
+        }
+
+        .priority-pill {
+            min-height: 40px;
+            display: inline-flex;
+            align-items: center;
+            gap: .4rem;
+            padding: .5rem .7rem;
+            color: #5F6F84;
+            font-size: .67rem;
+            font-weight: 800;
+            border: 1px solid #D8E0E9;
+            border-radius: 11px;
+            background: #FFFFFF;
+            transition: border-color .15s ease, background .15s ease, color .15s ease, transform .15s ease;
+        }
+
+        .priority-pill:hover {
+            transform: translateY(-1px);
+            color: #28385E;
+            border-color: #B9C7D6;
+        }
+
+        .priority-pill.active {
+            color: #FFFFFF;
+            border-color: #28385E;
+            background: #28385E;
+        }
+
+        .priority-pill .priority-check {
+            display: none;
+        }
+
+        .priority-pill.active .priority-check {
+            display: inline-block;
+        }
+
+        .priority-reset {
+            min-height: 40px;
+            display: inline-flex;
+            align-items: center;
+            gap: .35rem;
+            flex: 0 0 auto;
+            padding: .5rem .65rem;
+            color: #516C8D;
+            font-size: .64rem;
+            font-weight: 800;
+            border: 0;
+            background: transparent;
+        }
+
+        .priority-reset:hover {
+            color: #28385E;
+        }
+
+        .priority-summary {
+            grid-column: 1 / -1;
+            padding-top: .7rem;
+            color: #748196;
+            font-size: .64rem;
+            border-top: 1px solid #E5EAF0;
+        }
+
+        .priority-summary strong {
+            color: #28385E;
+        }
+
+        .quick-match-banner {
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr) auto;
+            align-items: center;
+            gap: .85rem;
+            margin: .85rem 0;
+            padding: .9rem 1rem;
+            border: 1px solid #D7E0E9;
+            border-radius: 16px;
+            background:
+                radial-gradient(circle at 92% 10%, rgba(81, 108, 141, .10), transparent 30%),
+                linear-gradient(135deg, #F4F7FA 0%, #FFFFFF 76%);
+        }
+
+        .quick-match-icon {
+            width: 42px;
+            height: 42px;
+            display: grid;
+            place-items: center;
+            color: #FFFFFF;
+            border-radius: 12px;
+            background: #28385E;
+            box-shadow: 0 8px 18px rgba(40, 56, 94, .15);
+        }
+
+        .quick-match-copy .ui-eyebrow {
+            margin-bottom: .15rem;
+        }
+
+        .quick-match-copy h3 {
+            margin: 0;
+            color: #111827;
+            font-size: .98rem;
+            font-weight: 820;
+            letter-spacing: -.02em;
+        }
+
+        .quick-match-copy p {
+            margin: .2rem 0 0;
+            color: #64748B;
+            font-size: .66rem;
+            line-height: 1.45;
+        }
+
+        .comparison-list-shell {
+            overflow: hidden;
+            border: 1px solid #DEE5ED;
+            border-radius: 17px;
+            background: #FFFFFF;
+            box-shadow: 0 8px 22px rgba(40, 56, 94, .04);
+        }
+
+        .comparison-list-header {
+            display: grid;
+            grid-template-columns: minmax(280px, 1.35fr) minmax(430px, 1.55fr) 92px 110px;
+            gap: .85rem;
+            align-items: center;
+            padding: .72rem 1rem;
+            color: #6D7A8E;
+            font-size: .58rem;
+            font-weight: 850;
+            letter-spacing: .06em;
+            text-transform: uppercase;
+            border-bottom: 1px solid #E6EBF1;
+            background: #F7F9FC;
+        }
+
+        .comparison-list-header span:nth-child(3),
+        .comparison-list-header span:nth-child(4) {
+            text-align: center;
+        }
+
+        .comparison-list {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .comparison-idea-row {
+            position: relative;
+            border-bottom: 1px solid #E8EDF2;
+            background: #FFFFFF;
+            transition: background .15s ease, box-shadow .15s ease;
+        }
+
+        .comparison-idea-row:last-child {
+            border-bottom: 0;
+        }
+
+        .comparison-idea-row:hover {
+            background: #FBFCFE;
+        }
+
+        .comparison-idea-row.best-match {
+            background: #F4F7FA;
+            box-shadow: inset 4px 0 0 #516C8D;
+        }
+
+        .comparison-idea-row.selected {
+            background: #F1F4F8;
+            box-shadow: inset 4px 0 0 #28385E;
+        }
+
+        .comparison-idea-row.selected.best-match {
+            background: #EEF2F6;
+            box-shadow:
+                inset 4px 0 0 #28385E,
+                inset 7px 0 0 #A9B8C8;
+        }
+
+        .comparison-row-main {
+            display: grid;
+            grid-template-columns: minmax(280px, 1.35fr) minmax(430px, 1.55fr) 92px 110px;
+            gap: .85rem;
+            align-items: center;
+            padding: .9rem 1rem .72rem;
+        }
+
+        .comparison-identity {
+            min-width: 0;
+            display: flex;
+            align-items: flex-start;
+            gap: .7rem;
+        }
+
+        .comparison-index {
+            width: 31px;
+            height: 31px;
+            display: grid;
+            place-items: center;
+            flex: 0 0 auto;
+            color: #28385E;
+            font-size: .67rem;
+            font-weight: 850;
+            border-radius: 9px;
+            background: #EEF2F6;
+        }
+
+        .comparison-identity-copy {
+            min-width: 0;
+        }
+
+        .comparison-title-line {
+            display: flex;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            gap: .38rem .5rem;
+        }
+
+        .comparison-title-line h3 {
+            min-width: 0;
+            margin: 0;
+            color: #111827;
+            font-size: .78rem;
+            line-height: 1.35;
+            font-weight: 800;
+        }
+
+        .comparison-badges {
+            display: inline-flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: .28rem;
+        }
+
+        .best-match-pill {
+            display: none;
+            align-items: center;
+            gap: .25rem;
+            padding: .18rem .42rem;
+            color: #28385E;
+            font-size: .52rem;
+            font-weight: 850;
+            border: 1px solid #CFDAE6;
+            border-radius: 999px;
+            background: #FFFFFF;
+        }
+
+        .comparison-idea-row.best-match .best-match-pill {
+            display: inline-flex;
+        }
+
+        .comparison-meta {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: .35rem .65rem;
+            margin-top: .35rem;
+            color: #718096;
+            font-size: .59rem;
+        }
+
+        .comparison-meta span {
+            display: inline-flex;
+            align-items: center;
+            gap: .25rem;
+        }
+
+        .compact-score-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: .55rem;
+        }
+
+        .compact-score {
+            min-width: 0;
+            padding: .52rem .58rem;
+            border: 1px solid #E2E8EF;
+            border-radius: 11px;
+            background: #FFFFFF;
+        }
+
+        .compact-score-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .45rem;
+        }
+
+        .compact-score-top > span {
+            min-width: 0;
+            display: inline-flex;
+            align-items: center;
+            gap: .28rem;
+            overflow: hidden;
+            color: #637287;
+            font-size: .57rem;
+            font-weight: 760;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+
+        .compact-score-top > span i {
+            color: #516C8D;
+        }
+
+        .compact-score-top strong {
+            flex: 0 0 auto;
+            color: #28385E;
+            font-size: .78rem;
+            font-weight: 850;
+        }
+
+        .compact-score-track {
+            height: 4px;
+            margin: .36rem 0 .28rem;
+            overflow: hidden;
+            border-radius: 999px;
+            background: #EAF0F5;
+        }
+
+        .compact-score-track span {
+            display: block;
+            height: 100%;
+            border-radius: inherit;
+            background: #8FA5BE;
+        }
+
+        .compact-score small {
+            display: block;
+            overflow: hidden;
+            color: #8995A5;
+            font-size: .5rem;
+            font-weight: 700;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+
+        .overall-score-box {
+            min-height: 58px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: .45rem;
+            text-align: center;
+            border: 1px solid #D9E2EB;
+            border-radius: 12px;
+            background: #F8FAFC;
+        }
+
+        .overall-score-box span {
+            color: #758297;
+            font-size: .5rem;
+            font-weight: 850;
+            letter-spacing: .04em;
+            text-transform: uppercase;
+        }
+
+        .overall-score-box strong {
+            margin-top: .08rem;
+            color: #28385E;
+            font-size: 1rem;
+            line-height: 1;
+            font-weight: 900;
+        }
+
+        .overall-score-box small {
+            margin-top: .1rem;
+            color: #9AA5B3;
+            font-size: .46rem;
+            font-weight: 700;
+        }
+
+        .comparison-decision {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .comparison-decision .decision-btn {
+            width: 100%;
+            min-width: 0;
+        }
+
+        .idea-score-details {
+            margin: 0 .95rem .8rem 3.95rem;
+            border-top: 1px dashed #DCE4EC;
+        }
+
+        .idea-score-details summary {
+            display: inline-flex;
+            align-items: center;
+            gap: .4rem;
+            padding: .58rem 0 .15rem;
+            color: #516C8D;
+            font-size: .6rem;
+            font-weight: 800;
+            cursor: pointer;
+            list-style: none;
+        }
+
+        .idea-score-details summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .idea-score-details summary > span {
+            display: inline-flex;
+            align-items: center;
+            gap: .32rem;
+        }
+
+        .idea-score-details .details-chevron {
+            transition: transform .16s ease;
+        }
+
+        .idea-score-details[open] .details-chevron {
+            transform: rotate(180deg);
+        }
+
+        .score-reason-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: .55rem;
+            padding: .65rem 0 .15rem;
+        }
+
+        .score-reason-card {
+            padding: .72rem;
+            border: 1px solid #E2E8EF;
+            border-radius: 12px;
+            background: #FFFFFF;
+        }
+
+        .score-reason-heading {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: .55rem;
+        }
+
+        .score-reason-heading span {
+            display: inline-flex;
+            align-items: center;
+            gap: .32rem;
+            color: #28385E;
+            font-size: .64rem;
+            font-weight: 820;
+        }
+
+        .score-reason-heading span i {
+            color: #516C8D;
+        }
+
+        .score-reason-heading strong {
+            color: #28385E;
+            font-size: .72rem;
+        }
+
+        .score-reason-meta {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: .3rem;
+            margin-top: .35rem;
+        }
+
+        .score-reason-meta span {
+            padding: .17rem .38rem;
+            color: #6E7D90;
+            font-size: .48rem;
+            font-weight: 760;
+            border-radius: 999px;
+            background: #F1F4F7;
+        }
+
+        .score-reason-card p {
+            margin: .45rem 0 0;
+            color: #5F6E82;
+            font-size: .58rem;
+            line-height: 1.48;
+        }
+
+        @@media (max-width: 1180px) {
+            .comparison-list-header {
+                display: none;
+            }
+
+            .comparison-row-main {
+                grid-template-columns: minmax(250px, 1.1fr) minmax(360px, 1.5fr) 80px;
+            }
+
+            .comparison-decision {
+                grid-column: 1 / -1;
+                justify-content: flex-end;
+            }
+
+            .comparison-decision .decision-btn {
+                width: auto;
+                min-width: 110px;
+            }
+        }
+
+        @@media (max-width: 900px) {
+            .priority-panel {
+                grid-template-columns: 1fr;
+            }
+
+            .priority-controls {
+                justify-content: flex-start;
+            }
+
+            .priority-pills {
+                justify-content: flex-start;
+            }
+
+            .priority-summary {
+                grid-column: auto;
+            }
+
+            .quick-match-banner {
+                grid-template-columns: auto minmax(0, 1fr);
+            }
+
+            .quick-match-action {
+                grid-column: 1 / -1;
+            }
+
+            .quick-match-action .ui-btn {
+                width: 100%;
+            }
+
+            .comparison-row-main {
+                grid-template-columns: 1fr;
+                gap: .7rem;
+            }
+
+            .compact-score-grid {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+
+            .overall-score-box {
+                min-height: 48px;
+                flex-direction: row;
+                gap: .35rem;
+            }
+
+            .overall-score-box strong {
+                margin: 0;
+            }
+
+            .overall-score-box small {
+                margin: 0;
+            }
+
+            .comparison-decision {
+                grid-column: auto;
+                justify-content: stretch;
+            }
+
+            .comparison-decision .decision-btn {
+                width: 100%;
+            }
+
+            .idea-score-details {
+                margin-left: 1rem;
+            }
+        }
+
+        @@media (max-width: 620px) {
+            .priority-controls {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .priority-pills {
+                display: grid;
+                grid-template-columns: 1fr;
+            }
+
+            .priority-pill {
+                justify-content: flex-start;
+            }
+
+            .priority-reset {
+                align-self: flex-start;
+            }
+
+            .quick-match-banner {
+                grid-template-columns: 1fr;
+            }
+
+            .quick-match-icon {
+                width: 38px;
+                height: 38px;
+            }
+
+            .compact-score-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .comparison-row-main {
+                padding: .85rem;
+            }
+
+            .idea-score-details {
+                margin: 0 .85rem .75rem;
+            }
+
+            .score-reason-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
     </style>
 }
 
 @section Scripts {
     <script>
-        const comparisonIdeas = @Html.Raw(
-            System.Text.Json.JsonSerializer.Serialize(comparisonData));
-
-        const metricLabels = {
-            feasibility: "Feasibility",
-            innovation: "Innovation",
-            market: "Market Demand",
-            overall: "Overall"
-        };
-
-        const metricTabs = document.querySelectorAll("[data-metric]");
-        const metricColumns = document.querySelectorAll("[data-metric-column]");
-        const metricCells = document.querySelectorAll("[data-metric-cell]");
-        const selectedSummary = document.getElementById("ic3SelectedSummary");
-        const recommendedTitle = document.getElementById("ic3RecommendedTitle");
-        const recommendedText = document.getElementById("ic3RecommendedText");
-        const recommendedIdeaId = document.getElementById("ic3RecommendedIdeaId");
-        const recommendedButton =
-            document.querySelector(".metric-recommendation-action button");
-        const resetButton = document.getElementById("ic3ResetMetrics");
-
-        function getSelectedMetrics() {
-            return Array.from(metricTabs)
-                .filter(tab => tab.classList.contains("active"))
-                .map(tab => tab.dataset.metric);
-        }
-
-        function scoreIdea(idea, selectedMetrics) {
-            const evaluatedValues = selectedMetrics
-                .map(metric => idea.scores[metric])
-                .filter(value => Number.isFinite(value) && value > 0);
-
-            if (evaluatedValues.length === 0) {
-                return {
-                    score: null,
-                    evaluatedCount: 0
-                };
-            }
-
-            const total = evaluatedValues.reduce(
-                (sum, value) => sum + value,
-                0);
-
-            return {
-                score: Math.round(total / evaluatedValues.length),
-                evaluatedCount: evaluatedValues.length
-            };
-        }
-
-        function updateMetricVisibility(selectedMetrics) {
-            metricColumns.forEach(column => {
-                column.classList.toggle(
-                    "ic-hidden",
-                    !selectedMetrics.includes(column.dataset.metricColumn));
-            });
-
-            metricCells.forEach(cell => {
-                cell.classList.toggle(
-                    "ic-hidden",
-                    !selectedMetrics.includes(cell.dataset.metricCell));
-            });
-        }
-
-        function updateTableHighlight(selectedMetrics) {
-            document.querySelectorAll("[data-idea-row]").forEach(row => {
-                row.classList.remove("best-match");
-            });
-
-            const ranked = comparisonIdeas
-                .map(idea => {
-                    const evaluation = scoreIdea(idea, selectedMetrics);
-
-                    return {
-                        ...idea,
-                        finalScore: evaluation.score,
-                        evaluatedCount: evaluation.evaluatedCount
-                    };
-                })
-                .sort((a, b) => (b.finalScore ?? -1) - (a.finalScore ?? -1));
-
-            const best = ranked.find(
-                idea => Number.isFinite(idea.finalScore));
-
-            if (!best) {
-                recommendedTitle.textContent = "Not enough evaluated scores";
-                recommendedText.textContent =
-                    "Generate new ideas with evaluated scores before using the automatic recommendation.";
-
-                recommendedIdeaId.value = "";
-
-                if (recommendedButton) {
-                    recommendedButton.disabled = true;
-                }
-
-                return;
-            }
-
-            document
-                .querySelector(`[data-idea-row="${best.id}"]`)
-                ?.classList.add("best-match");
-
-            recommendedTitle.textContent = best.title;
-            recommendedText.textContent =
-                `${best.title} is the strongest match at ${best.finalScore}% ` +
-                `across ${best.evaluatedCount} evaluated ` +
-                `${best.evaluatedCount === 1 ? "metric" : "metrics"}.`;
-
-            recommendedIdeaId.value = best.id;
-
-            if (recommendedButton) {
-                recommendedButton.disabled = false;
-            }
-        }
-
-        function updateComparison() {
-            let selectedMetrics = getSelectedMetrics();
-
-            if (selectedMetrics.length === 0) {
-                document
-                    .querySelector('[data-metric="feasibility"]')
-                    ?.classList.add("active");
-
-                selectedMetrics = ["feasibility"];
-            }
-
-            updateMetricVisibility(selectedMetrics);
-
-            const selectedLabels = selectedMetrics.map(
-                metric => metricLabels[metric]);
-
-            if (selectedSummary) {
-                selectedSummary.innerHTML =
-                    "Showing: " +
-                    selectedLabels
-                        .map(label => `<strong>${label}</strong>`)
-                        .join(", ");
-            }
-
-            updateTableHighlight(selectedMetrics);
-        }
-
-        metricTabs.forEach(tab => {
-            tab.addEventListener("click", function () {
-                this.classList.toggle("active");
-                updateComparison();
-            });
-        });
-
-        resetButton?.addEventListener("click", function () {
-            metricTabs.forEach(tab => tab.classList.remove("active"));
-
-            document
-                .querySelector('[data-metric="feasibility"]')
-                ?.classList.add("active");
-
-            document
-                .querySelector('[data-metric="innovation"]')
-                ?.classList.add("active");
-
-            updateComparison();
-        });
-
-        updateComparison();
-
         document.querySelectorAll("[data-details-toggle]").forEach(button => {
             button.addEventListener("click", () => {
                 const panel = document.getElementById(

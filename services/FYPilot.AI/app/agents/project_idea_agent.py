@@ -38,6 +38,7 @@ import requests
 from pydantic import BaseModel, Field
 
 from app.llm_firewall.firewall import LlmFirewall
+from app.llm_firewall.rules.url_policy import strip_urls
 from app.services.llm_provider import LLMResult, ProviderChain
 
 logger = logging.getLogger("fypilot-agent")
@@ -142,6 +143,13 @@ class StudentProfile(BaseModel):
     availableHoursPerWeek: int
     teamSize: int
     projectGoals: list[str]
+
+    # Student-chosen project timeline, direct from the Idea Generator form
+    # (min 4 / max 20 weeks, enforced both client-side and here). None means
+    # the caller didn't send one -- _estimate_duration's difficulty/hours
+    # formula is used instead, preserving exact prior behavior for any
+    # caller that predates this field.
+    targetWeeks: int | None = None
     lebaneseMarketRelevance: bool = True
 
     # Used for regenerate: Python tells Ollama to avoid these old ideas
@@ -821,6 +829,23 @@ Make the concepts meaningfully different from previous generated titles.
 
         admin_context_sections = self._build_admin_context_sections(profile)
 
+        # Student's own direct timeline choice (Idea Generator's "Duration
+        # (weeks)" field) -- when set, the LLM must scope each idea's
+        # mandatory feature set to realistically fit that many weeks, not
+        # just report the number back. None means the student didn't pick
+        # one (older caller, or field left at its formula-driven default);
+        # _estimate_duration's difficulty/hours formula covers that case
+        # silently, so no prompt line is needed then.
+        target_weeks_line = (
+            f"- Target project duration: {profile.targetWeeks} weeks -- "
+            "each idea's MANDATORY scope must realistically fit within this "
+            "many weeks for a single student; push anything that wouldn't "
+            "fit into optional/stretch scope rather than inflating the core "
+            "idea beyond what this timeline allows."
+            if profile.targetWeeks is not None
+            else ""
+        )
+
         return f"""
 You are ProjectIdeaAgent inside FYPilot, an Academic Intelligence System for Final Year Project planning.
 
@@ -855,6 +880,7 @@ Student profile:
 - Team size: {profile.teamSize}
 - Goals: {goals_text}
 - Skills: {skills_text}
+{target_weeks_line}
 
 Previous generated idea titles to avoid:
 {previous_titles}
@@ -1422,6 +1448,27 @@ Return exactly this JSON structure with exactly 4 filled idea objects:
             "career aspirations"
         )
 
+        # Deterministic safety net: url_mode="no_urls_allowed" (registry.py's
+        # ProjectIdeaAgent entry) blocks the ENTIRE 4-idea candidate at
+        # guarded_call's output-firewall check the instant any URL-shaped
+        # string appears anywhere in it -- before the Reviewer ever runs
+        # (see ReviewPipeline.run's writer_result.blocked branch). The
+        # RETRIEVED WEB EVIDENCE embedded in this agent's own prompt (see
+        # _build_prompt) contains real URLs, and the prompt's "do not place
+        # citations or URLs inside the idea fields" instruction is the only
+        # thing stopping one from leaking into a generated field -- the same
+        # class of live-confirmed defect MarketNeedsAgent already fixed with
+        # its own deterministic _strip_urls (market_needs_agent.py). Every
+        # narrative field of a ProjectIdea passes through this method (or
+        # _sanitize_technologies, which itself wraps this method), so this
+        # single call point covers all of them. If stripping empties the
+        # field (it was nothing but a URL), fall back to the caller's safe
+        # default rather than returning blank text.
+        text = strip_urls(text)
+
+        if not text:
+            return fallback
+
         return text
 
     def _sanitize_technologies(self, technologies: str) -> str:
@@ -1846,6 +1893,16 @@ Return exactly this JSON structure with exactly 4 filled idea objects:
             return ""
 
     def _estimate_duration(self, profile: StudentProfile, difficulty: int) -> int:
+        # Student's own direct choice (Idea Generator's "Duration (weeks)"
+        # field, min 4 / max 20) always wins when provided -- the whole
+        # point of that field is that the student picks the timeline and
+        # the idea (and everything downstream: roadmap phase count,
+        # capacity, scheduling) is scoped/justified against it, rather than
+        # a difficulty/hours-per-week formula guessing a number the student
+        # never chose. See StudentProfile.targetWeeks's docstring.
+        if profile.targetWeeks is not None:
+            return max(4, min(profile.targetWeeks, 20))
+
         weeks = 10 + (difficulty * 2)
 
         if profile.availableHoursPerWeek >= 12:

@@ -9,6 +9,7 @@ means.
 
 from __future__ import annotations
 
+import inspect
 import json
 from typing import Any
 
@@ -27,6 +28,21 @@ from app.review.se_documentation_rewrite_scope import (
 )
 from app.review.section_scope import revision_scope_for
 from app.services.llm_provider import LLMResult, ProviderChain, groq_request_token_limit
+
+
+def _accepts_keyword(callable_obj: Any, keyword: str) -> bool:
+    """Same duplicated helper as reviewer_agent.py/pipeline.py/llm_provider.py
+    -- keeps older/minimal provider_chain test doubles (e.g. idea_comparison_
+    worker's job-path fakes) working unchanged."""
+    try:
+        parameters = inspect.signature(callable_obj).parameters.values()
+    except (TypeError, ValueError):
+        return True
+
+    return any(
+        parameter.name == keyword or parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
 
 
 # Both build_rewrite_prompt and build_structural_repair_prompt ask the model
@@ -60,9 +76,27 @@ from app.services.llm_provider import LLMResult, ProviderChain, groq_request_tok
 # 20000 gives real headroom above what a full database-section echo needs,
 # reducing how often that extra repair round-trip is needed, while staying
 # well under Claude Sonnet 5's own output-token ceiling.
+# Headroom raised from 1.4 to 2.2, cap from 20000 to 28000 (freeze-audit
+# fix): this generic (non-SE-Documentation) full-object rewrite() path --
+# used by Roadmap among others -- estimates its OWN candidate's json size
+# and multiplies by headroom, unlike SE Documentation's per-section budgets
+# above. Live-observed on ProjectRoadmapAgent: a 7-phase/12-week roadmap
+# (estimated ~9566 tokens, 1.4x headroom -> requested max_tokens=13393)
+# needed a REWRITE that legitimately grows the document (fixing/adding
+# content, not just echoing it back) -- the response was cut off
+# (stop_reason=max_tokens) partway through week 7 of 12, invalid JSON,
+# provider_repair also failed on the truncated fragment. The whole
+# downstream cascade (DeepInfra fallback, then a ~106s Ollama timeout) then
+# burned the rest of the 360s pipeline deadline before giving up -- an
+# already-good, complete roadmap was discarded for the generic fallback
+# because of ONE undersized rewrite request, not any real problem with the
+# content. 2.2x headroom against the same estimate gives ~21000 tokens of
+# room (vs. the ~24000+ the response needed to actually finish); the cap
+# was raised alongside it so that headroom is never the thing silently
+# clamping a legitimately larger candidate back down.
 _MIN_REWRITE_MAX_TOKENS = 2200
-_MAX_REWRITE_MAX_TOKENS = 20000
-_REWRITE_MAX_TOKENS_HEADROOM = 1.4
+_MAX_REWRITE_MAX_TOKENS = 28000
+_REWRITE_MAX_TOKENS_HEADROOM = 2.2
 
 
 def _estimate_rewrite_max_tokens(candidate: Any) -> int:
@@ -275,6 +309,14 @@ Return the corrected complete object as valid JSON only.
         }
         if deadline is not None:
             kwargs["deadline"] = deadline
+            # See _generate_json's matching comment below -- clamps each
+            # provider's own per-attempt timeout to whatever pipeline budget
+            # is actually left, rather than only deciding whether to start
+            # the NEXT fallback provider. Guarded by _accepts_keyword so an
+            # older/minimal provider_chain test double never sees a kwarg it
+            # doesn't understand.
+            if _accepts_keyword(self.provider_chain.generate_json, "cap_timeout_to_deadline"):
+                kwargs["cap_timeout_to_deadline"] = True
 
         return self.provider_chain.generate_json(prompt, **kwargs)
 
@@ -362,6 +404,8 @@ Return the corrected complete object as valid JSON only.
         }
         if deadline is not None:
             kwargs["deadline"] = deadline
+            if _accepts_keyword(self.provider_chain.generate_json, "cap_timeout_to_deadline"):
+                kwargs["cap_timeout_to_deadline"] = True
 
         return self.provider_chain.generate_json(prompt, **kwargs)
 
@@ -383,6 +427,13 @@ Return the corrected complete object as valid JSON only.
         kwargs: dict[str, Any] = {"use_search": False}
         if deadline is not None:
             kwargs["deadline"] = deadline
+            # Same fix as ReviewerAgent.analyze -- without this, `deadline`
+            # only gated whether the NEXT fallback provider was allowed to
+            # start; it never shortened an in-flight provider's own
+            # configured timeout. Confirmed live as a real, not theoretical,
+            # near-miss on Mentor Chat's 90s pipeline budget.
+            if _accepts_keyword(self.provider_chain.generate_json, "cap_timeout_to_deadline"):
+                kwargs["cap_timeout_to_deadline"] = True
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
         if estimated_prompt_tokens is not None:
@@ -392,6 +443,9 @@ Return the corrected complete object as valid JSON only.
         try:
             return self.provider_chain.generate_json(prompt, **kwargs)
         except TypeError:
+            # Older/minimal provider_chain test doubles that don't accept
+            # cap_timeout_to_deadline (or the other newer kwargs) fall back
+            # to the smallest signature every fake in this codebase supports.
             minimal_kwargs: dict[str, Any] = {"use_search": False}
             if deadline is not None:
                 minimal_kwargs["deadline"] = deadline

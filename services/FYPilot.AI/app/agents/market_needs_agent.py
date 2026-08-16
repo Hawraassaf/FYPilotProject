@@ -2,12 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
+from app.agents.market_needs_evidence import (
+    SourceType,
+    classify_source_type,
+    compute_relevance_score,
+    domain_of,
+    is_high_authority,
+    project_concept_terms,
+)
 from app.llm_firewall.firewall import LlmFirewall
+from app.llm_firewall.rules.url_policy import _URL_PATTERN
 from app.models.market_needs_models import (
     MarketNeedsRequest,
     MarketNeedsResponse,
@@ -63,29 +73,6 @@ class MarketNeedsAgent:
     - The current score is a deterministic evidence score.
     - Claims are backed by real provider sources, never invented.
     """
-
-    _recognized_domains = {
-        "worldbank.org",
-        "un.org",
-        "unesco.org",
-        "itu.int",
-        "oecd.org",
-        "who.int",
-        "gov.lb",
-        "aub.edu.lb",
-        "lau.edu.lb",
-        "liu.edu.lb",
-        "usek.edu.lb",
-        "usj.edu.lb",
-        "ul.edu.lb",
-        "weforum.org",
-        "gartner.com",
-        "mckinsey.com",
-        "statista.com",
-        "linkedin.com",
-        "ilo.org",
-        "imf.org",
-    }
 
     def __init__(self) -> None:
         self.chain = ProviderChain()
@@ -337,7 +324,7 @@ class MarketNeedsAgent:
             error=(str(getattr(result, "error", "")) or None),
             search_used=self.last_search_used,
             search_provider=self.last_search_provider,
-            sources=self._normalize_sources(self.last_sources, maximum=14),
+            sources=self._normalize_sources(self.last_sources, request, maximum=14),
         )
 
     # =========================================================================
@@ -424,7 +411,7 @@ class MarketNeedsAgent:
 
         grounded = search_used and bool(sources)
 
-        problem_evidence = self._string_list(
+        problem_evidence = self._narrative_string_list(
             data.get("problemEvidence"),
             maximum=6,
         )
@@ -447,8 +434,8 @@ class MarketNeedsAgent:
 
         similar_solutions = [
             SimilarSolution(
-                name=self._text(item.get("name"), maximum=250),
-                description=self._text(
+                name=self._narrative_text(item.get("name"), maximum=250),
+                description=self._narrative_text(
                     item.get("description"),
                     maximum=1500,
                 ),
@@ -475,7 +462,7 @@ class MarketNeedsAgent:
             marketDemand=demand_label(demand_score),
             demandScore=demand_score,
             scoreBreakdown=breakdown,
-            targetSector=self._text(
+            targetSector=self._narrative_text(
                 data.get("targetSector"),
                 default=request.domain,
                 maximum=300,
@@ -483,20 +470,20 @@ class MarketNeedsAgent:
             problemEvidence=problem_evidence,
             similarSolutions=similar_solutions,
             sources=sources,
-            lebaneseMarketFit=self._text(
+            lebaneseMarketFit=self._narrative_text(
                 data.get("lebaneseMarketFit"),
                 maximum=5000,
             ),
-            universityValue=self._text(
+            universityValue=self._narrative_text(
                 data.get("universityValue"),
                 maximum=5000,
             ),
-            risks=self._string_list(data.get("risks"), maximum=6),
-            recommendation=self._text(
+            risks=self._narrative_string_list(data.get("risks"), maximum=6),
+            recommendation=self._narrative_text(
                 data.get("recommendation"),
                 maximum=5000,
             ),
-            nextSteps=self._string_list(data.get("nextSteps"), maximum=6),
+            nextSteps=self._narrative_string_list(data.get("nextSteps"), maximum=6),
             analyzedAt=datetime.now(timezone.utc),
         )
 
@@ -543,6 +530,15 @@ RESEARCH RULES
   total-addressable market, or Google Trends values.
 - Do not output a sources array. Real source URLs are read from provider tool
   metadata, not trusted from generated JSON.
+- NEVER write a URL (anything starting with "http://" or "https://") ANYWHERE
+  in your response -- not in problemEvidence, similarSolutions, lebaneseMarketFit,
+  universityValue, risks, recommendation, or nextSteps. This applies even to a
+  real, correctly-spelled URL for a company or product you recognize (e.g. a
+  competitor's own website) -- refer to companies, products, and sources by
+  NAME only, never by link. The application renders every verified source URL
+  separately in its own UI from the deterministic sources list; a URL written
+  by you here is never trusted and causes the entire analysis to be discarded,
+  so omitting URLs entirely is required, not optional.
 
 CURRENT SCORE CATEGORIES
 - problemEvidence: strength that the problem exists now.
@@ -682,12 +678,47 @@ Return ONLY valid JSON in this exact shape:
             analyzedAt=datetime.now(timezone.utc),
         )
 
+    # Human-readable labels for SourceType (app/agents/market_needs_evidence.py)
+    # -- MarketDemand.cshtml renders this string directly as a badge
+    # ("@source.SourceType"), so this is presentation text, not a code.
+    _SOURCE_TYPE_LABELS: dict[str, str] = {
+        "government_or_international_org": "Government / international org",
+        "peer_reviewed_research": "Peer-reviewed research",
+        "university": "University",
+        "market_research_firm": "Market research firm",
+        "industry_association": "Industry association",
+        "financial_business_press": "Financial / business press",
+        "technology_press": "Technology press",
+        "commercial_marketplace": "Commercial marketplace",
+        "blog_or_seo_content": "Blog / SEO content",
+        "unknown": "External",
+    }
+
     def _normalize_sources(
         self,
         raw_sources: list[Any],
+        request: MarketNeedsRequest,
         *,
         maximum: int,
     ) -> list[SourceItem]:
+        """
+        Deduplicates and scores real retrieved sources -- source_type and
+        relevance_score are both computed deterministically per source (see
+        app/agents/market_needs_evidence.py), never a hardcoded constant.
+        `isVerified` reflects the source TYPE's inherent authority for a
+        market/problem-evidence claim (see
+        market_needs_evidence.is_high_authority), not membership in a small
+        hand-maintained domain list -- a credible publisher that was never
+        individually named still classifies correctly.
+        """
+        project_terms = project_concept_terms(
+            project_title=request.project_title,
+            domain=request.domain,
+            technologies=request.technologies,
+            problem_statement=request.problem_statement,
+            target_users=request.target_users,
+        )
+
         results: list[SourceItem] = []
         seen: set[str] = set()
 
@@ -706,7 +737,7 @@ Return ONLY valid JSON in this exact shape:
                 continue
             seen.add(normalized_url)
 
-            domain = self._domain(url)
+            domain = domain_of(url)
             publisher = self._text(
                 item.get("publisher"),
                 default=domain,
@@ -716,22 +747,42 @@ Return ONLY valid JSON in this exact shape:
                 item.get("snippet") or item.get("relevance"),
                 maximum=1800,
             )
+            title = self._text(
+                item.get("title"),
+                default=publisher or domain,
+                maximum=500,
+            )
 
+            # Classification/relevance scoring runs on the RAW title/snippet
+            # (an embedded URL inside a snippet is harmless input to a
+            # deterministic classifier) -- only the values actually stored
+            # on SourceItem are stripped, below. `url` itself is NEVER
+            # stripped -- it must stay the real, exact source link.
+            source_type: SourceType = classify_source_type(domain, title, snippet)
+            relevance_score = (
+                clamp_score(item["relevanceScore"])
+                if isinstance(item.get("relevanceScore"), (int, float))
+                else compute_relevance_score(project_terms, source_type, title, snippet)
+            )
+
+            # Real web content (title/snippet) is uncontrolled -- a source's
+            # own snippet routinely embeds a SECOND, unrelated URL ("read
+            # more at https://...") that would never be in
+            # allowed_source_metadata (only each source's OWN url is there),
+            # which otherwise causes the whole analysis to be discarded by
+            # the output firewall's url_mode="source_metadata_only" check
+            # (see _strip_urls' docstring for the live-confirmed defect this
+            # closes). Stripped here, deterministically, never left to
+            # provider content or model compliance.
             results.append(
                 SourceItem(
-                    title=self._text(
-                        item.get("title"),
-                        default=publisher or domain,
-                        maximum=500,
-                    ),
+                    title=self._strip_urls(title),
                     url=url,
-                    publisher=publisher,
-                    relevance=snippet,
-                    relevanceScore=clamp_score(
-                        item.get("relevanceScore", 65)
-                    ),
-                    sourceType=self._source_type(domain),
-                    isVerified=self._is_recognized_domain(domain),
+                    publisher=self._strip_urls(publisher),
+                    relevance=self._strip_urls(snippet),
+                    relevanceScore=relevance_score,
+                    sourceType=self._SOURCE_TYPE_LABELS.get(source_type, "External"),
+                    isVerified=is_high_authority(source_type),
                 )
             )
 
@@ -743,22 +794,6 @@ Return ONLY valid JSON in this exact shape:
             ),
             reverse=True,
         )[:maximum]
-
-    def _is_recognized_domain(self, domain: str) -> bool:
-        return any(
-            domain == known or domain.endswith(f".{known}")
-            for known in self._recognized_domains
-        )
-
-    @staticmethod
-    def _source_type(domain: str) -> str:
-        if domain.endswith(".gov") or ".gov." in domain or domain == "gov.lb":
-            return "Official"
-        if ".edu" in domain or domain.endswith(".ac.uk"):
-            return "University"
-        if any(token in domain for token in ("oecd", "worldbank", "un.org", "itu")):
-            return "Institution"
-        return "External"
 
     @staticmethod
     def _valid_url(value: object) -> bool:
@@ -798,6 +833,73 @@ Return ONLY valid JSON in this exact shape:
     ) -> str:
         text = str(value or default).strip()
         return text[:maximum]
+
+    # =========================================================================
+    # URL stripping -- deterministic firewall safety net
+    # =========================================================================
+    #
+    # Root cause this closes (live-confirmed 2026-08-13, reproducibly, not a
+    # rare fluke): app/review/registry.py's url_mode="source_metadata_only"
+    # scans the ENTIRE final candidate dict for any http(s):// substring and
+    # blocks the WHOLE analysis (allow_unreviewed_output=False for this
+    # agent -- see registry.py) the instant one appears that isn't an exact
+    # match to a source's own canonical URL. Two distinct fields can carry
+    # such a URL, neither of which the prompt's "never invent a URL" rule
+    # actually prevents:
+    #   1. NARRATIVE fields the Writer LLM authors (targetSector,
+    #      problemEvidence, similarSolutions, lebaneseMarketFit,
+    #      universityValue, risks, recommendation, nextSteps) -- e.g. the
+    #      model spontaneously naming a real competitor's own website when
+    #      describing it in similarSolutions, which the old prompt wording
+    #      ("do not output a sources array") never actually forbade.
+    #   2. SourceItem.title/publisher/relevance -- REAL, uncontrolled web
+    #      content read directly from Brave/Groq search results (never
+    #      LLM-generated at all). A source's own snippet routinely embeds a
+    #      SECOND, unrelated URL ("read more at https://...", "via
+    #      TechCrunch (https://...)") that was never in
+    #      allowed_source_metadata (which only ever contains each source's
+    #      OWN url) -- this path is fully deterministic (same search results
+    #      -> same embedded link -> same block, every single time for that
+    #      project), which is why this was reported as a reliably
+    #      reproducible failure, not an occasional one.
+    # Prompt hardening alone (see _build_prompt's "NEVER write a URL...")
+    # only reduces cause 1's probability and cannot address cause 2 at all
+    # (that text is never LLM-generated). Stripping deterministically here
+    # -- never relying on the model's compliance -- is what actually
+    # guarantees the candidate handed to guarded_call can no longer contain
+    # an unmatched URL, matching this task's own "enforce through Reviewer
+    # policy and/or deterministic post-validation, not only Writer
+    # instructions" requirement. NEVER applied to SourceItem.url itself,
+    # which must remain the real, exact, verified link.
+    @staticmethod
+    def _strip_urls(text: str) -> str:
+        if not text:
+            return text
+
+        stripped = _URL_PATTERN.sub("", text)
+        # Collapse whitespace/punctuation left behind by the removed URL
+        # (e.g. "see (https://x.com) for more" -> "see () for more" ->
+        # "see for more") rather than leaving a visibly broken sentence.
+        stripped = re.sub(r"\(\s*\)", "", stripped)
+        stripped = re.sub(r"\s{2,}", " ", stripped)
+        stripped = re.sub(r"\s+([.,;:!?])", r"\1", stripped)
+        return stripped.strip()
+
+    def _narrative_text(
+        self,
+        value: object,
+        default: str = "",
+        maximum: int = 5000,
+    ) -> str:
+        return self._strip_urls(self._text(value, default=default, maximum=maximum))
+
+    def _narrative_string_list(self, value: object, *, maximum: int) -> list[str]:
+        return [
+            item for item in (
+                self._strip_urls(text) for text in self._string_list(value, maximum=maximum)
+            )
+            if item
+        ]
 
     @staticmethod
     def _similarity(value: object) -> str:
