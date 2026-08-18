@@ -36,6 +36,7 @@ def _build_questions_review_context(request: GenerateDefenseQuestionsRequest) ->
     trusted_structural_context = {
         "mode": request.mode,
         "numberOfQuestions": request.numberOfQuestions,
+        "focusAreas": request.focusAreas,
         "teamSize": profile.teamSize,
         "availableHoursPerWeek": profile.availableHoursPerWeek,
         "experienceLevel": profile.experienceLevel,
@@ -138,7 +139,7 @@ def generate_defense_questions(
 ) -> Dict[str, Any]:
     orchestrator = DefenseSimulatorOrchestrator()
     context = _build_questions_review_context(request)
-    pipeline = ReviewPipeline("DefenseQuestionAgent", tier="light")
+    pipeline = ReviewPipeline("DefenseQuestionAgent", tier="defense")
 
     global_deadline = time.monotonic() + pipeline.config.max_total_seconds
     writer_deadline = global_deadline - _WRITER_TIME_RESERVE_SECONDS
@@ -179,7 +180,7 @@ def evaluate_defense_answer(
 ) -> Dict[str, Any]:
     orchestrator = DefenseSimulatorOrchestrator()
     context = _build_evaluation_review_context(request)
-    pipeline = ReviewPipeline("DefenseEvaluatorAgent", tier="light")
+    pipeline = ReviewPipeline("DefenseEvaluatorAgent", tier="defense")
 
     global_deadline = time.monotonic() + pipeline.config.max_total_seconds
     writer_deadline = global_deadline - _WRITER_TIME_RESERVE_SECONDS

@@ -762,6 +762,8 @@ else
     </main>
 }
 
+<partial name="_AiDisclaimerFooter" />
+
 @section Head {
 <style>
     :root {
@@ -1788,8 +1790,36 @@ else
         .rm-timeline-scroll { overflow:visible; padding:.45rem; }
         .rm-timeline { min-width:0 !important; width:100% !important; grid-template-columns:220px minmax(0,1fr); }
         .rm-week-heads, .rm-week-track { grid-template-columns:repeat(var(--week-count), minmax(0,1fr)); }
-        .rm-detail-panel { display:block !important; break-inside:avoid; page-break-after:always; }
-        .rm-detail-panel:last-child { page-break-after:auto; }
+        .rm-overview-grid {
+            break-inside: avoid;
+            page-break-inside: avoid;
+        }
+
+        .rm-detail-section {
+            break-before: page;
+            page-break-before: always;
+        }
+
+        .rm-detail-panel {
+            display:block !important;
+            break-inside:auto;
+            page-break-inside:auto;
+            page-break-after:auto;
+        }
+
+        .rm-detail-panel + .rm-detail-panel {
+            border-top:1px solid var(--rm-line);
+        }
+
+        .rm-detail-header,
+        .rm-detail-facts,
+        .rm-task-table tr,
+        .rm-info-card,
+        .rm-alert-row,
+        .rm-beyond-item {
+            break-inside:avoid;
+            page-break-inside:avoid;
+        }
 
         /* Confirmed live defect: .rm-task-table-wrap's on-screen horizontal
            scrollbar (needed because .rm-task-table has min-width:620px for
@@ -1807,41 +1837,816 @@ else
         .rm-task-table { min-width:0 !important; max-width:700px; width:100%; table-layout:fixed; }
     }
 
-    body.roadmap-pdf-exporting .no-print,
-    body.roadmap-pdf-exporting .rm-hero-actions,
-    body.roadmap-pdf-exporting .rm-detail-action form { display:none !important; }
 
-    body.roadmap-pdf-exporting .roadmap-control { background:#fff; }
-    body.roadmap-pdf-exporting .rm-timeline-scroll { overflow:visible; }
-    body.roadmap-pdf-exporting .rm-detail-panel { display:block !important; break-inside:avoid; page-break-after:always; }
-    body.roadmap-pdf-exporting .rm-detail-panel:last-child { page-break-after:auto; }
+    /* ================================================================
+       DIRECT PDF EXPORT - ISOLATED A4 STAGE
+       ================================================================
+       The live Roadmap is never captured.
 
-    /* THE fix that actually matters for the "Download PDF" button: html2pdf.js
-       captures the DOM via html2canvas using plain screen-media CSS (it does
-       NOT apply @@media print rules), toggling this roadmap-pdf-exporting
-       class beforehand -- see the click handler below. The @@media print
-       block above only covers the window.print() fallback path (used only
-       if html2pdf.js itself fails to load/throws), so it alone was never
-       enough to fix the real export. Same root cause/fix as the Gantt's
-       .rm-timeline-scroll override two lines up: .rm-task-table-wrap's
-       on-screen horizontal scrollbar clips the Effort/Ownership/Allocation/
-       Sequence columns, and html2canvas cannot capture content hidden by a
-       scrollable container's clip region.
+       When Export PDF is clicked, JavaScript:
+       1) clones #roadmap-print-root,
+       2) mounts that clone directly under  inside a 793px A4 stage,
+       3) keeps a full-screen "Preparing PDF" cover above the stage,
+       4) captures ONLY the isolated clone,
+       5) removes the stage.
 
-       max-width:700px (NOT width:100%!important) is deliberate -- a
-       confirmed second-order live defect: letting the table grow to 100%
-       of its (otherwise unconstrained once the scrollbar is gone) parent
-       made root.scrollWidth balloon far past a normal page width. The
-       click handler below reads that scrollWidth and feeds it to
-       html2canvas as windowWidth/width so the table has room to lay out
-       without wrapping -- but simulating THAT WIDE a virtual browser
-       window shifted the whole page's layout sideways (sidebar/content
-       positioning), producing a left-clipped, seam-shifted export instead
-       of a merely-narrow one. Capping the table to a fixed, print-safe
-       width keeps root.scrollWidth close to the page's normal width, so
-       that windowWidth logic goes back to computing a sane value. */
-    body.roadmap-pdf-exporting .rm-task-table-wrap { overflow-x:visible !important; }
-    body.roadmap-pdf-exporting .rm-task-table { min-width:0 !important; max-width:700px; width:100%; table-layout:fixed; }
+       This prevents sidebar/content-wrapper offsets and eliminates the
+       repeated right-edge clipping from previous exports.
+       ================================================================ */
+
+    body.roadmap-pdf-exporting {
+        overflow: hidden !important;
+    }
+
+    .roadmap-pdf-screen-cover {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483646;
+        display: grid;
+        place-items: center;
+        padding: 1rem;
+        color: #fff;
+        background: rgba(7, 26, 56, .84);
+        backdrop-filter: blur(6px);
+    }
+
+    .roadmap-pdf-screen-cover > div {
+        display: flex;
+        align-items: center;
+        gap: .75rem;
+        padding: .9rem 1.05rem;
+        background: rgba(10, 40, 84, .96);
+        border: 1px solid rgba(255,255,255,.16);
+        border-radius: 12px;
+        box-shadow: 0 20px 55px rgba(0,0,0,.22);
+        font-size: .82rem;
+        font-weight: 750;
+    }
+
+    .roadmap-pdf-screen-cover .spinner-border {
+        width: 1.15rem;
+        height: 1.15rem;
+        border-width: .14rem;
+    }
+
+    .roadmap-pdf-stage {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 2147483645;
+        width: 793px;
+        max-width: 793px;
+        min-width: 793px;
+        height: auto;
+        margin: 0;
+        padding: 0;
+        overflow: visible;
+        pointer-events: none;
+        background: #fff;
+    }
+
+    .roadmap-pdf-document {
+        width: 793px !important;
+        max-width: 793px !important;
+        min-width: 793px !important;
+        margin: 0 !important;
+        padding: 0 28px !important;
+        display: grid !important;
+        gap: 7px !important;
+        color: var(--rm-ink) !important;
+        background: #fff !important;
+        box-sizing: border-box !important;
+        overflow: visible !important;
+    }
+
+    .roadmap-pdf-document,
+    .roadmap-pdf-document *,
+    .roadmap-pdf-document *::before,
+    .roadmap-pdf-document *::after {
+        box-sizing: border-box !important;
+        animation: none !important;
+        transition: none !important;
+        scroll-behavior: auto !important;
+    }
+
+    /* Remove everything interactive/useless in a document. */
+    .roadmap-pdf-document .no-print,
+    .roadmap-pdf-document .rm-hero-actions,
+    .roadmap-pdf-document .rm-detail-action form,
+    .roadmap-pdf-document .rm-primary-wide,
+    .roadmap-pdf-document .roadmap-loading-overlay,
+    .roadmap-pdf-document .rm-detail-hint {
+        display: none !important;
+    }
+
+    .roadmap-pdf-document .rm-project-hero,
+    .roadmap-pdf-document .rm-timeline-card,
+    .roadmap-pdf-document .rm-current-card,
+    .roadmap-pdf-document .rm-alert-card,
+    .roadmap-pdf-document .rm-beyond-card,
+    .roadmap-pdf-document .rm-workload-card,
+    .roadmap-pdf-document .rm-detail-section,
+    .roadmap-pdf-document .rm-deferred-card {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        margin: 0 !important;
+        box-shadow: none !important;
+        transform: none !important;
+    }
+
+    /* ---------- HERO ---------- */
+
+    .roadmap-pdf-document .rm-project-hero {
+        grid-template-columns: 50px minmax(0, 1fr) !important;
+        gap: 7px 10px !important;
+        padding: 10px 12px 9px !important;
+        overflow: hidden !important;
+        border-radius: 11px !important;
+    }
+
+    .roadmap-pdf-document .rm-project-hero::after {
+        width: 135px !important;
+        height: 90px !important;
+    }
+
+    .roadmap-pdf-document .rm-project-icon {
+        width: 50px !important;
+        height: 50px !important;
+        border-radius: 12px !important;
+        font-size: 1.12rem !important;
+        box-shadow: none !important;
+    }
+
+    .roadmap-pdf-document .rm-project-main {
+        min-width: 0 !important;
+        padding-top: 0 !important;
+    }
+
+    .roadmap-pdf-document .roadmap-eyebrow {
+        font-size: 7px !important;
+        letter-spacing: .1em !important;
+    }
+
+    .roadmap-pdf-document .rm-project-main h1 {
+        max-width: 100% !important;
+        margin: 2px 0 5px !important;
+        font-size: 21px !important;
+        line-height: 1.08 !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    .roadmap-pdf-document .rm-project-chips {
+        gap: 4px !important;
+    }
+
+    .roadmap-pdf-document .rm-project-chips > span {
+        max-width: 100% !important;
+        padding: 3px 6px !important;
+        gap: 3px !important;
+        font-size: 7px !important;
+        white-space: normal !important;
+    }
+
+    .roadmap-pdf-document .rm-project-progress {
+        grid-column: 1 / -1 !important;
+        min-width: 0 !important;
+        margin-top: 2px !important;
+    }
+
+    .roadmap-pdf-document .rm-progress-copy {
+        width: 100% !important;
+        margin-bottom: 3px !important;
+        padding-right: 1px !important;
+        font-size: 7px !important;
+    }
+
+    .roadmap-pdf-document .rm-progress-track {
+        height: 5px !important;
+    }
+
+    /* ---------- KPI CARDS ---------- */
+
+    .roadmap-pdf-document .rm-metrics-grid {
+        width: 100% !important;
+        min-width: 0 !important;
+        display: grid !important;
+        grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+        gap: 6px !important;
+    }
+
+    .roadmap-pdf-document .rm-metric-card {
+        width: auto !important;
+        min-width: 0 !important;
+        min-height: 86px !important;
+        padding: 6px 4px !important;
+        border-radius: 9px !important;
+        box-shadow: none !important;
+        transform: none !important;
+    }
+
+    .roadmap-pdf-document .rm-metric-card:hover {
+        transform: none !important;
+        box-shadow: none !important;
+    }
+
+    .roadmap-pdf-document .rm-metric-icon {
+        width: 22px !important;
+        height: 22px !important;
+        margin-bottom: 3px !important;
+        border-radius: 6px !important;
+        font-size: 10px !important;
+    }
+
+    .roadmap-pdf-document .rm-metric-label {
+        font-size: 6px !important;
+        letter-spacing: .045em !important;
+        line-height: 1.15 !important;
+    }
+
+    .roadmap-pdf-document .rm-metric-value {
+        margin-top: 4px !important;
+        font-size: 17px !important;
+        line-height: 1 !important;
+    }
+
+    .roadmap-pdf-document .rm-metric-caption,
+    .roadmap-pdf-document .rm-metric-pill {
+        margin-top: 3px !important;
+        font-size: 6px !important;
+        line-height: 1.1 !important;
+    }
+
+    .roadmap-pdf-document .rm-metric-pill {
+        padding: 2px 4px !important;
+    }
+
+    .roadmap-pdf-document .rm-mini-meter {
+        width: 78% !important;
+        height: 3px !important;
+        margin-top: 4px !important;
+    }
+
+    /* ---------- TIMELINE ---------- */
+
+    .roadmap-pdf-document .rm-section-head {
+        min-width: 0 !important;
+        padding: 7px 9px !important;
+        gap: 7px !important;
+    }
+
+    .roadmap-pdf-document .rm-section-title {
+        min-width: 0 !important;
+        gap: 6px !important;
+    }
+
+    .roadmap-pdf-document .rm-section-icon {
+        width: 27px !important;
+        height: 27px !important;
+        border-radius: 7px !important;
+        font-size: 10px !important;
+    }
+
+    .roadmap-pdf-document .rm-section-title h2 {
+        margin-top: 1px !important;
+        font-size: 12px !important;
+    }
+
+    .roadmap-pdf-document .rm-timeline-legend {
+        min-width: 0 !important;
+        max-width: 235px !important;
+        justify-content: flex-end !important;
+        gap: 5px 8px !important;
+        font-size: 6px !important;
+        line-height: 1.1 !important;
+        white-space: normal !important;
+    }
+
+    .roadmap-pdf-document .rm-timeline-legend span {
+        min-width: 0 !important;
+        gap: 3px !important;
+    }
+
+    .roadmap-pdf-document .legend-dot {
+        width: 6px !important;
+        height: 6px !important;
+    }
+
+    .roadmap-pdf-document .rm-timeline-scroll {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        overflow: hidden !important;
+        padding: 5px !important;
+    }
+
+    .roadmap-pdf-document .rm-timeline {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        grid-template-columns: 155px minmax(0, 1fr) !important;
+        overflow: hidden !important;
+        border-radius: 7px !important;
+    }
+
+    .roadmap-pdf-document .rm-timeline-head,
+    .roadmap-pdf-document .rm-week-heads {
+        min-height: 25px !important;
+    }
+
+    .roadmap-pdf-document .rm-phase-head {
+        min-width: 0 !important;
+        padding: 0 6px !important;
+        font-size: 6px !important;
+    }
+
+    .roadmap-pdf-document .rm-week-heads,
+    .roadmap-pdf-document .rm-week-track {
+        width: 100% !important;
+        min-width: 0 !important;
+        grid-template-columns: repeat(var(--week-count), minmax(0, 1fr)) !important;
+    }
+
+    .roadmap-pdf-document .rm-week-heads span {
+        min-width: 0 !important;
+        padding: 0 !important;
+        font-size: 5px !important;
+        overflow: hidden !important;
+    }
+
+    .roadmap-pdf-document .rm-phase-label {
+        min-width: 0 !important;
+        min-height: 34px !important;
+        grid-template-columns: 19px minmax(0, 1fr) !important;
+        gap: 4px !important;
+        padding: 4px 5px !important;
+        overflow: hidden !important;
+    }
+
+    .roadmap-pdf-document .rm-phase-number {
+        width: 19px !important;
+        height: 19px !important;
+        border-radius: 5px !important;
+        font-size: 6px !important;
+    }
+
+    .roadmap-pdf-document .rm-phase-label strong {
+        min-width: 0 !important;
+        max-width: 100% !important;
+        font-size: 6px !important;
+        line-height: 1.15 !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    .roadmap-pdf-document .rm-week-track {
+        min-height: 34px !important;
+        overflow: hidden !important;
+    }
+
+    .roadmap-pdf-document .rm-phase-bar {
+        min-width: 0 !important;
+        max-width: 100% !important;
+        height: 21px !important;
+        margin: 0 1px !important;
+        padding: 0 2px !important;
+        border-radius: 5px !important;
+        gap: 1px !important;
+        font-size: 5px !important;
+        overflow: hidden !important;
+        transform: none !important;
+        box-shadow: none !important;
+    }
+
+    .roadmap-pdf-document .rm-phase-bar span,
+    .roadmap-pdf-document .rm-phase-bar small {
+        min-width: 0 !important;
+        max-width: 100% !important;
+        font-size: 5px !important;
+        white-space: nowrap !important;
+        text-overflow: ellipsis !important;
+        overflow: hidden !important;
+    }
+
+    .roadmap-pdf-document .rm-overflow-timeline-label,
+    .roadmap-pdf-document .rm-overflow-timeline-track {
+        min-height: 31px !important;
+        font-size: 6px !important;
+        overflow: hidden !important;
+    }
+
+    /* ---------- LOWER SUMMARY ---------- */
+
+    .roadmap-pdf-document .rm-overview-grid {
+        width: 100% !important;
+        min-width: 0 !important;
+        display: grid !important;
+        grid-template-columns: minmax(0, .94fr) minmax(0, 1.06fr) !important;
+        grid-template-areas:
+            "current alerts"
+            "workload beyond" !important;
+        gap: 6px !important;
+        align-items: stretch !important;
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+    }
+
+    .roadmap-pdf-document .rm-current-card,
+    .roadmap-pdf-document .rm-alert-card,
+    .roadmap-pdf-document .rm-beyond-card,
+    .roadmap-pdf-document .rm-workload-card {
+        min-width: 0 !important;
+        padding: 7px !important;
+        border-radius: 9px !important;
+    }
+
+    .roadmap-pdf-document .rm-card-title-line {
+        min-width: 0 !important;
+        margin-bottom: 5px !important;
+    }
+
+    .roadmap-pdf-document .rm-status-chip,
+    .roadmap-pdf-document .rm-alert-count {
+        max-width: 135px !important;
+        padding: 2px 5px !important;
+        font-size: 6px !important;
+        line-height: 1.2 !important;
+        white-space: normal !important;
+    }
+
+    .roadmap-pdf-document .rm-current-heading {
+        gap: 6px !important;
+    }
+
+    .roadmap-pdf-document .rm-current-number {
+        width: 28px !important;
+        height: 28px !important;
+        font-size: 8px !important;
+    }
+
+    .roadmap-pdf-document .rm-current-heading h3 {
+        min-width: 0 !important;
+        font-size: 10px !important;
+        line-height: 1.22 !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    .roadmap-pdf-document .rm-current-card > p {
+        max-height: 30px !important;
+        margin: 5px 0 0 !important;
+        font-size: 6px !important;
+        line-height: 1.3 !important;
+        overflow: hidden !important;
+    }
+
+    .roadmap-pdf-document .rm-current-facts {
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        margin-top: 6px !important;
+        padding: 6px 0 !important;
+    }
+
+    .roadmap-pdf-document .rm-current-facts div {
+        min-width: 0 !important;
+        padding: 0 5px !important;
+    }
+
+    .roadmap-pdf-document .rm-current-facts span {
+        font-size: 5px !important;
+    }
+
+    .roadmap-pdf-document .rm-current-facts strong {
+        min-width: 0 !important;
+        font-size: 6px !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    .roadmap-pdf-document .rm-phase-progress-block {
+        margin-top: 6px !important;
+    }
+
+    .roadmap-pdf-document .rm-phase-progress-copy {
+        margin-bottom: 2px !important;
+        font-size: 6px !important;
+    }
+
+    .roadmap-pdf-document .rm-alert-list {
+        gap: 4px !important;
+    }
+
+    .roadmap-pdf-document .rm-alert-row {
+        min-width: 0 !important;
+        grid-template-columns: 22px minmax(0, 1fr) 8px !important;
+        gap: 5px !important;
+        padding: 5px !important;
+        border-radius: 7px !important;
+    }
+
+    .roadmap-pdf-document .rm-alert-icon {
+        width: 22px !important;
+        height: 22px !important;
+        border-radius: 6px !important;
+        font-size: 8px !important;
+    }
+
+    .roadmap-pdf-document .rm-alert-row strong {
+        min-width: 0 !important;
+        font-size: 6px !important;
+    }
+
+    .roadmap-pdf-document .rm-alert-row p {
+        min-width: 0 !important;
+        max-height: 18px !important;
+        margin: 1px 0 0 !important;
+        font-size: 5.5px !important;
+        line-height: 1.25 !important;
+        overflow: hidden !important;
+    }
+
+    .roadmap-pdf-document .rm-workload-list {
+        gap: 5px !important;
+    }
+
+    .roadmap-pdf-document .rm-workload-copy {
+        min-width: 0 !important;
+        gap: 4px !important;
+    }
+
+    .roadmap-pdf-document .rm-workload-copy strong,
+    .roadmap-pdf-document .rm-workload-copy span,
+    .roadmap-pdf-document .rm-workload-copy b {
+        min-width: 0 !important;
+        font-size: 6px !important;
+    }
+
+    .roadmap-pdf-document .rm-workload-track {
+        height: 4px !important;
+    }
+
+    .roadmap-pdf-document .rm-beyond-item {
+        min-width: 0 !important;
+        gap: 5px !important;
+        padding: 5px !important;
+        border-radius: 7px !important;
+    }
+
+    .roadmap-pdf-document .rm-beyond-number {
+        width: 25px !important;
+        height: 25px !important;
+        border-radius: 6px !important;
+        font-size: 6px !important;
+    }
+
+    .roadmap-pdf-document .rm-beyond-content,
+    .roadmap-pdf-document .rm-beyond-title {
+        min-width: 0 !important;
+    }
+
+    .roadmap-pdf-document .rm-beyond-title {
+        align-items: flex-start !important;
+    }
+
+    .roadmap-pdf-document .rm-beyond-title strong {
+        min-width: 0 !important;
+        font-size: 6px !important;
+        line-height: 1.2 !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    .roadmap-pdf-document .rm-beyond-title span {
+        flex: 0 0 auto !important;
+        max-width: 80px !important;
+        padding: 2px 4px !important;
+        font-size: 5px !important;
+        white-space: normal !important;
+        text-align: center !important;
+    }
+
+    .roadmap-pdf-document .rm-beyond-content p,
+    .roadmap-pdf-document .rm-beyond-meta span {
+        font-size: 5.5px !important;
+        line-height: 1.25 !important;
+    }
+
+    /* ---------- EXECUTION DETAILS ---------- */
+
+    .roadmap-pdf-document .rm-detail-section {
+        width: 100% !important;
+        min-width: 0 !important;
+        break-before: page !important;
+        page-break-before: always !important;
+    }
+
+    .roadmap-pdf-document .rm-detail-panel {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        display: block !important;
+        padding: 8px !important;
+        break-inside: auto !important;
+        page-break-inside: auto !important;
+        page-break-after: auto !important;
+    }
+
+    .roadmap-pdf-document .rm-detail-panel + .rm-detail-panel {
+        border-top: 1px solid var(--rm-line) !important;
+    }
+
+    .roadmap-pdf-document .rm-detail-header {
+        min-width: 0 !important;
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) auto !important;
+        gap: 8px !important;
+        padding-bottom: 6px !important;
+    }
+
+    .roadmap-pdf-document .rm-detail-header > div:first-child {
+        min-width: 0 !important;
+    }
+
+    .roadmap-pdf-document .rm-detail-kicker {
+        gap: 3px !important;
+    }
+
+    .roadmap-pdf-document .rm-detail-kicker span {
+        padding: 2px 4px !important;
+        font-size: 5.5px !important;
+    }
+
+    .roadmap-pdf-document .rm-detail-header h3 {
+        max-width: 100% !important;
+        margin: 4px 0 2px !important;
+        font-size: 13px !important;
+        line-height: 1.15 !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    .roadmap-pdf-document .rm-detail-header p {
+        max-width: 100% !important;
+        margin: 0 !important;
+        font-size: 6.5px !important;
+        line-height: 1.35 !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    /* Keep locked/completed status in PDF, but force it INSIDE the card. */
+    .roadmap-pdf-document .rm-detail-action {
+        min-width: 0 !important;
+        max-width: 128px !important;
+        align-self: start !important;
+    }
+
+    .roadmap-pdf-document .rm-detail-action .rm-status-chip {
+        width: auto !important;
+        max-width: 128px !important;
+        justify-content: flex-start !important;
+        white-space: normal !important;
+        overflow-wrap: anywhere !important;
+        text-align: left !important;
+    }
+
+    .roadmap-pdf-document .rm-detail-facts {
+        width: 100% !important;
+        min-width: 0 !important;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        gap: 5px !important;
+        margin: 6px 0 !important;
+    }
+
+    .roadmap-pdf-document .rm-detail-facts div {
+        min-width: 0 !important;
+        padding: 5px 6px !important;
+        border-radius: 7px !important;
+    }
+
+    .roadmap-pdf-document .rm-detail-facts span {
+        font-size: 5px !important;
+    }
+
+    .roadmap-pdf-document .rm-detail-facts strong {
+        min-width: 0 !important;
+        margin-top: 2px !important;
+        font-size: 6px !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    .roadmap-pdf-document .rm-task-table-wrap {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        overflow: hidden !important;
+        border-radius: 7px !important;
+    }
+
+    .roadmap-pdf-document .rm-task-table {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        table-layout: fixed !important;
+    }
+
+    .roadmap-pdf-document .rm-task-table th,
+    .roadmap-pdf-document .rm-task-table td {
+        min-width: 0 !important;
+        max-width: 100% !important;
+        padding: 5px 6px !important;
+        font-size: 6px !important;
+        line-height: 1.25 !important;
+        overflow-wrap: anywhere !important;
+        word-break: normal !important;
+    }
+
+    .roadmap-pdf-document .rm-task-table th:first-child,
+    .roadmap-pdf-document .rm-task-table td:first-child {
+        width: 63% !important;
+    }
+
+    .roadmap-pdf-document .rm-task-table th:nth-child(2),
+    .roadmap-pdf-document .rm-task-table td:nth-child(2) {
+        width: 12% !important;
+    }
+
+    .roadmap-pdf-document .rm-task-table th:nth-child(3),
+    .roadmap-pdf-document .rm-task-table td:nth-child(3) {
+        width: 25% !important;
+    }
+
+    .roadmap-pdf-document .rm-task-title {
+        min-width: 0 !important;
+        gap: 4px !important;
+    }
+
+    .roadmap-pdf-document .rm-task-title > span {
+        width: 19px !important;
+        height: 19px !important;
+        border-radius: 5px !important;
+        font-size: 5.5px !important;
+    }
+
+    .roadmap-pdf-document .rm-task-title strong {
+        min-width: 0 !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    .roadmap-pdf-document .rm-owner-list {
+        min-width: 0 !important;
+        font-size: 5.5px !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    .roadmap-pdf-document .rm-detail-info-grid {
+        width: 100% !important;
+        min-width: 0 !important;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        gap: 5px !important;
+        margin-top: 6px !important;
+    }
+
+    .roadmap-pdf-document .rm-info-card {
+        min-width: 0 !important;
+        max-width: 100% !important;
+        gap: 5px !important;
+        padding: 6px !important;
+        border-radius: 7px !important;
+        overflow: hidden !important;
+    }
+
+    .roadmap-pdf-document .rm-info-icon {
+        width: 22px !important;
+        height: 22px !important;
+        border-radius: 6px !important;
+        font-size: 8px !important;
+    }
+
+    .roadmap-pdf-document .rm-info-card > div {
+        min-width: 0 !important;
+    }
+
+    .roadmap-pdf-document .rm-info-card > div > span {
+        margin-bottom: 2px !important;
+        font-size: 5px !important;
+    }
+
+    .roadmap-pdf-document .rm-info-card p {
+        min-width: 0 !important;
+        max-width: 100% !important;
+        margin: 0 !important;
+        font-size: 5.7px !important;
+        line-height: 1.3 !important;
+        overflow-wrap: anywhere !important;
+    }
+
+    /* Keep meaningful sub-blocks together while allowing a long phase
+       (for example a final phase with many tasks) to continue naturally. */
+    .roadmap-pdf-document .rm-overview-grid,
+    .roadmap-pdf-document .rm-detail-header,
+    .roadmap-pdf-document .rm-detail-facts,
+    .roadmap-pdf-document .rm-task-table tr,
+    .roadmap-pdf-document .rm-info-card,
+    .roadmap-pdf-document .rm-alert-row,
+    .roadmap-pdf-document .rm-beyond-item {
+        break-inside: avoid !important;
+        page-break-inside: avoid !important;
+    }
+
 </style>
 }
 @section Scripts {
@@ -2018,80 +2823,182 @@ else
             }
 
             const label = button.querySelector("span");
-            const defaultLabel = label ? label.textContent : "Download PDF";
+            const defaultLabel = label ? label.textContent : "Export PDF";
 
-            button.addEventListener("click", function () {
+            function cleanupPdfUi(stage, cover) {
+                if (stage && stage.parentNode) {
+                    stage.parentNode.removeChild(stage);
+                }
+
+                if (cover && cover.parentNode) {
+                    cover.parentNode.removeChild(cover);
+                }
+
+                document.body.classList.remove("roadmap-pdf-exporting");
+                button.disabled = false;
+
+                if (label) {
+                    label.textContent = defaultLabel;
+                }
+            }
+
+            button.addEventListener("click", async function () {
                 if (button.disabled) {
                     return;
                 }
 
-                // No native browser Print dialog is used for this export --
-                // html2pdf renders the page straight to a PDF file client-side,
-                // so there is no "Headers and footers" option to turn off and
-                // no page URL/date/title ever gets stamped into the download.
                 if (typeof html2pdf === "undefined") {
-                    window.print();
+                    window.alert(
+                        "PDF export could not start because the PDF library did not load. " +
+                        "Please refresh the page and try again."
+                    );
                     return;
                 }
 
                 button.disabled = true;
+
                 if (label) {
                     label.textContent = "Preparing PDF...";
                 }
 
                 document.body.classList.add("roadmap-pdf-exporting");
 
-                const filename = button.getAttribute("data-pdf-filename") || "Roadmap.pdf";
+                const cover = document.createElement("div");
+                cover.className = "roadmap-pdf-screen-cover";
+                cover.innerHTML =
+                    '<div>' +
+                        '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span>' +
+                        '<span>Preparing your roadmap PDF...</span>' +
+                    '</div>';
 
-                // Confirmed live defect: html2canvas captures at the
-                // browser's CURRENT viewport width by default -- removing
-                // the .rm-timeline-scroll/.rm-task-table-wrap scrollbars
-                // above (roadmap-pdf-exporting class) lets their content
-                // grow to its full natural width, but html2canvas still
-                // only "sees" whatever fits in the existing viewport,
-                // silently cropping everything past it (the title, metric
-                // cards, and every task-table column past Effort all cut
-                // off at the same right-edge point in every export).
-                // root.scrollWidth is read AFTER the class above already
-                // widened the layout, so it reflects the TRUE full content
-                // width; passing that as both windowWidth (so html2canvas's
-                // internal layout pass has room to lay out that width
-                // without wrapping/hiding anything) and width (so the
-                // output canvas itself actually spans it, not just the
-                // viewport) makes the capture include everything, which
-                // html2pdf.js then scales down to fit the A4 page width.
-                const captureWidth = root.scrollWidth;
+                const stage = document.createElement("div");
+                stage.className = "roadmap-pdf-stage";
+                stage.setAttribute("aria-hidden", "true");
+
+                const exportRoot = root.cloneNode(true);
+                exportRoot.removeAttribute("id");
+                exportRoot.classList.add("roadmap-pdf-document");
+
+                /* Duplicate IDs are unnecessary inside the static PDF clone. */
+                exportRoot.querySelectorAll("[id]").forEach(function (element) {
+                    element.removeAttribute("id");
+                });
+
+                /* Remove controls that make no sense in a document. */
+                exportRoot.querySelectorAll(
+                    ".no-print, .rm-hero-actions, .rm-detail-action form, " +
+                    ".rm-primary-wide, .roadmap-loading-overlay, .rm-detail-hint"
+                ).forEach(function (element) {
+                    element.remove();
+                });
+
+                /* Every phase must be present in the exported document. */
+                exportRoot.querySelectorAll(".rm-detail-panel").forEach(function (panel) {
+                    panel.classList.add("is-active");
+                    panel.setAttribute("aria-hidden", "false");
+                });
+
+                /* Timeline buttons are visual content only in the PDF. */
+                exportRoot.querySelectorAll("button").forEach(function (element) {
+                    element.disabled = true;
+                    element.setAttribute("tabindex", "-1");
+                });
+
+                stage.appendChild(exportRoot);
+                document.body.appendChild(stage);
+                document.body.appendChild(cover);
+
+                /*
+                 * Wait for the browser to fully lay out the mounted A4 stage.
+                 * This is important: capturing a detached clone can cause
+                 * html2pdf to fall back to the live page's layout context.
+                 */
+                await new Promise(function (resolve) {
+                    requestAnimationFrame(function () {
+                        requestAnimationFrame(resolve);
+                    });
+                });
+
+                const filename =
+                    button.getAttribute("data-pdf-filename")
+                    || "Roadmap.pdf";
 
                 const options = {
-                    margin: 10,
+                    /*
+                     * LEFT/RIGHT margin is zero ON PURPOSE.
+                     * The export document itself owns a permanent 28px
+                     * horizontal inner margin. This avoids the old
+                     * html2pdf page-inner-width vs source-width mismatch.
+                     *
+                     * Top/bottom margins are still repeated on every page.
+                     */
+                    margin: [6, 0, 6, 0],
+
                     filename: filename,
-                    image: { type: "jpeg", quality: 0.97 },
+
+                    image: {
+                        type: "jpeg",
+                        quality: 0.98
+                    },
+
                     html2canvas: {
                         scale: 2,
                         useCORS: true,
                         backgroundColor: "#ffffff",
-                        windowWidth: captureWidth,
-                        width: captureWidth
+                        logging: false,
+                        scrollX: 0,
+                        scrollY: 0
                     },
-                    jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-                    pagebreak: { mode: ["css", "legacy"] }
+
+                    jsPDF: {
+                        unit: "mm",
+                        format: "a4",
+                        orientation: "portrait",
+                        compress: true
+                    },
+
+                    pagebreak: {
+                        mode: ["css", "legacy"],
+                        before: [".rm-detail-section"],
+                        avoid: [
+                            ".rm-overview-grid",
+                            ".rm-detail-header",
+                            ".rm-detail-facts",
+                            ".rm-info-card",
+                            ".rm-alert-row",
+                            ".rm-beyond-item"
+                        ]
+                    }
                 };
 
-                html2pdf()
-                    .set(options)
-                    .from(root)
-                    .save()
-                    .catch(function (error) {
-                        console.warn("PDF export failed, falling back to browser print.", error);
-                        window.print();
-                    })
-                    .finally(function () {
-                        document.body.classList.remove("roadmap-pdf-exporting");
-                        button.disabled = false;
-                        if (label) {
-                            label.textContent = defaultLabel;
-                        }
-                    });
+                try {
+                    /*
+                     * Capture the MOUNTED standalone clone - never the live
+                     * Roadmap. Because the source is 793px (A4 at 96dpi)
+                     * and jsPDF has zero horizontal margin, the canvas and
+                     * PDF page share one horizontal coordinate system.
+                     */
+                    await html2pdf()
+                        .set(options)
+                        .from(exportRoot)
+                        .save();
+                }
+                catch (error) {
+                    console.error("Roadmap PDF export failed.", error);
+
+                    /*
+                     * Do NOT silently fall back to browser print.
+                     * That old fallback was able to generate a visibly
+                     * clipped PDF and made failures look like successes.
+                     */
+                    window.alert(
+                        "The PDF could not be generated correctly. " +
+                        "No incomplete PDF was downloaded. Please try again."
+                    );
+                }
+                finally {
+                    cleanupPdfUi(stage, cover);
+                }
             });
         })();
     </script>

@@ -10,7 +10,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from app.llm_firewall.firewall import LlmFirewall
-from app.llm_firewall.rules.url_policy import strip_urls
+from app.llm_firewall.rules.url_policy import strip_markdown, strip_urls
 from app.models.market_footprint_models import (
     FootprintSourceItem,
     MarketFootprintRequest,
@@ -176,55 +176,105 @@ class MarketFootprintAgent:
         """
         self.last_fallback_reason_code = None
 
-        search_result: Any | None = None
+        search_result: LLMResult | None = None
         raw_sources: list[Any] = []
+        # Maps a normalized source URL to the set of region keys whose OWN
+        # dedicated search call actually returned it -- built below, across
+        # all three region searches, and threaded through to
+        # _match_region_sources via _create_response as a much stronger
+        # region-relevance signal than title-substring matching alone (see
+        # that method's origin_urls parameter).
+        origin_regions_by_url: dict[str, set[str]] = {}
 
         if request.use_search:
-            search_query = self._build_search_query(request)
+            # One combined query asking about Lebanon + MENA + Global at
+            # once was silently truncated by BraveSearchProvider's 320-char
+            # limit before the region-specific instructions ever reached
+            # Brave, and even when it wasn't, splitting one 8-URL search
+            # budget three ways starved every region. Live-verified against
+            # the real Brave API: one combined call returned 2 unique
+            # sources total; three region-scoped calls (below) returned 7
+            # unique sources, properly distributed per region. Each region
+            # gets its own dedicated call and its own share of the shared
+            # Writer deadline.
+            region_errors: list[str] = []
+            successful_providers: list[str] = []
+            successful_models: list[str] = []
 
-            # `_accepts_keyword` guard (shared helper, imported from
-            # llm_provider.py rather than duplicated again -- see
-            # MarketNeedsAgent's identical pattern): an older provider-chain
-            # test double (which doesn't accept `deadline`) keeps working
-            # completely unchanged. A real ProviderChain accepts it, so
-            # production calls always get the SAME Writer deadline forwarded
-            # here that generation will also use.
-            search_kwargs: dict[str, Any] = {}
-            if deadline is not None and _accepts_keyword(self.chain.search_web, "deadline"):
-                search_kwargs["deadline"] = deadline
-
-            remaining_before_search = deadline - time.monotonic() if deadline is not None else None
-            logger.info(
-                "market_footprint.search_attempt remaining_writer_seconds=%s",
-                f"{remaining_before_search:.1f}" if remaining_before_search is not None else "unbounded",
-            )
-
-            try:
-                search_result = self.chain.search_web(search_query, **search_kwargs)
-            except Exception as exception:
-                logger.exception(
-                    "Market footprint Groq web search crashed: %s",
-                    exception,
+            for region_key, region_name in _REGION_ORDER:
+                remaining_before_region = (
+                    deadline - time.monotonic() if deadline is not None else None
                 )
+                if (
+                    remaining_before_region is not None
+                    and remaining_before_region < ProviderChain._MIN_SECONDS_PER_PROVIDER_ATTEMPT
+                ):
+                    region_errors.append(
+                        f"{region_key} -> skipped, insufficient deadline time remaining"
+                    )
+                    break
+
+                region_query = self._build_region_search_query(
+                    request, region_key=region_key, region_name=region_name,
+                )
+
+                # `_accepts_keyword` guard (shared helper, imported from
+                # llm_provider.py rather than duplicated again -- see
+                # MarketNeedsAgent's identical pattern): an older
+                # provider-chain test double (which doesn't accept
+                # `deadline`) keeps working completely unchanged. A real
+                # ProviderChain accepts it, so production calls always get
+                # the SAME Writer deadline forwarded here that generation
+                # will also use.
+                search_kwargs: dict[str, Any] = {}
+                if deadline is not None and _accepts_keyword(self.chain.search_web, "deadline"):
+                    search_kwargs["deadline"] = deadline
+
+                logger.info(
+                    "market_footprint.search_attempt region=%s remaining_writer_seconds=%s",
+                    region_key,
+                    f"{remaining_before_region:.1f}" if remaining_before_region is not None else "unbounded",
+                )
+
+                try:
+                    region_result = self.chain.search_web(region_query, **search_kwargs)
+                except Exception as exception:
+                    logger.exception(
+                        "Market footprint web search crashed for region=%s: %s",
+                        region_key, exception,
+                    )
+                    region_errors.append(f"{region_key} -> crashed: {exception}")
+                    continue
+
+                if region_result.ok and region_result.search_used and region_result.sources:
+                    successful_providers.append(region_result.provider)
+                    successful_models.append(str(region_result.model or ""))
+
+                    for item in region_result.sources:
+                        if isinstance(item, dict):
+                            item_url = str(
+                                item.get("url") or item.get("link") or ""
+                            ).rstrip("/").lower()
+                            if item_url:
+                                origin_regions_by_url.setdefault(item_url, set()).add(region_key)
+                        raw_sources.append(item)
+                else:
+                    region_errors.append(
+                        f"{region_key}:{region_result.provider}:{region_result.model} -> {region_result.error}"
+                    )
 
             remaining_after_search = deadline - time.monotonic() if deadline is not None else None
             logger.info(
-                "market_footprint.search_complete remaining_writer_seconds=%s",
+                "market_footprint.search_complete regions_with_sources=%d total_raw_sources=%d "
+                "remaining_writer_seconds=%s",
+                len(successful_providers), len(raw_sources),
                 f"{remaining_after_search:.1f}" if remaining_after_search is not None else "unbounded",
             )
 
-            if (
-                search_result is None
-                or not getattr(search_result, "ok", False)
-                or not getattr(search_result, "search_used", False)
-                or not getattr(search_result, "sources", None)
-            ):
+            if not raw_sources:
                 logger.warning(
-                    "Market footprint search returned no verifiable evidence. "
-                    "Provider=%s Model=%s Error=%s",
-                    getattr(search_result, "provider", "none"),
-                    getattr(search_result, "model", None),
-                    getattr(search_result, "error", "No search result"),
+                    "Market footprint search returned no verifiable evidence for any region. Errors=%s",
+                    " | ".join(region_errors) or "none",
                 )
 
                 # Search is MANDATORY when use_search=True (unlike Market
@@ -236,17 +286,24 @@ class MarketFootprintAgent:
                     self.last_fallback_reason_code = WRITER_DEADLINE_EXCEEDED
 
                 return self._insufficient_evidence(
-                    provider=str(
-                        getattr(search_result, "provider", "none") or "none"
-                    ),
-                    model=(
-                        str(getattr(search_result, "model", "") or "")
-                        or None
-                    ),
+                    provider=successful_providers[0] if successful_providers else "none",
+                    model=(successful_models[0] if successful_models else None) or None,
                     status="insufficient_evidence",
                 )
 
-            raw_sources = list(getattr(search_result, "sources", []) or [])
+            # Aggregate stand-in for the old single search_result -- ok/
+            # search_used reflect "at least one region returned evidence",
+            # provider/model report the first region that succeeded (purely
+            # diagnostic/logging use downstream, same as before).
+            search_result = LLMResult(
+                ok=True,
+                provider=successful_providers[0] if successful_providers else "none",
+                model=(successful_models[0] if successful_models else None) or None,
+                text="",
+                data=None,
+                search_used=True,
+                sources=raw_sources,
+            )
 
         normalized_sources = self._normalize_sources(
             raw_sources,
@@ -376,6 +433,7 @@ class MarketFootprintAgent:
             model=(str(getattr(result, "model", "") or "") or None),
             source_result=search_result,
             normalized_sources=normalized_sources,
+            origin_regions_by_url=origin_regions_by_url,
         )
 
     # =========================================================================
@@ -438,6 +496,7 @@ class MarketFootprintAgent:
         model: str | None,
         source_result: Any | None,
         normalized_sources: list[FootprintSourceItem],
+        origin_regions_by_url: dict[str, set[str]] | None = None,
     ) -> MarketFootprintResponse:
         search_used = bool(
             request.use_search
@@ -473,10 +532,15 @@ class MarketFootprintAgent:
             requested_titles = self._string_list(
                 raw_region.get("sourceTitles"), maximum=6
             )
+            origin_urls = {
+                url for url, regions in (origin_regions_by_url or {}).items()
+                if region_key in regions
+            }
             matched_sources = self._match_region_sources(
                 region_name=region_name,
                 requested_titles=requested_titles,
                 sources=all_sources,
+                origin_urls=origin_urls,
             )
 
             for source in matched_sources:
@@ -658,43 +722,63 @@ class MarketFootprintAgent:
 
     # ── Prompt ────────────────────────────────────────────────────────────────
 
-    def _build_search_query(
+    # Per-region query suffix -- deliberately short and Brave-friendly
+    # (see _build_region_search_query's docstring for why this replaced a
+    # single combined query). Keyed by region_key from _REGION_ORDER.
+    _REGION_SEARCH_SUFFIX: dict[str, str] = {
+        "lebanon": "market demand in Lebanon: {problem} Existing solutions, "
+        "adoption, and competition in Lebanon.",
+        "mena": "market demand in the Middle East and North Africa (MENA): "
+        "{problem} Existing solutions and adoption in the MENA region.",
+        "global": "global market demand and adoption: {problem} Existing "
+        "solutions, competitors, and technology trends worldwide.",
+    }
+
+    def _build_region_search_query(
         self,
         request: MarketFootprintRequest,
+        *,
+        region_key: str,
+        region_name: str,
     ) -> str:
-        return f"""
-Research current, verifiable market evidence for this software project.
+        """
+        One dedicated, topic-first query per region for Brave's LLM Context
+        API (see BraveSearchProvider._MAX_QUERY_LENGTH / _clean_query --
+        every query is silently truncated to 320 chars).
 
-PROJECT
-Title: {request.project_title}
-Problem: {request.problem_statement}
-Target users: {request.target_users}
-Domain: {request.domain}
-Technologies: {request.technologies}
+        Deliberately never includes the idea's own (often invented,
+        FYP-only) project title -- no real source on the web will ever
+        mention that exact name, so leading with it both wastes query
+        budget on a term that can never match and skews Brave toward
+        searching for a literal, nonexistent product. Leads with the
+        real-world topic (domain + problem) instead.
 
-Find concise evidence for exactly these geographic scopes:
-1. Lebanon
-2. MENA (Middle East and North Africa)
-3. Global
+        Previously this agent sent ONE combined query asking about Lebanon
+        + MENA + Global at once. Two problems with that, both confirmed
+        live against the real Brave API: (1) the combined query was long
+        enough that the region/source-preference instructions were
+        regularly truncated away entirely, and (2) even when they weren't,
+        splitting one ~8-URL search budget three ways starved every single
+        region. Three separate calls (one per region, see _analyze_sync)
+        returned 7 unique sources in testing vs. 2 for the combined query,
+        with each region actually getting region-relevant results instead
+        of a handful of generic ones split three ways.
+        """
+        suffix_template = self._REGION_SEARCH_SUFFIX.get(
+            region_key, f"market demand in {region_name}: {{problem}}",
+        )
+        suffix = suffix_template.format(
+            problem=request.problem_statement.strip()[:120],
+        )
 
-Focus only on:
-- real problem urgency
-- regional relevance and geographic fit
-- adoption readiness
-- existing alternatives and competition
-- target-user reachability
-- technology or policy momentum
+        parts = [
+            f"{request.domain.strip() or 'This software project'} {suffix}",
+        ]
 
-Prefer official institutions, government sources, universities, academic
-research, international organizations, and recognized industry reports.
+        if request.target_users.strip():
+            parts.append(f"Users: {request.target_users.strip()[:50]}.")
 
-For Lebanon, prioritize Lebanon-specific evidence.
-For MENA, prioritize regional evidence that explicitly covers MENA.
-For Global, prioritize international or worldwide evidence.
-
-Return a concise research summary with the real sources used.
-Do not invent URLs, statistics, market size, revenue, CAGR, or user counts.
-"""
+        return " ".join(parts).strip()
 
     def _build_prompt(
         self,
@@ -818,6 +902,7 @@ Return ONLY valid JSON in exactly this structure:
         region_name: str,
         requested_titles: list[str],
         sources: list[FootprintSourceItem],
+        origin_urls: set[str] | None = None,
     ) -> list[FootprintSourceItem]:
         ranked: list[tuple[float, FootprintSourceItem]] = []
 
@@ -841,6 +926,17 @@ Return ONLY valid JSON in exactly this structure:
                     similarity = max(similarity, 0.92)
 
                 score = max(score, similarity)
+
+            # A source retrieved from THIS region's own dedicated search
+            # call (see _analyze_sync's per-region search loop /
+            # origin_regions_by_url) is itself strong region-relevance
+            # evidence -- Brave/Groq matched the region name inside the
+            # query that returned it, not just a coincidental word overlap
+            # in the title. Given a higher floor than the region-name
+            # substring match above, but still below an exact/near-exact
+            # title match, so a genuinely stronger signal still outranks it.
+            if origin_urls and source.url.rstrip("/").lower() in origin_urls:
+                score = max(score, 0.75)
 
             # Lowered from 0.55 -- observed live consistently leaving only a
             # single (sometimes zero) matched source per region for
@@ -901,19 +997,28 @@ Return ONLY valid JSON in exactly this structure:
             # market_needs_agent.py's _strip_urls/_narrative_text). `url`
             # itself is NEVER stripped -- it must remain the real, exact,
             # verified source link the student sees as evidence.
+            #
+            # strip_markdown runs first: Brave's LLM Context API returns
+            # snippets as raw markdown excerpts (headings, bold, list
+            # markers), which reach the student verbatim on any page that
+            # renders `source.relevance` as plain text -- confirmed live for
+            # Market Demand's identical Brave-sourced snippets (see
+            # market_needs_agent.py's analogous fix), and this agent shares
+            # the exact same upstream source, so the same defect applies
+            # here even if not yet separately observed on this response.
             publisher = strip_urls(
-                self._text(item.get("publisher"), default=domain, maximum=250)
+                strip_markdown(self._text(item.get("publisher"), default=domain, maximum=250))
             )
             snippet = strip_urls(
-                self._text(item.get("snippet") or item.get("relevance"), maximum=800)
+                strip_markdown(self._text(item.get("snippet") or item.get("relevance"), maximum=800))
             )
 
             results.append(
                 FootprintSourceItem(
                     title=strip_urls(
-                        self._text(
+                        strip_markdown(self._text(
                             item.get("title"), default=publisher or domain, maximum=300
-                        )
+                        ))
                     ),
                     url=url,
                     publisher=publisher,

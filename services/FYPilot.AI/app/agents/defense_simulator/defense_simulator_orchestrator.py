@@ -55,6 +55,8 @@ class GenerateDefenseQuestionsRequest(BaseModel):
     selectedIdea: DefenseSelectedIdeaDto
     roadmap: List[DefenseRoadmapPhaseDto] = Field(default_factory=list)
     seDocumentation: Optional[Dict[str, Any]] = None
+    focusAreas: List[str] = Field(default_factory=list)
+    previousQuestions: List[str] = Field(default_factory=list)
     mode: str = "mixed"
     numberOfQuestions: int = Field(default=10, ge=3, le=20)
     model: str = "qwen2.5-coder:7b"
@@ -134,6 +136,30 @@ class DefenseSimulatorOrchestrator:
     }
 
     VALID_DIFFICULTIES = {"Easy", "Medium", "Hard"}
+
+    # Maps the Defense Simulator UI's focus-area checkboxes (src/FYPilot.Web/
+    # Pages/Student/DefenseSimulator.cshtml.cs's AvailableFocusAreas) to the
+    # fixed VALID_CATEGORIES enum the deterministic fallback bank below is
+    # organized by. The UI offers finer-grained fields (Backend Development,
+    # Frontend and UX, API and Integration, ...) than the 10-category bank
+    # supports, so this is a best-effort many-to-many mapping used only to
+    # order/filter the fallback bank -- the live LLM prompt gets the
+    # student's raw focus area labels instead (see
+    # DefenseQuestionAgent._build_prompt) and is not limited to this map.
+    FOCUS_AREA_TO_CATEGORIES = {
+        "Database Design": ["Database Design"],
+        "Backend Development": ["Technical Architecture", "Database Design"],
+        "Frontend and UX": ["Technical Architecture", "Business Value"],
+        "API and Integration": ["Technical Architecture"],
+        "Business Logic": ["Business Value", "Feasibility"],
+        "System Architecture": ["Technical Architecture"],
+        "Security": ["Security"],
+        "AI and Machine Learning": ["AI Integration"],
+        "Testing and Validation": ["Testing and Validation"],
+        "Deployment and DevOps": ["Technical Architecture", "Limitations"],
+        "Requirements and Problem": ["Problem Understanding"],
+        "Feasibility and Limitations": ["Feasibility", "Limitations"],
+    }
 
     def __init__(self):
         self.question_agent = DefenseQuestionAgent()
@@ -538,9 +564,13 @@ class DefenseSimulatorOrchestrator:
             },
         ]
 
+        ordered_questions = self._order_fallback_by_focus_areas(
+            base_questions, request.focusAreas,
+        )
+
         questions: List[DefenseQuestionDto] = []
 
-        for index, item in enumerate(base_questions[: request.numberOfQuestions]):
+        for index, item in enumerate(ordered_questions[: request.numberOfQuestions]):
             questions.append(
                 DefenseQuestionDto(
                     id=f"DQ-{index + 1:02d}",
@@ -553,6 +583,45 @@ class DefenseSimulatorOrchestrator:
             )
 
         return questions
+
+    def _order_fallback_by_focus_areas(
+        self,
+        base_questions: List[Dict[str, Any]],
+        focus_areas: List[str],
+    ) -> List[Dict[str, Any]]:
+        """
+        Reorders the deterministic fallback bank so questions matching the
+        student's chosen focus areas come first, instead of always leading
+        with the hardcoded "Problem Understanding" entry regardless of what
+        the student picked. Categories not covered by any chosen focus area
+        are appended afterward (still included, just deprioritized) so the
+        session always has enough questions to reach numberOfQuestions.
+        """
+        if not focus_areas:
+            return base_questions
+
+        wanted_categories: List[str] = []
+
+        for area in focus_areas:
+            for category in self.FOCUS_AREA_TO_CATEGORIES.get(area, []):
+                if category not in wanted_categories:
+                    wanted_categories.append(category)
+
+        if not wanted_categories:
+            return base_questions
+
+        matched = [
+            item for item in base_questions
+            if item["category"] in wanted_categories
+        ]
+        unmatched = [
+            item for item in base_questions
+            if item["category"] not in wanted_categories
+        ]
+
+        matched.sort(key=lambda item: wanted_categories.index(item["category"]))
+
+        return matched + unmatched
 
     def _fallback_evaluation(
         self,

@@ -391,7 +391,13 @@ class SharedWriterBudgetTests(unittest.TestCase):
         with patch("app.services.llm_provider.time.monotonic", side_effect=fake_monotonic):
             agent._analyze_sync(_request(), deadline=deadline)
 
-        self.assertEqual(search_provider.call_count, 1)
+        # One search_web call per region (Lebanon, MENA, Global) -- see
+        # MarketFootprintAgent._analyze_sync's per-region search loop,
+        # replacing the old single combined-query call. The simulated
+        # 20-second delay is applied idempotently by search_and_advance_clock
+        # (sets elapsed_seconds to 20.0 rather than incrementing it), so the
+        # shared Writer budget still reflects one 20s search step overall.
+        self.assertEqual(search_provider.call_count, 3)
         self.assertEqual(generation_provider.call_count, 1)
         self.assertIsInstance(generation_provider.received_writer_budget_seconds, float)
         # ~130s = 150 - 20, not a fresh ~150s budget.
@@ -799,7 +805,10 @@ class LegacyFakeCompatibilityTests(unittest.TestCase):
         # candidate either.
         response = agent._analyze_sync(_request(), deadline=time.monotonic() + 150.0)
 
-        self.assertEqual(len(agent.chain.search_calls), 1)
+        # One search_web call per region (Lebanon, MENA, Global) -- see
+        # MarketFootprintAgent._analyze_sync's per-region search loop,
+        # replacing the old single combined-query call.
+        self.assertEqual(len(agent.chain.search_calls), 3)
         self.assertEqual(len(agent.chain.generate_calls), 1)
         self.assertEqual(response.status, "ready")
 

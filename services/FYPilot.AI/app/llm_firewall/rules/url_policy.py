@@ -75,6 +75,64 @@ def strip_urls(text: str) -> str:
     return stripped.strip()
 
 
+_MARKDOWN_LINK_PATTERN = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_MARKDOWN_HEADING_PATTERN = re.compile(r"(?<![^\s])#{1,6} +")
+_MARKDOWN_LIST_MARKER_PATTERN = re.compile(r"(?m)^ {0,3}[-*+] +")
+_MARKDOWN_BOLD_PATTERN = re.compile(r"(\*\*|__)(.+?)\1")
+_MARKDOWN_CODE_SPAN_PATTERN = re.compile(r"`{1,3}([^`]*)`{1,3}")
+
+
+def strip_markdown(text: str) -> str:
+    """
+    Deterministically remove common markdown syntax (headings, bold, links,
+    list markers, code spans) from `text`, leaving the plain reading content
+    behind.
+
+    Brave's LLM Context API returns snippets as raw markdown-formatted page
+    excerpts (see BraveSearchProvider._parse_response in llm_provider.py),
+    not plain text -- confirmed live via MarketNeedsAgent's "Research
+    sources" cards, which were rendering literal "# Heading" / "##
+    Subheading" markup straight to students on MarketDemand.cshtml because
+    nothing in the pipeline stripped it before storage (that Razor page
+    renders `@source.Relevance` as plain encoded text, never through a
+    markdown renderer, so the raw "#" characters showed up verbatim).
+
+    The heading pattern matches "#"..."######" preceded by whitespace or
+    start-of-string rather than requiring a true line start: Brave's
+    snippets[] fragments are joined with spaces, not newlines (see
+    llm_provider.py's `" ".join(...)` in _parse_response), so a heading
+    that was on its own line on the source page shows up mid-string here
+    (e.g. "...speaks ## Rentals under pressure...") -- a `re.MULTILINE`
+    `^`-anchored pattern would silently miss exactly this, the most common
+    real case.
+
+    Deliberately conservative: only strips DOUBLE-marker bold (`**x**`/
+    `__x__`), never single `*`/`_` emphasis, since single asterisks/
+    underscores appear routinely in ordinary prose (math, code-ish terms)
+    without being markdown -- stripping those would risk mangling
+    legitimate content for a purely cosmetic cleanup. List-marker stripping
+    is still line-start-anchored (`^- `/`^* `/`^+ `) since a bare hyphen
+    preceded only by whitespace mid-string is often just a real hyphen or
+    dash in prose, not a list item -- that ambiguity does not apply to "#",
+    which is not otherwise used in ordinary prose. Mirrors strip_urls'
+    role for the same class of "uncontrolled scraped web content reaching
+    the UI unsanitized" problem -- centralized here so every agent that
+    stores/displays a retrieved snippet (MarketNeedsAgent,
+    MarketFootprintAgent, ...) reuses the same cleanup instead of
+    reimplementing it.
+    """
+    if not text:
+        return text
+
+    cleaned = _MARKDOWN_LINK_PATTERN.sub(r"\1", text)
+    cleaned = _MARKDOWN_HEADING_PATTERN.sub("", cleaned)
+    cleaned = _MARKDOWN_LIST_MARKER_PATTERN.sub("", cleaned)
+    cleaned = _MARKDOWN_BOLD_PATTERN.sub(r"\2", cleaned)
+    cleaned = _MARKDOWN_CODE_SPAN_PATTERN.sub(r"\1", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    return cleaned.strip()
+
+
 def strip_urls_from_narrative_fields(value: Any) -> Any:
     """
     Recursively apply strip_urls() to every string value in a candidate

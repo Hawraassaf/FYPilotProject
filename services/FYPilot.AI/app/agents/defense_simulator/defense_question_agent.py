@@ -9,13 +9,18 @@ class DefenseQuestionAgent:
     Responsible only for generating defense questions.
 
     Uses ProviderChain (DeepInfra -> Groq -> Ollama) so cloud providers are
-    tried before falling back to the slower local Ollama model. Question
-    generation is a short, simple prompt, so this uses the "light" DeepInfra
-    tier rather than the high-accuracy tier reserved for SE Documentation.
+    tried before falling back to the slower local Ollama model. Uses its own
+    "defense" DeepInfra tier (meta-llama/Llama-3.3-70B-Instruct-Turbo) --
+    moved off the "light" tier's gemma-3-12b-it, which was timing out on
+    live traffic and produced lower-quality questions than this stronger
+    model. Kept as its own tier rather than literally "standard" so its
+    DeepInfra timeout can be tuned independently of Market Needs/DNA/Market
+    Footprint, which also share "standard" (see llm_provider.py's
+    _DEEPINFRA_TIER_TIMING["defense"]).
     """
 
     def __init__(self):
-        self.provider_chain = ProviderChain(tier="light")
+        self.provider_chain = ProviderChain(tier="defense")
         self.last_error: Optional[str] = None
         self.last_raw_response: Optional[str] = None
         self.last_provider: Optional[str] = None
@@ -74,6 +79,8 @@ class DefenseQuestionAgent:
         se_docs = request.seDocumentation or {}
         mode = request.mode or "mixed"
         number = request.numberOfQuestions or 10
+        focus_areas = getattr(request, "focusAreas", None) or []
+        previous_questions = getattr(request, "previousQuestions", None) or []
 
         roadmap_text = "\n".join(
             [
@@ -82,6 +89,18 @@ class DefenseQuestionAgent:
                 f"{getattr(phase, 'objective', '')}"
                 for index, phase in enumerate(roadmap[:8])
             ]
+        )
+
+        focus_areas_text = (
+            ", ".join(focus_areas)
+            if focus_areas
+            else "None selected -- cover a broad mix of categories."
+        )
+
+        previous_questions_text = (
+            "\n".join(f"- {question}" for question in previous_questions[:20])
+            if previous_questions
+            else "None."
         )
 
         return f"""
@@ -94,6 +113,14 @@ You are an academic final year project defense jury simulator.
 Generate {number} defense questions for this project.
 
 Defense mode: {mode}
+
+Student-Selected Defense Fields (the student chose these focus areas for
+this practice session -- questions MUST be concentrated on these fields,
+not on whatever category you would pick by default):
+{focus_areas_text}
+
+Previously Asked Questions (do not repeat these or ask near-duplicates):
+{previous_questions_text}
 
 Student Profile:
 Major: {profile.major}
@@ -143,7 +170,7 @@ JSON shape:
 Rules:
 - Return exactly {number} questions.
 - IDs must be DQ-01, DQ-02, etc.
-- Categories should include:
+- Every category you use must be one of:
   Problem Understanding,
   Technical Architecture,
   Database Design,
@@ -154,6 +181,11 @@ Rules:
   Limitations,
   Future Work,
   Business Value.
+- If the student selected specific defense fields above, choose whichever of
+  those categories best matches each selected field and generate most or
+  all questions from that set. Do NOT default to "Problem Understanding" as
+  question 1 unless the student's selected fields actually relate to it
+  (e.g. "Requirements and Problem").
 - Questions must be specific to this project, not generic.
 - expectedAnswerPoints must contain 3 to 5 points.
 - For strict mode, questions should be harder.

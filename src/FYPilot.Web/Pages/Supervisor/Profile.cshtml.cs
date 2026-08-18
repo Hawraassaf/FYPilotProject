@@ -44,8 +44,19 @@ public class ProfileModel(ApplicationDbContext db, IWebHostEnvironment env) : Pa
         [StringLength(150)]
         public string University { get; set; } = "";
 
-        [StringLength(200)]
+        [StringLength(300)]
         public string Specialization { get; set; } = "";
+
+        /// <summary>
+        /// Checkbox-bound selections shown in edit mode -- a supervisor may
+        /// cover more than one area (e.g. both AI and Web Development).
+        /// Persisted back into the single <see cref="Specialization"/>
+        /// string (comma-joined) so no schema change is needed and every
+        /// other place that reads SupervisorProfile.Specialization as plain
+        /// text (admin assignment lists, registration approval, the API)
+        /// keeps working unchanged.
+        /// </summary>
+        public List<string> Specializations { get; set; } = [];
 
         [StringLength(700)]
         public string ResearchAreas { get; set; } = "";
@@ -88,6 +99,7 @@ public class ProfileModel(ApplicationDbContext db, IWebHostEnvironment env) : Pa
             Faculty = profile.Faculty ?? "",
             University = profile.University ?? "",
             Specialization = profile.Specialization ?? "",
+            Specializations = SplitSpecializations(profile.Specialization),
             ResearchAreas = profile.ResearchAreas ?? "",
             OfficeLocation = profile.OfficeLocation ?? "",
             OfficeHours = profile.OfficeHours ?? "",
@@ -155,9 +167,15 @@ public class ProfileModel(ApplicationDbContext db, IWebHostEnvironment env) : Pa
         profile.Faculty = Clean(Input.Faculty);
         profile.University = Clean(Input.University);
 
-        profile.Specialization = string.IsNullOrWhiteSpace(Input.Specialization)
-            ? "General Software Engineering"
-            : Input.Specialization.Trim();
+        var selectedSpecializations = (Input.Specializations ?? [])
+            .Select(s => s.Trim())
+            .Where(s => s.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        profile.Specialization = selectedSpecializations.Count > 0
+            ? string.Join(", ", selectedSpecializations)
+            : "General Software Engineering";
 
         profile.ResearchAreas = string.IsNullOrWhiteSpace(Input.ResearchAreas)
             ? "Software Engineering"
@@ -327,6 +345,18 @@ public class ProfileModel(ApplicationDbContext db, IWebHostEnvironment env) : Pa
     private static string? Clean(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static List<string> SplitSpecializations(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        return value
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
     }
 
     private int GetCurrentUserId()
