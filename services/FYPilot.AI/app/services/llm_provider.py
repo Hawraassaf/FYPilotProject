@@ -2505,10 +2505,10 @@ class OllamaProvider(BaseProvider):
 
 # Per-task accuracy/cost tier for the DeepInfra leg of the chain -- some
 # agents (SE Documentation) need the highest-accuracy model available,
-# others (Defense Simulator's question/evaluation prompts) don't, so a
-# single global DEEPINFRA_MODEL would either overpay everywhere or
-# underpower the agents that need it most. Each tier's model is still
-# overridable per-deployment via its own env var.
+# others (Idea Comparison's ranking prompt) don't, so a single global
+# DEEPINFRA_MODEL would either overpay everywhere or underpower the agents
+# that need it most. Each tier's model is still overridable per-deployment
+# via its own env var.
 _DEEPINFRA_TIER_DEFAULTS: dict[str, str] = {
     # Highest-accuracy tier: strict-schema, high-stakes generation (SE Docs,
     # Project Roadmap, Idea Generator).
@@ -2519,7 +2519,10 @@ _DEEPINFRA_TIER_DEFAULTS: dict[str, str] = {
     # Default tier: most agents (market needs, project DNA, market
     # footprint) -- confirmed working, cheap, good instruction-following.
     "standard": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
-    # Lightweight tier: short, simple prompts (Defense Simulator).
+    # Lightweight tier: short, simple prompts (Idea Comparison's ranking
+    # prompt -- see "comparison" below, its only remaining consumer since
+    # Defense Simulator moved to its own "defense" tier for better question/
+    # evaluation quality).
     "light": "google/gemma-3-12b-it",
     # Mentor Chat tier: interactive, latency-sensitive, needs strong coding
     # ability (generates codeBlocks) and broad multilingual support -- Qwen3
@@ -2582,6 +2585,17 @@ _DEEPINFRA_TIER_DEFAULTS["comparison_review"] = "google/gemma-3-27b-it"
 # found to truncate long Roadmap responses at inconsistent points -- kept on
 # the reliable 70B model here too rather than ship an unverified path.
 _DEEPINFRA_TIER_DEFAULTS["se_documentation"] = _DEEPINFRA_TIER_DEFAULTS["standard"]
+
+# Defense Simulator gets its OWN tier -- moved off "light"'s gemma-3-12b-it
+# (chosen there only for speed on the wrong assumption that question
+# generation/answer evaluation are "short, simple" prompts) onto the same
+# 70B model "standard" uses, for noticeably better question relevance and
+# evaluation quality. Kept as a separate tier rather than literally reusing
+# "standard" so its own DeepInfra timeout (see _DEEPINFRA_TIER_TIMING below)
+# can be sized for the slower 70B model without changing "standard"'s 60s
+# default for the other agents sharing that tier (market needs, project DNA,
+# market footprint).
+_DEEPINFRA_TIER_DEFAULTS["defense"] = _DEEPINFRA_TIER_DEFAULTS["standard"]
 
 # Per-tier timing overrides for the DeepInfra leg of the chain. Absent here
 # (every tier except "comparison") means "use DeepInfraProvider's own
@@ -2689,15 +2703,24 @@ _DEEPINFRA_TIER_TIMING: dict[str, dict[str, float | int]] = {
     # timeout_seconds stays None (each provider's own configured default) --
     # only the hidden retry multiplier is removed.
     "standard": {"timeout_seconds": None, "max_retries": 0},
-    # Same root cause and same fix as "mentor"/"high"/"standard" above --
-    # "light" (Defense Simulator's question-generation and answer-evaluation
-    # agents, the only two consumers of this tier) was missed by the same
-    # hardening pass that covered every other tier. DeepInfraProvider(
-    # max_retries=None, ...) let the openai SDK's own default (2) apply here
-    # too. timeout_seconds stays None (DeepInfraProvider's own
-    # DEEPINFRA_TIMEOUT_SECONDS default, 60s); only the hidden retry
-    # multiplier is removed.
-    "light": {"timeout_seconds": None, "max_retries": 0},
+    # Defense Simulator's own tier (see _DEEPINFRA_TIER_DEFAULTS["defense"]
+    # above) -- kept separate from "standard" specifically so this timeout
+    # can be sized independently of Market Needs/DNA/Market Footprint, which
+    # also share "standard". max_retries=0 removes the openai SDK's own
+    # hidden retry multiplier (same fix as every other tier above).
+    # Configurable via DEFENSE_SIMULATOR_DEEPINFRA_TIMEOUT_SECONDS (default
+    # 90s, up from DeepInfraProvider's own 60s default) -- the smaller
+    # gemma-3-12b-it model this tier replaced was observed live repeatedly
+    # timing out at the flat 60s default, falling back to Groq every time;
+    # the 70B model this tier now uses is likely slower per-request, so the
+    # extra headroom matters even more. Both defense_question_agent.py and
+    # defense_evaluator_agent.py already pass cap_timeout_to_deadline=True,
+    # so this only ever grants MORE of the existing ~65s Writer budget
+    # (DefenseQuestionAgent/DefenseEvaluatorAgent's max_total_seconds=90.0
+    # minus routers/defense_simulator.py's 25s review reserve) to the
+    # DeepInfra attempt -- it can never make a request run longer than the
+    # pipeline's own deadline already allows.
+    "defense": {"timeout_seconds": None, "max_retries": 0},  # resolved by _deepinfra_timing_for_tier
 }
 
 # Same rationale as _DEEPINFRA_TIER_TIMING, for the Groq fallback leg.
@@ -2749,9 +2772,9 @@ _GROQ_TIER_TIMING: dict[str, dict[str, float | int]] = {
     # See _DEEPINFRA_TIER_TIMING["standard"]'s comment -- same fix, same
     # reasoning, for the Groq fallback leg of the default tier.
     "standard": {"timeout_seconds": None, "max_retries": 0},
-    # See _DEEPINFRA_TIER_TIMING["light"]'s comment -- same fix, same
-    # reasoning, for the Groq fallback leg of Defense Simulator's tier.
-    "light": {"timeout_seconds": None, "max_retries": 0},
+    # See _DEEPINFRA_TIER_TIMING["defense"]'s comment -- same fix, same
+    # reasoning, for the Groq fallback leg of Defense Simulator's own tier.
+    "defense": {"timeout_seconds": None, "max_retries": 0},
     # "roadmap"/"se_documentation" had their DeepInfra leg fixed with an
     # explicit max_retries=0 entry above but the parallel Groq FALLBACK leg
     # for these two tiers was missed by the same pass -- GroqProvider(
@@ -2793,6 +2816,7 @@ def _deepinfra_model_for_tier(tier: str) -> str:
 
 _DEFAULT_ROADMAP_DEEPINFRA_TIMEOUT_SECONDS = 280.0
 _DEFAULT_SE_DOCUMENTATION_DEEPINFRA_TIMEOUT_SECONDS = 180.0
+_DEFAULT_DEFENSE_SIMULATOR_DEEPINFRA_TIMEOUT_SECONDS = 90.0
 
 
 def _deepinfra_timing_for_tier(tier: str) -> dict[str, float | int]:
@@ -2808,6 +2832,14 @@ def _deepinfra_timing_for_tier(tier: str) -> dict[str, float | int]:
             os.getenv(
                 "SE_DOCUMENTATION_DEEPINFRA_TIMEOUT_SECONDS",
                 str(_DEFAULT_SE_DOCUMENTATION_DEEPINFRA_TIMEOUT_SECONDS),
+            ),
+        )
+
+    if tier == "defense":
+        timing["timeout_seconds"] = float(
+            os.getenv(
+                "DEFENSE_SIMULATOR_DEEPINFRA_TIMEOUT_SECONDS",
+                str(_DEFAULT_DEFENSE_SIMULATOR_DEEPINFRA_TIMEOUT_SECONDS),
             ),
         )
 
@@ -2854,7 +2886,7 @@ class ProviderChain:
     the "roadmap"-only comment in __init__ for why.
 
     `tier` selects the DeepInfra model ("high" / "standard" / "light" /
-    "mentor", see _DEEPINFRA_TIER_DEFAULTS) and is ignored if `providers`
+    "mentor" / "defense", see _DEEPINFRA_TIER_DEFAULTS) and is ignored if `providers`
     is passed explicitly. Brave is never part of this chain -- it has no
     generate_json/generate_text implementation and must never generate an
     agent's final answer.

@@ -110,6 +110,22 @@ _TECHNOLOGY_PRESS_MARKERS = (
     "healthcareitnews.com", "fiercehealthcare.com", "modernhealthcare.com",
 )
 
+# Major, industry-leading technology vendors whose own published case
+# studies/technical reports are a recognized primary authority for their
+# specific domain -- classified as "industry_association" (IS_HIGH_AUTHORITY
+# below), not "technology_press" (journalism ABOUT an industry, not a
+# primary source FROM it, and deliberately excluded from high-authority --
+# see _HIGH_AUTHORITY_TYPES). Live-confirmed gap: a real GIS-based project's
+# own Esri case study (a genuinely on-topic, industry-leading source) was
+# falling through to "unknown" (weight 0.45, never "verified") purely
+# because esri.com was never individually named anywhere in this module.
+# Kept small and domain-specific rather than a broad allowlist -- expand
+# only for vendors that are the clear #1/#2 in their specific technical
+# domain, not general software companies.
+_RECOGNIZED_VENDOR_MARKERS = (
+    "esri.com", "arcgis.com", "mapbox.com", "qgis.org", "here.com", "carto.com",
+)
+
 # Same category the Mentor-Chat-side scorer already confirmed live for FYP
 # source-code marketplaces -- kept here as its own small, explicit list
 # (never used to justify authority for a market-demand claim) plus a text
@@ -156,6 +172,9 @@ def classify_source_type(domain: str, title: str, snippet: str) -> SourceType:
         return "market_research_firm"
 
     if _INDUSTRY_ASSOCIATION_PATTERN.search(domain):
+        return "industry_association"
+
+    if any(marker in domain for marker in _RECOGNIZED_VENDOR_MARKERS):
         return "industry_association"
 
     if any(marker in domain for marker in _FINANCIAL_BUSINESS_PRESS_MARKERS):

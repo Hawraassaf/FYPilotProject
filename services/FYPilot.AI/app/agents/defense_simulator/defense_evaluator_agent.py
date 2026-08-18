@@ -9,13 +9,18 @@ class DefenseEvaluatorAgent:
     Responsible only for evaluating the student's answer.
 
     Uses ProviderChain (DeepInfra -> Groq -> Ollama) so cloud providers are
-    tried before falling back to the slower local Ollama model. Answer
-    evaluation is a short, simple prompt, so this uses the "light" DeepInfra
-    tier rather than the high-accuracy tier reserved for SE Documentation.
+    tried before falling back to the slower local Ollama model. Uses its own
+    "defense" DeepInfra tier (meta-llama/Llama-3.3-70B-Instruct-Turbo) --
+    moved off the "light" tier's gemma-3-12b-it, which was timing out on
+    live traffic and produced lower-quality evaluations than this stronger
+    model. Kept as its own tier rather than literally "standard" so its
+    DeepInfra timeout can be tuned independently of Market Needs/DNA/Market
+    Footprint, which also share "standard" (see llm_provider.py's
+    _DEEPINFRA_TIER_TIMING["defense"]).
     """
 
     def __init__(self):
-        self.provider_chain = ProviderChain(tier="light")
+        self.provider_chain = ProviderChain(tier="defense")
         self.last_error: Optional[str] = None
         self.last_raw_response: Optional[str] = None
         self.last_provider: Optional[str] = None

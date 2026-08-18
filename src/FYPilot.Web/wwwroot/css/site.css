@@ -2395,6 +2395,19 @@ body,
         box-shadow: 0 8px 20px rgba(15, 23, 42, 0.045);
     }
 
+.profile-specialization-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem 1rem;
+    margin-top: 0.4rem;
+}
+
+@media (max-width: 767px) {
+    .profile-specialization-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
 .profile-remove-photo-light {
     margin-top: 0.2rem;
 }
@@ -15936,4 +15949,24 @@ body,
         height: auto;
         overflow: visible;
     }
+}
+
+/* AI disclaimer footer -- shown at the bottom of every AI-powered page
+   (see Pages/Shared/_AiDisclaimerFooter.cshtml). */
+.ai-disclaimer-footer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: .45rem;
+    margin: 1.75rem 0 .5rem;
+    padding-top: .9rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: .78rem;
+    text-align: center;
+}
+
+.ai-disclaimer-footer i {
+    color: var(--muted-light);
+    font-size: .9rem;
 }

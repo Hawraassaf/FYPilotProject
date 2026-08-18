@@ -290,34 +290,53 @@
                             </div>
                         </div>
 
-                        <div class="profile-clean-row">
-                            <div class="profile-clean-field">
-                                <label asp-for="Input.Specialization" class="form-label profile-label">Specialization</label>
-                                <select asp-for="Input.Specialization" class="form-select profile-control">
-                                    <option value="">Select specialization</option>
-                                    <option value="General Software System">General Software System</option>
-                                    <option value="Web Development">Web Development</option>
-                                    <option value="AI/Data Science">AI/Data Science</option>
-                                    <option value="Mobile Development">Mobile Development</option>
-                                    <option value="Cybersecurity">Cybersecurity</option>
-                                    <option value="Healthcare Technology">Healthcare Technology</option>
-                                    <option value="FinTech">FinTech</option>
-                                    <option value="Education Technology">Education Technology</option>
-                                    <option value="IoT / Embedded">IoT / Embedded</option>
-                                </select>
-                                <span asp-validation-for="Input.Specialization" class="text-danger small"></span>
-                            </div>
+                        @{
+                            var specializationOptions = new[]
+                            {
+                                "General Software System",
+                                "Web Development",
+                                "AI/Data Science",
+                                "Mobile Development",
+                                "Cybersecurity",
+                                "Healthcare Technology",
+                                "FinTech",
+                                "Education Technology",
+                                "IoT / Embedded"
+                            };
+                        }
 
-                            <div class="profile-clean-field">
-                                <label asp-for="Input.PreferredMeetingMode" class="form-label profile-label">Preferred Meeting Mode</label>
-                                <select asp-for="Input.PreferredMeetingMode" class="form-select profile-control">
-                                    <option value="">Select meeting mode</option>
-                                    <option>Online</option>
-                                    <option>In-person</option>
-                                    <option>Hybrid</option>
-                                </select>
-                                <span asp-validation-for="Input.PreferredMeetingMode" class="text-danger small"></span>
+                        <div class="profile-clean-field">
+                            <label class="form-label profile-label">Specialization</label>
+                            <div class="profile-specialization-grid">
+                                @foreach (var option in specializationOptions)
+                                {
+                                    var checkboxId = $"specialization-{option.Replace("/", "").Replace(" ", "-").ToLowerInvariant()}";
+                                    var isChecked = Model.Input.Specializations.Contains(option, StringComparer.OrdinalIgnoreCase);
+
+                                    <div class="form-check">
+                                        <input type="checkbox"
+                                               class="form-check-input"
+                                               id="@checkboxId"
+                                               name="Input.Specializations"
+                                               value="@option"
+                                               checked="@(isChecked ? "checked" : null)" />
+                                        <label class="form-check-label" for="@checkboxId">@option</label>
+                                    </div>
+                                }
                             </div>
+                            <div class="form-text">Select every area you can supervise -- e.g. both AI and Web Development.</div>
+                            <span asp-validation-for="Input.Specializations" class="text-danger small"></span>
+                        </div>
+
+                        <div class="profile-clean-field">
+                            <label asp-for="Input.PreferredMeetingMode" class="form-label profile-label">Preferred Meeting Mode</label>
+                            <select asp-for="Input.PreferredMeetingMode" class="form-select profile-control">
+                                <option value="">Select meeting mode</option>
+                                <option>Online</option>
+                                <option>In-person</option>
+                                <option>Hybrid</option>
+                            </select>
+                            <span asp-validation-for="Input.PreferredMeetingMode" class="text-danger small"></span>
                         </div>
 
                         <div class="profile-clean-row">

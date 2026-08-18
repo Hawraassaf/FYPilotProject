@@ -17,7 +17,7 @@ from app.agents.market_needs_evidence import (
     project_concept_terms,
 )
 from app.llm_firewall.firewall import LlmFirewall
-from app.llm_firewall.rules.url_policy import _URL_PATTERN
+from app.llm_firewall.rules.url_policy import _URL_PATTERN, strip_markdown
 from app.models.market_needs_models import (
     MarketNeedsRequest,
     MarketNeedsResponse,
@@ -575,33 +575,38 @@ Return ONLY valid JSON in this exact shape:
 
     def _build_search_query(self, request: MarketNeedsRequest) -> str:
         """
-        Small, dedicated search request -- mirrors ProjectIdeaAgent's/
-        MarketFootprintAgent's search_web() usage. Sent to whichever
-        provider the central chain tries (Brave first, Groq Compound
-        fallback) -- never the full generation prompt. BraveSearchProvider
-        safely truncates/sanitizes this further on its side, so this does
-        not need to hand-tune exact character limits.
+        Topic-first, dedicated search request for Brave's LLM Context API
+        (see BraveSearchProvider._MAX_QUERY_LENGTH / _clean_query -- every
+        query is silently truncated to 320 chars). Mirrors
+        MarketFootprintAgent._build_region_search_query's identical fix.
+
+        Previously led with "...for: <project title> - <problem statement>"
+        and put the domain/technologies/region context and the actual "find
+        credible sources" instruction LAST -- for a real project with a
+        normal-length title and problem statement, the full query ran to
+        ~530 chars, so everything past "Affected users: ..." (including the
+        retrieval instruction itself) was silently discarded before ever
+        reaching Brave, live-confirmed for a real request. Reordered so the
+        real-world topic (domain + problem) and the retrieval instruction
+        both land within the first ~300 characters; the idea's own project
+        title is dropped entirely -- no real source will ever mention an
+        invented FYP product name verbatim (same rationale as
+        MarketFootprintAgent's query fix).
         """
+        region = request.country_context.strip() or "Lebanon"
+
         parts = [
-            "Current market problem and demand evidence for:",
-            request.project_title.strip(),
-            "-",
-            request.problem_statement.strip()[:150],
+            f"Current market demand and adoption evidence for "
+            f"{request.domain.strip() or 'this problem area'} in {region}:",
+            request.problem_statement.strip()[:130],
+            "Find credible sources on adoption, existing solutions, and demand indicators.",
         ]
 
         if request.target_users.strip():
-            parts.append(f"Affected users: {request.target_users.strip()[:80]}.")
-
-        if request.domain.strip():
-            parts.append(f"Domain: {request.domain.strip()[:60]}.")
+            parts.append(f"Affected users: {request.target_users.strip()[:60]}.")
 
         if request.technologies.strip():
-            parts.append(f"Technologies: {request.technologies.strip()[:60]}.")
-
-        parts.append(f"Region: {(request.country_context.strip() or 'Lebanon')}.")
-        parts.append(
-            "Find credible sources on adoption, existing solutions, and demand indicators."
-        )
+            parts.append(f"Technologies: {request.technologies.strip()[:50]}.")
 
         return " ".join(parts).strip()
 
@@ -774,12 +779,21 @@ Return ONLY valid JSON in this exact shape:
             # (see _strip_urls' docstring for the live-confirmed defect this
             # closes). Stripped here, deterministically, never left to
             # provider content or model compliance.
+            #
+            # Brave's LLM Context API returns snippets as raw markdown
+            # excerpts (headings, bold, list markers) -- live-confirmed
+            # rendering literal "# Heading" / "## Subheading" text straight
+            # into the "Research sources" cards on MarketDemand.cshtml,
+            # since that page renders `@source.Relevance` as plain text,
+            # never through a markdown renderer. strip_markdown runs BEFORE
+            # strip_urls so a markdown link's "(https://...)" portion is
+            # still caught by the URL stripper afterward if any survives.
             results.append(
                 SourceItem(
-                    title=self._strip_urls(title),
+                    title=self._strip_urls(strip_markdown(title)),
                     url=url,
-                    publisher=self._strip_urls(publisher),
-                    relevance=self._strip_urls(snippet),
+                    publisher=self._strip_urls(strip_markdown(publisher)),
+                    relevance=self._strip_urls(strip_markdown(snippet)),
                     relevanceScore=relevance_score,
                     sourceType=self._SOURCE_TYPE_LABELS.get(source_type, "External"),
                     isVerified=is_high_authority(source_type),
